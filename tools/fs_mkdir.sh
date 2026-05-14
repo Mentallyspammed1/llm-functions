@@ -5,11 +5,11 @@ set -e
 
 # @option --path! The path of the directory to create
 
-# @env LLM_OUTPUT=/dev/stdout The output path
+# @env LLM_OUTPUT=/dev/fd/1 The output path
 
 main() {
     mkdir -p "$argc_path"
-    echo "Directory created: $argc_path" >> "$LLM_OUTPUT"
+    echo "Directory created: $argc_path" >&1
 }
 
 eval "$(argc --argc-eval "$0" "$@")"

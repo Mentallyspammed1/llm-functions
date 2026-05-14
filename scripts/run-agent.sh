@@ -2,7 +2,17 @@
 
 # Usage: ./run-agent.sh <agent-name> <agent-func> <agent-data>
 
-set -e
+set -eo pipefail
+
+cleanup() {
+    local exit_code=$?
+    if [[ -n "${is_temp_llm_output:-}" ]] && [[ -n "${LLM_OUTPUT:-}" ]] && [[ -f "$LLM_OUTPUT" ]]; then
+        rm -f "$LLM_OUTPUT"
+    fi
+    exit $exit_code
+}
+
+trap cleanup EXIT
 
 main() {
     root_dir="$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd)"
@@ -62,7 +72,7 @@ run() {
         die "error: no JSON data"
     fi
 
-    if [[ "$OS" == "Windows_NT" ]]; then
+    if [[ "${OS:-}" == "Windows_NT" ]]; then
         set -o igncr
         tools_path="$(cygpath -w "$tools_path")"
         tool_data="$(echo "$tool_data" | sed 's/\\/\\\\/g')"
@@ -95,6 +105,9 @@ EOF
         is_temp_llm_output=1
         export LLM_OUTPUT="$(mktemp)"
     fi
+    if [[ -t 1 ]]; then
+        export LLM_OUTPUT_COLOR=1
+    fi
     eval "'$tools_path' '$agent_func' $args"
     if [[ "$is_temp_llm_output" -eq 1 ]]; then
         cat "$LLM_OUTPUT"
@@ -117,8 +130,9 @@ EOF
 }
 
 die() {
-    echo "$*" >&2
-    exit 1
+    local exit_code=${2:-1}
+    echo "ERROR: $1" >&2
+    exit "$exit_code"
 }
 
 main "$@"

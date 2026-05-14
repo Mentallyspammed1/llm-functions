@@ -1,33 +1,30 @@
-import ast
-import io
-from contextlib import redirect_stdout
+#!/usr/bin/env python3
+# @describe Execute the python code.
+# @option --code! <TEXT> Python code to execute.
 
+import sys, os, io, traceback, contextlib
 
-def run(code: str):
-    """Execute the python code.
-    Args:
-        code: Python code to execute, such as `print("hello world")`
-    """
-    output = io.StringIO()
-    with redirect_stdout(output):
-        value = exec_with_return(code, {}, {})
+# @env LLM_OUTPUT=/dev/stdout The output path.
 
-        if value is not None:
-            output.write(str(value))
+def run(code: str) -> str:
+    stdout_buf = io.StringIO()
+    try:
+        with io.StringIO() as buf, contextlib.redirect_stdout(buf):
+            exec(code, {"__name__": "__main__"}, {})
+            return buf.getvalue()
+    except Exception:
+        return traceback.format_exc()
 
-    return output.getvalue()
+def main():
+    code = os.environ.get("argc_code", "")
+    output = run(code)
+    output_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
+    
+    if output_path == "/dev/stdout":
+        print(output)
+    else:
+        with open(output_path, "a", encoding="utf-8") as f:
+            f.write(output + "\n")
 
-
-def exec_with_return(code: str, globals: dict, locals: dict):
-    a = ast.parse(code)
-    last_expression = None
-    if a.body:
-        if isinstance(a_last := a.body[-1], ast.Expr):
-            last_expression = ast.unparse(a.body.pop())
-        elif isinstance(a_last, ast.Assign):
-            last_expression = ast.unparse(a_last.targets[0])
-        elif isinstance(a_last, (ast.AnnAssign, ast.AugAssign)):
-            last_expression = ast.unparse(a_last.target)
-    exec(ast.unparse(a), globals, locals)
-    if last_expression:
-        return eval(last_expression, globals, locals)
+if __name__ == "__main__":
+    main()

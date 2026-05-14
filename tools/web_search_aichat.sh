@@ -15,7 +15,7 @@ set -e
 #   - vertexai:gemini-*
 #   - perplexity:*
 #   - ernie:*
-# @env LLM_OUTPUT=/dev/stdout The output path
+# @env LLM_OUTPUT=/dev/fd/1 The output path
 
 main() {
     client="${WEB_SEARCH_MODEL%%:*}"
@@ -29,7 +29,7 @@ main() {
     elif [[ "$client" == "ernie" ]]; then
         export AICHAT_PATCH_ERNIE_CHAT_COMPLETIONS='{".*":{"body":{"web_search":{"enable":true}}}}'
     fi
-    aichat -m "$WEB_SEARCH_MODEL" "$argc_query" >> "$LLM_OUTPUT"
+    aichat -m "$WEB_SEARCH_MODEL" "$argc_query" >&1
 }
 
 eval "$(argc --argc-eval "$0" "$@")"

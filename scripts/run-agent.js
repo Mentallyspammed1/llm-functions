@@ -70,6 +70,9 @@ async function setupEnv(rootDir, agentName, agentFunc) {
     "cache",
     agentName,
   );
+  if (process.stdout.isTTY) {
+    process.env["LLM_OUTPUT_COLOR"] = "1";
+  }
 }
 
 async function loadEnv(filePath) {

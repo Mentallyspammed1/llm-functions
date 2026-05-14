@@ -32,6 +32,10 @@ run@tool() {
     cmd="$(_lang_to_cmd "$lang")"
     run_tool_script="scripts/run-tool.$lang"
     [[ -n "$argc_cwd" ]] && cd "$argc_cwd"
+    
+    # Ensure LLM_OUTPUT exists if not provided
+    export LLM_OUTPUT="${LLM_OUTPUT:-/dev/stdout}"
+    
     exec "$cmd" "$run_tool_script" "$argc_tool" "$argc_json"
 }
 
@@ -56,6 +60,10 @@ run@agent() {
     cmd="$(_lang_to_cmd "$lang")"
     run_agent_script="scripts/run-agent.$lang"
     [[ -n "$argc_cwd" ]] && cd "$argc_cwd"
+    
+    # Ensure LLM_OUTPUT exists if not provided
+    export LLM_OUTPUT="${LLM_OUTPUT:-/dev/stdout}"
+    
     exec "$cmd" "$run_agent_script"  "$argc_agent" "$argc_action" "$argc_json"
 }
 
@@ -677,10 +685,11 @@ _check_bin() {
 
 _check_envs() {
     script_path="$1"
-    envs=( $(sed -E -n 's/.* @env ([A-Z0-9_]+)!.*/\1/p' $script_path) )
+    envs=( $(grep -oP '(?<=@env )[A-Z0-9_]+' "$script_path" 2>/dev/null || true) )
     missing_envs=()
     for env in $envs; do
-        if [[ -z "${!env}" ]]; then
+        # Ignore LLM_OUTPUT as it's injected by the framework at runtime
+        if [[ -z "${!env}" && "$env" != "LLM_OUTPUT" ]]; then
             missing_envs+=("$env")
         fi
     done
@@ -784,7 +793,7 @@ _choice_mcp_args() {
 }
 
 _die() {
-    echo "$*" >&2
+    echo -e '[31m'"$*"'[0m' >&2
     exit 1
 }
 

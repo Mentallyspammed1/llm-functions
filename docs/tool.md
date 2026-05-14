@@ -192,6 +192,55 @@ def run(
     """
     # ... your Python code ...
 ```
+
+## Tool Output
+
+When a tool is executed, it can provide feedback to the LLM. This is primarily done through the `LLM_OUTPUT` environment variable.
+
+- `LLM_OUTPUT`: This variable contains a path to a file where the tool should write its output. If this variable is not set, the tool should write to `stdout`.
+- `LLM_OUTPUT_COLOR`: This variable is set to `1` if the current environment supports colorized output (i.e., when running in a TTY). Tools can use this to decide whether to include ANSI escape codes in their output.
+
+## Tool Result
+
+Tools can return data to the LLM in different ways depending on the language.
+
+### Bash
+
+In Bash, you should append your output to the file specified by `$LLM_OUTPUT`.
+
+```sh
+main() {
+    echo "Hello, LLM!" >> "$LLM_OUTPUT"
+}
+```
+
+### JavaScript
+
+In JavaScript, you can either:
+1. Return a value (string, number, boolean, object, or array) from the `run` function.
+2. Write directly to the file specified by `process.env.LLM_OUTPUT`.
+
+If you return an object or array, it will be automatically stringified to JSON.
+
+```js
+exports.run = function (args) {
+  return { result: "success", message: "Hello, LLM!" };
+}
+```
+
+### Python
+
+In Python, you can either:
+1. Return a value (str, int, float, bool, dict, or list) from the `run` function.
+2. Write directly to the file specified by `os.environ["LLM_OUTPUT"]`.
+
+If you return a dict or list, it will be automatically stringified to JSON.
+
+```py
+def run(code: str):
+    return {"result": "success", "message": "Hello, LLM!"}
+```
+
 ## Common tools
 
 Common tools can be found in `tools/<tool-name>.{sh,js,py}`. Each script defines a single tool.

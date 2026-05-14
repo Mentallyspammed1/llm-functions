@@ -16,7 +16,7 @@ set -e
 # +    name = input("What is your name? ")
 # +    print(f"Hello {name}")
 
-# @env LLM_OUTPUT=/dev/stdout The output path
+# @env LLM_OUTPUT=/dev/fd/1 The output path
 
 ROOT_DIR="${LLM_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
@@ -26,11 +26,17 @@ main() {
         exit 1
     fi
     new_contents="$(awk -f "$ROOT_DIR/utils/patch.awk" "$argc_path" <(printf "%s" "$argc_contents"))"
-    printf "%s" "$new_contents" | git diff --no-index "$argc_path" - || true
+
+    diff_args=("--no-index")
+    if [[ "$LLM_OUTPUT_COLOR" == "1" ]]; then
+        diff_args+=("--color=always")
+    fi
+
+    printf "%s" "$new_contents" | git diff "${diff_args[@]}" "$argc_path" - || true
     "$ROOT_DIR/utils/guard_operation.sh" "Apply changes?"
     printf "%s" "$new_contents" > "$argc_path"
 
-    echo "The patch applied to: $argc_path" >> "$LLM_OUTPUT"
+    echo "The patch applied to: $argc_path" >&1
 }
 
 eval "$(argc --argc-eval "$0" "$@")"
