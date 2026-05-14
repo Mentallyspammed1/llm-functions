@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""
+Bybit API Base Module (Professional Edition - Requests Version)
+Provides: api_request, Technical Indicators (RSI, EMA, ATR),
+Risk Management, and Connectivity Utilities.
+"""
+
+import os
+import sys
+import json
+import time
+import hmac
+import hashlib
+import math
+import requests
+import urllib.parse
+import logging
+from typing import Dict, Any, Optional, List, Tuple
+
+
+# --------------------------------------------------------------------------|
+# Custom Exceptions
+# --------------------------------------------------------------------------|
+class BybitError(Exception):
+    """Base exception for Bybit API errors."""
+
+    pass
+
+
+# --------------------------------------------------------------------------|
+# Logging Setup
+# --------------------------------------------------------------------------|
+def setup_logging(config: Dict[str, Any]) -> None:
+    log_level = logging.INFO
+    logger = logging.getLogger("bybit")
+    logger.setLevel(log_level)
+    if not logger.handlers:
+        console_handler = logging.StreamHandler(sys.stderr)
+        formatter = logging.Formatter(
+            "\033[96m[BYBIT] %(levelname)s: %(message)s\033[0m"
+        )
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+
+# --------------------------------------------------------------------------|
+# Configuration
+# --------------------------------------------------------------------------|
+def load_env() -> Dict[str, str]:
+    candidates = [
+        os.path.join(os.getcwd(), ".env"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"),
+        os.path.expanduser("~/.config/aichat/llm-functions/.env"),
+    ]
+    loaded = {}
+    for path in candidates:
+        if os.path.isfile(path):
+            with open(path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k, v = k.strip(), v.strip().strip('"').strip("'")
+                        if k not in os.environ:
+                            os.environ[k] = v
+                        loaded[k] = v
+            break
+    return loaded
+
+
+def get_config() -> Dict[str, Any]:
+    load_env()
+    config = {
+        "api_key": os.environ.get("BYBIT_API_KEY", ""),
+        "api_secret": os.environ.get("BYBIT_API_SECRET", ""),
+        "testnet": os.environ.get("BYBIT_TESTNET", "false").lower()
+        in ("true", "1", "yes"),
+        "recv_window": os.environ.get("BYBIT_RECV_WINDOW", "5000"),
+        "base_url": "https://api.bybit.com"
+        if os.environ.get("BYBIT_TESTNET", "false").lower() != "true"
+        else "https://api-testnet.bybit.com",
+        "proxy": os.environ.get("HTTPS_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("BYBIT_TOR_PROXY"),
+    }
+    setup_logging(config)
+    return config
+
+
+# --------------------------------------------------------------------------|
+# API Engine
+# --------------------------------------------------------------------------|
+def _sign(
+    api_secret: str, timestamp: str, api_key: str, recv_window: str, payload: str
+) -> str:
+    param_str = f"{timestamp}{api_key}{recv_window}{payload}"
+    return hmac.new(
+        api_secret.encode("utf-8"), param_str.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
+def api_request(
+    method: str,
+    endpoint: str,
+    params: Optional[Dict[str, Any]] = None,
+    signed: bool = False,
+) -> Dict[str, Any]:
+    config = get_config()
+    url = f"{config['base_url']}{endpoint}"
+    headers = {"Content-Type": "application/json"}
+
+    # Sign request if needed
+    if signed and config["api_key"]:
+        ts = str(int(time.time() * 1000))
+        rw = config["recv_window"]
+        if method in ("POST", "PUT"):
+            body = json.dumps(params or {})
+            signature = _sign(config["api_secret"], ts, config["api_key"], rw, body)
+        else:
+            qs = urllib.parse.urlencode(params or {})
+            signature = _sign(config["api_secret"], ts, config["api_key"], rw, qs)
+
+        headers.update(
+            {
+                "X-BAPI-API-KEY": config["api_key"],
+                "X-BAPI-SIGN": signature,
+                "X-BAPI-TIMESTAMP": ts,
+                "X-BAPI-RECV-WINDOW": rw,
+            }
+        )
+
+    proxies = {}
+    if config["proxy"]:
+        proxies = {"http": config["proxy"], "https": config["proxy"]}
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            if method == "GET":
+                resp = requests.get(
+                    url, params=params, headers=headers, proxies=proxies, timeout=15
+                )
+            elif method == "POST":
+                resp = requests.post(
+                    url, json=params, headers=headers, proxies=proxies, timeout=15
+                )
+            elif method == "PUT":
+                resp = requests.put(
+                    url, json=params, headers=headers, proxies=proxies, timeout=15
+                )
+            elif method == "DELETE":
+                resp = requests.delete(
+                    url, json=params, headers=headers, proxies=proxies, timeout=15
+                )
+            else:
+                return {"retCode": -1, "retMsg": f"Unsupported method: {method}"}
+
+            return resp.json()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                return {"retCode": -1, "retMsg": str(e)}
+            time.sleep(1)
+
+
+# --------------------------------------------------------------------------|
+# Technical Indicators
+# --------------------------------------------------------------------------|
+def calculate_ema(data: List[float], period: int) -> List[float]:
+    if len(data) < period:
+        return []
+    ema = [sum(data[:period]) / period]
+    multiplier = 2 / (period + 1)
+    for price in data[period:]:
+        ema.append((price - ema[-1]) * multiplier + ema[-1])
+    return ema
+
+
+def calculate_rsi(data: List[float], period: int = 14) -> List[float]:
+    if len(data) <= period:
+        return []
+    deltas = [data[i + 1] - data[i] for i in range(len(data) - 1)]
+    gains = [d if d > 0 else 0 for d in deltas]
+    losses = [-d if d < 0 else 0 for d in deltas]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    rsi = []
+    for i in range(period, len(deltas)):
+        if avg_loss == 0:
+            rs = 100
+        else:
+            rs = avg_gain / avg_loss
+            rs = 100 - (100 / (1 + rs))
+        rsi.append(rs)
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    return rsi
+
+
+def calculate_atr(
+    highs: List[float], lows: List[float], closes: List[float], period: int = 14
+) -> List[float]:
+    if len(closes) <= period:
+        return []
+    tr_list = []
+    for i in range(1, len(closes)):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+        tr_list.append(tr)
+    atr = [sum(tr_list[:period]) / period]
+    for i in range(period, len(tr_list)):
+        atr.append((atr[-1] * (period - 1) + tr_list[i]) / period)
+    return atr
+
+
+# --------------------------------------------------------------------------|
+# Trading Logic
+# --------------------------------------------------------------------------|
+def get_position_size(balance: float, risk_pct: float, stop_loss_dist: float) -> float:
+    if stop_loss_dist <= 0:
+        return 0
+    risk_amount = balance * (risk_pct / 100)
+    return risk_amount / stop_loss_dist
+
+
+def round_step(value: float, step: float) -> float:
+    if step <= 0:
+        return value
+    return round(
+        math.floor(value / step) * step, max(0, -int(math.floor(math.log10(step))))
+    )
+
+
+def now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+# --- Advanced Trading Utilities ---
+
+
+def calculate_fees(qty: float, price: float, fee_rate: float = 0.0006) -> float:
+    """Calculate taker fees (default Bybit 0.06%)"""
+    return qty * price * fee_rate
+
+
+def get_breakeven_price(
+    entry_price: float,
+    side: str,
+    qty: float,
+    fee_rate: float = 0.0006,
+    slippage: float = 0.0002,
+) -> float:
+    """
+    Calculate the price needed to close in profit after open/close fees and slippage.
+    """
+    # Total fee for round trip (open + close)
+    total_fee_rate = (fee_rate * 2) + slippage
+    if side.lower() == "buy":
+        return entry_price * (1 + total_fee_rate)
+    else:
+        return entry_price * (1 - total_fee_rate)
+
+
+def check_profit_after_fees(
+    entry_price: float,
+    current_price: float,
+    side: str,
+    qty: float,
+    fee_rate: float = 0.0006,
+) -> Tuple[bool, float]:
+    """
+    Check if current price is in profit after deducting estimated fees.
+    Returns (is_profitable, net_profit_usdt)
+    """
+    open_fee = calculate_fees(qty, entry_price, fee_rate)
+    close_fee = calculate_fees(qty, current_price, fee_rate)
+    total_fees = open_fee + close_fee
+
+    if side.lower() == "buy":
+        gross_profit = (current_price - entry_price) * qty
+    else:
+        gross_profit = (entry_price - current_price) * qty
+
+    net_profit = gross_profit - total_fees
+    return net_profit > 0, net_profit

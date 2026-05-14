@@ -1,0 +1,468 @@
+#!/usr/bin/env python3
+"""
+run-tool.py — Dynamic tool runner for LLM tool integrations.
+
+Usage:
+    ./run-tool.py <tool-name> <tool-data-json>
+    ./<tool-name>.py <tool-data-json>
+"""
+
+import os
+import re
+import json
+import sys
+import importlib.util
+import inspect
+from pathlib import Path
+from typing import Any, Dict, Literal, Optional, Tuple, Union, get_type_hints, get_args, get_origin
+
+# ---------------------------------------------------------------------------
+# Standard exit codes
+# ---------------------------------------------------------------------------
+
+EXIT_SUCCESS         = 0
+EXIT_GENERAL_ERROR   = 1
+EXIT_INVALID_INPUT   = 2
+EXIT_FILE_NOT_FOUND  = 3
+EXIT_PERMISSION_DENIED = 4
+EXIT_NETWORK_ERROR   = 5
+EXIT_TIMEOUT         = 124
+EXIT_COMMAND_NOT_FOUND = 127
+
+
+# ---------------------------------------------------------------------------
+# Custom exception
+# ---------------------------------------------------------------------------
+
+class ToolError(Exception):
+    """Exception that carries an exit code alongside its message."""
+
+    def __init__(self, message: str, exit_code: int = EXIT_GENERAL_ERROR):
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    try:
+        tool_name, raw_data = parse_argv("run-tool.py")
+        tool_data = parse_raw_data(raw_data)
+
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        setup_env(root_dir, tool_name)
+
+        tool_path = os.path.join(root_dir, "tools", f"{tool_name}.py")
+        run(tool_name, tool_path, "run", tool_data)
+
+    except ToolError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(e.exit_code)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(EXIT_GENERAL_ERROR)
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing                                              (FIX #5)
+# ---------------------------------------------------------------------------
+
+def parse_argv(this_file_name: str) -> Tuple[str, str]:
+    """
+    Resolve tool name and raw JSON data from sys.argv.
+
+    Supports two calling conventions:
+      1. ``./run-tool.py <tool-name> <json>``   — dispatcher mode
+      2. ``./<tool-name>.py <json>``            — direct mode
+    """
+    argv = sys.argv  # do not mutate; index carefully
+
+    # Dispatcher mode: argv[0] is this script
+    if os.path.basename(argv[0]).endswith(this_file_name):
+        if len(argv) < 3:  # need argv[1]=name, argv[2]=data
+            raise ToolError(
+                "Usage: ./run-tool.py <tool-name> <tool-data>",
+                EXIT_INVALID_INPUT,
+            )
+        tool_name = argv[1]
+        tool_data = argv[2]
+
+    # Direct mode: argv[0] is the tool script itself
+    else:
+        if len(argv) < 2:  # need argv[1]=data
+            raise ToolError(
+                "Usage: ./run-tool.py <tool-name> <tool-data>",
+                EXIT_INVALID_INPUT,
+            )
+        tool_name = os.path.basename(argv[0])
+        tool_data = argv[1]
+
+    # Strip .py suffix if present
+    if tool_name.endswith(".py"):
+        tool_name = tool_name[:-3]
+
+    if not tool_name or not tool_data:
+        raise ToolError(
+            "Usage: ./run-tool.py <tool-name> <tool-data>",
+            EXIT_INVALID_INPUT,
+        )
+
+    return tool_name, tool_data
+
+
+# ---------------------------------------------------------------------------
+# JSON parsing
+# ---------------------------------------------------------------------------
+
+def parse_raw_data(data: str) -> Dict[str, Any]:
+    """Parse raw JSON string into a dict, raising ToolError on failure."""
+    if not data:
+        raise ToolError("No JSON data provided", EXIT_INVALID_INPUT)
+    try:
+        parsed = json.loads(data)
+    except json.JSONDecodeError as exc:
+        raise ToolError(f"Invalid JSON data: {exc}", EXIT_INVALID_INPUT)
+
+    if not isinstance(parsed, dict):
+        raise ToolError(
+            f"Expected a JSON object, got {type(parsed).__name__}",
+            EXIT_INVALID_INPUT,
+        )
+    return parsed
+
+
+# ---------------------------------------------------------------------------
+# Environment setup                                             (FIX #10)
+# ---------------------------------------------------------------------------
+
+def setup_env(root_dir: str, tool_name: str) -> None:
+    """Populate environment variables consumed by tool scripts."""
+    load_env(os.path.join(root_dir, ".env"))
+
+    cache_dir = os.path.join(root_dir, "cache", tool_name)
+
+    # FIX #10: create the cache directory so tools can rely on it existing
+    os.makedirs(cache_dir, exist_ok=True)
+
+    os.environ["LLM_ROOT_DIR"]       = root_dir
+    os.environ["LLM_TOOL_NAME"]      = tool_name
+    os.environ["LLM_TOOL_CACHE_DIR"] = cache_dir
+
+    if "LLM_OUTPUT" not in os.environ:
+        if os.name == "posix":
+            os.environ["LLM_OUTPUT"] = "/dev/stdout"
+        elif os.name == "nt":
+            os.environ["LLM_OUTPUT"] = "CON"
+        else:
+            os.environ["LLM_OUTPUT"] = ""
+
+
+def load_env(file_path: str) -> None:
+    """
+    Load key=value pairs from *file_path* into the environment.
+
+    Existing environment variables are never overwritten.
+    Lines starting with ``#`` and blank lines are ignored.
+    Values may be optionally quoted with single or double quotes.
+
+    FIX #6: specific exceptions are caught and logged rather than silenced.
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        return  # .env is optional
+    except PermissionError as exc:
+        print(f"Warning: cannot read {file_path}: {exc}", file=sys.stderr)
+        return
+    except OSError as exc:
+        print(f"Warning: cannot read {file_path}: {exc}", file=sys.stderr)
+        return
+
+    new_vars: Dict[str, str] = {}
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if "=" not in line:
+            continue  # skip malformed lines silently
+
+        key, _, raw_value = line.partition("=")
+        env_name  = key.strip()
+        env_value = raw_value.strip()
+
+        # Strip matching surrounding quotes
+        if len(env_value) >= 2 and env_value[0] == env_value[-1] and env_value[0] in ('"', "'"):
+            env_value = env_value[1:-1]
+
+        if env_name and env_name not in os.environ:
+            new_vars[env_name] = env_value
+
+    os.environ.update(new_vars)
+
+
+# ---------------------------------------------------------------------------
+# Tool loader & runner                                          (FIX #8)
+# ---------------------------------------------------------------------------
+
+def run(
+    tool_name: str,
+    tool_path: str,
+    tool_func: str,
+    tool_data: Dict[str, Any],
+) -> None:
+    """Import *tool_path*, coerce *tool_data*, call *tool_func*, emit result."""
+
+    # --- import -------------------------------------------------------
+    if not os.path.isfile(tool_path):
+        raise ToolError(
+            f"Tool file not found: {tool_path}",
+            EXIT_FILE_NOT_FOUND,
+        )
+
+    try:
+        spec = importlib.util.spec_from_file_location(
+            os.path.basename(tool_path), tool_path
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except PermissionError as exc:
+        raise ToolError(f"Permission denied loading tool: {exc}", EXIT_PERMISSION_DENIED)
+    except Exception as exc:
+        raise ToolError(f"Failed to import tool module: {exc}", EXIT_FILE_NOT_FOUND)
+
+    # --- locate function ----------------------------------------------
+    if not hasattr(mod, tool_func):
+        raise ToolError(
+            f"No function '{tool_func}' in '{tool_path}'",
+            EXIT_GENERAL_ERROR,
+        )
+
+    func = getattr(mod, tool_func)
+
+    # --- coerce argument types ----------------------------------------
+    tool_data = _coerce_types(func, tool_data)
+
+    # --- call ---------------------------------------------------------
+    # FIX #8: use inspect to decide whether a TypeError is from the call
+    # site (bad args) or from inside the tool (propagate as-is).
+    try:
+        value = func(**tool_data)
+    except TypeError as exc:
+        # Walk the traceback: if there is a frame *inside* the function
+        # (tb_next leads to a frame whose f_code is not func.__code__)
+        # the error originated inside the tool — re-raise unchanged.
+        tb = sys.exc_info()[2]
+        inside_tool = tb is not None and tb.tb_next is not None and (
+            tb.tb_next.tb_frame.f_code is not func.__code__
+            or tb.tb_next.tb_next is not None        # deeper frame = tool-internal
+        )
+        if inside_tool:
+            raise
+        raise ToolError(
+            f"Tool '{tool_name}' run() called with wrong arguments: {exc}",
+            EXIT_INVALID_INPUT,
+        )
+    except Exception as exc:
+        if hasattr(exc, "exit_code"):
+            sys.exit(exc.exit_code)
+        raise
+
+    return_to_llm(value)
+    dump_result(tool_name)
+
+
+# ---------------------------------------------------------------------------
+# Type coercion                                    (FIX #1, #2, #3, #4)
+# ---------------------------------------------------------------------------
+
+def _unwrap_optional(hint: Any) -> Any:
+    """
+    Return the inner type of ``Optional[X]`` (i.e. ``Union[X, None]``).
+
+    If *hint* is not Optional, return it unchanged.
+    """
+    if get_origin(hint) is Union:
+        args = [a for a in get_args(hint) if a is not type(None)]
+        if len(args) == 1:
+            return args[0]
+    return hint
+
+
+def _coerce_types(func: Any, data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Coerce string (or loosely-typed) values in *data* to the types
+    declared in *func*'s signature.
+
+    Handles: ``int``, ``float``, ``bool``, ``str``,
+             ``Optional[X]``, ``Union[X, None]``, ``Literal[...]``.
+
+    FIX #1: ``Union`` is now properly imported and used via ``get_origin``.
+    FIX #2: ``Optional[X]`` is unwrapped before type comparison.
+    FIX #3: ``bool`` is checked *before* ``int`` (bool ⊂ int in Python).
+    FIX #4: ``Literal`` values are validated but not coerced.
+    """
+    # Gather type hints — fall back to inspecting the signature
+    try:
+        hints = get_type_hints(func)
+    except Exception:
+        try:
+            hints = {
+                name: param.annotation
+                for name, param in inspect.signature(func).parameters.items()
+            }
+        except Exception:
+            return data  # cannot introspect — pass data through unchanged
+
+    coerced = data.copy()
+
+    for key, value in coerced.items():
+        if key not in hints:
+            continue
+
+        raw_hint    = hints[key]
+        target_type = _unwrap_optional(raw_hint)   # FIX #2
+
+        # --- Literal validation (FIX #4) --------------------------------
+        if get_origin(target_type) is Literal:
+            allowed = get_args(target_type)
+            if value not in allowed:
+                # Attempt a type-coerced match (e.g. Literal[1,2] with "1")
+                for candidate in allowed:
+                    try:
+                        if type(candidate)(value) == candidate:
+                            coerced[key] = candidate
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            continue  # either matched or leave as-is
+
+        # Only attempt coercion when value is a primitive scalar
+        if not isinstance(value, (str, int, float, bool)):
+            continue
+
+        # FIX #3: bool MUST come before int (bool is subclass of int)
+        if target_type is bool:
+            if isinstance(value, bool):
+                pass  # already correct
+            elif isinstance(value, str):
+                val_lower = value.lower()
+                if val_lower in ("true", "1", "yes", "on"):
+                    coerced[key] = True
+                elif val_lower in ("false", "0", "no", "off"):
+                    coerced[key] = False
+            elif isinstance(value, (int, float)):
+                coerced[key] = bool(value)
+
+        elif target_type is int:
+            if isinstance(value, bool):
+                # bool → int is almost never desired; skip
+                pass
+            elif isinstance(value, int):
+                pass  # already correct
+            elif isinstance(value, float) and value.is_integer():
+                coerced[key] = int(value)
+            elif isinstance(value, str):
+                try:
+                    coerced[key] = int(value)
+                except ValueError:
+                    pass  # leave original; let the tool raise
+
+        elif target_type is float:
+            if isinstance(value, float):
+                pass  # already correct
+            elif isinstance(value, bool):
+                pass  # avoid bool → float surprise
+            elif isinstance(value, int):
+                coerced[key] = float(value)
+            elif isinstance(value, str):
+                try:
+                    coerced[key] = float(value)
+                except ValueError:
+                    pass
+
+        elif target_type is str:
+            if not isinstance(value, str):
+                coerced[key] = str(value)
+
+    return coerced
+
+
+# ---------------------------------------------------------------------------
+# Output helpers                                                (FIX #7)
+# ---------------------------------------------------------------------------
+
+def return_to_llm(value: Any) -> None:
+    """
+    Write *value* to ``LLM_OUTPUT`` (or stdout).
+
+    FIX #7: file handle is closed via a try/finally block so it is
+    released even when the write raises.
+    """
+    if value is None:
+        return
+
+    llm_output = os.environ.get("LLM_OUTPUT", "")
+    use_file   = llm_output and llm_output not in ("/dev/stdout", "/dev/fd/1", "CON")
+
+    writer = open(llm_output, "w", encoding="utf-8") if use_file else sys.stdout
+
+    try:
+        if isinstance(value, (str, int, float, bool)):
+            writer.write(str(value))
+        elif isinstance(value, (dict, list)):
+            writer.write(json.dumps(value, indent=2))
+        # Other types (e.g. custom objects): silently skip
+    finally:
+        if use_file:
+            writer.close()          # FIX #7: always reached
+
+
+def dump_result(name: str) -> None:
+    """
+    Pretty-print the tool result to the terminal when ``LLM_DUMP_RESULTS``
+    matches *name* and stdout is a TTY.
+
+    FIX #9: ``os.isatty`` is wrapped to handle ``OSError`` on
+    non-seekable / redirected file descriptors.
+    """
+    if not os.getenv("LLM_DUMP_RESULTS") or not os.getenv("LLM_OUTPUT"):
+        return
+
+    # FIX #9: isatty can raise OSError on some platforms/fds
+    try:
+        stdout_is_tty = os.isatty(sys.stdout.fileno())
+    except (OSError, AttributeError):
+        stdout_is_tty = False
+
+    if not stdout_is_tty:
+        return
+
+    try:
+        pattern = os.environ["LLM_DUMP_RESULTS"]
+        if not re.search(rf"\b({pattern})\b", name):
+            return
+    except re.error:
+        return  # invalid regex — skip silently
+
+    llm_output = os.environ.get("LLM_OUTPUT", "")
+    if llm_output in ("/dev/stdout", "/dev/fd/1", "CON"):
+        return
+
+    try:
+        with open(llm_output, "r", encoding="utf-8") as fh:
+            data = fh.read()
+    except OSError:
+        return
+
+    print(f"\x1b[2m----------------------\n{data}\n----------------------\x1b[0m")
+
+
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    main()

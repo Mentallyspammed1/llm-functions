@@ -1,0 +1,73 @@
+name: bybit_trader
+description: A comprehensive Bybit trading agent with technical analysis, order management, and portfolio rebalancing capabilities
+version: 1.0.0
+author: AI Trading Assistant
+
+# Environment variables required
+env:
+  - BYBIT_API_KEY
+  - BYBIT_API_SECRET
+  - BYBIT_USE_TESTNET
+  - TELEGRAM_BOT_TOKEN
+  - TELEGRAM_CHAT_ID
+
+# Dependencies
+dependencies:
+  - bybit-api
+  - technicalindicators
+  - dotenv
+
+# Tools provided by this agent
+tools:
+  - trend: Get market trend analysis with technical indicators
+  - status: Check active account positions and orders
+  - execute: Execute a trade with net profit TP logic
+  - l2: Analyze Level 2 order book for liquidity and pressure
+  - funding: Screen for high funding rate arbitrage opportunities
+  - rebalance: Rebalance portfolio to a target percentage
+  - history: Analyze recent trade history and performance
+  - iceberg: Execute large order using iceberg strategy
+  - telegram: Send a custom alert to Telegram
+  - logs: View the local CSV log of agent-executed trades
+
+# Usage examples
+examples:
+  - name: Get market trend
+    description: Analyze BTC/USDT trend with technical indicators
+    command: bybit_trader trend symbol=BTCUSDT interval=15
+    
+  - name: Check account status
+    description: View current positions and orders for ETH/USDT
+    command: bybit_trader status symbol=ETHUSDT
+    
+  - name: Execute trade
+    description: Place a buy order with $10 risk and $5 profit target
+    command: bybit_trader execute symbol=BTCUSDT side=buy risk=10 profit=5
+    
+  - name: Analyze order book
+    description: Get Level 2 order book analysis for SOL/USDT
+    command: bybit_trader l2 symbol=SOLUSDT depth=50
+    
+  - name: Check funding rates
+    description: Screen for high funding rate opportunities
+    command: bybit_trader funding symbols='["BTCUSDT","ETHUSDT","SOLUSDT"]'
+    
+  - name: Rebalance portfolio
+    description: Rebalance BTC allocation to 50% of portfolio
+    command: bybit_trader rebalance target=0.5 asset=BTC
+    
+  - name: View trade history
+    description: Get last 10 executions for BTC/USDT
+    command: bybit_trader history symbol=BTCUSDT limit=10
+    
+  - name: Execute iceberg order
+    description: Place large sell order using iceberg strategy
+    command: bybit_trader iceberg side=sell total_qty=100 visible_qty=10 symbol=BTCUSDT
+    
+  - name: Send Telegram alert
+    description: Send custom message to Telegram
+    command: bybit_trader telegram message="Trade executed successfully"
+    
+  - name: View trade logs
+    description: Show last 20 trades from local log
+    command: bybit_trader logs limit=20

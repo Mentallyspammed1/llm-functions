@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# ==============================================================================
+# execute_py_code.py
+#
+# @describe Execute the python code (Unrestricted Mode).
+# @option --code! <TEXT> Python code to execute
+# ==============================================================================
+
+import sys
+import os
+import io
+import traceback
+import signal
+import threading
+from contextlib import redirect_stdout, redirect_stderr
+from typing import Optional
+
+# Configuration
+EXECUTION_TIMEOUT_SECONDS = 60 
+
+class _TimeoutError(Exception):
+    """Raised when code exceeds the execution time limit."""
+
+def _sigalrm_handler(signum, frame):
+    raise _TimeoutError("Execution exceeded the time limit.")
+
+def run(code: str) -> str:
+    """Execute code without restrictions."""
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    
+    exec_globals = {"__name__": "__main__"}
+    exec_locals = {}
+
+    # Setup Timeout
+    if hasattr(signal, "SIGALRM"):
+        signal.signal(signal.SIGALRM, _sigalrm_handler)
+        signal.alarm(EXECUTION_TIMEOUT_SECONDS)
+
+    try:
+        with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+            # Directly execute the code string
+            exec(code, exec_globals, exec_locals)
+            
+    except Exception:
+        print(traceback.format_exc(), file=stderr_buf)
+    finally:
+        if hasattr(signal, "SIGALRM"):
+            signal.alarm(0)
+
+    return f"{stdout_buf.getvalue()}\n{stderr_buf.getvalue()}".strip()
+
+def main() -> None:
+    # argc injects parsed flags as environment variables
+    code = os.environ.get("argc_code", "").strip()
+
+    if not code:
+        print("Error: --code must be provided.", file=sys.stderr)
+        sys.exit(1)
+
+    output = run(code)
+
+    # Use LLM_OUTPUT if set, otherwise stdout
+    output_path = os.environ.get("LLM_OUTPUT")
+    if output_path:
+        with open(output_path, "a", encoding="utf-8") as fh:
+            fh.write(output + "\n")
+    else:
+        print(output)
+
+if __name__ == "__main__":
+    main()

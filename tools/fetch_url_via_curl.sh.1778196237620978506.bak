@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# @describe Fetch content from a URL using curl with enhanced options.
+# @option --url! The URL to fetch.
+# @option --timeout=30 <INT> Request timeout in seconds.
+# @option --max-time=60 <INT> Maximum transfer time in seconds.
+# @option --connect-timeout=10 <INT> Connection timeout in seconds.
+# @option --user-agent=curl_tool/1.0 <STRING> Custom User-Agent header.
+# @option --output=- <STRING> Output file path (default: stdout).
+# @option --method=GET <STRING> HTTP method (GET, POST, PUT, DELETE, PATCH).
+# @option --data= <STRING> Request body data for POST/PUT requests.
+# @option --headers= <STRING> Additional headers (comma-separated, format: "Header1: Value1,Header2: Value2").
+# @flag --follow-redirects Follow HTTP redirects (default: true).
+# @option --max-redirects=5 <INT> Maximum number of redirects to follow.
+# @flag --verify-ssl Verify SSL certificates (default: true).
+# @flag --compressed Request compressed response.
+# @flag --silent Silent mode (no progress meter).
+# @flag --verbose Verbose output.
+# @flag --include Include HTTP headers in output.
+# @option --retry=3 <INT> Number of retry attempts on failure.
+# @option --retry-delay=1 <INT> Delay between retries in seconds.
+# @option --limit-rate= <STRING> Limit download rate (e.g., 100k, 1m).
+
+# @env LLM_OUTPUT=/dev/stdout The output path.
+
+main() {
+    # -----------------------------
+    # Validate required parameters
+    # -----------------------------
+    if [[ -z "${argc_url:-}" ]]; then
+        echo "Error: --url is required." >&2
+        exit 1
+    fi
+
+    if [[ ! "$argc_url" =~ ^https?:// ]]; then
+        echo "Error: Invalid URL format. Must start with http:// or https://" >&2
+        exit 1
+    fi
+
+    # -----------------------------
+    # Prepare curl arguments
+    # -----------------------------
+    curl_args=(
+        --location
+        --max-time "${argc_max_time:-60}"
+        --connect-timeout "${argc_connect_timeout:-10}"
+        --user-agent "${argc_user_agent:-curl_tool/1.0}"
+        --retry "${argc_retry:-3}"
+        --retry-delay "${argc_retry_delay:-1}"
+        --retry-connrefused
+        --retry-max-time "${argc_max_time:-60}"
+        --fail
+        --show-error
+    )
+
+    # Handle redirects
+    if [[ "${argc_follow_redirects:-true}" != "true" ]]; then
+        curl_args+=(--no-location)
+    else
+        curl_args+=(--max-redirs "${argc_max_redirects:-5}")
+    fi
+
+    # SSL verification
+    if [[ "${argc_verify_ssl:-true}" != "true" ]]; then
+        curl_args+=(--insecure)
+    fi
+
+    # Compression
+    if [[ "${argc_compressed:-false}" == "true" ]]; then
+        curl_args+=(--compressed)
+    fi
+
+    # Output options
+    if [[ "${argc_silent:-false}" == "true" ]]; then
+        curl_args+=(--silent)
+    fi
+
+    if [[ "${argc_verbose:-false}" == "true" ]]; then
+        curl_args+=(--verbose)
+    fi
+
+    if [[ "${argc_include:-false}" == "true" ]]; then
+        curl_args+=(--include)
+    fi
+
+    # Rate limiting
+    if [[ -n "${argc_limit_rate:-}" ]]; then
+        curl_args+=(--limit-rate "${argc_limit_rate}")
+    fi
+
+    # HTTP method
+    if [[ -n "${argc_method:-}" ]]; then
+        curl_args+=(--request "${argc_method}")
+    fi
+
+    # Request data
+    if [[ -n "${argc_data:-}" ]]; then
+        curl_args+=(--data "${argc_data}")
+    fi
+
+    # Additional headers
+    if [[ -n "${argc_headers:-}" ]]; then
+        IFS=',' read -ra headers_array <<< "$argc_headers"
+        for header in "${headers_array[@]}"; do
+            curl_args+=(--header "${header}")
+        done
+    fi
+
+    # -----------------------------
+    # Execute request
+    # -----------------------------
+    output_target="${argc_output:-${LLM_OUTPUT:-/dev/stdout}}"
+
+    if curl "${curl_args[@]}" "$argc_url" 2>> "$LLM_OUTPUT" >> "$output_target"; then
+        :
+    else
+        exit_code=$?
+        echo "Error: Failed to fetch URL (exit code: $exit_code)" >> "$LLM_OUTPUT"
+        exit $exit_code
+    fi
+}
+
+eval "$(argc --argc-eval "$0" "$@")"

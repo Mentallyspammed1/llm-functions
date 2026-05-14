@@ -1,0 +1,25 @@
+{
+  "trading_settings": {
+    "symbols": ["BTCUSDT", "ETHUSDT"],
+    "base_qty": 0.001,
+    "leverage": 5,
+    "max_position_usdt": 1000.0,
+    "default_stop_loss": 0.02,
+    "default_take_profit": 0.04
+  },
+  "network": {
+    "use_tor": true,
+    "tor_socks_port": 9050,
+    "request_timeout": 15,
+    "max_retries": 3
+  },
+  "circuit_breaker": {
+    "failure_threshold": 5,
+    "recovery_timeout": 60.0,
+    "cooldown": 30.0
+  },
+  "rate_limit": {
+    "calls": 10,
+    "window": 1.0
+  }
+}

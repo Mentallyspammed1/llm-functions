@@ -1,0 +1,1289 @@
+#!/usr/bin/env python3
+"""
+enhanced_web_search.py - AI-Powered Multi-Source Web Search Tool
+
+A comprehensive web search platform with semantic search, multi-source aggregation,
+intelligent caching, advanced filtering, and AI-powered content analysis.
+"""
+
+import json
+import sys
+import argparse
+import logging
+import time
+import random
+import shutil
+import subprocess
+import urllib.parse
+import re
+import hashlib
+import sqlite3
+import os
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional, Literal, Tuple, Set
+from html.parser import HTMLParser
+from dataclasses import dataclass, asdict, field
+from pathlib import Path
+from urllib.parse import urlparse
+import difflib
+
+# AI/ML imports
+try:
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+    from sklearn.metrics.pairwise import cosine_similarity
+    HAS_SEMANTIC = True
+except ImportError:
+    HAS_SEMANTIC = False
+    print("Warning: semantic search features disabled (install sentence-transformers, scikit-learn, numpy)")
+
+try:
+    from transformers import pipeline
+    HAS_TRANSFORMERS = True
+except ImportError:
+    HAS_TRANSFORMERS = False
+    print("Warning: AI content analysis disabled (install transformers)")
+
+# Web parsing imports
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+
+# ---------------------------------------------------------------------------
+# Enhanced Data Structures
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SearchFilters:
+    """Advanced filtering options for search queries."""
+    date_range: Optional[Tuple[datetime, datetime]] = None
+    include_domains: List[str] = field(default_factory=list)
+    exclude_domains: List[str] = field(default_factory=list)
+    content_types: List[str] = field(default_factory=list)  # news, images, videos, academic
+    file_types: List[str] = field(default_factory=list)  # pdf, doc, ppt, etc.
+    location: Optional[str] = None
+    min_relevance_score: float = 0.0
+
+@dataclass
+class Entity:
+    """Named entity extracted from content."""
+    text: str
+    label: str  # PERSON, ORG, GPE, etc.
+    confidence: float
+
+@dataclass
+class ContentAnalysis:
+    """AI-powered analysis of crawled content."""
+    summary: str = ""
+    sentiment: str = ""  # positive, negative, neutral
+    entities: List[Entity] = field(default_factory=list)
+    key_points: List[str] = field(default_factory=list)
+    topic: str = ""
+    relevance_score: float = 0.0
+
+@dataclass
+class SearchResult:
+    """Enhanced search result with AI analysis."""
+    position: int
+    url: str
+    title: str = ""
+    snippet: str = ""
+    content: str = ""
+    error: str = ""
+    source_engine: str = ""
+    relevance_score: float = 0.0
+    content_analysis: Optional[ContentAnalysis] = None
+    crawl_timestamp: Optional[datetime] = None
+
+# ---------------------------------------------------------------------------
+# Detect available HTTP CLI tools
+# ---------------------------------------------------------------------------
+
+CURLIE_BIN = shutil.which("curlie")
+WGET2_BIN  = shutil.which("wget2")
+CURL_BIN   = shutil.which("curl")
+WGET_BIN   = shutil.which("wget")
+
+def _preferred_fetcher() -> str:
+    """Return the name of the best available HTTP CLI tool."""
+    if CURLIE_BIN:
+        return "curlie"
+    if WGET2_BIN:
+        return "wget2"
+    if CURL_BIN:
+        return "curl"
+    if WGET_BIN:
+        return "wget"
+    raise EnvironmentError(
+        "No supported HTTP tool found. Install curlie, wget2, curl, or wget."
+    )
+
+# ---------------------------------------------------------------------------
+# Enhanced Caching System
+# ---------------------------------------------------------------------------
+
+class SearchCache:
+    """Intelligent multi-layer caching system with SQLite backend."""
+    
+    def __init__(self, cache_dir: str = "~/.aichat/search_cache", ttl_hours: int = 24):
+        self.cache_dir = Path(cache_dir).expanduser()
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.db_path = self.cache_dir / "search_cache.db"
+        self.ttl = timedelta(hours=ttl_hours)
+        self._init_db()
+    
+    def _init_db(self):
+        """Initialize SQLite database for caching."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS search_cache (
+                    query_hash TEXT PRIMARY KEY,
+                    query TEXT,
+                    results TEXT,
+                    timestamp DATETIME,
+                    ttl_hours INTEGER
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS content_cache (
+                    url_hash TEXT PRIMARY KEY,
+                    url TEXT,
+                    content TEXT,
+                    timestamp DATETIME,
+                    ttl_hours INTEGER
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS embedding_cache (
+                    text_hash TEXT PRIMARY KEY,
+                    embedding BLOB,
+                    timestamp DATETIME
+                )
+            """)
+    
+    def _get_hash(self, text: str) -> str:
+        """Generate MD5 hash for caching keys."""
+        return hashlib.md5(text.encode()).hexdigest()
+    
+    def get_cached_results(self, query: str) -> Optional[List[Dict[str, Any]]]:
+        """Retrieve cached search results if available and not expired."""
+        query_hash = self._get_hash(query)
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT results, timestamp FROM search_cache WHERE query_hash = ?",
+                (query_hash,)
+            )
+            row = cursor.fetchone()
+            if row:
+                results_json, timestamp_str = row
+                timestamp = datetime.fromisoformat(timestamp_str)
+                if datetime.now() - timestamp < self.ttl:
+                    return json.loads(results_json)
+        return None
+    
+    def cache_results(self, query: str, results: List[SearchResult]):
+        """Cache search results with TTL."""
+        query_hash = self._get_hash(query)
+        results_json = json.dumps([asdict(r) for r in results])
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO search_cache VALUES (?, ?, ?, ?, ?)",
+                (query_hash, query, results_json, datetime.now(), 24)
+            )
+    
+    def get_cached_content(self, url: str) -> Optional[str]:
+        """Retrieve cached content if available and not expired."""
+        url_hash = self._get_hash(url)
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT content, timestamp FROM content_cache WHERE url_hash = ?",
+                (url_hash,)
+            )
+            row = cursor.fetchone()
+            if row:
+                content, timestamp_str = row
+                timestamp = datetime.fromisoformat(timestamp_str)
+                if datetime.now() - timestamp < self.ttl:
+                    return content
+        return None
+    
+    def cache_content(self, url: str, content: str):
+        """Cache crawled content with TTL."""
+        url_hash = self._get_hash(url)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO content_cache VALUES (?, ?, ?, ?, ?)",
+                (url_hash, url, content, datetime.now(), 24)
+            )
+
+# ---------------------------------------------------------------------------
+# Semantic Search Engine
+# ---------------------------------------------------------------------------
+
+# Only define SemanticSearcher if semantic features are available
+if HAS_SEMANTIC:
+    class SemanticSearcher:
+        """AI-powered semantic search and relevance scoring."""
+        
+        def __init__(self):
+            self.model = SentenceTransformer('all-MiniLM-L6-v2')
+            self.domain_authority = {
+                'wikipedia.org': 0.9,
+                'github.com': 0.85,
+                'stackoverflow.com': 0.85,
+                'medium.com': 0.8,
+                'dev.to': 0.75,
+                'reddit.com': 0.7,
+            }
+        
+        def get_embedding(self, text: str) -> np.ndarray:
+            """Get text embedding with caching."""
+            text_hash = hashlib.md5(text.encode()).hexdigest()
+            # Note: In production, this would use the cache system
+            return self.model.encode(text)
+        
+        def score_relevance(self, query: str, result: SearchResult) -> float:
+            """Calculate relevance score using semantic similarity and domain authority."""
+            try:
+                # Semantic similarity
+                query_embedding = self.get_embedding(query)
+                content_text = f"{result.title} {result.snippet}"
+                content_embedding = self.get_embedding(content_text)
+                
+                similarity = cosine_similarity(
+                    query_embedding.reshape(1, -1),
+                    content_embedding.reshape(1, -1)
+                )[0][0]
+                
+                # Domain authority boost
+                domain = urlparse(result.url).netloc.lower()
+                authority_boost = self.domain_authority.get(domain, 0.5)
+                
+                # Combined score
+                relevance_score = (similarity * 0.7) + (authority_boost * 0.3)
+                return float(relevance_score)
+                
+            except Exception as e:
+                logging.warning(f"Failed to calculate relevance score: {e}")
+                return 0.5  # Default score
+else:
+    # Fallback class when semantic features are not available
+    class SemanticSearcher:
+        """Fallback semantic search when dependencies are not available."""
+        
+        def __init__(self):
+            self.domain_authority = {
+                'wikipedia.org': 0.9,
+                'github.com': 0.85,
+                'stackoverflow.com': 0.85,
+                'medium.com': 0.8,
+                'dev.to': 0.75,
+                'reddit.com': 0.7,
+            }
+        
+        def score_relevance(self, query: str, result: SearchResult) -> float:
+            """Simple relevance scoring based on domain authority only."""
+            try:
+                # Domain authority boost only
+                domain = urlparse(result.url).netloc.lower()
+                authority_boost = self.domain_authority.get(domain, 0.5)
+                return float(authority_boost)
+            except Exception as e:
+                logging.warning(f"Failed to calculate relevance score: {e}")
+                return 0.5  # Default score
+
+# ---------------------------------------------------------------------------
+# AI Content Analyzer
+# ---------------------------------------------------------------------------
+
+# Only define ContentAnalyzer if transformers are available
+if HAS_TRANSFORMERS:
+    class ContentAnalyzer:
+        """AI-powered content analysis and summarization."""
+        
+        def __init__(self):
+            self.summarizer = None
+            self.sentiment_analyzer = None
+            self.ner_model = None
+            
+            try:
+                self.summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+                self.sentiment_analyzer = pipeline("sentiment-analysis")
+                self.ner_model = pipeline("ner", aggregation_strategy="simple")
+            except Exception as e:
+                logging.warning(f"Failed to load AI models: {e}")
+        
+        def analyze_content(self, content: str, query: str) -> ContentAnalysis:
+            """Perform comprehensive content analysis."""
+            analysis = ContentAnalysis()
+            
+            if not content:
+                return analysis
+            
+            try:
+                # Summarization (truncate if too long)
+                text_to_summarize = content[:1024] if len(content) > 1024 else content
+                if self.summarizer and len(text_to_summarize) > 50:
+                    summary_result = self.summarizer(text_to_summarize, max_length=150, min_length=30)
+                    analysis.summary = summary_result[0]['summary_text']
+                
+                # Sentiment analysis
+                if self.sentiment_analyzer:
+                    sentiment_result = self.sentiment_analyzer(content[:512])
+                    analysis.sentiment = sentiment_result[0]['label'].lower()
+                
+                # Named entity recognition
+                if self.ner_model:
+                    entities_result = self.ner_model(content[:512])
+                    analysis.entities = [
+                        Entity(text=ent['word'], label=ent['entity_group'], confidence=ent['score'])
+                        for ent in entities_result
+                    ]
+                
+                # Key points extraction (simple heuristic)
+                analysis.key_points = self._extract_key_points(content)
+                
+                # Topic classification (simple keyword-based)
+                analysis.topic = self._classify_topic(content, query)
+                
+            except Exception as e:
+                logging.warning(f"Content analysis failed: {e}")
+            
+            return analysis
+        
+        def _extract_key_points(self, content: str) -> List[str]:
+            """Extract key points using simple heuristics."""
+            sentences = re.split(r'[.!?]+', content)
+            # Filter for sentences with important keywords
+            important_keywords = ['important', 'key', 'main', 'primary', 'essential', 'crucial']
+            key_points = []
+            
+            for sentence in sentences[:10]:  # Limit to first 10 sentences
+                sentence = sentence.strip()
+                if len(sentence) > 20 and any(keyword in sentence.lower() for keyword in important_keywords):
+                    key_points.append(sentence)
+            
+            return key_points[:3]  # Return top 3 key points
+        
+        def _classify_topic(self, content: str, query: str) -> str:
+            """Simple topic classification based on keywords."""
+            topic_keywords = {
+                'technology': ['software', 'programming', 'code', 'tech', 'computer', 'digital'],
+                'business': ['business', 'company', 'market', 'finance', 'economy', 'investment'],
+                'science': ['research', 'study', 'experiment', 'scientific', 'data', 'analysis'],
+                'health': ['health', 'medical', 'medicine', 'treatment', 'disease', 'patient'],
+                'education': ['education', 'learning', 'school', 'university', 'student', 'course'],
+            }
+            
+            content_lower = content.lower() + " " + query.lower()
+            topic_scores = {}
+            
+            for topic, keywords in topic_keywords.items():
+                score = sum(1 for keyword in keywords if keyword in content_lower)
+                topic_scores[topic] = score
+            
+            return max(topic_scores, key=topic_scores.get) if topic_scores else 'general'
+else:
+    # Fallback class when transformers are not available
+    class ContentAnalyzer:
+        """Fallback content analyzer when dependencies are not available."""
+        
+        def analyze_content(self, content: str, query: str) -> ContentAnalysis:
+            """Perform basic content analysis without AI models."""
+            analysis = ContentAnalysis()
+            
+            if not content:
+                return analysis
+            
+            try:
+                # Basic topic classification (keyword-based only)
+                analysis.topic = self._classify_topic(content, query)
+                
+                # Basic key points extraction
+                analysis.key_points = self._extract_key_points(content)
+                
+            except Exception as e:
+                logging.warning(f"Content analysis failed: {e}")
+            
+            return analysis
+        
+        def _extract_key_points(self, content: str) -> List[str]:
+            """Extract key points using simple heuristics."""
+            sentences = re.split(r'[.!?]+', content)
+            # Filter for sentences with important keywords
+            important_keywords = ['important', 'key', 'main', 'primary', 'essential', 'crucial']
+            key_points = []
+            
+            for sentence in sentences[:10]:  # Limit to first 10 sentences
+                sentence = sentence.strip()
+                if len(sentence) > 20 and any(keyword in sentence.lower() for keyword in important_keywords):
+                    key_points.append(sentence)
+            
+            return key_points[:3]  # Return top 3 key points
+        
+        def _classify_topic(self, content: str, query: str) -> str:
+            """Simple topic classification based on keywords."""
+            topic_keywords = {
+                'technology': ['software', 'programming', 'code', 'tech', 'computer', 'digital'],
+                'business': ['business', 'company', 'market', 'finance', 'economy', 'investment'],
+                'science': ['research', 'study', 'experiment', 'scientific', 'data', 'analysis'],
+                'health': ['health', 'medical', 'medicine', 'treatment', 'disease', 'patient'],
+                'education': ['education', 'learning', 'school', 'university', 'student', 'course'],
+            }
+            
+            content_lower = content.lower() + " " + query.lower()
+            topic_scores = {}
+            
+            for topic, keywords in topic_keywords.items():
+                score = sum(1 for keyword in keywords if keyword in content_lower)
+                topic_scores[topic] = score
+            
+            return max(topic_scores, key=topic_scores.get) if topic_scores else 'general'
+
+# ---------------------------------------------------------------------------
+# HTML text extractor (enhanced)
+# ---------------------------------------------------------------------------
+
+class ContentExtractor(HTMLParser):
+    """Enhanced HTML parser to extract clean text content."""
+
+    def __init__(self, max_length: int = 3000):
+        super().__init__()
+        self.max_length = max_length
+        self.content: List[str] = []
+        self.in_script = False
+        self.in_style = False
+        self.current_length = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            self.in_script = True
+        elif tag == "style":
+            self.in_style = True
+        elif tag in ("p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "span"):
+            if self.content and self.content[-1] not in (" ", "\n"):
+                self.content.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self.in_script = False
+        elif tag == "style":
+            self.in_style = False
+        elif tag in ("p", "div", "li"):
+            if self.content and self.content[-1] != "\n":
+                self.content.append("\n")
+
+    def handle_data(self, data):
+        if self.in_script or self.in_style:
+            return
+        if data.strip():
+            words = data.split()
+            for word in words:
+                if self.current_length >= self.max_length:
+                    return
+                self.content.append(word)
+                self.current_length += len(word) + 1
+
+    def get_text(self) -> str:
+        """Return cleaned text content."""
+        text = " ".join(self.content)
+        return " ".join(text.split())
+
+# ---------------------------------------------------------------------------
+# User-Agent rotation (enhanced)
+# ---------------------------------------------------------------------------
+
+_USER_AGENTS: List[str] = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
+]
+
+_USER_AGENT = random.choice(_USER_AGENTS)
+
+def _random_user_agent() -> str:
+    """Return a randomly selected User-Agent string."""
+    return random.choice(_USER_AGENTS)
+
+# ---------------------------------------------------------------------------
+# Block / CAPTCHA detection (enhanced)
+# ---------------------------------------------------------------------------
+
+_BLOCK_SIGNALS: List[str] = [
+    "unusual traffic", "captcha", "ip blocked", "access denied",
+    "enable javascript", "please verify you are a human", "sorry, we can't",
+    "automated queries", "to continue, please", "robot check", "bot detection"
+]
+
+def _is_blocked(html: str) -> bool:
+    """Detect bot block pages with enhanced patterns."""
+    sample = html[:4096].lower()
+    return any(signal in sample for signal in _BLOCK_SIGNALS)
+
+# ---------------------------------------------------------------------------
+# Low-level HTTP fetch (enhanced)
+# ---------------------------------------------------------------------------
+
+def _build_cmd(fetcher: str, url: str, timeout: int, user_agent: str) -> List[str]:
+    """Build HTTP command with enhanced headers."""
+    common_headers = [
+        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language: en-US,en;q=0.5",
+        "Accept-Encoding: gzip, deflate, br",
+        "DNT: 1",
+        "Connection: keep-alive",
+        "Upgrade-Insecure-Requests: 1",
+    ]
+
+    if fetcher in ("curlie", "curl"):
+        binary = CURLIE_BIN if fetcher == "curlie" else CURL_BIN
+        cmd = [
+            binary, "-s", "-S", "-L", "--compressed",
+            "--max-time", str(timeout),
+            "-H", f"User-Agent: {user_agent}",
+        ]
+        for h in common_headers:
+            cmd += ["-H", h]
+        cmd.append(url)
+
+    elif fetcher == "wget2":
+        cmd = [
+            WGET2_BIN, "-q", "-O", "-",
+            f"--timeout={timeout}",
+            f"--user-agent={user_agent}",
+            "--max-redirect=5",
+            "--compression=auto",
+        ]
+        for h in common_headers:
+            cmd.append(f"--header={h}")
+        cmd.append(url)
+
+    else:  # legacy wget
+        cmd = [
+            WGET_BIN, "-q", "-O", "-",
+            f"--timeout={timeout}",
+            f"--user-agent={user_agent}",
+        ]
+        for h in common_headers:
+            cmd.append(f"--header={h}")
+        cmd.append(url)
+
+    return cmd
+
+def _fetch_url(
+    url: str,
+    timeout: int = 10,
+    verbose: bool = False,
+    user_agent: Optional[str] = None,
+) -> str:
+    """Fetch URL with enhanced error handling."""
+    logger = logging.getLogger(__name__)
+    fetcher = _preferred_fetcher()
+    ua = user_agent or _USER_AGENT
+    cmd = _build_cmd(fetcher, url, timeout, ua)
+
+    if verbose:
+        logger.debug("Fetch command: %s", " ".join(cmd))
+
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout + 5,
+    )
+
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        raise RuntimeError(f"{fetcher} failed (rc={proc.returncode}): {stderr}")
+
+    return proc.stdout
+
+# ---------------------------------------------------------------------------
+# Content extraction helpers (enhanced)
+# ---------------------------------------------------------------------------
+
+def _extract_text(html: str, max_length: int = 3000) -> str:
+    """Extract text with enhanced processing."""
+    if HAS_BS4:
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript", "nav", "footer", "header"]):
+            tag.decompose()
+        text = soup.get_text(separator=" ", strip=True)
+        return text[:max_length]
+
+    extractor = ContentExtractor(max_length)
+    extractor.feed(html)
+    return extractor.get_text()
+
+# ---------------------------------------------------------------------------
+# Enhanced Search Engine Parsers
+# ---------------------------------------------------------------------------
+
+def _parse_duckduckgo(html: str, num_results: int) -> List[Dict[str, str]]:
+    """Parse DuckDuckGo results with enhanced extraction."""
+    results: List[Dict[str, str]] = []
+
+    if HAS_BS4:
+        soup = BeautifulSoup(html, "html.parser")
+        for r in soup.select("div.result:not(.result--ad)"):
+            a_tag = r.select_one("a.result__a")
+            snippet_el = r.select_one("a.result__snippet")
+            if not a_tag:
+                continue
+
+            href = a_tag.get("href", "")
+            if "uddg=" in href:
+                m = re.search(r"uddg=([^&]+)", href)
+                if m:
+                    href = urllib.parse.unquote(m.group(1))
+
+            if not href.startswith("http"):
+                continue
+
+            results.append({
+                "url": href,
+                "title": a_tag.get_text(strip=True),
+                "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
+            })
+            if len(results) >= num_results:
+                break
+
+    else:
+        for m in re.finditer(r"uddg=(https?[^&\"]+)", html):
+            results.append({
+                "url": urllib.parse.unquote(m.group(1)),
+                "title": "",
+                "snippet": "",
+            })
+            if len(results) >= num_results:
+                break
+
+    return results
+
+def _parse_google(html: str, num_results: int) -> List[Dict[str, str]]:
+    """Parse Google results with enhanced extraction."""
+    results: List[Dict[str, str]] = []
+
+    if HAS_BS4:
+        soup = BeautifulSoup(html, "html.parser")
+        for block in soup.select("div.g"):
+            a_tag = block.select_one("a[href]")
+            if not a_tag:
+                continue
+
+            href = a_tag.get("href", "")
+            if "/url?q=" in href:
+                m = re.search(r"/url\?q=([^&]+)", href)
+                if m:
+                    href = urllib.parse.unquote(m.group(1))
+
+            if not href.startswith("http") or "google.com" in href:
+                continue
+
+            title = a_tag.get_text(strip=True)
+            snippet = ""
+            snippet_el = (
+                block.select_one("div.VwiC3b")
+                or block.select_one("span.st")
+            )
+            if snippet_el:
+                snippet = snippet_el.get_text(strip=True)
+
+            results.append({"url": href, "title": title, "snippet": snippet})
+            if len(results) >= num_results:
+                break
+
+    else:
+        for m in re.finditer(r"/url\?q=(https?://[^&\"]+)", html):
+            url = urllib.parse.unquote(m.group(1))
+            if "google.com" not in url:
+                results.append({"url": url, "title": "", "snippet": ""})
+                if len(results) >= num_results:
+                    break
+
+    return results
+
+def _parse_bing(html: str, num_results: int) -> List[Dict[str, str]]:
+    """Parse Bing search results."""
+    results: List[Dict[str, str]] = []
+
+    if HAS_BS4:
+        soup = BeautifulSoup(html, "html.parser")
+        for li in soup.select("li.b_algo"):
+            a_tag = li.select_one("h2 a")
+            if not a_tag:
+                continue
+
+            href = a_tag.get("href", "")
+            if not href.startswith("http"):
+                continue
+
+            title = a_tag.get_text(strip=True)
+            snippet_el = li.select_one("p")
+            snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+
+            results.append({"url": href, "title": title, "snippet": snippet})
+            if len(results) >= num_results:
+                break
+
+    return results
+
+def _parse_brave(html: str, num_results: int) -> List[Dict[str, str]]:
+    """Parse Brave search results."""
+    results: List[Dict[str, str]] = []
+
+    if HAS_BS4:
+        soup = BeautifulSoup(html, "html.parser")
+        for div in soup.select("div.web-result"):
+            a_tag = div.select_one("a.result-header")
+            if not a_tag:
+                continue
+
+            href = a_tag.get("href", "")
+            if not href.startswith("http"):
+                continue
+
+            title = a_tag.get_text(strip=True)
+            snippet_el = div.select_one(".snippet")
+            snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+
+            results.append({"url": href, "title": title, "snippet": snippet})
+            if len(results) >= num_results:
+                break
+
+    return results
+
+# ---------------------------------------------------------------------------
+# Retry helper (enhanced)
+# ---------------------------------------------------------------------------
+
+def _fetch_with_retry(
+    url: str,
+    timeout: int,
+    verbose: bool,
+    retries: int = 3,
+    backoff: float = 1.5,
+) -> str:
+    """Enhanced retry with exponential backoff."""
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, retries + 1):
+        try:
+            return _fetch_url(
+                url,
+                timeout=timeout,
+                verbose=verbose,
+                user_agent=_random_user_agent(),
+            )
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retries:
+                wait = backoff ** attempt + random.uniform(0, 0.5)
+                logging.getLogger(__name__).warning(
+                    "Fetch attempt %d/%d failed for %s: %s — retrying in %.1fs",
+                    attempt, retries, url, exc, wait,
+                )
+                time.sleep(wait)
+    raise RuntimeError(f"All {retries} fetch attempts failed: {last_exc}") from last_exc
+
+# ---------------------------------------------------------------------------
+# Multi-Source Search Engine (NEW)
+# ---------------------------------------------------------------------------
+
+def _multi_source_search(
+    query: str,
+    num_results: int = 10,
+    lang: str = "en",
+    region: str = "us",
+    timeout: int = 10,
+    verbose: bool = False,
+) -> List[Dict[str, str]]:
+    """Enhanced multi-source search with intelligent aggregation."""
+    logger = logging.getLogger(__name__)
+    encoded_query = urllib.parse.quote_plus(query)
+
+    engines = [
+        {
+            "name": "DuckDuckGo",
+            "url": f"https://html.duckduckgo.com/html/?q={encoded_query}&kl={region}-{lang}",
+            "parser": _parse_duckduckgo,
+            "weight": 1.0,
+        },
+        {
+            "name": "Google",
+            "url": f"https://www.google.com/search?q={encoded_query}&hl={lang}&gl={region}&num={num_results}",
+            "parser": _parse_google,
+            "weight": 1.2,
+        },
+        {
+            "name": "Bing",
+            "url": f"https://www.bing.com/search?q={encoded_query}&setlang={lang}",
+            "parser": _parse_bing,
+            "weight": 0.9,
+        },
+        {
+            "name": "Brave",
+            "url": f"https://search.brave.com/search?q={encoded_query}",
+            "parser": _parse_brave,
+            "weight": 0.8,
+        },
+    ]
+
+    all_results = []
+    engine_results = {}
+
+    for engine in engines:
+        try:
+            logger.info("Trying %s search", engine["name"])
+            html = _fetch_with_retry(engine["url"], timeout=timeout, verbose=verbose)
+
+            if _is_blocked(html):
+                logger.warning("%s returned a block/CAPTCHA page — skipping", engine["name"])
+                continue
+
+            parsed = engine["parser"](html, num_results)
+            if parsed:
+                # Add engine info and weight
+                for result in parsed:
+                    result["source_engine"] = engine["name"]
+                    result["weight"] = engine["weight"]
+                
+                engine_results[engine["name"]] = parsed
+                logger.info("Got %d results from %s", len(parsed), engine["name"])
+
+        except Exception as exc:
+            logger.warning("%s search failed: %s", engine["name"], exc)
+
+    # Aggregate and deduplicate results
+    all_results = _aggregate_and_deduplicate(engine_results, num_results)
+    return all_results
+
+def _aggregate_and_deduplicate(engine_results: Dict[str, List[Dict]], num_results: int) -> List[Dict[str, str]]:
+    """Intelligent aggregation with deduplication."""
+    logger = logging.getLogger(__name__)
+    
+    # Collect all results with their sources
+    all_results = []
+    seen_urls = set()
+    seen_domains = set()
+    
+    for engine_name, results in engine_results.items():
+        for result in results:
+            url = result["url"]
+            domain = urlparse(url).netloc.lower()
+            
+            # Skip exact URL duplicates
+            if url in seen_urls:
+                continue
+            
+            # Skip too many results from same domain (max 3)
+            if domain in seen_domains and sum(1 for r in all_results if urlparse(r["url"]).netloc.lower() == domain) >= 3:
+                continue
+            
+            result["sources"] = [engine_name]
+            all_results.append(result)
+            seen_urls.add(url)
+            seen_domains.add(domain)
+    
+    # Sort by weight and relevance
+    all_results.sort(key=lambda x: x.get("weight", 1.0), reverse=True)
+    
+    logger.info("Aggregated %d unique results from %d engines", len(all_results), len(engine_results))
+    return all_results[:num_results]
+
+# ---------------------------------------------------------------------------
+# Advanced Filtering (NEW)
+# ---------------------------------------------------------------------------
+
+def _apply_filters(results: List[Dict[str, str]], filters: SearchFilters) -> List[Dict[str, str]]:
+    """Apply advanced filtering to search results."""
+    filtered_results = []
+    
+    for result in results:
+        url = result["url"]
+        domain = urlparse(url).netloc.lower()
+        
+        # Domain filtering
+        if filters.include_domains and not any(d in domain for d in filters.include_domains):
+            continue
+        if filters.exclude_domains and any(d in domain for d in filters.exclude_domains):
+            continue
+        
+        # Content type filtering (simple heuristic)
+        if filters.content_types:
+            content_type = _detect_content_type(result)
+            if content_type not in filters.content_types:
+                continue
+        
+        # File type filtering
+        if filters.file_types:
+            file_ext = os.path.splitext(urlparse(url).path)[1].lower().lstrip('.')
+            if file_ext and file_ext not in filters.file_types:
+                continue
+        
+        filtered_results.append(result)
+    
+    return filtered_results
+
+def _detect_content_type(result: Dict[str, str]) -> str:
+    """Detect content type from URL and snippet."""
+    url = result["url"].lower()
+    snippet = result.get("snippet", "").lower()
+    
+    if any(site in url for site in ['wikipedia', 'scholar', 'arxiv', 'pubmed']):
+        return 'academic'
+    elif any(site in url for site in ['news', 'cnn', 'bbc', 'reuters']):
+        return 'news'
+    elif any(ext in url for ext in ['.pdf', '.doc', '.ppt']):
+        return 'document'
+    elif any(term in snippet for term in ['video', 'youtube', 'watch']):
+        return 'video'
+    elif any(term in snippet for term in ['image', 'photo', 'picture']):
+        return 'image'
+    
+    return 'web'
+
+# ---------------------------------------------------------------------------
+# Enhanced URL crawling
+# ---------------------------------------------------------------------------
+
+def crawl_url(
+    url: str,
+    timeout: int = 10,
+    max_length: int = 3000,
+    verbose: bool = False,
+    cache: Optional[SearchCache] = None,
+) -> str:
+    """Enhanced URL crawling with caching."""
+    logger = logging.getLogger(__name__)
+    
+    # Check cache first
+    if cache:
+        cached_content = cache.get_cached_content(url)
+        if cached_content:
+            if verbose:
+                logger.debug("Using cached content for %s", url)
+            return cached_content
+    
+    if verbose:
+        logger.debug("Crawling URL: %s", url)
+
+    html = _fetch_url(
+        url,
+        timeout=timeout,
+        verbose=verbose,
+        user_agent=_random_user_agent(),
+    )
+    text = _extract_text(html, max_length)
+    
+    # Cache the content
+    if cache and text:
+        cache.cache_content(url, text)
+
+    if verbose:
+        logger.debug("Extracted %d characters from %s", len(text), url)
+    return text
+
+
+
+# ---------------------------------------------------------------------------
+# Logging configuration (enhanced)
+# ---------------------------------------------------------------------------
+
+_logging_configured = False
+
+def setup_logging(verbose: bool = False) -> None:
+    """Enhanced logging configuration."""
+    global _logging_configured
+    if _logging_configured:
+        return
+    
+    level = logging.DEBUG if verbose else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    _logging_configured = True
+
+# ---------------------------------------------------------------------------
+# Query validation (enhanced)
+# ---------------------------------------------------------------------------
+
+def validate_query(query: str) -> None:
+    """Enhanced query validation."""
+    if not query or not query.strip():
+        raise ValueError("Search query cannot be empty")
+    
+    if len(query.strip()) < 2:
+        raise ValueError("Search query too short (minimum 2 characters)")
+    
+    if len(query) > 1000:
+        raise ValueError("Search query too long (maximum 1000 characters)")
+
+# ---------------------------------------------------------------------------
+# Main Enhanced Search Orchestrator
+# ---------------------------------------------------------------------------
+
+def enhanced_search(
+    query: str,
+    num_results: int = 10,
+    lang: str = "en",
+    region: str = "us",
+    safe_search: str = "moderate",
+    pause: float = 2.0,
+    crawl: bool = False,
+    content_length: int = 3000,
+    timeout: int = 10,
+    verbose: bool = False,
+    filters: Optional[SearchFilters] = None,
+    use_semantic: bool = True,
+    use_ai_analysis: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Enhanced web search with all advanced features.
+    
+    Args:
+        query: Search query string.
+        num_results: Number of results to return.
+        lang: Language code.
+        region: Region code.
+        safe_search: Safe search level.
+        pause: Seconds between crawl requests.
+        crawl: Whether to crawl content.
+        content_length: Maximum content length.
+        timeout: Request timeout.
+        verbose: Enable verbose logging.
+        filters: Advanced filtering options.
+        use_semantic: Enable semantic search scoring.
+        use_ai_analysis: Enable AI content analysis.
+    
+    Returns:
+        List of enhanced search results with AI analysis.
+    """
+    setup_logging(verbose)
+    logger = logging.getLogger(__name__)
+    
+    validate_query(query)
+    
+    # Initialize components
+    cache = SearchCache()
+    semantic_searcher = SemanticSearcher() if use_semantic and HAS_SEMANTIC else None
+    content_analyzer = ContentAnalyzer() if use_ai_analysis and HAS_TRANSFORMERS else None
+    
+    # Check cache first
+    cached_results = cache.get_cached_results(query)
+    if cached_results:
+        logger.info("Using cached results for query: %s", query)
+        return cached_results
+    
+    # Apply filters if provided
+    if filters:
+        logger.info("Applying advanced filters")
+    
+    # Multi-source search phase
+    raw_results = _multi_source_search(
+        query,
+        num_results=num_results,
+        lang=lang,
+        region=region,
+        timeout=timeout,
+        verbose=verbose,
+    )
+    
+    # Apply filters
+    if filters:
+        raw_results = _apply_filters(raw_results, filters)
+    
+    if not raw_results:
+        logger.error("All search engines failed — no results available")
+        return []
+    
+    logger.info("Found %d results", len(raw_results))
+    
+    # Build enhanced SearchResult objects
+    results: List[Dict[str, Any]] = []
+    
+    for i, item in enumerate(raw_results[:num_results], 1):
+        result = SearchResult(
+            position=i,
+            url=item["url"],
+            title=item.get("title", ""),
+            snippet=item.get("snippet", ""),
+            content="",
+            error="",
+            source_engine=item.get("source_engine", "unknown"),
+            relevance_score=0.0,
+            content_analysis=None,
+            crawl_timestamp=None,
+        )
+        
+        # Semantic relevance scoring
+        if semantic_searcher:
+            result.relevance_score = semantic_searcher.score_relevance(query, result)
+        
+        # Content crawling and AI analysis
+        if crawl:
+            if verbose:
+                logger.info("Crawling result %d: %s", i, item["url"])
+            
+            try:
+                result.content = crawl_url(
+                    item["url"],
+                    timeout=timeout,
+                    max_length=content_length,
+                    verbose=verbose,
+                    cache=cache,
+                )
+                result.crawl_timestamp = datetime.now()
+                
+                # AI content analysis
+                if content_analyzer and result.content:
+                    result.content_analysis = content_analyzer.analyze_content(result.content, query)
+                
+            except Exception as exc:
+                result.error = str(exc)
+                logger.warning("Failed to crawl %s: %s", item["url"], exc)
+            
+            # Pause between requests
+            if i < len(raw_results):
+                time.sleep(pause + random.uniform(0, 0.5))
+        
+        results.append(asdict(result))
+        logger.debug("Result %d: %s (score: %.2f)", i, item["url"], result.relevance_score)
+    
+    # Sort by relevance score if semantic search is enabled
+    if semantic_searcher:
+        results.sort(key=lambda x: x["relevance_score"], reverse=True)
+        # Reassign positions after sorting
+        for i, result in enumerate(results, 1):
+            result["position"] = i
+    
+    # Cache results
+    cache.cache_results(query, [SearchResult(**r) for r in results])
+    
+    return results
+
+# ---------------------------------------------------------------------------
+# Public API - Backward Compatible
+# ---------------------------------------------------------------------------
+
+def run(
+    query: str,
+    limit: int = 10,
+    lang: str = "en",
+    region: str = "us",
+    safe_search: Literal["off", "moderate", "strict"] = "moderate",
+    pause: float = 2.0,
+    crawl: bool = False,
+    content_length: int = 3000,
+    timeout: int = 10,
+    verbose: bool = False,
+):
+    """Backward compatible entry point with enhanced features."""
+    try:
+        return enhanced_search(
+            query=query,
+            num_results=limit,
+            lang=lang,
+            region=region,
+            safe_search=safe_search,
+            pause=pause,
+            crawl=crawl,
+            content_length=content_length,
+            timeout=timeout,
+            verbose=verbose,
+            filters=None,
+            use_semantic=HAS_SEMANTIC,
+            use_ai_analysis=HAS_TRANSFORMERS,
+        )
+    except (ValueValueError, RuntimeError):
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"An unexpected error occurred: {exc}") from exc
+
+# ---------------------------------------------------------------------------
+# Enhanced CLI Interface
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    """Enhanced CLI interface with all new features."""
+    parser = argparse.ArgumentParser(
+        description="AI-Powered Enhanced Web Search Tool",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    
+    # Basic arguments
+    parser.add_argument("query", help="Search query")
+    parser.add_argument("-n", "--num-results", type=int, default=10, help="Number of results")
+    parser.add_argument("-l", "--lang", default="en", help="Language code")
+    parser.add_argument("-r", "--region", default="us", help="Region code")
+    parser.add_argument("-s", "--safe-search", choices=["off", "moderate", "strict"], default="moderate", help="Safe-search level")
+    parser.add_argument("-p", "--pause", type=float, default=2.0, help="Pause between crawl requests")
+    parser.add_argument("-c", "--crawl", action="store_true", help="Crawl content from result URLs")
+    parser.add_argument("--content-length", type=int, default=3000, help="Max content length per page")
+    parser.add_argument("-t", "--timeout", type=int, default=10, help="Request timeout")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+    
+    # Enhanced features
+    parser.add_argument("--no-semantic", action="store_true", help="Disable semantic search")
+    parser.add_argument("--no-ai-analysis", action="store_true", help="Disable AI content analysis")
+    parser.add_argument("--include-domains", nargs="+", help="Include only these domains")
+    parser.add_argument("--exclude-domains", nargs="+", help="Exclude these domains")
+    parser.add_argument("--content-types", nargs="+", choices=["web", "news", "academic", "video", "image"], help="Filter by content type")
+    parser.add_argument("--file-types", nargs="+", help="Filter by file extension")
+    parser.add_argument("--min-relevance", type=float, default=0.0, help="Minimum relevance score")
+    
+    args = parser.parse_args()
+    
+    # Build filters
+    filters = None
+    if any([args.include_domains, args.exclude_domains, args.content_types, args.file_types]):
+        filters = SearchFilters(
+            include_domains=args.include_domains or [],
+            exclude_domains=args.exclude_domains or [],
+            content_types=args.content_types or [],
+            file_types=args.file_types or [],
+            min_relevance_score=args.min_relevance,
+        )
+    
+    try:
+        results = enhanced_search(
+            query=args.query,
+            num_results=args.num_results,
+            lang=args.lang,
+            region=args.region,
+            safe_search=args.safe_search,
+            pause=args.pause,
+            crawl=args.crawl,
+            content_length=args.content_length,
+            timeout=args.timeout,
+            verbose=args.verbose,
+            filters=filters,
+            use_semantic=not args.no_semantic and HAS_SEMANTIC,
+            use_ai_analysis=not args.no_ai_analysis and HAS_TRANSFORMERS,
+        )
+        
+        # Enhanced output formatting
+        output = {
+            "query": args.query,
+            "total_results": len(results),
+            "features": {
+                "semantic_search": not args.no_semantic and HAS_SEMANTIC,
+                "ai_analysis": not args.no_ai_analysis and HAS_TRANSFORMERS,
+                "caching": True,
+                "multi_source": True,
+            },
+            "results": results
+        }
+        
+        print(json.dumps(output, indent=2, default=str))
+        
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

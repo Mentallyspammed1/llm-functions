@@ -1,0 +1,2047 @@
+[
+  {
+    "name": "code_git_status",
+    "description": "Get a summary of the git status in the current directory.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "code_http_status",
+    "description": "Check the HTTP status code and response headers of a URL.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "create_interactive_tool",
+    "description": "Interactive tool creation wizard",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Tool name"
+        },
+        "lang": {
+          "type": "string",
+          "description": "Language (sh|js|py)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Tool description"
+        }
+      },
+      "required": [
+        "name",
+        "lang"
+      ]
+    }
+  },
+  {
+    "name": "crypto_price",
+    "description": "Get current price of a cryptocurrency (e.g., bitcoin, ethereum).",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "dependency_manager",
+    "description": "Manage tool dependencies",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action (install|check|list)"
+        },
+        "tool": {
+          "type": "string",
+          "description": "Tool name"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "edit",
+    "description": "Edit, create, read, or patch files with various operations",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "[Target file path (required)]"
+        },
+        "operation": {
+          "type": "string",
+          "description": "[Operation: write|append|prepend|insert|replace|delete|read|patch|rename|copy|move|touch|truncate|head|tail|search|sort|reverse|duplicate|merge|diff|wc|chmod|unique]"
+        },
+        "content": {
+          "type": "string",
+          "description": "[Content to write/append/prepend/insert]"
+        },
+        "line": {
+          "type": "integer",
+          "description": "[Line number for insert/delete/replace]"
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "[End line number for range delete/replace]"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "[Search/replace regex pattern]"
+        },
+        "replacement": {
+          "type": "string",
+          "description": "[Replacement string]"
+        },
+        "dest": {
+          "type": "string",
+          "description": "[Destination path for copy/move/rename]"
+        },
+        "count": {
+          "type": "integer",
+          "description": "[Number of lines for head/tail (default: 10); 1/2/3 for wc]"
+        },
+        "source": {
+          "type": "string",
+          "description": "[Source file for merge/diff operation]"
+        },
+        "mode": {
+          "type": "string",
+          "description": "[Permission mode for chmod (e.g., 755, u+w)]"
+        },
+        "create_dirs": {
+          "type": "boolean",
+          "description": "[Create parent directories if needed]"
+        },
+        "backup": {
+          "type": "boolean",
+          "description": "[Create .bak backup before modifying]"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "[Show what would be done without doing it]"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "[Overwrite existing files]"
+        },
+        "global": {
+          "type": "boolean",
+          "description": "[Apply pattern replacement globally]"
+        },
+        "case_insensitive": {
+          "type": "boolean",
+          "description": "[Case-insensitive pattern matching]"
+        },
+        "literal": {
+          "type": "boolean",
+          "description": "[Treat pattern as literal string]"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "[Enable verbose output]"
+        },
+        "json_output": {
+          "type": "boolean",
+          "description": "[Output clean JSON]"
+        },
+        "follow_symlinks": {
+          "type": "boolean",
+          "description": "[Follow symbolic links]"
+        },
+        "no_final_newline": {
+          "type": "boolean",
+          "description": "[Don't add final newline]"
+        },
+        "invert_match": {
+          "type": "boolean",
+          "description": "[Invert grep pattern match]"
+        },
+        "line_number": {
+          "type": "boolean",
+          "description": "[Show line numbers in output]"
+        },
+        "count_only": {
+          "type": "boolean",
+          "description": "[Only show match count (for search)]"
+        }
+      },
+      "required": [
+        "path",
+        "operation"
+      ]
+    }
+  },
+  {
+    "name": "execute_command",
+    "description": "Execute arbitrary shell command and return full output.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command to run"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Duration for the command (e.g. 60s, 1m, 2h)"
+        },
+        "connect_timeout": {
+          "type": "string",
+          "description": "Connection timeout for curl commands (e.g. 10s, default: 10s)"
+        },
+        "max_time": {
+          "type": "string",
+          "description": "Max transfer time for curl commands (e.g. 30s, default: matches --timeout)"
+        }
+      },
+      "required": [
+        "command"
+      ]
+    }
+  },
+  {
+    "name": "execute_sql_code",
+    "description": "Execute the sql code.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "The code to execute."
+        }
+      },
+      "required": [
+        "code"
+      ]
+    }
+  },
+  {
+    "name": "fetch_url_via_curl",
+    "description": "Fetch content from a URL using curl with enhanced options.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The URL to fetch."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Request timeout in seconds."
+        },
+        "max_time": {
+          "type": "string",
+          "description": "Maximum transfer time in seconds."
+        },
+        "connect_timeout": {
+          "type": "string",
+          "description": "Connection timeout in seconds."
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent header."
+        },
+        "output": {
+          "type": "string",
+          "description": "Output file path (default: stdout)."
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method (GET, POST, PUT, DELETE, etc.)."
+        },
+        "data": {
+          "type": "string",
+          "description": "Request body data for POST/PUT requests."
+        },
+        "headers": {
+          "type": "string",
+          "description": "Additional headers (comma-separated, format: \"Header1: Value1,Header2: Value2\")."
+        },
+        "follow_redirects": {
+          "type": "string",
+          "description": "Follow HTTP redirects (default: true)."
+        },
+        "max_redirects": {
+          "type": "string",
+          "description": "Maximum number of redirects to follow."
+        },
+        "verify_ssl": {
+          "type": "string",
+          "description": "Verify SSL certificates (default: true)."
+        },
+        "compressed": {
+          "type": "string",
+          "description": "Request compressed response."
+        },
+        "silent": {
+          "type": "string",
+          "description": "Silent mode (no progress meter)."
+        },
+        "verbose": {
+          "type": "string",
+          "description": "Verbose output."
+        },
+        "include": {
+          "type": "string",
+          "description": "Include HTTP headers in output."
+        },
+        "retry": {
+          "type": "string",
+          "description": "Number of retry attempts on failure."
+        },
+        "retry_delay": {
+          "type": "string",
+          "description": "Delay between retries in seconds."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "fetch_url_via_jina",
+    "description": "Extract the content from a given URL using Jina AI Reader.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The URL to scrape."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Request timeout in seconds."
+        },
+        "format": {
+          "type": "string",
+          "description": "Output format (text, json)."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "fetch_url_via_wget",
+    "description": "Fetch content from a URL using wget with enhanced options.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The URL to fetch."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Request timeout in seconds."
+        },
+        "tries": {
+          "type": "string",
+          "description": "Number of retry attempts."
+        },
+        "output_document": {
+          "type": "string",
+          "description": "Output file path (default: stdout)."
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent header."
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method (GET, POST, PUT, DELETE, etc.)."
+        },
+        "body_data": {
+          "type": "string",
+          "description": "Request body data for POST/PUT requests."
+        },
+        "header": {
+          "type": "string",
+          "description": "Additional headers (can be specified multiple times)."
+        },
+        "follow_redirects": {
+          "type": "string",
+          "description": "Follow HTTP redirects (default: true)."
+        },
+        "max_redirect": {
+          "type": "string",
+          "description": "Maximum number of redirects to follow."
+        },
+        "no_check_certificate": {
+          "type": "string",
+          "description": "Skip SSL certificate verification."
+        },
+        "continue": {
+          "type": "string",
+          "description": "Continue partially downloaded files."
+        },
+        "background": {
+          "type": "string",
+          "description": "Download in background."
+        },
+        "quiet": {
+          "type": "string",
+          "description": "Quiet mode (no output)."
+        },
+        "verbose": {
+          "type": "string",
+          "description": "Verbose output."
+        },
+        "server_response": {
+          "type": "string",
+          "description": "Include server response headers."
+        },
+        "save_headers": {
+          "type": "string",
+          "description": "Save HTTP headers to file."
+        },
+        "no_proxy": {
+          "type": "string",
+          "description": "Don't use proxy."
+        },
+        "limit_rate": {
+          "type": "string",
+          "description": "Limit download rate (e.g., 100k, 1m)."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "fs_cat",
+    "description": "Read the contents of a file at the specified path.\nUse this when you need to examine the contents of an existing file.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path of the file to read"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "fs_checksum",
+    "description": "Calculate SHA256 checksum of a file.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "fs_compress",
+    "description": "Compress a file or folder into a tar.gz archive.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "output": {
+          "type": "string",
+          "description": "The output filename (e.g., archive.tar.gz)."
+        }
+      },
+      "required": [
+        "output"
+      ]
+    }
+  },
+  {
+    "name": "fs_extract",
+    "description": "Extract a tar.gz or zip archive.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "The directory to extract into."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "fs_find_large",
+    "description": "Find large files in a directory.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "The directory to search in."
+        },
+        "min_size": {
+          "type": "string",
+          "description": "The minimum size of files to find."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "fs_ls",
+    "description": "List all files and directories at the specified path.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path of the directory to list"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "fs_mime_type",
+    "description": "Identify the MIME type of a file.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "fs_mkdir",
+    "description": "Create a new directory at the specified path.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path of the directory to create"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "fs_patch",
+    "description": "Apply a patch to a file at the specified path.\nThis can be used to edit the file, without having to rewrite the whole file.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path of the file to apply to"
+        },
+        "contents": {
+          "type": "string",
+          "description": "The patch to apply to the file\n\nHere is an example of a patch block that can be applied to modify the file to request the user's name:\n--- a/hello.py\n+++ b/hello.py\n@@ ... @@\n def hello():\n-    print(\"Hello World\")\n+    name = input(\"What is your name? \")\n+    print(f\"Hello {name}\")"
+        }
+      },
+      "required": [
+        "path",
+        "contents"
+      ]
+    }
+  },
+  {
+    "name": "fs_rm",
+    "description": "Remove the file or directory at the specified path.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path of the file or directory to remove"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "fs_write",
+    "description": "Write, append, insert, or replace content in a file",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path of the file to write to"
+        },
+        "contents": {
+          "type": "string",
+          "description": "The contents to write/append/replace. Use '-' to read from stdin"
+        },
+        "append": {
+          "type": "boolean",
+          "description": "Append the contents to the end of the file instead of overwriting"
+        },
+        "line": {
+          "type": "string",
+          "description": "The specific line number to replace with the contents"
+        },
+        "insert": {
+          "type": "string",
+          "description": "Insert the contents *before* a specific line number"
+        },
+        "backup": {
+          "type": "boolean",
+          "description": "Create a backup of the file before modifying"
+        },
+        "parents": {
+          "type": "boolean",
+          "description": "Create parent directories if they don't exist"
+        },
+        "match": {
+          "type": "string",
+          "description": "Regex pattern to perform global replacement on the file content"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose output"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Prevents actual file modification"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Skip all confirmation prompts"
+        },
+        "encoding": {
+          "type": "string",
+          "description": "Specify file encoding (ascii, utf-8, latin1)"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Timeout in seconds for file operations"
+        },
+        "retries": {
+          "type": "string",
+          "description": "Number of retries on failure"
+        },
+        "preserve_permissions": {
+          "type": "boolean",
+          "description": "Preserve file permissions when modifying"
+        },
+        "no_trailing_newline": {
+          "type": "boolean",
+          "description": "Do not add trailing newline to content"
+        },
+        "format": {
+          "type": "string",
+          "description": "Format file after operation (none, json, xml, yaml)"
+        },
+        "in_place": {
+          "type": "boolean",
+          "description": "Edit file in place without temporary file"
+        },
+        "context": {
+          "type": "string",
+          "description": "Show context lines around changes (number of lines)"
+        },
+        "diff": {
+          "type": "boolean",
+          "description": "Show diff of changes"
+        },
+        "sudo": {
+          "type": "boolean",
+          "description": "Use sudo for file operations"
+        },
+        "chown": {
+          "type": "string",
+          "description": "Change ownership of file (user:group)"
+        },
+        "chmod": {
+          "type": "string",
+          "description": "Change permissions of file (octal)"
+        },
+        "acl": {
+          "type": "string",
+          "description": "Set ACL on file"
+        },
+        "follow_symlinks": {
+          "type": "boolean",
+          "description": "Follow symlinks instead of replacing them"
+        },
+        "ignore_backup_errors": {
+          "type": "boolean",
+          "description": "Continue even if backup fails"
+        },
+        "json_output": {
+          "type": "boolean",
+          "description": "Output clean JSON"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_current_time",
+    "description": "Get the current time.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "get_current_weather",
+    "description": "Get the current weather in a given location.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "string",
+          "description": "The city and optionally the state or country, e.g., \"London\", \"San Francisco, CA\"."
+        }
+      },
+      "required": [
+        "location"
+      ]
+    }
+  },
+  {
+    "name": "memory_aware_tool",
+    "description": "Execute tool with automatic memory storage of context",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "Target tool to execute"
+        },
+        "args": {
+          "type": "string",
+          "description": "Tool arguments (JSON)"
+        },
+        "store_context": {
+          "type": "string",
+          "description": "Whether to store context (default: true)"
+        },
+        "memory_tags": {
+          "type": "string",
+          "description": "Tags for memory storage"
+        }
+      },
+      "required": [
+        "tool"
+      ]
+    }
+  },
+  {
+    "name": "memory_manager",
+    "description": "Manage persistent memory for AIChat conversations and context",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action (store|retrieve|search|clear|export|import)"
+        },
+        "key": {
+          "type": "string",
+          "description": "Memory key or identifier"
+        },
+        "value": {
+          "type": "string",
+          "description": "Value to store (for store action)"
+        },
+        "type": {
+          "type": "string",
+          "description": "Memory type (conversation|preference|context|knowledge)"
+        },
+        "session": {
+          "type": "string",
+          "description": "Session identifier"
+        },
+        "tags": {
+          "type": "string",
+          "description": "Comma-separated tags for categorization"
+        }
+      },
+      "required": [
+        "action",
+        "value"
+      ]
+    }
+  },
+  {
+    "name": "net_dns_lookup",
+    "description": "Perform a DNS lookup.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "net_ip_info",
+    "description": "Get external IP and geolocation info.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "net_ping",
+    "description": "Ping a host to check connectivity.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "string",
+          "description": "Number of pings."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "net_port_scan",
+    "description": "Scan common open ports on a host.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "net_speedtest",
+    "description": "Run a basic network speed test using curl.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "search_arxiv",
+    "description": "Search arXiv for a query and return the top papers.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The query to search for."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "search_wikipedia",
+    "description": "Search Wikipedia for a query.\nUses it to get detailed information about a public figure, interpretation of a complex scientific concept or in-depth connectivity of a significant historical event,.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The query to search for."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "search_wolframalpha",
+    "description": "Get an answer to a question using Wolfram Alpha. Input should the query in English.\nUse it to answer user questions that require computation, detailed facts, data analysis, or complex queries.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The query to search for."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "send_mail",
+    "description": "Send a email.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "recipient": {
+          "type": "string",
+          "description": "The recipient of the email."
+        },
+        "subject": {
+          "type": "string",
+          "description": "The subject of the email."
+        },
+        "body": {
+          "type": "string",
+          "description": "The body of the email."
+        }
+      },
+      "required": [
+        "recipient",
+        "subject",
+        "body"
+      ]
+    }
+  },
+  {
+    "name": "send_twilio",
+    "description": "Send SMS or Twilio Messaging Channels messages using Twilio API.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "to_number": {
+          "type": "string",
+          "description": "The recipient's phone number. Prefix with 'whatsapp:' for WhatsApp messages, e.g. whatsapp:+1234567890"
+        },
+        "message": {
+          "type": "string",
+          "description": "The content of the message to be sent"
+        }
+      },
+      "required": [
+        "to_number",
+        "message"
+      ]
+    }
+  },
+  {
+    "name": "session_manager",
+    "description": "Manage AIChat sessions with persistent context (tool-based)",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action (start|save|load|list|delete)"
+        },
+        "session": {
+          "type": "string",
+          "description": "Session name"
+        },
+        "context": {
+          "type": "string",
+          "description": "Session context data"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "smart_selector",
+    "description": "AI-powered tool selection based on user intent",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "User query or task description"
+        },
+        "context": {
+          "type": "string",
+          "description": "Additional context for selection"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "sys_cpu_info",
+    "description": "Get CPU information and usage.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "sys_disk_info",
+    "description": "Get disk space usage.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "sys_mem_info",
+    "description": "Get memory usage information.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "sys_pkg_list",
+    "description": "List installed packages (pkg).",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "sys_uptime",
+    "description": "Get system uptime and load average.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "todo_add",
+    "description": "Add a task to a local todo.txt file.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "weather_forecast",
+    "description": "Get weather forecast for a city (wttr.in).",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "web_search_aichat",
+    "description": "Perform a web search to get up-to-date information or additional context.\nUse this when you need current information or feel a search could provide a better answer.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The query to search for."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "web_search_perplexity",
+    "description": "Perform a web search using Perplexity API to get up-to-date information or additional context.\nUse this when you need current information or feel a search could provide a better answer.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The query to search for."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "web_search_tavily",
+    "description": "Perform a web search using Tavily API to get up-to-date information or additional context.\nUse this when you need current information or feel a search could provide a better answer.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The query to search for."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "demo_js",
+    "description": "Demonstrate how to create a tool using Javascript and how to use comments.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "s": {
+          "type": "string",
+          "enum": [
+            "foo",
+            "bar"
+          ],
+          "description": "tring_enum - Define a required string property with enum"
+        },
+        "[": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "array_optional] - Define a optional string array property"
+        },
+        "b": {
+          "type": "boolean",
+          "description": "oolean - Define a required boolean property"
+        },
+        "i": {
+          "type": "integer",
+          "description": "nteger - Define a required integer property"
+        },
+        "n": {
+          "type": "number",
+          "description": "umber - Define a required number property"
+        },
+        "a": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "rray - Define a required string array property"
+        }
+      },
+      "required": [
+        "s",
+        "s",
+        "[",
+        "b",
+        "i",
+        "n",
+        "a",
+        "["
+      ]
+    }
+  },
+  {
+    "name": "execute_js_code",
+    "description": "Execute the javascript code in node.js.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "c": {
+          "type": "string",
+          "description": "ode - Javascript code to execute, such as `console.log(\"hello world\")`"
+        },
+        "a": {
+          "type": "string",
+          "description": "rgs"
+        }
+      },
+      "required": [
+        "c",
+        "a"
+      ]
+    }
+  },
+  {
+    "name": "bybit_cancel_all_orders",
+    "description": "Cancel all orders for a symbol on Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "<linear|inverse|option|spot>  Product type (linear/inverse/option/spot)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Symbol name (e.g., BTCUSDT, ETHUSDT)"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                 Use testnet (default: true)"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key (optional, can use env var)"
+        },
+        "api_secret": {
+          "type": "string",
+          "description": "API secret (optional, can use env var)"
+        }
+      },
+      "required": [
+        "category",
+        "symbol"
+      ]
+    }
+  },
+  {
+    "name": "bybit_cancel_order",
+    "description": "Cancel a single order on Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "<linear|inverse|option|spot>  Product type (linear/inverse/option/spot)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Symbol name (e.g., BTCUSDT, ETHUSDT)"
+        },
+        "order_id": {
+          "type": "string",
+          "description": "Order ID to cancel"
+        },
+        "order_link_id": {
+          "type": "string",
+          "description": "Order link ID to cancel"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                 Use testnet (default: true)"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key (optional, can use env var)"
+        },
+        "api_secret": {
+          "type": "string",
+          "description": "API secret (optional, can use env var)"
+        }
+      },
+      "required": [
+        "category",
+        "symbol"
+      ]
+    }
+  },
+  {
+    "name": "bybit_get_balance",
+    "description": "Get wallet balance from Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "account_type": {
+          "type": "string",
+          "description": "<UNIFIED|CONTRACT|SPOT>  Account type (default: UNIFIED)"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                 Use testnet (default: true)"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key (optional, can use env var)"
+        },
+        "api_secret": {
+          "type": "string",
+          "description": "API secret (optional, can use env var)"
+        }
+      }
+    }
+  },
+  {
+    "name": "bybit_get_klines",
+    "description": "Get candlestick/kline data from Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "<linear|inverse|spot>        Product type (linear/inverse/spot)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Symbol name (e.g., BTCUSDT, ETHUSDT)"
+        },
+        "interval": {
+          "type": "string",
+          "description": "<1|3|5|15|30|60|120|240|360|720|D|W|M>  Time interval (default: 1)"
+        },
+        "start": {
+          "type": "string",
+          "description": "Start timestamp (optional)"
+        },
+        "end": {
+          "type": "string",
+          "description": "End timestamp (optional)"
+        },
+        "limit": {
+          "type": "string",
+          "description": "Limit number of results (default: 200)"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                 Use testnet (default: true)"
+        }
+      },
+      "required": [
+        "category",
+        "symbol"
+      ]
+    }
+  },
+  {
+    "name": "bybit_get_open_orders",
+    "description": "Get open orders from Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "<linear|inverse|option|spot>  Product type (linear/inverse/option/spot)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Symbol filter (optional)"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                 Use testnet (default: true)"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key (optional, can use env var)"
+        },
+        "api_secret": {
+          "type": "string",
+          "description": "API secret (optional, can use env var)"
+        }
+      },
+      "required": [
+        "category"
+      ]
+    }
+  },
+  {
+    "name": "bybit_get_orderbook",
+    "description": "Get orderbook information from Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "<linear|inverse|option|spot>  Product type (linear/inverse/option/spot)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Symbol name (e.g., BTCUSDT, ETHUSDT)"
+        },
+        "limit": {
+          "type": "string",
+          "description": "Limit depth (default: 25)"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                 Use testnet (default: true)"
+        }
+      },
+      "required": [
+        "category",
+        "symbol"
+      ]
+    }
+  },
+  {
+    "name": "bybit_get_positions",
+    "description": "Get open positions from Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "<linear|inverse|option>         Category (default: linear)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Symbol filter (optional)"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                    Use testnet (default: true)"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key (optional, can use env var)"
+        },
+        "api_secret": {
+          "type": "string",
+          "description": "API secret (optional, can use env var)"
+        }
+      }
+    }
+  },
+  {
+    "name": "bybit_get_ticker",
+    "description": "Get ticker information from Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "<linear|inverse|option|spot>  Product type (linear/inverse/option/spot)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Symbol filter (optional, gets all if not provided)"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                 Use testnet (default: true)"
+        }
+      },
+      "required": [
+        "category"
+      ]
+    }
+  },
+  {
+    "name": "bybit_place_order",
+    "description": "Place a trading order on Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "<linear|inverse|option|spot>  Product type (linear/inverse/option/spot)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Symbol name (e.g., BTCUSDT, ETHUSDT)"
+        },
+        "side": {
+          "type": "string",
+          "description": "<Buy|Sell>                     Order side (Buy/Sell)"
+        },
+        "order_type": {
+          "type": "string",
+          "description": "<Market|Limit>           Order type (Market/Limit)"
+        },
+        "qty": {
+          "type": "string",
+          "description": "Order quantity"
+        },
+        "price": {
+          "type": "string",
+          "description": "Order price (required for Limit orders)"
+        },
+        "time_in_force": {
+          "type": "string",
+          "description": "<GTC|IOC|FOK|PostOnly> Time in force (default: GTC)"
+        },
+        "take_profit": {
+          "type": "string",
+          "description": "Take profit price"
+        },
+        "stop_loss": {
+          "type": "string",
+          "description": "Stop loss price"
+        },
+        "reduce_only": {
+          "type": "string",
+          "description": "<true|false>             Reduce only position (default: false)"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                 Use testnet (default: true)"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key (optional, can use env var)"
+        },
+        "api_secret": {
+          "type": "string",
+          "description": "API secret (optional, can use env var)"
+        }
+      },
+      "required": [
+        "category",
+        "symbol",
+        "side",
+        "order_type",
+        "qty"
+      ]
+    }
+  },
+  {
+    "name": "bybit_set_leverage",
+    "description": "Set leverage for trading on Bybit exchange using V5 API",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "<linear|inverse>              Product type (linear/inverse)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Symbol name (e.g., BTCUSDT, ETHUSDT)"
+        },
+        "leverage": {
+          "type": "string",
+          "description": "Leverage multiplier (e.g., 1, 2, 5, 10)"
+        },
+        "testnet": {
+          "type": "string",
+          "description": "<true|false>                   Use testnet (default: true)"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key (optional, can use env var)"
+        },
+        "api_secret": {
+          "type": "string",
+          "description": "API secret (optional, can use env var)"
+        }
+      },
+      "required": [
+        "category",
+        "symbol",
+        "leverage"
+      ]
+    }
+  },
+  {
+    "name": "code_base64",
+    "description": "Encode or decode Base64 data.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "description": "The string to process."
+        },
+        "decode": {
+          "type": "string",
+          "description": "If true, decode instead of encode."
+        }
+      },
+      "required": [
+        "data"
+      ]
+    }
+  },
+  {
+    "name": "code_format_json",
+    "description": "Format or minify JSON data.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "description": "The JSON string."
+        },
+        "indent": {
+          "type": "integer",
+          "description": "Indentation level (0 for minify)."
+        }
+      },
+      "required": [
+        "data"
+      ]
+    }
+  },
+  {
+    "name": "code_gen_password",
+    "description": "Generate a secure random password.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "length": {
+          "type": "integer",
+          "description": "Password length."
+        },
+        "symbols": {
+          "type": "string",
+          "description": "Include special characters."
+        }
+      }
+    }
+  },
+  {
+    "name": "date_diff",
+    "description": "Calculate the difference in days between two dates (YYYY-MM-DD).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date1": {
+          "type": "string",
+          "description": "First date."
+        },
+        "date2": {
+          "type": "string",
+          "description": "Second date."
+        }
+      },
+      "required": [
+        "date1",
+        "date2"
+      ]
+    }
+  },
+  {
+    "name": "demo_py",
+    "description": "Demonstrate how to create a tool using Python and how to use comments.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "string": {
+          "type": "string",
+          "description": "Define a required string property"
+        },
+        "string_enum": {
+          "type": "string",
+          "description": "Define a required string property with enum (foo|bar)"
+        },
+        "boolean": {
+          "type": "string",
+          "description": "Define a required boolean property"
+        },
+        "integer": {
+          "type": "integer",
+          "description": "Define a required integer property"
+        },
+        "number": {
+          "type": "integer",
+          "description": "Define a required number property"
+        },
+        "array": {
+          "type": "string",
+          "description": "Define a required string array property (repeatable)"
+        },
+        "string_optional": {
+          "type": "string",
+          "description": "Define an optional string property"
+        },
+        "array_optional": {
+          "type": "string",
+          "description": "Define an optional string array property (repeatable)"
+        }
+      },
+      "required": [
+        "string",
+        "string_enum",
+        "boolean",
+        "integer",
+        "number",
+        "array"
+      ]
+    }
+  },
+  {
+    "name": "edit",
+    "description": "File editing and manipulation tool with security restrictions.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "description": "Operation to perform (required)"
+        },
+        "file_path": {
+          "type": "string",
+          "description": "Primary file or directory path"
+        },
+        "target_path": {
+          "type": "string",
+          "description": "Secondary path (copy/move/diff target)"
+        },
+        "content": {
+          "type": "string",
+          "description": "Content to write/append/insert"
+        },
+        "search_text": {
+          "type": "string",
+          "description": "Text to search for (replace/search ops)"
+        },
+        "replacement": {
+          "type": "string",
+          "description": "Replacement text"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Search pattern (search/grep_dir)"
+        },
+        "line_number": {
+          "type": "integer",
+          "description": "Line number for insert/delete"
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "Start line for range operations"
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "End line for range operations"
+        },
+        "encoding": {
+          "type": "string",
+          "description": "File encoding (default: utf-8)"
+        },
+        "max_size": {
+          "type": "integer",
+          "description": "Max read size in bytes"
+        },
+        "max_write_size": {
+          "type": "integer",
+          "description": "Max write size in bytes"
+        },
+        "line_context": {
+          "type": "integer",
+          "description": "Context lines for search results"
+        },
+        "sort_by": {
+          "type": "string",
+          "description": "Sort field for list_dir (name/size/modified)"
+        },
+        "context_lines": {
+          "type": "integer",
+          "description": "Context lines for diff"
+        },
+        "truncate_size": {
+          "type": "integer",
+          "description": "Size for truncate operation"
+        },
+        "max_backups": {
+          "type": "integer",
+          "description": "Maximum backup count"
+        },
+        "max_matches": {
+          "type": "integer",
+          "description": "Maximum search matches"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Permission mode (octal) or compare mode"
+        },
+        "to_type": {
+          "type": "string",
+          "description": "Line ending type: lf or crlf"
+        },
+        "backup_timestamp": {
+          "type": "string",
+          "description": "Backup timestamp for revert"
+        },
+        "algorithm": {
+          "type": "string",
+          "description": "Hash algorithm (sha256/sha1/sha512/md5)"
+        },
+        "n_lines": {
+          "type": "integer",
+          "description": "Lines for head/tail operations"
+        },
+        "compare_mode": {
+          "type": "string",
+          "description": "Compare mode: bytes or text"
+        },
+        "compression": {
+          "type": "string",
+          "description": "Archive compression type"
+        },
+        "password": {
+          "type": "string",
+          "description": "Archive password"
+        },
+        "undefined_var": {
+          "type": "string",
+          "description": "Template undefined var: error/keep/empty"
+        },
+        "file_pattern": {
+          "type": "string",
+          "description": "File pattern for find/grep"
+        },
+        "min_size": {
+          "type": "integer",
+          "description": "Minimum file size filter"
+        },
+        "max_size_filter": {
+          "type": "integer",
+          "description": "Maximum file size filter"
+        },
+        "modified_after": {
+          "type": "string",
+          "description": "Modified after (unix timestamp)"
+        },
+        "modified_before": {
+          "type": "string",
+          "description": "Modified before (unix timestamp)"
+        },
+        "file_type": {
+          "type": "string",
+          "description": "File type filter: any/file/dir"
+        },
+        "max_results": {
+          "type": "integer",
+          "description": "Maximum find results"
+        },
+        "var": {
+          "type": "string",
+          "description": "<KEY=VALUE>               Template variable (repeatable)"
+        },
+        "ops": {
+          "type": "string",
+          "description": "JSON array of operations for batch mode"
+        }
+      },
+      "required": [
+        "operation"
+      ]
+    }
+  },
+  {
+    "name": "execute_py_code",
+    "description": "Execute the python code.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Python code to execute, such as `print(\"hello world\")`"
+        }
+      },
+      "required": [
+        "code"
+      ]
+    }
+  },
+  {
+    "name": "google_search",
+    "description": "Google Search Tool with Content Crawling",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "text_count",
+    "description": "Count words, lines, and characters in text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to analyze."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "text_extract_emails",
+    "description": "Extract all email addresses from text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to search."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "text_extract_urls",
+    "description": "Extract all URLs from text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to search."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "text_reverse",
+    "description": "Reverse the lines in a text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to reverse."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "text_sort",
+    "description": "Sort lines in a text alphabetically.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to sort."
+        },
+        "reverse": {
+          "type": "string",
+          "description": "Sort in reverse order."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "unit_convert",
+    "description": "Convert between units (length: m, km, mi, ft; weight: kg, lb).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "integer",
+          "description": "Value to convert."
+        },
+        "from_unit": {
+          "type": "string",
+          "description": "Source unit."
+        },
+        "to_unit": {
+          "type": "string",
+          "description": "Target unit."
+        }
+      },
+      "required": [
+        "value",
+        "from_unit",
+        "to_unit"
+      ]
+    }
+  },
+  {
+    "name": "web",
+    "description": "Advanced web search tool supporting multiple backends with content",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query (required)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum results to return (default: 10)"
+        },
+        "backend": {
+          "type": "string",
+          "description": "Search backend: ddg|bing|searx (default: ddg)"
+        },
+        "format": {
+          "type": "string",
+          "description": "Output format: json|jsonl|markdown|csv|tsv (default: json)"
+        },
+        "output": {
+          "type": "string",
+          "description": "Save results to file path"
+        },
+        "type": {
+          "type": "string",
+          "description": "Search type: web|image|news (default: web)"
+        },
+        "depth": {
+          "type": "integer",
+          "description": "Crawl depth for recursive crawling (default: 1)"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "HTTP request timeout in seconds (default: 15)"
+        },
+        "delay": {
+          "type": "string",
+          "description": "Delay between requests in seconds (default: 1.0)"
+        },
+        "proxy": {
+          "type": "string",
+          "description": "HTTP/HTTPS proxy URL"
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent string"
+        },
+        "header": {
+          "type": "string",
+          "description": "<KEY:VALUE>                     Extra HTTP header (repeatable)"
+        },
+        "content_length": {
+          "type": "integer",
+          "description": "Maximum content length per page (default: 3000)"
+        },
+        "threads": {
+          "type": "integer",
+          "description": "Parallel crawl/download threads (default: 4)"
+        },
+        "safe": {
+          "type": "string",
+          "description": "Safe search: off|moderate|strict (default: moderate)"
+        },
+        "region": {
+          "type": "string",
+          "description": "Region/market code e.g. us-en (default: us-en)"
+        },
+        "lang": {
+          "type": "string",
+          "description": "Language code e.g. en-US (default: en-US)"
+        },
+        "searx_url": {
+          "type": "string",
+          "description": "Custom Searx instance URL"
+        },
+        "max_crawl_size": {
+          "type": "integer",
+          "description": "Max page size to crawl in bytes (default: 5242880)"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "web_search",
+    "description": "Web Search Tool with Content Crawling (DuckDuckGo/SearXNG/Brave/Google)",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "webx",
+    "description": "Web Search Tool with Content Crawling (Alternative)",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  }
+]

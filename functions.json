@@ -1,0 +1,1229 @@
+[
+  {
+    "name": "web_fetcher",
+    "description": "A web fetching utility that uses Python's built-in urllib.request.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "The only supported action is 'fetch'."
+        },
+        "url": {
+          "type": "string",
+          "description": "The URL to fetch. Required if action is 'fetch'."
+        },
+        "data": {
+          "type": "string",
+          "description": "Data to send in the request body (e.g., for POST/PUT)."
+        },
+        "headers": {
+          "type": "string",
+          "description": "Custom headers, comma-separated (e.g., \"Header1: Value1,Header2: Value2\")."
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "bybit-realm",
+    "description": "Bybit Trading Tool – Execute any supported trading operation.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": ""
+        },
+        "symbol": {
+          "type": "string",
+          "description": ""
+        },
+        "side": {
+          "type": "string",
+          "description": ""
+        },
+        "qty": {
+          "type": "string",
+          "description": ""
+        },
+        "price": {
+          "type": "string",
+          "description": ""
+        },
+        "order_type": {
+          "type": "string",
+          "description": ""
+        },
+        "category": {
+          "type": "string",
+          "description": ""
+        },
+        "order_id": {
+          "type": "string",
+          "description": ""
+        },
+        "stop_loss": {
+          "type": "string",
+          "description": ""
+        },
+        "take_profit": {
+          "type": "string",
+          "description": ""
+        },
+        "trailing_stop": {
+          "type": "string",
+          "description": ""
+        },
+        "reduce_only": {
+          "type": "string",
+          "description": ""
+        },
+        "time_in_force": {
+          "type": "string",
+          "description": ""
+        },
+        "position_idx": {
+          "type": "string",
+          "description": ""
+        },
+        "client_oid": {
+          "type": "string",
+          "description": ""
+        },
+        "leverage": {
+          "type": "string",
+          "description": ""
+        },
+        "buy_leverage": {
+          "type": "string",
+          "description": ""
+        },
+        "sell_leverage": {
+          "type": "string",
+          "description": ""
+        },
+        "account_type": {
+          "type": "string",
+          "description": ""
+        },
+        "limit": {
+          "type": "string",
+          "description": ""
+        },
+        "interval": {
+          "type": "string",
+          "description": ""
+        },
+        "interval_time": {
+          "type": "string",
+          "description": ""
+        },
+        "strong_threshold": {
+          "type": "string",
+          "description": ""
+        },
+        "mild_threshold": {
+          "type": "string",
+          "description": ""
+        },
+        "sl_pct": {
+          "type": "string",
+          "description": ""
+        },
+        "tp_pct": {
+          "type": "string",
+          "description": ""
+        },
+        "risk_usdt": {
+          "type": "string",
+          "description": ""
+        },
+        "sl_price": {
+          "type": "string",
+          "description": ""
+        },
+        "orders": {
+          "type": "string",
+          "description": ""
+        },
+        "slices": {
+          "type": "string",
+          "description": ""
+        },
+        "delay": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "required": [
+        "action",
+        "symbol",
+        "side",
+        "qty",
+        "price",
+        "order_type",
+        "category",
+        "order_id",
+        "stop_loss",
+        "take_profit",
+        "trailing_stop",
+        "reduce_only",
+        "time_in_force",
+        "position_idx",
+        "client_oid",
+        "leverage",
+        "buy_leverage",
+        "sell_leverage",
+        "account_type",
+        "limit",
+        "interval",
+        "interval_time",
+        "strong_threshold",
+        "mild_threshold",
+        "sl_pct",
+        "tp_pct",
+        "risk_usdt",
+        "sl_price",
+        "orders",
+        "slices",
+        "delay"
+      ]
+    }
+  },
+  {
+    "name": "web_search",
+    "description": "Perform a high-quality web search using the You.com Search API with enhanced features.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query string"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Default: 5, Max: 20 - Maximum number of results to return"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Default: 0, Max: 9 - Number of pages to skip"
+        },
+        "include_domains": {
+          "type": "string",
+          "description": "Comma-separated list of domains to prioritize"
+        },
+        "exclude_domains": {
+          "type": "string",
+          "description": "Comma-separated list of domains to block"
+        },
+        "safe_search": {
+          "type": "string",
+          "description": "[off|moderate|strict]   Default: moderate - Safe search level"
+        },
+        "country": {
+          "type": "string",
+          "description": "Country code (e.g. \"US\", \"IN\")"
+        },
+        "format": {
+          "type": "string",
+          "description": "[json|table|urls|compact]    Default: json - Output format"
+        },
+        "verbose": {
+          "type": "string",
+          "description": "Enable verbose output"
+        },
+        "no_cache": {
+          "type": "string",
+          "description": "Disable caching"
+        },
+        "config": {
+          "type": "string",
+          "description": "Custom config file path"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "execute_command",
+    "description": "Execute arbitrary shell command and return full output.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command to run"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Duration for the command (e.g. 60s, 1m, 2h)"
+        },
+        "connect_timeout": {
+          "type": "string",
+          "description": "Connection timeout for curl commands (e.g. 10s, default: 10s)"
+        },
+        "max_time": {
+          "type": "string",
+          "description": "Max transfer time for curl commands (e.g. 30s, default: matches --timeout)"
+        }
+      },
+      "required": [
+        "command"
+      ]
+    }
+  },
+  {
+    "name": "execute_py_code",
+    "description": "Execute the python code.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Python code to execute."
+        }
+      },
+      "required": [
+        "code"
+      ]
+    }
+  },
+  {
+    "name": "fetch_url_via_jina",
+    "description": "Extract the content from a URL using Jina AI Reader.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The URL to scrape."
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout."
+        },
+        "format": {
+          "type": "string",
+          "description": "Output format (text, json)."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "fetch_url_via_wget",
+    "description": "Fetch content from a URL using wget.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The URL to fetch."
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout in seconds."
+        },
+        "tries": {
+          "type": "integer",
+          "description": "Number of retry attempts."
+        },
+        "output": {
+          "type": "string",
+          "description": "Output file path (default: LLM_OUTPUT or stdout)."
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent."
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method."
+        },
+        "body_data": {
+          "type": "string",
+          "description": "Request body data."
+        },
+        "headers": {
+          "type": "string",
+          "description": "Headers (comma-separated)."
+        },
+        "follow_redirects": {
+          "type": "boolean",
+          "description": "Follow redirects."
+        },
+        "max_redirect": {
+          "type": "integer",
+          "description": "Max redirects."
+        },
+        "no_check_certificate": {
+          "type": "boolean",
+          "description": "Skip SSL verification."
+        },
+        "continue": {
+          "type": "boolean",
+          "description": "Continue partial downloads."
+        },
+        "quiet": {
+          "type": "boolean",
+          "description": "Quiet mode."
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Verbose output."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "fetch_url_via_curl",
+    "description": "Fetch content from a URL using curl.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The URL to fetch."
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout in seconds."
+        },
+        "max_time": {
+          "type": "integer",
+          "description": "Maximum transfer time in seconds."
+        },
+        "connect_timeout": {
+          "type": "integer",
+          "description": "Connection timeout in seconds."
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent header."
+        },
+        "output": {
+          "type": "string",
+          "description": "Output file path (default: LLM_OUTPUT or stdout)."
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method (GET, POST, PUT, DELETE, PATCH)."
+        },
+        "data": {
+          "type": "string",
+          "description": "Request body data for POST/PUT."
+        },
+        "headers": {
+          "type": "string",
+          "description": "Comma-separated headers (e.g., \"Key: Val,Key2: Val2\")."
+        },
+        "follow_redirects": {
+          "type": "boolean",
+          "description": "Follow HTTP redirects."
+        },
+        "max_redirects": {
+          "type": "integer",
+          "description": "Maximum number of redirects."
+        },
+        "verify_ssl": {
+          "type": "boolean",
+          "description": "Verify SSL certificates."
+        },
+        "compressed": {
+          "type": "boolean",
+          "description": "Request compressed response."
+        },
+        "silent": {
+          "type": "boolean",
+          "description": "Silent mode."
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Verbose output."
+        },
+        "include": {
+          "type": "boolean",
+          "description": "Include HTTP headers in output."
+        },
+        "retry": {
+          "type": "integer",
+          "description": "Number of retry attempts."
+        },
+        "retry_delay": {
+          "type": "integer",
+          "description": "Delay between retries in seconds."
+        },
+        "limit_rate": {
+          "type": "string",
+          "description": "Limit download rate (e.g., 100k, 1m)."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "get_current_time",
+    "description": "Get the current time.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "search_wikipedia",
+    "description": "Search Wikipedia for a query.\nUses it to get detailed information about a public figure, interpretation of a complex scientific concept or in-depth connectivity of a significant historical event,.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The query to search for."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "sys_cpu_info",
+    "description": "Get CPU information and usage.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "sys_mem_info",
+    "description": "Get memory usage information.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "sys_disk_info",
+    "description": "Get disk space usage.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "sys_uptime",
+    "description": "Get system uptime and load average.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "sys_pkg_list",
+    "description": "List installed packages (pkg).",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "fs_find_large",
+    "description": "Find large files in a directory.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "The directory to search in."
+        },
+        "min_size": {
+          "type": "string",
+          "description": "The minimum size of files to find."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "fs_compress",
+    "description": "Compress a file or folder into a tar.gz archive.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "output": {
+          "type": "string",
+          "description": "The output filename (e.g., archive.tar.gz)."
+        }
+      },
+      "required": [
+        "output"
+      ]
+    }
+  },
+  {
+    "name": "fs_extract",
+    "description": "Extract a tar.gz or zip archive.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "The directory to extract into."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "fs_checksum",
+    "description": "Calculate SHA256 checksum of a file.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "fs_mime_type",
+    "description": "Identify the MIME type of a file.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "net_ping",
+    "description": "Ping a host to check connectivity.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "The host to ping."
+        },
+        "count": {
+          "type": "string",
+          "description": "Number of pings."
+        }
+      },
+      "required": [
+        "host"
+      ]
+    }
+  },
+  {
+    "name": "net_dns_lookup",
+    "description": "Perform a DNS lookup.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "The host to lookup."
+        }
+      },
+      "required": [
+        "host"
+      ]
+    }
+  },
+  {
+    "name": "net_ip_info",
+    "description": "Get network IP address information",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "ip": {
+          "type": "string",
+          "description": "Specific IP address to look up (optional, defaults to own IP)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "net_speedtest",
+    "description": "Run a basic network speed test using curl.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "net_port_scan",
+    "description": "Scan common open ports on a host.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "The host to scan."
+        }
+      },
+      "required": [
+        "host"
+      ]
+    }
+  },
+  {
+    "name": "text_count",
+    "description": "Count words, lines, and characters in text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to analyze."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "text_reverse",
+    "description": "Reverse the lines in a text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to reverse."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "text_sort",
+    "description": "Sort lines in a text alphabetically.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to sort."
+        },
+        "reverse": {
+          "type": "string",
+          "description": "Sort in reverse order."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "text_extract_emails",
+    "description": "Extract all email addresses from text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to search."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "text_extract_urls",
+    "description": "Extract all URLs from text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to search."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "date_diff",
+    "description": "Calculate the difference in days between two dates (YYYY-MM-DD).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date1": {
+          "type": "string",
+          "description": "First date."
+        },
+        "date2": {
+          "type": "string",
+          "description": "Second date."
+        }
+      },
+      "required": [
+        "date1",
+        "date2"
+      ]
+    }
+  },
+  {
+    "name": "unit_convert",
+    "description": "Convert between units (length: m, km, mi, ft; weight: kg, lb).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "integer",
+          "description": "Value to convert."
+        },
+        "from_unit": {
+          "type": "string",
+          "description": "Source unit."
+        },
+        "to_unit": {
+          "type": "string",
+          "description": "Target unit."
+        }
+      },
+      "required": [
+        "value",
+        "from_unit",
+        "to_unit"
+      ]
+    }
+  },
+  {
+    "name": "todo_add",
+    "description": "Add a task to a local todo.txt file.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "weather_forecast",
+    "description": "Get weather forecast for a city (wttr.in).",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "code_git_status",
+    "description": "Get a summary of the git status in the current directory.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "code_format_json",
+    "description": "Format or minify JSON data.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "description": "The JSON string."
+        },
+        "indent": {
+          "type": "integer",
+          "description": "Indentation level (0 for minify)."
+        }
+      },
+      "required": [
+        "data"
+      ]
+    }
+  },
+  {
+    "name": "code_gen_password",
+    "description": "Generate a secure random password.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "length": {
+          "type": "integer",
+          "description": "Password length."
+        },
+        "symbols": {
+          "type": "string",
+          "description": "Include special characters."
+        }
+      }
+    }
+  },
+  {
+    "name": "code_base64",
+    "description": "Encode or decode Base64 data.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "description": "The string to process."
+        },
+        "decode": {
+          "type": "string",
+          "description": "If true, decode instead of encode."
+        }
+      },
+      "required": [
+        "data"
+      ]
+    }
+  },
+  {
+    "name": "code_http_status",
+    "description": "Check the HTTP status code and response headers of a URL.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "edit",
+    "description": "File editing and manipulation tool with security restrictions.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "description": "Operation to perform (required)"
+        },
+        "file_path": {
+          "type": "string",
+          "description": "Primary file or directory path"
+        },
+        "target_path": {
+          "type": "string",
+          "description": "Secondary path (copy/move/diff target)"
+        },
+        "content": {
+          "type": "string",
+          "description": "Content to write/append/insert"
+        },
+        "search_text": {
+          "type": "string",
+          "description": "Text to search for (replace/search ops)"
+        },
+        "replacement": {
+          "type": "string",
+          "description": "Replacement text"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Search pattern (search/grep_dir)"
+        },
+        "line_number": {
+          "type": "integer",
+          "description": "Line number for insert/delete"
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "Start line for range operations"
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "End line for range operations"
+        },
+        "encoding": {
+          "type": "string",
+          "description": "File encoding (default: utf-8)"
+        },
+        "max_size": {
+          "type": "integer",
+          "description": "Max read size in bytes"
+        },
+        "max_write_size": {
+          "type": "integer",
+          "description": "Max write size in bytes"
+        },
+        "line_context": {
+          "type": "integer",
+          "description": "Context lines for search results"
+        },
+        "sort_by": {
+          "type": "string",
+          "description": "Sort field for list_dir (name/size/modified)"
+        },
+        "context_lines": {
+          "type": "integer",
+          "description": "Context lines for diff"
+        },
+        "truncate_size": {
+          "type": "integer",
+          "description": "Size for truncate operation"
+        },
+        "max_backups": {
+          "type": "integer",
+          "description": "Maximum backup count"
+        },
+        "max_matches": {
+          "type": "integer",
+          "description": "Maximum search matches"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Permission mode (octal) or compare mode"
+        },
+        "to_type": {
+          "type": "string",
+          "description": "Line ending type: lf or crlf"
+        },
+        "backup_timestamp": {
+          "type": "string",
+          "description": "Backup timestamp for revert"
+        },
+        "algorithm": {
+          "type": "string",
+          "description": "Hash algorithm (sha256/sha1/sha512/md5)"
+        },
+        "n_lines": {
+          "type": "integer",
+          "description": "Lines for head/tail operations"
+        },
+        "compare_mode": {
+          "type": "string",
+          "description": "Compare mode: bytes or text"
+        },
+        "compression": {
+          "type": "string",
+          "description": "Archive compression type"
+        },
+        "password": {
+          "type": "string",
+          "description": "Archive password"
+        },
+        "undefined_var": {
+          "type": "string",
+          "description": "Template undefined var: error/keep/empty"
+        },
+        "file_pattern": {
+          "type": "string",
+          "description": "File pattern for find/grep"
+        },
+        "min_size": {
+          "type": "integer",
+          "description": "Minimum file size filter"
+        },
+        "max_size_filter": {
+          "type": "integer",
+          "description": "Maximum file size filter"
+        },
+        "modified_after": {
+          "type": "string",
+          "description": "Modified after (unix timestamp)"
+        },
+        "modified_before": {
+          "type": "string",
+          "description": "Modified before (unix timestamp)"
+        },
+        "file_type": {
+          "type": "string",
+          "description": "File type filter: any/file/dir"
+        },
+        "max_results": {
+          "type": "integer",
+          "description": "Maximum find results"
+        },
+        "var": {
+          "type": "string",
+          "description": "<KEY=VALUE>               Template variable (repeatable)"
+        },
+        "ops": {
+          "type": "string",
+          "description": "JSON array of operations for batch mode"
+        }
+      },
+      "required": [
+        "operation"
+      ]
+    }
+  },
+  {
+    "name": "memory_manager",
+    "description": "Manage persistent memory for AIChat conversations and context",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action",
+          "enum": [
+            "store",
+            "retrieve",
+            "search",
+            "clear",
+            "export",
+            "import"
+          ]
+        },
+        "key": {
+          "type": "string",
+          "description": "Memory key or identifier"
+        },
+        "value": {
+          "type": "string",
+          "description": "Value to store or search query"
+        },
+        "type": {
+          "type": "string",
+          "description": "Memory type",
+          "enum": [
+            "conversation",
+            "preference",
+            "context",
+            "knowledge"
+          ]
+        },
+        "session": {
+          "type": "string",
+          "description": "Session identifier"
+        },
+        "tags": {
+          "type": "string",
+          "description": "Comma-separated tags for categorization"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "dependency_manager",
+    "description": "Manage tool dependencies",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action (install|check|list)"
+        },
+        "tool": {
+          "type": "string",
+          "description": "Tool name"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "session_manager",
+    "description": "Manage AIChat sessions with persistent context (tool-based)",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action",
+          "enum": [
+            "start",
+            "save",
+            "load",
+            "list",
+            "delete"
+          ]
+        },
+        "session": {
+          "type": "string",
+          "description": "Session name"
+        },
+        "context": {
+          "type": "string",
+          "description": "Session context data"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "smart_selector",
+    "description": "AI-powered tool selection based on user intent",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "User query or task description"
+        },
+        "context": {
+          "type": "string",
+          "description": "Additional context for selection"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "memory_analytics",
+    "description": "Generate memory analytics and insights.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "analytics_type": {
+          "type": "string",
+          "description": ""
+        },
+        "days": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "required": [
+        "analytics_type",
+        "days"
+      ]
+    }
+  },
+  {
+    "name": "context_analyzer",
+    "description": "Analyze context and suggest tools.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "required": [
+        "message"
+      ]
+    }
+  }
+]

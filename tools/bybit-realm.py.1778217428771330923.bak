@@ -1,0 +1,2653 @@
+#!/usr/bin/env python3
+"""
+BYBIT REALM - Production-Grade Trading System Tool for LLM Functions v4.0
+
+A comprehensive Bybit trading tool that provides:
+• Symbol-Aware Quantity Engine  (lotSizeFilter auto-query + cache)
+• Circuit Breaker & Resilience  (exponential backoff + auto-reset)
+• High-Performance Batch Orders (POST /v5/order/create-batch)
+• Market Intelligence           (order flow imbalance + momentum + VWAP + RSI + BB)
+• Multi-Tier Network Failover   (Proxy → Torsocks → Direct)
+• Position & Risk Management    (PnL tracking, stop-loss, take-profit)
+• Rate Limiter                  (sliding window, prevents 429 errors)
+• Open Interest & Liquidations  (market structure analysis)
+• Order History & PnL Report    (closed trade analytics)
+• Iceberg Orders                (large order splitting)
+• Trailing Stop                 (dynamic risk management)
+• Price Precision Engine        (tickSize enforcement)
+• Server Time Sync              (clock skew prevention for auth)
+• Get Server Time               (public endpoint)
+• Conditional Orders            (stop/trigger-based entry)
+• Account Info                  (UTA mode, margin, fee rates)
+• Instrument Search             (filter by base coin, status)
+• Spread Analysis               (bid-ask spread + depth imbalance)
+• ATR-Based Position Sizing     (volatility-adjusted sizing)
+• Multi-Symbol Batch Queries    (tickers for a list of symbols)
+
+Usage:
+    Set environment variables BYBIT_API_KEY and BYBIT_API_SECRET before use.
+    Optional: BYBIT_USE_TESTNET, TOR_ENABLED, TOR_SOCKS_PORT
+"""
+from typing import Optional, List, Dict, Any, Literal, Tuple, Callable
+import os
+import sys
+import json
+import time
+import math
+import hmac
+import logging
+import hashlib
+import threading
+import subprocess
+import shutil
+import statistics
+from collections import deque
+from dataclasses import dataclass, field
+from enum import Enum
+
+# ── Optional dependencies ─────────────────────────────────────
+try:
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
+# ── .env file loading ──────────────────────────────────────────
+def load_env_file():
+    """Load .env file if present."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(env_path):
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(env_path)
+            logger.info("Loaded .env file from %s", env_path)
+        except ImportError:
+            # Fallback: manual .env parsing
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, val = line.split("=", 1)
+                        os.environ.setdefault(key.strip(), val.strip())
+            logger.info("Loaded .env file (manual parse) from %s", env_path)
+
+# Load .env on module import
+load_env_file()
+
+
+# ─────────────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+logger = logging.getLogger("BybitRealm")
+
+
+# ─────────────────────────────────────────────────────────────
+# ENUMS
+# ─────────────────────────────────────────────────────────────
+class OrderSide(str, Enum):
+    BUY  = "Buy"
+    SELL = "Sell"
+
+
+class OrderType(str, Enum):
+    LIMIT        = "Limit"
+    MARKET       = "Market"
+    LIMIT_MAKER  = "LimitMaker"
+    STOP         = "Stop"
+    STOP_LIMIT   = "StopLimit"
+
+
+class Category(str, Enum):
+    LINEAR  = "linear"
+    INVERSE = "inverse"
+    SPOT    = "spot"
+    OPTION  = "option"
+
+
+class CircuitState(str, Enum):
+    CLOSED    = "CLOSED"
+    OPEN      = "OPEN"
+    HALF_OPEN = "HALF_OPEN"
+
+
+class Signal(str, Enum):
+    STRONG_BUY  = "STRONG_BUY"
+    BUY         = "BUY"
+    NEUTRAL     = "NEUTRAL"
+    SELL        = "SELL"
+    STRONG_SELL = "STRONG_SELL"
+
+
+class TimeInForce(str, Enum):
+    GTC       = "GTC"       # Good Till Cancel
+    IOC       = "IOC"       # Immediate or Cancel
+    FOK       = "FOK"       # Fill or Kill
+    POST_ONLY = "PostOnly"
+
+
+class PositionIdx(int, Enum):
+    ONE_WAY    = 0
+    HEDGE_BUY  = 1
+    HEDGE_SELL = 2
+
+
+class TriggerBy(str, Enum):
+    LAST_PRICE  = "LastPrice"
+    INDEX_PRICE = "IndexPrice"
+    MARK_PRICE  = "MarkPrice"
+
+
+# ─────────────────────────────────────────────────────────────
+# CONFIGURATION
+# ─────────────────────────────────────────────────────────────
+@dataclass
+class TradingConfig:
+    """Central configuration – all values sourced from environment variables."""
+
+    # ── Auth ──────────────────────────────────────────────────
+    api_key:    str = field(default_factory=lambda: os.getenv("BYBIT_API_KEY",    ""))
+    api_secret: str = field(default_factory=lambda: os.getenv("BYBIT_API_SECRET", ""))
+
+    # ── Network ───────────────────────────────────────────────
+    testnet:         bool = field(default_factory=lambda: os.getenv("BYBIT_USE_TESTNET", "false").lower() == "true")
+    use_tor:         bool = field(default_factory=lambda: os.getenv("TOR_ENABLED",       "false").lower() == "true")
+    tor_socks_port:  int  = field(default_factory=lambda: int(os.getenv("TOR_SOCKS_PORT", "9050")))
+    request_timeout: int  = 15
+    max_retries:     int  = 3
+
+    # ── Clock sync ────────────────────────────────────────────
+    # How many ms of clock skew to tolerate before re-syncing
+    clock_sync_threshold_ms: int = 500
+
+    # ── Circuit Breaker ───────────────────────────────────────
+    cb_failure_threshold: int   = 5
+    cb_recovery_timeout:  float = 60.0
+    cb_cooldown:          float = 30.0
+
+    # ── Rate Limiting ─────────────────────────────────────────
+    rate_limit_calls:  int   = 10
+    rate_limit_window: float = 1.0
+
+    # ── Risk Management ───────────────────────────────────────
+    max_position_usdt:   float = 1000.0
+    default_leverage:    int   = 1
+    default_stop_loss:   float = 0.02
+    default_take_profit: float = 0.04
+    max_orders_per_batch: int  = 20
+
+    # ── Iceberg ───────────────────────────────────────────────
+    iceberg_min_slices: int   = 3
+    iceberg_max_slices: int   = 10
+    iceberg_delay:      float = 0.5   # seconds between slices
+
+    @property
+    def base_url(self) -> str:
+        """Determine the appropriate Bybit API base URL based on configuration."""
+        base = (
+            "https://api-testnet.bybit.com"
+            if self.testnet
+            else "https://api.bybit.com"
+        )
+        # Add logic here for regional endpoints if needed in the future, e.g.:
+        # if os.getenv("BYBIT_REGION") == "HK":
+        #     base = "https://api.byhkbit.com"
+        # elif os.getenv("BYBIT_REGION") == "TR":
+        #     base = "https://api.bybit-tr.com"
+        # elif os.getenv("BYBIT_REGION") == "KZ":
+        #     base = "https://api.bybit.kz"
+        
+        logger.info("Using Bybit API base URL: %s", base)
+        return base
+
+    def validate(self) -> None:
+        if not self.api_key or not self.api_secret:
+            raise ValueError(
+                "BYBIT_API_KEY and BYBIT_API_SECRET must be set "
+                "as environment variables."
+            )
+
+
+# ─────────────────────────────────────────────────────────────
+# RATE LIMITER
+# ─────────────────────────────────────────────────────────────
+class RateLimiter:
+    """Sliding-window rate limiter – thread-safe."""
+
+    def __init__(self, max_calls: int, window: float) -> None:
+        self._max_calls = max_calls
+        self._window    = window
+        self._calls: deque = deque()
+        self._lock  = threading.Lock()
+
+    def acquire(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            while self._calls and self._calls[0] <= now - self._window:
+                self._calls.popleft()
+
+            if len(self._calls) >= self._max_calls:
+                sleep_for = self._window - (now - self._calls[0])
+                if sleep_for > 0:
+                    logger.debug("Rate limiter sleeping %.3fs", sleep_for)
+                    time.sleep(sleep_for)
+
+            self._calls.append(time.monotonic())
+
+    @property
+    def current_usage(self) -> int:
+        """Return number of calls used in current window."""
+        now = time.monotonic()
+        with self._lock:
+            return sum(1 for c in self._calls if c > now - self._window)
+
+
+# ─────────────────────────────────────────────────────────────
+# CIRCUIT BREAKER
+# ─────────────────────────────────────────────────────────────
+class CircuitBreaker:
+    """Three-state circuit breaker with thread-safe state transitions."""
+
+    def __init__(
+        self,
+        failure_threshold: int   = 5,
+        recovery_timeout:  float = 60.0,
+        cooldown:          float = 30.0,
+    ) -> None:
+        self._threshold        = failure_threshold
+        self._recovery_timeout = recovery_timeout
+        self._cooldown         = cooldown
+        self._state            = CircuitState.CLOSED
+        self._failure_count    = 0
+        self._last_failure_ts  = 0.0
+        self._lock             = threading.Lock()
+
+    @property
+    def state(self) -> CircuitState:
+        return self._state
+
+    @property
+    def failure_count(self) -> int:
+        return self._failure_count
+
+    def call(self, fn: Callable, *args, **kwargs) -> Any:
+        with self._lock:
+            self._maybe_transition()
+            if self._state == CircuitState.OPEN:
+                wait = self._recovery_timeout - (time.monotonic() - self._last_failure_ts)
+                raise RuntimeError(
+                    f"Circuit OPEN – retry in {max(0, wait):.1f}s"
+                )
+        try:
+            result = fn(*args, **kwargs)
+            self._on_success()
+            return result
+        except Exception as exc:
+            self._on_failure()
+            raise exc
+
+    def reset(self) -> None:
+        """Manually reset the circuit breaker."""
+        with self._lock:
+            self._state         = CircuitState.CLOSED
+            self._failure_count = 0
+            logger.info("Circuit manually reset → CLOSED")
+
+    def _maybe_transition(self) -> None:
+        if (
+            self._state == CircuitState.OPEN
+            and time.monotonic() - self._last_failure_ts >= self._recovery_timeout
+        ):
+            self._state = CircuitState.HALF_OPEN
+            logger.info("Circuit → HALF_OPEN (testing recovery)")
+
+    def _on_success(self) -> None:
+        with self._lock:
+            self._failure_count = 0
+            if self._state != CircuitState.CLOSED:
+                logger.info("Circuit → CLOSED")
+            self._state = CircuitState.CLOSED
+
+    def _on_failure(self) -> None:
+        with self._lock:
+            self._failure_count  += 1
+            self._last_failure_ts = time.monotonic()
+            logger.warning(
+                "Circuit failure %d/%d", self._failure_count, self._threshold
+            )
+            if (
+                self._state == CircuitState.HALF_OPEN
+                or self._failure_count >= self._threshold
+            ):
+                self._state = CircuitState.OPEN
+                logger.error("Circuit → OPEN (cooldown %.0fs)", self._cooldown)
+                time.sleep(self._cooldown)
+
+
+# ─────────────────────────────────────────────────────────────
+# TOR / NETWORK MANAGER
+# ─────────────────────────────────────────────────────────────
+class TorManager:
+    """
+    Multi-tier network layer.
+    Tier 1 → SOCKS5 proxy via requests
+    Tier 2 → torsocks binary (subprocess)
+    Tier 3 → direct connection (fallback)
+    """
+
+    def __init__(
+        self,
+        enabled:     bool,
+        socks_port:  int,
+        timeout:     int,
+        max_retries: int,
+    ) -> None:
+        self.enabled       = enabled
+        self.socks_port    = socks_port
+        self.timeout       = timeout
+        self._proxy_url    = f"socks5h://127.0.0.1:{socks_port}" if enabled else None
+        self._torsocks_bin = shutil.which("torsocks")
+        self._session      = self._build_session(max_retries) if REQUESTS_AVAILABLE else None
+
+    def request(
+        self,
+        method:    str,
+        url:       str,
+        headers:   dict,
+        params:    Optional[dict] = None,
+        json_data: Optional[dict] = None,
+    ) -> dict:
+        """Try each tier in order; return first success. Renew Tor identity on persistent failure."""
+        # Build tier list based on configuration
+        tiers = []
+        
+        # Tier 1: SOCKS5 proxy (if enabled and Tor is available)
+        if self.enabled and self.tor_available:
+            tiers.append(self._tier_proxy)
+        
+        # Tier 2: torsocks (always try if binary exists and enabled)
+        if self.enabled and self._torsocks_bin:
+            tiers.append(self._tier_torsocks)
+        
+        # Tier 3: Direct connection (always as fallback)
+        tiers.append(self._tier_direct)
+        
+        last_exc: Optional[Exception] = None
+        consecutive_failures = 0
+        max_consecutive_tier_failures = 1 # Number of tiers to try before renewing Tor identity
+
+        for tier in tiers:
+            try:
+                logger.info("Trying network tier: %s", tier.__name__)
+                return tier(method, url, headers, params, json_data)
+            except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError) as exc:
+                # Handle network-level connection issues
+                last_exc = exc
+                logger.warning("Network connection tier %s failed: %s", tier.__name__, exc)
+                consecutive_failures += 1
+                
+                # If Tor tiers failed consecutively, attempt to renew identity
+                if self.enabled and consecutive_failures > max_consecutive_tier_failures:
+                    logger.warning("Persistent network failures detected. Attempting Tor identity renewal.")
+                    try:
+                        # Call renew_tor_identity method (assuming it's implemented in TorManager)
+                        # This method should ideally signal Tor to get a new identity.
+                        if hasattr(self, 'renew_tor_identity') and callable(self.renew_tor_identity):
+                            self.renew_tor_identity()
+                        else:
+                            logger.warning("renew_tor_identity method not found or not callable.")
+                    except Exception as tor_renew_exc:
+                        logger.error("Failed to renew Tor identity: %s", tor_renew_exc)
+                    # Reset consecutive failures count as we've attempted renewal
+                    consecutive_failures = 0 
+                    # Re-check Tor availability after renewal attempt
+                    self._check_tor_availability()
+
+                # Fallback logic: try next tier
+                if tier == self._tier_proxy and self._torsocks_bin:
+                    logger.info("Falling back to torsocks for %s", url)
+                    continue
+                elif tier == self._tier_torsocks:
+                    logger.info("Falling back to direct connection for %s", url)
+                    continue
+                else: # Direct connection failed or no other tiers left
+                    break
+            except requests.exceptions.HTTPError as exc:
+                # Handle HTTP errors (e.g., 4xx, 5xx)
+                last_exc = exc
+                logger.warning("HTTP error tier %s failed: %s", tier.__name__, exc)
+                
+                # Special handling for 403 Forbidden, which might indicate IP ban
+                if "403" in str(exc) and self.enabled:
+                    logger.warning("403 Forbidden detected. Attempting Tor identity renewal.")
+                    try:
+                        if hasattr(self, 'renew_tor_identity') and callable(self.renew_tor_identity):
+                            self.renew_tor_identity()
+                        else:
+                            logger.warning("renew_tor_identity method not found or not callable.")
+                    except Exception as tor_renew_exc:
+                        logger.error(f"Failed to renew Tor identity: {tor_renew_exc}")
+                    # After attempting renewal, we can decide to break or continue
+                    # For now, let's continue to try the next tier if available
+                    continue 
+                
+                # For other HTTP errors, try the next tier if available
+                continue 
+            except Exception as exc:
+                # Catch any other unexpected errors
+                last_exc = exc
+                logger.warning("Unexpected error tier %s failed: %s", tier.__name__, exc)
+                continue # Try next tier if available
+
+        raise ConnectionError(f"All network tiers exhausted for {url}. Last error: {last_exc}")
+
+    def _tier_proxy(self, method, url, headers, params, json_data) -> dict:
+        if not REQUESTS_AVAILABLE:
+            raise RuntimeError("requests library not available")
+        proxies = (
+            {"http": self._proxy_url, "https": self._proxy_url}
+            if self.enabled else None
+        )
+        resp = self._session.request(
+            method, url,
+            headers=headers, params=params, json=json_data,
+            proxies=proxies, timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        # Bybit API-level error check
+        if isinstance(data, dict) and data.get("retCode", 0) != 0:
+            raise RuntimeError(
+                f"Bybit API error {data.get('retCode')}: {data.get('retMsg')}"
+            )
+        return data
+
+    def _tier_torsocks(self, method, url, headers, params, json_data) -> dict:
+        if not self._torsocks_bin:
+            raise RuntimeError("torsocks binary not found")
+
+        cmd = [
+            self._torsocks_bin, "curl", "-s",
+            "-X", method,
+            "-H", "Content-Type: application/json",
+        ]
+        if headers.get("X-BAPI-API-KEY"):
+            for k, v in headers.items():
+                cmd += ["-H", f"{k}: {v}"]
+        if json_data:
+            cmd += ["-d", json.dumps(json_data)]
+        if params:
+            qs  = "&".join(f"{k}={v}" for k, v in params.items())
+            url = f"{url}?{qs}"
+        cmd.append(url)
+
+        result = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=self.timeout + 5,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"torsocks stderr: {result.stderr}")
+        data = json.loads(result.stdout)
+        if isinstance(data, dict) and data.get("retCode", 0) != 0:
+            raise RuntimeError(
+                f"Bybit API error {data.get('retCode')}: {data.get('retMsg')}"
+            )
+        return data
+
+    def _tier_direct(self, method, url, headers, params, json_data) -> dict:
+        if not REQUESTS_AVAILABLE:
+            raise RuntimeError("requests library not available")
+        resp = self._session.request(
+            method, url,
+            headers=headers, params=params, json=json_data,
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict) and data.get("retCode", 0) != 0:
+            raise RuntimeError(
+                f"Bybit API error {data.get('retCode')}: {data.get('retMsg')}"
+            )
+        return data
+
+    @staticmethod
+    def _build_session(max_retries: int):
+        session = requests.Session()
+        retry   = Retry(
+            total=max_retries,
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "POST"],
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount("https://", adapter)
+        session.mount("http://",  adapter)
+        return session
+
+    @property
+    def tor_available(self) -> bool:
+        """Check if Tor proxy is available."""
+        if not self.enabled:
+            return False
+        # Try to connect to the SOCKS port to check availability
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex(('127.0.0.1', self.socks_port))
+            sock.close()
+            return result == 0
+        except Exception:
+            return False
+
+    def _check_tor_availability(self) -> None:
+        """Re-check Tor availability after renewal attempt."""
+        logger.info(f"Re-checking Tor availability on port {self.socks_port}...")
+        # The tor_available property will be re-evaluated on next request
+
+    def renew_tor_identity(self) -> None:
+        """
+        Attempt to renew Tor identity to get a new IP address.
+        This uses the control port to send a NEWNYM signal.
+        """
+        logger.info("Attempting to renew Tor identity...")
+        
+        # Try to connect to Tor control port
+        try:
+            import socket
+            # Default control port (can be configured via TOR_CONTROL_PORT env var)
+            control_port = int(os.getenv("TOR_CONTROL_PORT", "9051"))
+            
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            sock.connect(('127.0.0.1', control_port))
+            
+            # Authenticate (using cookie or password - try empty first for cookie auth)
+            auth_line = b"AUTHENTICATE
+"
+            sock.send(auth_line)
+            response = sock.recv(1024)
+            
+            if response.startswith(b"250"):  # Authentication successful
+                # Send NEWNYM signal to get new identity
+                sock.send(b"NEWNYM
+")
+                response = sock.recv(1024)
+                
+                if response.startswith(b"250"):
+                    logger.info("Tor identity renewed successfully (NEWNYM signal sent)")
+                else:
+                    logger.warning(f"NEWNYM signal failed: {response}")
+            else:
+                logger.warning(f"Tor authentication failed: {response}")
+            
+            sock.close()
+        except ConnectionRefusedError:
+            logger.warning("Tor control port not reachable. Cannot renew identity.")
+        except Exception as e:
+            logger.warning(f"Failed to renew Tor identity: {e}")
+        
+        logger.info("Tor identity renewal process completed.")
+
+
+# ─────────────────────────────────────────────────────────────
+# INSTRUMENT CACHE
+# ─────────────────────────────────────────────────────────────
+@dataclass
+class LotSizeFilter:
+    qty_step:      float
+    min_order_qty: float
+    max_order_qty: float
+    min_notional:  float = 0.0
+
+    def adjust(self, qty: float) -> float:
+        """Round qty to the nearest valid step and enforce min/max."""
+        if self.qty_step <= 0:
+            return qty
+        precision = max(0, -int(math.floor(math.log10(self.qty_step))))
+        adjusted  = round(round(qty / self.qty_step) * self.qty_step, precision)
+        return float(max(self.min_order_qty, min(self.max_order_qty, adjusted)))
+
+
+@dataclass
+class PriceFilter:
+    tick_size: float
+    min_price: float = 0.0
+    max_price: float = 1e12
+
+    def adjust(self, price: float) -> float:
+        """Round price to the nearest valid tick and enforce min/max."""
+        if self.tick_size <= 0:
+            return price
+        precision = max(0, -int(math.floor(math.log10(self.tick_size))))
+        adjusted  = round(round(price / self.tick_size) * self.tick_size, precision)
+        return float(max(self.min_price, min(self.max_price, adjusted)))
+
+
+@dataclass
+class InstrumentInfo:
+    lot_size:  LotSizeFilter
+    price_flt: PriceFilter
+    symbol:    str
+    status:    str = "Trading"
+    fetched_at: float = field(default_factory=time.time)
+
+    @property
+    def is_stale(self) -> bool:
+        """Cache TTL: 1 hour."""
+        return time.time() - self.fetched_at > 3600
+
+
+# ─────────────────────────────────────────────────────────────
+# MARKET INTELLIGENCE
+# ─────────────────────────────────────────────────────────────
+@dataclass
+class MomentumResult:
+    symbol:       str
+    imbalance:    float
+    signal:       Signal
+    buy_vol:      float
+    sell_vol:     float
+    vwap:         float = 0.0
+    avg_trade_sz: float = 0.0
+    timestamp:    float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict:
+        return {
+            "symbol":       self.symbol,
+            "imbalance":    round(self.imbalance, 4),
+            "signal":       self.signal.value,
+            "buy_vol":      round(self.buy_vol,   4),
+            "sell_vol":     round(self.sell_vol,  4),
+            "vwap":         round(self.vwap,      4),
+            "avg_trade_sz": round(self.avg_trade_sz, 4),
+            "timestamp":    self.timestamp,
+        }
+
+
+@dataclass
+class PnLReport:
+    symbol:        str
+    total_pnl:     float
+    win_count:     int
+    loss_count:    int
+    win_rate:      float
+    avg_win:       float
+    avg_loss:      float
+    largest_win:   float
+    largest_loss:  float
+    total_fees:    float
+    trade_count:   int
+
+    def to_dict(self) -> dict:
+        return {
+            "symbol":       self.symbol,
+            "total_pnl":    round(self.total_pnl,    4),
+            "win_count":    self.win_count,
+            "loss_count":   self.loss_count,
+            "win_rate":     round(self.win_rate,     4),
+            "avg_win":      round(self.avg_win,      4),
+            "avg_loss":     round(self.avg_loss,     4),
+            "largest_win":  round(self.largest_win,  4),
+            "largest_loss": round(self.largest_loss, 4),
+            "total_fees":   round(self.total_fees,   4),
+            "trade_count":  self.trade_count,
+        }
+
+
+# ─────────────────────────────────────────────────────────────
+# CLOCK SYNC HELPER
+# ─────────────────────────────────────────────────────────────
+class ClockSync:
+    """
+    Tracks the offset between local clock and Bybit server time.
+    Prevents 10002 (request timestamp expired) errors due to clock skew.
+    """
+
+    def __init__(self, threshold_ms: int = 500) -> None:
+        self._offset_ms:    int   = 0      # local_time + offset ≈ server_time
+        self._synced_at:    float = 0.0
+        self._sync_ttl_s:   float = 300.0  # re-sync every 5 minutes
+        self._threshold_ms: int   = threshold_ms
+        self._lock          = threading.Lock()
+
+    def sync(self, server_time_ms: int) -> None:
+        """Update offset from a known server timestamp (ms)."""
+        with self._lock:
+            local_ms        = int(time.time() * 1000)
+            self._offset_ms = server_time_ms - local_ms
+            self._synced_at = time.monotonic()
+            logger.debug("Clock sync: offset=%dms", self._offset_ms)
+
+    def now_ms(self) -> str:
+        """Return adjusted current timestamp as ms string."""
+        with self._lock:
+            return str(int(time.time() * 1000) + self._offset_ms)
+
+    @property
+    def needs_sync(self) -> bool:
+        return time.monotonic() - self._synced_at > self._sync_ttl_s
+
+
+# ─────────────────────────────────────────────────────────────
+# MAIN DISPATCHER
+# ─────────────────────────────────────────────────────────────
+class BybitToolDispatcher:
+    """Central dispatcher for all Bybit API interactions."""
+
+    _RECV_WINDOW = "5000"
+
+    def __init__(self, config: TradingConfig) -> None:
+        config.validate()
+        self.config  = config
+        self.tor     = TorManager(
+            enabled     = config.use_tor,
+            socks_port  = config.tor_socks_port,
+            timeout     = config.request_timeout,
+            max_retries = config.max_retries,
+        )
+        self.circuit = CircuitBreaker(
+            failure_threshold = config.cb_failure_threshold,
+            recovery_timeout  = config.cb_recovery_timeout,
+            cooldown          = config.cb_cooldown,
+        )
+        self.limiter = RateLimiter(
+            max_calls = config.rate_limit_calls,
+            window    = config.rate_limit_window,
+        )
+        self.clock         = ClockSync(config.clock_sync_threshold_ms)
+        self._instr_cache: Dict[str, InstrumentInfo] = {}
+        self._cache_lock   = threading.Lock()
+
+    # ══════════════════════════════════════════════════════════
+    # AUTH & REQUEST
+    # ══════════════════════════════════════════════════════════
+    def _sign(self, payload: str, timestamp: str) -> str:
+        msg = f"{timestamp}{self.config.api_key}{self._RECV_WINDOW}{payload}"
+        return hmac.new(
+            self.config.api_secret.encode(),
+            msg.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
+    def _ensure_clock_sync(self) -> None:
+        """Lazily sync clock before authenticated requests."""
+        if self.clock.needs_sync:
+            try:
+                resp = self._raw_public_get("/v5/market/time")
+                ts_nano = resp.get("result", {}).get("timeNano")
+                if ts_nano:
+                    self.clock.sync(int(ts_nano) // 1_000_000)
+            except Exception as exc:
+                logger.warning("Clock sync failed (using local time): %s", exc)
+
+    def _raw_public_get(self, endpoint: str, params: Optional[dict] = None) -> dict:
+        """Direct GET without auth or rate-limiting (used for clock sync only)."""
+        url = f"{self.config.base_url}{endpoint}"
+        headers = {"Content-Type": "application/json"}
+        return self.tor.request("GET", url, headers, params, None)
+
+    def api_request_with_retry(
+        self,
+        method:    str,
+        endpoint:  str,
+        params:    Optional[dict] = None,
+        json_data: Optional[dict] = None,
+        signed:    bool = True,
+        max_retries: int = 3,
+    ) -> dict:
+        """
+        Universal error handler with retry logic.
+        Handles 404 and 403 errors, including 403-specific Tor identity renewal.
+        """
+        last_exc = None
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                return self.api_request(method, endpoint, params, json_data, signed)
+            except RuntimeError as exc:
+                # Handle Bybit API-level errors (retCode != 0)
+                error_msg = str(exc)
+                last_exc = exc
+                
+                # Check for 403 Forbidden - likely IP ban or Tor issue
+                if "403" in error_msg or "Forbidden" in error_msg:
+                    logger.warning(f"403 Forbidden detected on attempt {attempt}/{max_retries}. Attempting Tor identity renewal.")
+                    try:
+                        if hasattr(self.tor, 'renew_tor_identity') and callable(self.tor.renew_tor_identity):
+                            self.tor.renew_tor_identity()
+                        else:
+                            logger.warning("renew_tor_identity method not found or not callable.")
+                    except Exception as tor_exc:
+                        logger.error(f"Failed to renew Tor identity: {tor_exc}")
+                    
+                    # If this was the last attempt, raise
+                    if attempt >= max_retries:
+                        raise exc
+                    
+                    # Wait before retry
+                    wait_time = 2 ** attempt
+                    logger.info(f"Waiting {wait_time}s before retrying after 403...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # Check for 404 Not Found - endpoint might not exist
+                if "404" in error_msg or "Not Found" in error_msg:
+                    logger.warning(f"404 Not Found detected on attempt {attempt}/{max_retries}.")
+                    # For 404, we might not want to retry as the endpoint likely doesn't exist
+                    # But if it's a network issue, we can retry
+                    if attempt >= max_retries:
+                        raise exc
+                    continue
+                
+                # For other errors, retry with backoff
+                if attempt >= max_retries:
+                    raise exc
+                    
+                wait_time = 2 ** attempt
+                logger.warning(f"API error on attempt {attempt}/{max_retries}: {exc}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+                
+            except Exception as exc:
+                # Handle network-level errors
+                last_exc = exc
+                logger.warning(f"Network error on attempt {attempt}/{max_retries}: {exc}")
+                
+                if attempt >= max_retries:
+                    raise exc
+                
+                wait_time = 2 ** attempt
+                time.sleep(wait_time)
+        
+        raise last_exc if last_exc else RuntimeError("Max retries exceeded")
+
+    def api_request(
+        self,
+        method:    str,
+        endpoint:  str,
+        params:    Optional[dict] = None,
+        json_data: Optional[dict] = None,
+        signed:    bool = True,
+    ) -> dict:
+        self.limiter.acquire()
+
+        if signed:
+            self._ensure_clock_sync()
+
+        url = f"{self.config.base_url}{endpoint}"
+        ts  = self.clock.now_ms() if signed else str(int(time.time() * 1000))
+
+        if method == "POST":
+            payload_str = json.dumps(json_data or {}, separators=(",", ":"))
+        else:
+            payload_str = "&".join(
+                f"{k}={v}" for k, v in sorted((params or {}).items())
+            )
+
+        headers = {
+            "Content-Type":       "application/json",
+            "X-BAPI-API-KEY":     self.config.api_key,
+            "X-BAPI-TIMESTAMP":   ts,
+            "X-BAPI-RECV-WINDOW": self._RECV_WINDOW,
+        }
+        if signed:
+            headers["X-BAPI-SIGN"] = self._sign(payload_str, ts)
+
+        return self.circuit.call(
+            self.tor.request,
+            method, url, headers,
+            params    if method == "GET"  else None,
+            json_data if method == "POST" else None,
+        )
+
+    # ══════════════════════════════════════════════════════════
+    # INSTRUMENT / LOT-SIZE + PRICE FILTER
+    # ══════════════════════════════════════════════════════════
+    def _fetch_instrument(self, symbol: str, category: str) -> InstrumentInfo:
+        """Fetch and cache instrument info (lot size + price filter), thread-safe."""
+        with self._cache_lock:
+            info = self._instr_cache.get(symbol)
+            if info and not info.is_stale:
+                return info
+
+        logger.info("Fetching instrument info for %s (category: %s) …", symbol, category)
+        try:
+            resp = self.api_request(
+                "GET",
+                "/v5/market/instruments-info",
+                params={"category": category, "symbol": symbol},
+                signed=False,
+            )
+            logger.debug("Instrument info API response for %s: %s", symbol, resp)
+        except Exception as exc:
+            logger.error("API request for instrument info failed for %s: %s", symbol, exc)
+            raise ValueError(f"API request failed for instrument info: {exc}") from exc
+
+        try:
+            item = resp["result"]["list"][0]
+            logger.debug("Instrument data item for %s: %s", symbol, item)
+            lot  = item["lotSizeFilter"]
+            pft  = item.get("priceFilter", {})
+
+            lsf = LotSizeFilter(
+                qty_step      = float(lot["qtyStep"]),
+                min_order_qty = float(lot["minOrderQty"]),
+                max_order_qty = float(lot.get("maxOrderQty", 1e9)),
+                min_notional  = float(lot.get("minNotionalValue", 0)),
+            )
+            logger.debug("Parsed lotSizeFilter for %s: %s", symbol, lsf)
+            pf = PriceFilter(
+                tick_size = float(pft.get("tickSize", 0.01)),
+                min_price = float(pft.get("minPrice", 0)),
+                max_price = float(pft.get("maxPrice", 1e12)),
+            )
+            logger.debug("Parsed priceFilter for %s: %s", symbol, pf)
+
+            info = InstrumentInfo(
+                lot_size  = lsf,
+                price_flt = pf,
+                symbol    = symbol,
+                status    = item.get("status", "Trading"),
+            )
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            logger.error("Failed to parse instrument info for %s: %s", symbol, exc)
+            raise ValueError(
+                f"Could not parse instrument info for {symbol}: {exc}"
+            ) from exc
+
+        with self._cache_lock:
+            self._instr_cache[symbol] = info
+
+        return info
+
+    def adjust_quantity(
+        self,
+        symbol:   str,
+        qty:      float,
+        category: str = Category.LINEAR,
+    ) -> float:
+        """Return a valid quantity rounded to lotSize rules."""
+        info     = self._fetch_instrument(symbol, category)
+        adjusted = info.lot_size.adjust(qty)
+        logger.debug("%s qty %.8f → %.8f", symbol, qty, adjusted)
+        return adjusted
+
+    def adjust_quantity(
+        self,
+        symbol:   str,
+        qty:      float,
+        category: str = Category.LINEAR,
+    ) -> float:
+        """Return a valid quantity rounded to lotSize rules."""
+        info     = self._fetch_instrument(symbol, category)
+        adjusted = info.lot_size.adjust(qty)
+        logger.debug("%s qty %.8f → %.8f", symbol, qty, adjusted)
+        return adjusted
+
+    def adjust_price(
+        self,
+        symbol:   str,
+        price:    float,
+        category: str = Category.LINEAR,
+    ) -> float:
+        """Return a valid price rounded to tickSize rules."""
+        info     = self._fetch_instrument(symbol, category)
+        adjusted = info.price_flt.adjust(price)
+        logger.debug("%s price %.8f → %.8f", symbol, price, adjusted)
+        return adjusted
+
+    # ══════════════════════════════════════════════════════════
+    # SERVER TIME (PUBLIC)
+    # ══════════════════════════════════════════════════════════
+    def get_server_time(self) -> dict:
+        """Fetch server time (public endpoint, no auth required)."""
+        resp = self.api_request("GET", "/v5/market/time", signed=False)
+        result = resp.get("result", {})
+        time_nano = result.get("timeNano", "0")
+        time_ms   = int(time_nano) // 1_000_000 if time_nano else 0
+        # opportunistically update clock sync
+        if time_ms:
+            self.clock.sync(time_ms)
+        return {
+            "time_nano":   time_nano,
+            "time_ms":     time_ms,
+            "time_second": time_ms // 1000 if time_ms else 0,
+        }
+
+    # ══════════════════════════════════════════════════════════
+    # SINGLE ORDER
+    # ══════════════════════════════════════════════════════════
+    def place_order(
+        self,
+        symbol:       str,
+        side:         OrderSide,
+        qty:          float,
+        price:        Optional[float] = None,
+        order_type:   OrderType       = OrderType.LIMIT,
+        category:     Category        = Category.LINEAR,
+        stop_loss:    Optional[float] = None,
+        take_profit:  Optional[float] = None,
+        reduce_only:  bool            = False,
+        time_in_force: TimeInForce    = TimeInForce.GTC,
+        position_idx:  PositionIdx    = PositionIdx.ONE_WAY,
+        client_oid:   Optional[str]   = None,
+        trailing_stop: Optional[float] = None,
+    ) -> dict:
+        """Place a single order with optional SL/TP and trailing stop."""
+        adj_qty = self.adjust_quantity(symbol, qty, category)
+        payload: Dict[str, Any] = {
+            "category":    category,
+            "symbol":      symbol,
+            "side":        side,
+            "orderType":   order_type,
+            "qty":         str(adj_qty),
+            "timeInForce": time_in_force,
+            "positionIdx": position_idx,
+        }
+        if price is not None:
+            adj_price        = self.adjust_price(symbol, price, category)
+            payload["price"] = str(adj_price)
+        if stop_loss is not None:
+            payload["stopLoss"]    = str(self.adjust_price(symbol, stop_loss,   category))
+        if take_profit is not None:
+            payload["takeProfit"]  = str(self.adjust_price(symbol, take_profit, category))
+        if trailing_stop is not None:
+            payload["trailingStop"] = str(trailing_stop)
+        if reduce_only:
+            payload["reduceOnly"] = True
+        if client_oid:
+            payload["orderLinkId"] = client_oid
+
+        logger.info(
+            "Placing %s %s %s @ %s qty=%s",
+            category, side, symbol, price or "MARKET", adj_qty,
+        )
+        return self.api_request("POST", "/v5/order/create", json_data=payload)
+
+    # ══════════════════════════════════════════════════════════
+    # CONDITIONAL / TRIGGER ORDERS
+    # ══════════════════════════════════════════════════════════
+    def place_conditional_order(
+        self,
+        symbol:        str,
+        side:          OrderSide,
+        qty:           float,
+        trigger_price: float,
+        order_type:    OrderType    = OrderType.MARKET,
+        price:         Optional[float] = None,
+        category:      Category     = Category.LINEAR,
+        stop_loss:     Optional[float] = None,
+        take_profit:   Optional[float] = None,
+        trigger_by:    TriggerBy    = TriggerBy.LAST_PRICE,
+        time_in_force: TimeInForce  = TimeInForce.GTC,
+        position_idx:  PositionIdx  = PositionIdx.ONE_WAY,
+        client_oid:    Optional[str] = None,
+        reduce_only:   bool          = False,
+    ) -> dict:
+        """
+        Place a conditional (stop) order that fires when trigger_price is hit.
+        Use for breakout entries or stop-entry strategies.
+        """
+        adj_qty   = self.adjust_quantity(symbol, qty, category)
+        adj_trig  = self.adjust_price(symbol, trigger_price, category)
+
+        payload: Dict[str, Any] = {
+            "category":     category,
+            "symbol":       symbol,
+            "side":         side,
+            "orderType":    order_type,
+            "qty":          str(adj_qty),
+            "triggerPrice": str(adj_trig),
+            "triggerBy":    trigger_by,
+            "timeInForce":  time_in_force,
+            "positionIdx":  position_idx,
+        }
+        if price is not None:
+            payload["price"] = str(self.adjust_price(symbol, price, category))
+        if stop_loss is not None:
+            payload["stopLoss"]   = str(self.adjust_price(symbol, stop_loss,   category))
+        if take_profit is not None:
+            payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
+        if reduce_only:
+            payload["reduceOnly"] = True
+        if client_oid:
+            payload["orderLinkId"] = client_oid
+
+        logger.info(
+            "Conditional %s %s %s trigger=%.4f qty=%s",
+            category, side, symbol, adj_trig, adj_qty,
+        )
+        return self.api_request("POST", "/v5/order/create", json_data=payload)
+
+    # ══════════════════════════════════════════════════════════
+    # BATCH ORDERS
+    # ══════════════════════════════════════════════════════════
+    def execute_scalp_batch(self, order_list: List[dict]) -> dict:
+        """Place up to 20 orders in a single API call."""
+        if not order_list:
+            raise ValueError("order_list must not be empty")
+        if len(order_list) > self.config.max_orders_per_batch:
+            raise ValueError(
+                f"Bybit batch API supports max {self.config.max_orders_per_batch} orders per request"
+            )
+
+        batch = []
+        for o in order_list:
+            cat     = o.get("category", Category.LINEAR)
+            adj_qty = self.adjust_quantity(o["symbol"], float(o["qty"]), cat)
+
+            entry: Dict[str, Any] = {
+                "category":    cat,
+                "symbol":      o["symbol"],
+                "side":        o["side"],
+                "orderType":   o.get("orderType", OrderType.LIMIT),
+                "qty":         str(adj_qty),
+                "timeInForce": o.get("timeInForce", TimeInForce.GTC),
+            }
+            if "price" in o:
+                entry["price"] = str(
+                    self.adjust_price(o["symbol"], float(o["price"]), cat)
+                )
+            if "stopLoss" in o:
+                entry["stopLoss"] = str(
+                    self.adjust_price(o["symbol"], float(o["stopLoss"]), cat)
+                )
+            if "takeProfit" in o:
+                entry["takeProfit"] = str(
+                    self.adjust_price(o["symbol"], float(o["takeProfit"]), cat)
+                )
+            if "orderLinkId" in o:
+                entry["orderLinkId"] = o["orderLinkId"]
+            batch.append(entry)
+
+        logger.info("Submitting batch of %d orders …", len(batch))
+        return self.api_request(
+            "POST",
+            "/v5/order/create-batch",
+            json_data={"category": Category.LINEAR, "request": batch},
+        )
+
+    # ══════════════════════════════════════════════════════════
+    # ICEBERG ORDERS
+    # ══════════════════════════════════════════════════════════
+    def place_iceberg_order(
+        self,
+        symbol:      str,
+        side:        OrderSide,
+        total_qty:   float,
+        price:       float,
+        slices:      int            = 5,
+        category:    Category       = Category.LINEAR,
+        stop_loss:   Optional[float] = None,
+        take_profit: Optional[float] = None,
+        delay:       float           = None,
+    ) -> List[dict]:
+        """
+        Split a large order into multiple smaller slices to reduce market impact.
+        Returns list of individual order results.
+        """
+        slices    = max(
+            self.config.iceberg_min_slices,
+            min(self.config.iceberg_max_slices, slices),
+        )
+        delay     = delay if delay is not None else self.config.iceberg_delay
+        slice_qty = total_qty / slices
+        results   = []
+
+        logger.info(
+            "Iceberg: %s %s %s total=%.4f in %d slices @ %.4f",
+            category, side, symbol, total_qty, slices, price,
+        )
+        for i in range(slices):
+            result = self.safe_execute(
+                self.place_order,
+                symbol      = symbol,
+                side        = side,
+                qty         = slice_qty,
+                price       = price,
+                category    = category,
+                stop_loss   = stop_loss if i == 0 else None,
+                take_profit = take_profit if i == 0 else None,
+                client_oid  = f"iceberg_{symbol}_{int(time.time())}_{i}",
+            )
+            results.append({"slice": i + 1, "result": result})
+            logger.info("Iceberg slice %d/%d placed", i + 1, slices)
+            if i < slices - 1:
+                time.sleep(delay)
+
+        return results
+
+    # ══════════════════════════════════════════════════════════
+    # CANCEL ORDERS
+    # ══════════════════════════════════════════════════════════
+    def cancel_order(
+        self,
+        symbol:   str,
+        order_id: str,
+        category: Category = Category.LINEAR,
+    ) -> dict:
+        return self.api_request(
+            "POST",
+            "/v5/order/cancel",
+            json_data={
+                "category": category,
+                "symbol":   symbol,
+                "orderId":  order_id,
+            },
+        )
+
+    def cancel_all_orders(
+        self,
+        symbol:   str,
+        category: Category = Category.LINEAR,
+    ) -> dict:
+        logger.warning("Cancelling ALL open orders for %s", symbol)
+        return self.api_request(
+            "POST",
+            "/v5/order/cancel-all",
+            json_data={"category": category, "symbol": symbol},
+        )
+
+    def get_open_orders(
+        self,
+        symbol:   Optional[str] = None,
+        category: Category = Category.LINEAR,
+        limit:    int = 50,
+    ) -> List[dict]:
+        params: Dict[str, Any] = {"category": category, "limit": limit}
+        if symbol:
+            params["symbol"] = symbol
+        resp = self.api_request("GET", "/v5/order/realtime", params=params)
+        return resp.get("result", {}).get("list", [])
+
+    # ══════════════════════════════════════════════════════════
+    # AMEND ORDER
+    # ══════════════════════════════════════════════════════════
+    def amend_order(
+        self,
+        symbol:      str,
+        order_id:    str,
+        qty:         Optional[float] = None,
+        price:       Optional[float] = None,
+        category:    Category = Category.LINEAR,
+        stop_loss:   Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> dict:
+        """Modify an existing open order."""
+        payload: Dict[str, Any] = {
+            "category": category,
+            "symbol":   symbol,
+            "orderId":  order_id,
+        }
+        if qty is not None:
+            payload["qty"] = str(self.adjust_quantity(symbol, qty, category))
+        if price is not None:
+            payload["price"] = str(self.adjust_price(symbol, price, category))
+        if stop_loss is not None:
+            payload["stopLoss"] = str(self.adjust_price(symbol, stop_loss, category))
+        if take_profit is not None:
+            payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
+
+        return self.api_request("POST", "/v5/order/amend", json_data=payload)
+
+    # ══════════════════════════════════════════════════════════
+    # POSITIONS & BALANCE
+    # ══════════════════════════════════════════════════════════
+    def get_positions(
+        self,
+        category: Category = Category.LINEAR,
+        symbol:   Optional[str] = None,
+    ) -> List[dict]:
+        params: Dict[str, Any] = {"category": category}
+        if symbol:
+            params["symbol"] = symbol
+        resp = self.api_request("GET", "/v5/position/list", params=params)
+        return resp.get("result", {}).get("list", [])
+
+    def get_wallet_balance(self, account_type: str = "UNIFIED") -> dict:
+        resp = self.api_request(
+            "GET",
+            "/v5/account/wallet-balance",
+            params={"accountType": account_type},
+        )
+        return resp.get("result", {})
+
+    def get_account_info(self) -> dict:
+        """
+        Fetch account info: UTA upgrade status, margin mode, DCP status,
+        time window, and account-level margin data.
+        """
+        resp = self.api_request("GET", "/v5/account/info")
+        return resp.get("result", {})
+
+    def get_fee_rates(
+        self,
+        symbol:   Optional[str] = None,
+        category: Category      = Category.LINEAR,
+    ) -> List[dict]:
+        """Fetch maker/taker fee rates for the account."""
+        params: Dict[str, Any] = {"category": category}
+        if symbol:
+            params["symbol"] = symbol
+        resp = self.api_request("GET", "/v5/account/fee-rate", params=params)
+        return resp.get("result", {}).get("list", [])
+
+    def set_leverage(
+        self,
+        symbol:        str,
+        leverage:      int,
+        category:      Category = Category.LINEAR,
+        buy_leverage:  Optional[int] = None,
+        sell_leverage: Optional[int] = None,
+    ) -> dict:
+        payload = {
+            "category":     category,
+            "symbol":       symbol,
+            "buyLeverage":  str(buy_leverage  or leverage),
+            "sellLeverage": str(sell_leverage or leverage),
+        }
+        return self.api_request(
+            "POST", "/v5/position/set-leverage", json_data=payload
+        )
+
+    def set_trading_stop(
+        self,
+        symbol:        str,
+        stop_loss:     Optional[float] = None,
+        take_profit:   Optional[float] = None,
+        trailing_stop: Optional[float] = None,
+        category:      Category = Category.LINEAR,
+        position_idx:  PositionIdx = PositionIdx.ONE_WAY,
+    ) -> dict:
+        """Update SL/TP/trailing stop on an existing position."""
+        payload: Dict[str, Any] = {
+            "category":    category,
+            "symbol":      symbol,
+            "positionIdx": position_idx,
+        }
+        if stop_loss is not None:
+            payload["stopLoss"] = str(
+                self.adjust_price(symbol, stop_loss, category)
+            )
+        if take_profit is not None:
+            payload["takeProfit"] = str(
+                self.adjust_price(symbol, take_profit, category)
+            )
+        if trailing_stop is not None:
+            payload["trailingStop"] = str(trailing_stop)
+
+        return self.api_request(
+            "POST", "/v5/position/trading-stop", json_data=payload
+        )
+
+    def get_pnl_history(
+        self,
+        symbol:   Optional[str] = None,
+        category: Category = Category.LINEAR,
+        limit:    int = 100,
+    ) -> List[dict]:
+        """Fetch closed PnL records."""
+        params: Dict[str, Any] = {"category": category, "limit": limit}
+        if symbol:
+            params["symbol"] = symbol
+        resp = self.api_request("GET", "/v5/position/closed-pnl", params=params)
+        return resp.get("result", {}).get("list", [])
+
+    def get_pnl_report(
+        self,
+        symbol:   str,
+        category: Category = Category.LINEAR,
+        limit:    int = 100,
+    ) -> PnLReport:
+        """Aggregate closed PnL records into a summary report."""
+        records = self.get_pnl_history(symbol=symbol, category=category, limit=limit)
+        if not records:
+            return PnLReport(
+                symbol=symbol, total_pnl=0, win_count=0, loss_count=0,
+                win_rate=0, avg_win=0, avg_loss=0, largest_win=0,
+                largest_loss=0, total_fees=0, trade_count=0,
+            )
+
+        pnls   = [float(r.get("closedPnl", 0)) for r in records]
+        fees   = [float(r.get("cumExecFee", 0)) for r in records]
+        wins   = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p <= 0]
+
+        return PnLReport(
+            symbol       = symbol,
+            total_pnl    = sum(pnls),
+            win_count    = len(wins),
+            loss_count   = len(losses),
+            win_rate     = len(wins) / len(pnls) if pnls else 0,
+            avg_win      = statistics.mean(wins)   if wins   else 0,
+            avg_loss     = statistics.mean(losses) if losses else 0,
+            largest_win  = max(wins)               if wins   else 0,
+            largest_loss = min(losses)             if losses else 0,
+            total_fees   = sum(fees),
+            trade_count  = len(pnls),
+        )
+
+    def get_order_history(
+        self,
+        symbol:   Optional[str] = None,
+        category: Category = Category.LINEAR,
+        limit:    int = 50,
+    ) -> List[dict]:
+        """Fetch historical orders."""
+        params: Dict[str, Any] = {"category": category, "limit": limit}
+        if symbol:
+            params["symbol"] = symbol
+        resp = self.api_request("GET", "/v5/order/history", params=params)
+        return resp.get("result", {}).get("list", [])
+
+    # ══════════════════════════════════════════════════════════
+    # MARKET DATA
+    # ══════════════════════════════════════════════════════════
+    def get_ticker(
+        self,
+        symbol:   str,
+        category: Category = Category.LINEAR,
+    ) -> dict:
+        resp = self.api_request(
+            "GET",
+            "/v5/market/tickers",
+            params={"category": category, "symbol": symbol},
+            signed=False,
+        )
+        items = resp.get("result", {}).get("list", [])
+        return items[0] if items else {}
+
+    def get_tickers_bulk(
+        self,
+        symbols:  List[str],
+        category: Category = Category.LINEAR,
+    ) -> List[dict]:
+        """
+        Fetch tickers for multiple symbols in a single API call.
+        Returns a list of ticker dicts filtered to the requested symbols.
+        """
+        resp = self.api_request(
+            "GET",
+            "/v5/market/tickers",
+            params={"category": category},
+            signed=False,
+        )
+        all_tickers = resp.get("result", {}).get("list", [])
+        sym_set = {s.upper() for s in symbols}
+        return [t for t in all_tickers if t.get("symbol", "") in sym_set]
+
+    def get_orderbook(
+        self,
+        symbol:   str,
+        limit:    int      = 25,
+        category: Category = Category.LINEAR,
+    ) -> dict:
+        return self.api_request(
+            "GET",
+            "/v5/market/orderbook",
+            params={"category": category, "symbol": symbol, "limit": limit},
+            signed=False,
+        )
+
+    def get_klines(
+        self,
+        symbol:   str,
+        interval: str      = "1",
+        limit:    int      = 200,
+        category: Category = Category.LINEAR,
+    ) -> List[dict]:
+        resp = self.api_request(
+            "GET",
+            "/v5/market/kline",
+            params={
+                "category": category,
+                "symbol":   symbol,
+                "interval": interval,
+                "limit":    limit,
+            },
+            signed=False,
+        )
+        return resp.get("result", {}).get("list", [])
+
+    def get_recent_trades(
+        self,
+        symbol:   str,
+        limit:    int      = 500,
+        category: Category = Category.LINEAR,
+    ) -> List[dict]:
+        resp = self.api_request(
+            "GET",
+            "/v5/market/recent-trade",
+            params={"category": category, "symbol": symbol, "limit": limit},
+            signed=False,
+        )
+        return resp.get("result", {}).get("list", [])
+
+    def get_open_interest(
+        self,
+        symbol:        str,
+        interval_time: str     = "5min",
+        category:      Category = Category.LINEAR,
+        limit:         int     = 50,
+    ) -> List[dict]:
+        """Fetch open interest history."""
+        resp = self.api_request(
+            "GET",
+            "/v5/market/open-interest",
+            params={
+                "category":     category,
+                "symbol":       symbol,
+                "intervalTime": interval_time,
+                "limit":        limit,
+            },
+            signed=False,
+        )
+        return resp.get("result", {}).get("list", [])
+
+    def get_liquidations(
+        self,
+        symbol:   str,
+        category: Category = Category.LINEAR,
+        limit:    int = 200,
+    ) -> List[dict]:
+        """Fetch recent liquidation orders."""
+        resp = self.api_request(
+            "GET",
+            "/v5/market/liquidation",
+            params={"category": category, "symbol": symbol, "limit": limit},
+            signed=False,
+        )
+        return resp.get("result", {}).get("list", [])
+
+    def get_instruments_info(
+        self,
+        category:   Category = Category.LINEAR,
+        symbol:     Optional[str] = None,
+        base_coin:  Optional[str] = None,
+        status:     Optional[str] = None,
+        limit:      int = 100,
+    ) -> List[dict]:
+        """
+        Search / list tradeable instruments with optional filters.
+        Useful for discovering available symbols or verifying an instrument exists.
+        """
+        params: Dict[str, Any] = {"category": category, "limit": limit}
+        if symbol:
+            params["symbol"]   = symbol
+        if base_coin:
+            params["baseCoin"] = base_coin
+        if status:
+            params["status"]   = status
+        resp = self.api_request(
+            "GET", "/v5/market/instruments-info", params=params, signed=False
+        )
+        return resp.get("result", {}).get("list", [])
+
+    # ══════════════════════════════════════════════════════════
+    # SPREAD & DEPTH ANALYSIS
+    # ══════════════════════════════════════════════════════════
+    def get_spread_analysis(
+        self,
+        symbol:   str,
+        depth:    int      = 5,
+        category: Category = Category.LINEAR,
+    ) -> dict:
+        """
+        Analyse orderbook spread and bid/ask depth imbalance.
+
+        Returns:
+            mid_price, spread_abs, spread_pct,
+            bid_depth (USDT), ask_depth (USDT),
+            depth_imbalance ([-1, +1] → +1 = strong bid pressure)
+        """
+        raw     = self.get_orderbook(symbol=symbol, limit=depth, category=category)
+        result  = raw.get("result", raw)
+        bids    = result.get("b", [])[:depth]   # [[price, qty], …]
+        asks    = result.get("a", [])[:depth]
+
+        if not bids or not asks:
+            return {"error": "Empty orderbook"}
+
+        best_bid  = float(bids[0][0])
+        best_ask  = float(asks[0][0])
+        mid_price = (best_bid + best_ask) / 2
+        spread    = best_ask - best_bid
+
+        bid_depth = sum(float(p) * float(q) for p, q in bids)
+        ask_depth = sum(float(p) * float(q) for p, q in asks)
+        total_depth = bid_depth + ask_depth
+        imbalance   = (bid_depth - ask_depth) / total_depth if total_depth else 0.0
+
+        return {
+            "symbol":       symbol,
+            "best_bid":     best_bid,
+            "best_ask":     best_ask,
+            "mid_price":    mid_price,
+            "spread_abs":   round(spread, 8),
+            "spread_pct":   round(spread / mid_price * 100, 6) if mid_price else 0,
+            "bid_depth":    round(bid_depth,   2),
+            "ask_depth":    round(ask_depth,   2),
+            "depth_imbalance": round(imbalance, 4),
+        }
+
+    # ══════════════════════════════════════════════════════════
+    # TECHNICAL INDICATORS
+    # ══════════════════════════════════════════════════════════
+    @staticmethod
+    def _compute_rsi(closes: List[float], period: int = 14) -> float:
+        """Compute RSI from a list of close prices (oldest first)."""
+        if len(closes) < period + 1:
+            return float("nan")
+        deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+        gains  = [d if d > 0 else 0.0 for d in deltas]
+        losses = [-d if d < 0 else 0.0 for d in deltas]
+
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
+
+        for i in range(period, len(deltas)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+        if avg_loss == 0:
+            return 100.0
+        rs  = avg_gain / avg_loss
+        return round(100 - 100 / (1 + rs), 2)
+
+    @staticmethod
+    def _compute_bollinger(
+        closes: List[float], period: int = 20, std_dev: float = 2.0
+    ) -> Dict[str, float]:
+        """Compute Bollinger Bands from a list of close prices (oldest first)."""
+        if len(closes) < period:
+            return {"upper": float("nan"), "middle": float("nan"), "lower": float("nan")}
+        window   = closes[-period:]
+        middle   = sum(window) / period
+        variance = sum((x - middle) ** 2 for x in window) / period
+        std      = math.sqrt(variance)
+        return {
+            "upper":  round(middle + std_dev * std, 6),
+            "middle": round(middle, 6),
+            "lower":  round(middle - std_dev * std, 6),
+        }
+
+    def get_technical_analysis(
+        self,
+        symbol:        str,
+        interval:      str      = "15",
+        rsi_period:    int      = 14,
+        bb_period:     int      = 20,
+        bb_std:        float    = 2.0,
+        limit:         int      = 100,
+        category:      Category = Category.LINEAR,
+    ) -> dict:
+        """
+        Fetch klines and compute RSI + Bollinger Bands for a symbol.
+        Kline format from Bybit: [startTime, open, high, low, close, vol, turnover]
+        Returns: current_price, rsi, bollinger_bands, atr, signal summary
+        """
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=limit + 1, category=category
+        )
+        if not klines:
+            return {"error": "No kline data returned"}
+
+        # Bybit returns newest first – reverse for chronological order
+        klines_asc = list(reversed(klines))
+
+        closes = [float(k[4]) for k in klines_asc]
+        highs  = [float(k[2]) for k in klines_asc]
+        lows   = [float(k[3]) for k in klines_asc]
+
+        # ATR (True Range, period=14)
+        atr = self._compute_atr(closes, highs, lows, period=14)
+
+        rsi = self._compute_rsi(closes, period=rsi_period)
+        bb  = self._compute_bollinger(closes, period=bb_period, std_dev=bb_std)
+
+        current_price = closes[-1]
+
+        # Simple signal from BB + RSI
+        bb_signal = "NEUTRAL"
+        if current_price < bb["lower"]:
+            bb_signal = "OVERSOLD"
+        elif current_price > bb["upper"]:
+            bb_signal = "OVERBOUGHT"
+
+        rsi_signal = "NEUTRAL"
+        if not math.isnan(rsi):
+            if rsi < 30:
+                rsi_signal = "OVERSOLD"
+            elif rsi > 70:
+                rsi_signal = "OVERBOUGHT"
+
+        return {
+            "symbol":         symbol,
+            "interval":       interval,
+            "current_price":  current_price,
+            "rsi":            rsi,
+            "rsi_signal":     rsi_signal,
+            "bollinger":      bb,
+            "bb_signal":      bb_signal,
+            "atr":            round(atr, 6),
+        }
+
+    @staticmethod
+    def _compute_atr(
+        closes: List[float],
+        highs:  List[float],
+        lows:   List[float],
+        period: int = 14,
+    ) -> float:
+        """Compute Average True Range."""
+        if len(closes) < period + 1:
+            return float("nan")
+        trs = []
+        for i in range(1, len(closes)):
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i]  - closes[i - 1]),
+            )
+            trs.append(tr)
+        return sum(trs[-period:]) / period
+
+    # ══════════════════════════════════════════════════════════
+    # MARKET INTELLIGENCE
+    # ══════════════════════════════════════════════════════════
+    def get_market_momentum(
+        self,
+        symbol:           str,
+        category:         Category = Category.LINEAR,
+        strong_threshold: float    = 0.20,
+        mild_threshold:   float    = 0.08,
+    ) -> MomentumResult:
+        """
+        Calculate real-time order flow imbalance + VWAP.
+
+        Imbalance = (buy_vol - sell_vol) / (buy_vol + sell_vol)
+        Range: [-1.0, +1.0]
+        """
+        trades = self.get_recent_trades(symbol, limit=500, category=category)
+
+        buy_vol  = sum(float(t["size"]) for t in trades if t["side"] == "Buy")
+        sell_vol = sum(float(t["size"]) for t in trades if t["side"] == "Sell")
+        total    = buy_vol + sell_vol
+        imbalance = (buy_vol - sell_vol) / total if total > 0 else 0.0
+
+        # VWAP calculation
+        vwap_num = sum(float(t["price"]) * float(t["size"]) for t in trades)
+        vwap     = vwap_num / total if total > 0 else 0.0
+        avg_sz   = total / len(trades) if trades else 0.0
+
+        if imbalance > strong_threshold:
+            signal = Signal.STRONG_BUY
+        elif imbalance > mild_threshold:
+            signal = Signal.BUY
+        elif imbalance < -strong_threshold:
+            signal = Signal.STRONG_SELL
+        elif imbalance < -mild_threshold:
+            signal = Signal.SELL
+        else:
+            signal = Signal.NEUTRAL
+
+        result = MomentumResult(
+            symbol       = symbol,
+            imbalance    = imbalance,
+            signal       = signal,
+            buy_vol      = buy_vol,
+            sell_vol     = sell_vol,
+            vwap         = vwap,
+            avg_trade_sz = avg_sz,
+        )
+        logger.info(
+            "Momentum %s → %s (imbalance=%.4f vwap=%.4f)",
+            symbol, signal.value, imbalance, vwap,
+        )
+        return result
+
+    def get_funding_rate(
+        self,
+        symbol:   str,
+        category: Category = Category.LINEAR,
+    ) -> dict:
+        resp = self.api_request(
+            "GET",
+            "/v5/market/funding/history",
+            params={"category": category, "symbol": symbol, "limit": 1},
+            signed=False,
+        )
+        items = resp.get("result", {}).get("list", [])
+        return items[0] if items else {}
+
+    # ══════════════════════════════════════════════════════════
+    # RISK HELPERS
+    # ══════════════════════════════════════════════════════════
+    def calculate_sl_tp(
+        self,
+        entry_price: float,
+        side:        OrderSide,
+        sl_pct:      Optional[float] = None,
+        tp_pct:      Optional[float] = None,
+    ) -> Tuple[float, float]:
+        """Return (stop_loss_price, take_profit_price) for a given entry."""
+        sl_pct = sl_pct if sl_pct is not None else self.config.default_stop_loss
+        tp_pct = tp_pct if tp_pct is not None else self.config.default_take_profit
+
+        if side == OrderSide.BUY:
+            sl = round(entry_price * (1 - sl_pct), 8)
+            tp = round(entry_price * (1 + tp_pct), 8)
+        else:
+            sl = round(entry_price * (1 + sl_pct), 8)
+            tp = round(entry_price * (1 - tp_pct), 8)
+
+        logger.debug(
+            "SL/TP for %s entry=%.4f → sl=%.4f tp=%.4f",
+            side, entry_price, sl, tp,
+        )
+        return sl, tp
+
+    def calculate_position_size(
+        self,
+        symbol:      str,
+        entry_price: float,
+        sl_price:    float,
+        risk_usdt:   float,
+        category:    Category = Category.LINEAR,
+    ) -> float:
+        """
+        Kelly / fixed-risk position sizing.
+        Returns quantity sized so max loss = risk_usdt.
+        """
+        price_diff = abs(entry_price - sl_price)
+        if price_diff == 0:
+            return 0.0
+        raw_qty = risk_usdt / price_diff
+        return self.adjust_quantity(symbol, raw_qty, category)
+
+    def calculate_atr_position_size(
+        self,
+        symbol:      str,
+        risk_usdt:   float,
+        atr_mult:    float    = 1.5,
+        interval:    str      = "15",
+        category:    Category = Category.LINEAR,
+    ) -> dict:
+        """
+        ATR-based position sizing: SL distance = atr_mult × ATR.
+        Returns suggested qty, ATR, and implied SL distance.
+        """
+        ta = self.get_technical_analysis(
+            symbol=symbol, interval=interval, category=category
+        )
+        atr = ta.get("atr", float("nan"))
+        if math.isnan(atr) or atr == 0:
+            return {"error": "Could not compute ATR"}
+
+        sl_distance = atr * atr_mult
+        current_price = ta.get("current_price", 0.0)
+        if current_price == 0:
+            return {"error": "No current price"}
+
+        raw_qty  = risk_usdt / sl_distance
+        adj_qty  = self.adjust_quantity(symbol, raw_qty, category)
+
+        return {
+            "symbol":       symbol,
+            "current_price": current_price,
+            "atr":          round(atr, 6),
+            "atr_mult":     atr_mult,
+            "sl_distance":  round(sl_distance, 6),
+            "risk_usdt":    risk_usdt,
+            "quantity":     adj_qty,
+        }
+
+    def check_max_position(self, symbol: str, usdt_value: float) -> bool:
+        """Returns True if adding usdt_value would not breach the position cap."""
+        positions = self.get_positions(symbol=symbol)
+        current   = sum(float(p.get("positionValue", 0)) for p in positions)
+        allowed   = self.config.max_position_usdt - current
+        if usdt_value > allowed:
+            logger.warning(
+                "Position cap reached for %s: current=%.2f cap=%.2f requested=%.2f",
+                symbol, current, self.config.max_position_usdt, usdt_value,
+            )
+            return False
+        return True
+
+    # ══════════════════════════════════════════════════════════
+    # SAFE EXECUTE (exponential backoff + circuit-aware)
+    # ══════════════════════════════════════════════════════════
+    def safe_execute(
+        self,
+        fn:          Callable,
+        *args,
+        max_retries: int   = 3,
+        base_delay:  float = 1.0,
+        **kwargs,
+    ) -> Any:
+        """Execute fn with exponential backoff; respects circuit state."""
+        last_exc: Optional[Exception] = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                return fn(*args, **kwargs)
+            except RuntimeError as exc:
+                # Circuit is OPEN – abort immediately
+                logger.error("Circuit OPEN – aborting safe_execute: %s", exc)
+                return {"status": "circuit_open", "msg": str(exc)}
+            except Exception as exc:
+                last_exc = exc
+                delay    = base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    "Attempt %d/%d failed: %s – retrying in %.1fs",
+                    attempt, max_retries, exc, delay,
+                )
+                time.sleep(delay)
+
+        logger.error(
+            "All %d attempts exhausted. Last error: %s", max_retries, last_exc
+        )
+        return {"status": "error", "msg": str(last_exc)}
+
+    # ══════════════════════════════════════════════════════════
+    # DIAGNOSTICS
+    # ══════════════════════════════════════════════════════════
+    def health_check(self) -> dict:
+        """Quick sanity check – server time + connectivity."""
+        try:
+            resp = self.api_request("GET", "/v5/market/time", signed=False)
+            time_nano = resp.get("result", {}).get("timeNano")
+            if time_nano:
+                self.clock.sync(int(time_nano) // 1_000_000)
+            return {
+                "status":        "ok",
+                "circuit":       self.circuit.state.value,
+                "circuit_fails": self.circuit.failure_count,
+                "rate_usage":    self.limiter.current_usage,
+                "server_time":   time_nano,
+                "base_url":      self.config.base_url,
+                "tor_enabled":   self.config.use_tor,
+                "testnet":       self.config.testnet,
+                "clock_offset_ms": self.clock._offset_ms,
+                "cache_symbols": list(self._instr_cache.keys()),
+            }
+        except Exception as exc:
+            return {"status": "error", "msg": str(exc)}
+
+
+# ─────────────────────────────────────────────────────────────
+# GLOBAL DISPATCHER INSTANCE
+# ─────────────────────────────────────────────────────────────
+_dispatcher:  Optional[BybitToolDispatcher] = None
+_disp_lock    = threading.Lock()
+
+
+def _get_dispatcher() -> BybitToolDispatcher:
+    """Get or lazily create the singleton dispatcher (thread-safe)."""
+    global _dispatcher
+    if _dispatcher is None:
+        with _disp_lock:
+            if _dispatcher is None:
+                _dispatcher = BybitToolDispatcher(TradingConfig())
+    return _dispatcher
+
+
+# ─────────────────────────────────────────────────────────────
+# TOOL ENTRY POINT
+# ─────────────────────────────────────────────────────────────
+def run(
+    action: Literal[
+        "health_check",
+        "get_server_time",
+        "place_order",
+        "place_conditional_order",
+        "amend_order",
+        "cancel_order",
+        "cancel_all_orders",
+        "get_open_orders",
+        "get_order_history",
+        "get_positions",
+        "get_wallet_balance",
+        "get_account_info",
+        "get_fee_rates",
+        "set_leverage",
+        "set_trading_stop",
+        "get_ticker",
+        "get_tickers_bulk",
+        "get_orderbook",
+        "get_klines",
+        "get_recent_trades",
+        "get_open_interest",
+        "get_liquidations",
+        "get_instruments_info",
+        "get_spread_analysis",
+        "get_technical_analysis",
+        "get_market_momentum",
+        "get_funding_rate",
+        "calculate_sl_tp",
+        "calculate_position_size",
+        "calculate_atr_position_size",
+        "get_pnl_history",
+        "get_pnl_report",
+        "batch_orders",
+        "iceberg_order",
+        "reset_circuit",
+    ],
+    # ── Order fields ──────────────────────────────────────────
+    symbol:         Optional[str]   = None,
+    side:           Optional[Literal["Buy", "Sell"]] = None,
+    qty:            Optional[float] = None,
+    price:          Optional[float] = None,
+    order_type:     Optional[Literal["Limit", "Market", "LimitMaker", "Stop", "StopLimit"]] = None,
+    category:       Optional[Literal["linear", "inverse", "spot", "option"]] = None,
+    order_id:       Optional[str]   = None,
+    stop_loss:      Optional[float] = None,
+    take_profit:    Optional[float] = None,
+    trailing_stop:  Optional[float] = None,
+    reduce_only:    Optional[bool]  = False,
+    time_in_force:  Optional[Literal["GTC", "IOC", "FOK", "PostOnly"]] = None,
+    position_idx:   Optional[int]   = None,
+    client_oid:     Optional[str]   = None,
+    trigger_price:  Optional[float] = None,
+    trigger_by:     Optional[Literal["LastPrice", "IndexPrice", "MarkPrice"]] = None,
+    # ── Leverage & account ────────────────────────────────────
+    leverage:       Optional[int]   = None,
+    buy_leverage:   Optional[int]   = None,
+    sell_leverage:  Optional[int]   = None,
+    account_type:   Optional[str]   = "UNIFIED",
+    # ── Market data ───────────────────────────────────────────
+    limit:          Optional[int]   = 25,
+    interval:       Optional[str]   = "1",
+    interval_time:  Optional[str]   = "5min",
+    depth:          Optional[int]   = 5,
+    symbols:        Optional[List[str]] = None,
+    base_coin:      Optional[str]   = None,
+    status:         Optional[str]   = None,
+    # ── Momentum thresholds ───────────────────────────────────
+    strong_threshold: Optional[float] = 0.20,
+    mild_threshold:   Optional[float] = 0.08,
+    # ── Technical analysis ────────────────────────────────────
+    rsi_period:     Optional[int]   = 14,
+    bb_period:      Optional[int]   = 20,
+    bb_std:         Optional[float] = 2.0,
+    atr_mult:       Optional[float] = 1.5,
+    # ── Risk helpers ──────────────────────────────────────────
+    sl_pct:         Optional[float] = None,
+    tp_pct:         Optional[float] = None,
+    risk_usdt:      Optional[float] = None,
+    sl_price:       Optional[float] = None,
+    # ── Batch / Iceberg ───────────────────────────────────────
+    orders:         Optional[List[Dict[str, Any]]] = None,
+    slices:         Optional[int]   = 5,
+    delay:          Optional[float] = None,
+) -> dict:
+    """
+    Bybit Trading Tool – Execute any supported trading operation.
+
+    Args:
+        action:           Operation to perform (see Literal options above)
+        symbol:           Trading symbol e.g. "BTCUSDT"
+        side:             "Buy" or "Sell"
+        qty:              Order quantity
+        price:            Limit price
+        order_type:       "Limit" | "Market" | "LimitMaker" | "Stop" | "StopLimit"
+        category:         "linear" | "inverse" | "spot" | "option"
+        order_id:         Existing order ID (amend / cancel)
+        stop_loss:        Stop loss price
+        take_profit:      Take profit price
+        trailing_stop:    Trailing stop distance in price units
+        reduce_only:      Reduce-only flag
+        time_in_force:    "GTC" | "IOC" | "FOK" | "PostOnly"
+        position_idx:     0 = one-way, 1 = hedge buy, 2 = hedge sell
+        client_oid:       Client order link ID
+        trigger_price:    Trigger price for conditional orders
+        trigger_by:       "LastPrice" | "IndexPrice" | "MarkPrice"
+        leverage:         Leverage integer
+        buy_leverage:     Independent buy-side leverage
+        sell_leverage:    Independent sell-side leverage
+        account_type:     "UNIFIED" | "CONTRACT" etc.
+        limit:            Result count for list endpoints
+        interval:         Kline interval ("1","5","15","60","D" …)
+        interval_time:    Open interest interval ("5min","15min","1h","4h","1d")
+        depth:            Orderbook depth for spread analysis
+        symbols:          List of symbols for bulk ticker queries
+        base_coin:        Filter instruments by base coin (e.g. "BTC")
+        status:           Filter instruments by status (e.g. "Trading")
+        strong_threshold: Momentum strong-signal cutoff (default 0.20)
+        mild_threshold:   Momentum mild-signal cutoff (default 0.08)
+        rsi_period:       RSI period for technical analysis (default 14)
+        bb_period:        Bollinger Bands period (default 20)
+        bb_std:           Bollinger Bands std deviation multiplier (default 2.0)
+        atr_mult:         ATR multiplier for stop-loss distance (default 1.5)
+        sl_pct:           Stop-loss as decimal fraction of entry
+        tp_pct:           Take-profit as decimal fraction of entry
+        risk_usdt:        Max USDT risk per trade (position sizing)
+        sl_price:         Explicit stop-loss price (for position sizing)
+        orders:           List of order dicts for batch_orders
+        slices:           Number of iceberg slices (3–10)
+        delay:            Seconds between iceberg slices
+
+    Returns:
+        dict: Structured result of the operation
+    """
+    bot = _get_dispatcher()
+
+    try:
+        cat  = Category(category or "linear")
+        tif  = TimeInForce(time_in_force or "GTC")
+        pidx = PositionIdx(position_idx if position_idx is not None else 0)
+        trig = TriggerBy(trigger_by or "LastPrice")
+
+        # ── Health / Diagnostics ──────────────────────────────
+        if action == "health_check":
+            return bot.health_check()
+
+        elif action == "reset_circuit":
+            bot.circuit.reset()
+            return {"status": "ok", "msg": "Circuit breaker reset to CLOSED"}
+
+        # ── Server Time (public) ──────────────────────────────
+        elif action == "get_server_time":
+            return bot.get_server_time()
+
+        # ── Place Order ───────────────────────────────────────
+        elif action == "place_order":
+            if not symbol or not side or qty is None:
+                return {"status": "error", "msg": "symbol, side, and qty are required"}
+            return bot.place_order(
+                symbol        = symbol,
+                side          = OrderSide(side),
+                qty           = qty,
+                price         = price,
+                order_type    = OrderType(order_type or "Limit"),
+                category      = cat,
+                stop_loss     = stop_loss,
+                take_profit   = take_profit,
+                reduce_only   = reduce_only or False,
+                time_in_force = tif,
+                position_idx  = pidx,
+                client_oid    = client_oid,
+                trailing_stop = trailing_stop,
+            )
+
+        # ── Conditional / Stop Entry Order ────────────────────
+        elif action == "place_conditional_order":
+            if not symbol or not side or qty is None or trigger_price is None:
+                return {
+                    "status": "error",
+                    "msg":    "symbol, side, qty, and trigger_price are required",
+                }
+            return bot.place_conditional_order(
+                symbol        = symbol,
+                side          = OrderSide(side),
+                qty           = qty,
+                trigger_price = trigger_price,
+                order_type    = OrderType(order_type or "Market"),
+                price         = price,
+                category      = cat,
+                stop_loss     = stop_loss,
+                take_profit   = take_profit,
+                trigger_by    = trig,
+                time_in_force = tif,
+                position_idx  = pidx,
+                client_oid    = client_oid,
+                reduce_only   = reduce_only or False,
+            )
+
+        # ── Amend Order ───────────────────────────────────────
+        elif action == "amend_order":
+            if not symbol or not order_id:
+                return {"status": "error", "msg": "symbol and order_id are required"}
+            return bot.amend_order(
+                symbol      = symbol,
+                order_id    = order_id,
+                qty         = qty,
+                price       = price,
+                category    = cat,
+                stop_loss   = stop_loss,
+                take_profit = take_profit,
+            )
+
+        # ── Cancel Order ──────────────────────────────────────
+        elif action == "cancel_order":
+            if not symbol or not order_id:
+                return {"status": "error", "msg": "symbol and order_id are required"}
+            return bot.cancel_order(
+                symbol=symbol, order_id=order_id, category=cat
+            )
+
+        # ── Cancel All Orders ─────────────────────────────────
+        elif action == "cancel_all_orders":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return bot.cancel_all_orders(symbol=symbol, category=cat)
+
+        # ── Open Orders ───────────────────────────────────────
+        elif action == "get_open_orders":
+            return {"orders": bot.get_open_orders(symbol=symbol, category=cat, limit=limit or 50)}
+
+        # ── Order History ─────────────────────────────────────
+        elif action == "get_order_history":
+            return {"orders": bot.get_order_history(symbol=symbol, category=cat, limit=limit or 50)}
+
+        # ── Positions ─────────────────────────────────────────
+        elif action == "get_positions":
+            return {"positions": bot.get_positions(category=cat, symbol=symbol)}
+
+        # ── Wallet Balance ────────────────────────────────────
+        elif action == "get_wallet_balance":
+            return bot.get_wallet_balance(account_type=account_type or "UNIFIED")
+
+        # ── Account Info ──────────────────────────────────────
+        elif action == "get_account_info":
+            return bot.get_account_info()
+
+        # ── Fee Rates ─────────────────────────────────────────
+        elif action == "get_fee_rates":
+            return {"fee_rates": bot.get_fee_rates(symbol=symbol, category=cat)}
+
+        # ── Set Leverage ──────────────────────────────────────
+        elif action == "set_leverage":
+            if not symbol or leverage is None:
+                return {"status": "error", "msg": "symbol and leverage are required"}
+            return bot.set_leverage(
+                symbol        = symbol,
+                leverage      = leverage,
+                category      = cat,
+                buy_leverage  = buy_leverage,
+                sell_leverage = sell_leverage,
+            )
+
+        # ── Set Trading Stop ──────────────────────────────────
+        elif action == "set_trading_stop":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return bot.set_trading_stop(
+                symbol        = symbol,
+                stop_loss     = stop_loss,
+                take_profit   = take_profit,
+                trailing_stop = trailing_stop,
+                category      = cat,
+                position_idx  = pidx,
+            )
+
+        # ── Ticker ────────────────────────────────────────────
+        elif action == "get_ticker":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return bot.get_ticker(symbol=symbol, category=cat)
+
+        # ── Bulk Tickers ──────────────────────────────────────
+        elif action == "get_tickers_bulk":
+            if not symbols:
+                return {"status": "error", "msg": "symbols list is required"}
+            return {"tickers": bot.get_tickers_bulk(symbols=symbols, category=cat)}
+
+        # ── Orderbook ─────────────────────────────────────────
+        elif action == "get_orderbook":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return bot.get_orderbook(symbol=symbol, limit=limit or 25, category=cat)
+
+        # ── Klines ────────────────────────────────────────────
+        elif action == "get_klines":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return {
+                "klines": bot.get_klines(
+                    symbol=symbol, interval=interval or "1",
+                    limit=limit or 200, category=cat,
+                )
+            }
+
+        # ── Recent Trades ─────────────────────────────────────
+        elif action == "get_recent_trades":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return {
+                "trades": bot.get_recent_trades(
+                    symbol=symbol, limit=limit or 500, category=cat
+                )
+            }
+
+        # ── Open Interest ─────────────────────────────────────
+        elif action == "get_open_interest":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return {
+                "open_interest": bot.get_open_interest(
+                    symbol=symbol, interval_time=interval_time or "5min",
+                    category=cat, limit=limit or 50,
+                )
+            }
+
+        # ── Liquidations ──────────────────────────────────────
+        elif action == "get_liquidations":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return {
+                "liquidations": bot.get_liquidations(
+                    symbol=symbol, category=cat, limit=limit or 200
+                )
+            }
+
+        # ── Instruments Info ──────────────────────────────────
+        elif action == "get_instruments_info":
+            return {
+                "instruments": bot.get_instruments_info(
+                    category  = cat,
+                    symbol    = symbol,
+                    base_coin = base_coin,
+                    status    = status,
+                    limit     = limit or 100,
+                )
+            }
+
+        # ── Spread Analysis ───────────────────────────────────
+        elif action == "get_spread_analysis":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return bot.get_spread_analysis(
+                symbol=symbol, depth=depth or 5, category=cat
+            )
+
+        # ── Technical Analysis ────────────────────────────────
+        elif action == "get_technical_analysis":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return bot.get_technical_analysis(
+                symbol     = symbol,
+                interval   = interval or "15",
+                rsi_period = rsi_period or 14,
+                bb_period  = bb_period  or 20,
+                bb_std     = bb_std     or 2.0,
+                limit      = limit      or 100,
+                category   = cat,
+            )
+
+        # ── Market Momentum ───────────────────────────────────
+        elif action == "get_market_momentum":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return bot.get_market_momentum(
+                symbol           = symbol,
+                category         = cat,
+                strong_threshold = strong_threshold or 0.20,
+                mild_threshold   = mild_threshold   or 0.08,
+            ).to_dict()
+
+        # ── Funding Rate ──────────────────────────────────────
+        elif action == "get_funding_rate":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return bot.get_funding_rate(symbol=symbol, category=cat)
+
+        # ── Calculate SL / TP ─────────────────────────────────
+        elif action == "calculate_sl_tp":
+            if not side or price is None:
+                return {"status": "error", "msg": "side and price are required"}
+            sl, tp = bot.calculate_sl_tp(
+                entry_price = price,
+                side        = OrderSide(side),
+                sl_pct      = sl_pct,
+                tp_pct      = tp_pct,
+            )
+            return {
+                "symbol":      symbol,
+                "entry_price": price,
+                "side":        side,
+                "stop_loss":   sl,
+                "take_profit": tp,
+                "sl_pct":      sl_pct or bot.config.default_stop_loss,
+                "tp_pct":      tp_pct or bot.config.default_take_profit,
+            }
+
+        # ── Position Sizing ───────────────────────────────────
+        elif action == "calculate_position_size":
+            if not symbol or price is None or sl_price is None or risk_usdt is None:
+                return {
+                    "status": "error",
+                    "msg":    "symbol, price, sl_price, and risk_usdt are required",
+                }
+            qty_out = bot.calculate_position_size(
+                symbol      = symbol,
+                entry_price = price,
+                sl_price    = sl_price,
+                risk_usdt   = risk_usdt,
+                category    = cat,
+            )
+            return {
+                "symbol":      symbol,
+                "entry_price": price,
+                "sl_price":    sl_price,
+                "risk_usdt":   risk_usdt,
+                "quantity":    qty_out,
+            }
+
+        # ── ATR Position Sizing ───────────────────────────────
+        elif action == "calculate_atr_position_size":
+            if not symbol or risk_usdt is None:
+                return {"status": "error", "msg": "symbol and risk_usdt are required"}
+            return bot.calculate_atr_position_size(
+                symbol    = symbol,
+                risk_usdt = risk_usdt,
+                atr_mult  = atr_mult or 1.5,
+                interval  = interval or "15",
+                category  = cat,
+            )
+
+        # ── PnL History ───────────────────────────────────────
+        elif action == "get_pnl_history":
+            return {
+                "pnl_history": bot.get_pnl_history(
+                    symbol=symbol, category=cat, limit=limit or 100
+                )
+            }
+
+        # ── PnL Report ────────────────────────────────────────
+        elif action == "get_pnl_report":
+            if not symbol:
+                return {"status": "error", "msg": "symbol is required"}
+            return bot.get_pnl_report(
+                symbol=symbol, category=cat, limit=limit or 100
+            ).to_dict()
+
+        # ── Batch Orders ──────────────────────────────────────
+        elif action == "batch_orders":
+            if not orders:
+                return {"status": "error", "msg": "orders list is required"}
+            return bot.safe_execute(bot.execute_scalp_batch, orders)
+
+        # ── Iceberg Order ─────────────────────────────────────
+        elif action == "iceberg_order":
+            if not symbol or not side or qty is None or price is None:
+                return {
+                    "status": "error",
+                    "msg":    "symbol, side, qty, and price are required",
+                }
+            results = bot.place_iceberg_order(
+                symbol      = symbol,
+                side        = OrderSide(side),
+                total_qty   = qty,
+                price       = price,
+                slices      = slices or 5,
+                category    = cat,
+                stop_loss   = stop_loss,
+                take_profit = take_profit,
+                delay       = delay,
+            )
+            return {"status": "ok", "iceberg_results": results}
+
+        else:
+            return {"status": "error", "msg": f"Unknown action: {action}"}
+
+    except Exception as exc:
+        logger.exception("run() unhandled exception for action=%s", action)
+        return {"status": "error", "msg": str(exc)}
+
+
+# ─────────────────────────────────────────────────────────────
+# CLI ENTRY POINT
+# ─────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Bybit Trading Tool – CLI Interface",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python bybit-realm.py --action health_check
+  python bybit-realm.py --action get_server_time
+  python bybit-realm.py --action get_ticker --symbol BTCUSDT
+  python bybit-realm.py --action get_klines --symbol BTCUSDT --interval 15 --limit 200
+  python bybit-realm.py --action get_technical_analysis --symbol BTCUSDT --interval 15
+  python bybit-realm.py --action get_spread_analysis --symbol BTCUSDT --depth 10
+  python bybit-realm.py --action get_market_momentum --symbol BTCUSDT
+  python bybit-realm.py --action get_tickers_bulk --symbols BTCUSDT,ETHUSDT,SOLUSDT
+  python bybit-realm.py --action get_instruments_info --base-coin BTC
+  python bybit-realm.py --action calculate_sl_tp --side Buy --price 65000
+  python bybit-realm.py --action calculate_atr_position_size --symbol BTCUSDT --risk-usdt 50
+  python bybit-realm.py --action get_positions
+  python bybit-realm.py --action get_wallet_balance
+  python bybit-realm.py --action get_account_info
+  python bybit-realm.py --action get_fee_rates --symbol BTCUSDT
+  python bybit-realm.py --action get_pnl_report --symbol BTCUSDT
+  python bybit-realm.py --action place_conditional_order --symbol BTCUSDT --side Buy --qty 0.01 --trigger-price 70000
+        """,
+    )
+
+    # ── Core ──────────────────────────────────────────────────
+    parser.add_argument("--action",          required=True,        help="Action to perform")
+    parser.add_argument("--symbol",                                help="Trading symbol")
+    parser.add_argument("--side",                                  help="Buy or Sell")
+    parser.add_argument("--qty",             type=float,           help="Order quantity")
+    parser.add_argument("--price",           type=float,           help="Order price")
+    parser.add_argument("--order-type",                            help="Limit | Market | LimitMaker | Stop | StopLimit")
+    parser.add_argument("--category",        default="linear",     help="linear | inverse | spot | option")
+    parser.add_argument("--order-id",                              help="Order ID")
+    parser.add_argument("--stop-loss",       type=float,           help="Stop loss price")
+    parser.add_argument("--take-profit",     type=float,           help="Take profit price")
+    parser.add_argument("--trailing-stop",   type=float,           help="Trailing stop distance")
+    parser.add_argument("--reduce-only",     action="store_true",  help="Reduce only flag")
+    parser.add_argument("--time-in-force",   default="GTC",        help="GTC | IOC | FOK | PostOnly")
+    parser.add_argument("--position-idx",    type=int, default=0,  help="0=one-way 1=hedge-buy 2=hedge-sell")
+    parser.add_argument("--client-oid",                            help="Client order link ID")
+    parser.add_argument("--trigger-price",   type=float,           help="Trigger price for conditional orders")
+    parser.add_argument("--trigger-by",      default="LastPrice",  help="LastPrice | IndexPrice | MarkPrice")
+
+    # ── Account ───────────────────────────────────────────────
+    parser.add_argument("--leverage",        type=int,             help="Leverage")
+    parser.add_argument("--buy-leverage",    type=int,             help="Buy-side leverage")
+    parser.add_argument("--sell-leverage",   type=int,             help="Sell-side leverage")
+    parser.add_argument("--account-type",    default="UNIFIED",    help="Account type")
+
+    # ── Market data ───────────────────────────────────────────
+    parser.add_argument("--limit",           type=int, default=25, help="Result limit")
+    parser.add_argument("--interval",        default="1",          help="Kline interval")
+    parser.add_argument("--interval-time",   default="5min",       help="Open-interest interval")
+    parser.add_argument("--depth",           type=int, default=5,  help="Orderbook depth for spread analysis")
+    parser.add_argument("--symbols",                               help="Comma-separated symbols for bulk tickers")
+    parser.add_argument("--base-coin",                             help="Base coin filter for instruments")
+    parser.add_argument("--status",                                help="Status filter for instruments")
+
+    # ── Momentum ──────────────────────────────────────────────
+    parser.add_argument("--strong-threshold", type=float, default=0.20)
+    parser.add_argument("--mild-threshold",   type=float, default=0.08)
+
+    # ── Technical analysis ────────────────────────────────────
+    parser.add_argument("--rsi-period",      type=int,   default=14,  help="RSI period")
+    parser.add_argument("--bb-period",       type=int,   default=20,  help="Bollinger period")
+    parser.add_argument("--bb-std",          type=float, default=2.0, help="Bollinger std multiplier")
+    parser.add_argument("--atr-mult",        type=float, default=1.5, help="ATR multiplier for position sizing")
+
+    # ── Risk ──────────────────────────────────────────────────
+    parser.add_argument("--sl-pct",     type=float, help="Stop-loss %% as decimal")
+    parser.add_argument("--tp-pct",     type=float, help="Take-profit %% as decimal")
+    parser.add_argument("--risk-usdt",  type=float, help="Max USDT risk per trade")
+    parser.add_argument("--sl-price",   type=float, help="Stop-loss price (for sizing)")
+
+    # ── Iceberg ───────────────────────────────────────────────
+    parser.add_argument("--slices",     type=int,   default=5,   help="Iceberg slices")
+    parser.add_argument("--delay",      type=float,              help="Delay between slices (s)")
+
+    # ── Output ────────────────────────────────────────────────
+    parser.add_argument("--output",                              help="Output file path")
+    parser.add_argument("--orders-file",                         help="JSON file with batch orders list")
+
+    args = parser.parse_args()
+
+    # ── Load batch orders from file if provided ───────────────
+    orders_data = None
+    if args.orders_file:
+        with open(args.orders_file) as f:
+            orders_data = json.load(f)
+
+    # ── Parse comma-separated symbols list ────────────────────
+    symbols_list = None
+    if getattr(args, "symbols", None):
+        symbols_list = [s.strip() for s in args.symbols.split(",") if s.strip()]
+
+    # ── Normalise hyphenated keys → underscore ────────────────
+    result = run(
+        action            = args.action,
+        symbol            = args.symbol,
+        side              = args.side,
+        qty               = args.qty,
+        price             = args.price,
+        order_type        = getattr(args, "order_type", None),
+        category          = args.category,
+        order_id          = getattr(args, "order_id", None),
+        stop_loss         = getattr(args, "stop_loss", None),
+        take_profit       = getattr(args, "take_profit", None),
+        trailing_stop     = getattr(args, "trailing_stop", None),
+        reduce_only       = getattr(args, "reduce_only", False),
+        time_in_force     = getattr(args, "time_in_force", "GTC"),
+        position_idx      = getattr(args, "position_idx", 0),
+        client_oid        = getattr(args, "client_oid", None),
+        trigger_price     = getattr(args, "trigger_price", None),
+        trigger_by        = getattr(args, "trigger_by", "LastPrice"),
+        leverage          = args.leverage,
+        buy_leverage      = getattr(args, "buy_leverage", None),
+        sell_leverage     = getattr(args, "sell_leverage", None),
+        account_type      = getattr(args, "account_type", "UNIFIED"),
+        limit             = args.limit,
+        interval          = args.interval,
+        interval_time     = getattr(args, "interval_time", "5min"),
+        depth             = getattr(args, "depth", 5),
+        symbols           = symbols_list,
+        base_coin         = getattr(args, "base_coin", None),
+        status            = getattr(args, "status", None),
+        strong_threshold  = getattr(args, "strong_threshold", 0.20),
+        mild_threshold    = getattr(args, "mild_threshold",   0.08),
+        rsi_period        = getattr(args, "rsi_period",       14),
+        bb_period         = getattr(args, "bb_period",        20),
+        bb_std            = getattr(args, "bb_std",           2.0),
+        atr_mult          = getattr(args, "atr_mult",         1.5),
+        sl_pct            = getattr(args, "sl_pct",   None),
+        tp_pct            = getattr(args, "tp_pct",   None),
+        risk_usdt         = getattr(args, "risk_usdt", None),
+        sl_price          = getattr(args, "sl_price",  None),
+        orders            = orders_data,
+        slices            = args.slices,
+        delay             = args.delay,
+    )
+
+    # ── Output handling ───────────────────────────────────────
+    output_path = args.output or os.environ.get("LLM_OUTPUT")
+    if output_path:
+        with open(output_path, "w") as f:
+            json.dump(result, f, indent=2)
+        logger.info("Result written to %s", output_path)
+    else:
+        print(json.dumps(result, indent=2))

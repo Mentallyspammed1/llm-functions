@@ -1,0 +1,86 @@
+[
+  {
+    "name": "memory_store",
+    "description": "Store conversation context in memory",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "Content to store"
+        },
+        "tags": {
+          "type": "string",
+          "description": "Tags for categorization"
+        },
+        "importance": {
+          "type": "string",
+          "description": "Importance level (1-10)"
+        }
+      },
+      "required": [
+        "content"
+      ]
+    },
+    "agent": true
+  },
+  {
+    "name": "memory_retrieve",
+    "description": "Retrieve relevant memories for current context",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query"
+        },
+        "limit": {
+          "type": "string",
+          "description": "Maximum results (default: 5)"
+        },
+        "session": {
+          "type": "string",
+          "description": "Session to search in"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "agent": true
+  },
+  {
+    "name": "memory_summarize",
+    "description": "Summarize recent conversation memories",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "type": "string",
+          "description": "Session to summarize"
+        },
+        "hours": {
+          "type": "string",
+          "description": "Hours to look back (default: 24)"
+        }
+      },
+      "required": []
+    },
+    "agent": true
+  },
+  {
+    "name": "memory_cleanup",
+    "description": "Clean up old memories based on retention policy",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "string",
+          "description": "Days to retain (default: 30)"
+        }
+      },
+      "required": []
+    },
+    "agent": true
+  }
+]

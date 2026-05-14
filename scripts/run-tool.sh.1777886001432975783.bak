@@ -1,0 +1,562 @@
+#!/usr/bin/env bash
+
+# Enhanced run-tool.sh with relaxed parameters, robust error handling, and debugging
+# Usage: ./run-tool.sh [tool-name] [tool-data] [options]
+# Options:
+#   -h, --help              Show this help message
+#   -v, --verbose           Enable verbose output
+#   -d, --debug             Enable debug mode
+#   --dry-run               Show what would be executed without running
+#   --list-tools            List available tools
+#   --validate-only         Validate tool and data without execution
+
+# --- Strict Mode ---
+# set -o errexit (or -e): Exit immediately if a command exits with a non-zero status.
+# set -o nounset (or -u): Treat unset variables as an error and exit immediately.
+# set -o pipefail: The return value of a pipeline is the status of the last command to exit with a non-zero status,
+# or zero if no command exited with a non-zero status.
+set -euo pipefail
+# -----------------
+
+# --- OS Detection ---
+# Define OS variable if it's not already set. This is crucial for cross-platform compatibility
+# and for scripts that might rely on the OS variable (e.g., checking for Windows-specific logic).
+if [[ -z "$OS" ]]; then
+    case "$(uname -s)" in
+        CYGWIN*|MINGW*|MSYS*)
+            OS="Windows_NT" # Map Cygwin/MinGW/MSYS to a Windows-like identifier
+            ;;
+        Linux)
+            OS="Linux"
+            ;;
+        Darwin)
+            OS="Darwin" # macOS
+            ;;
+        *)
+            OS="Unknown" # Fallback for other systems
+            ;;
+    esac
+    # Export OS so it's available to child processes if they need it.
+    export OS
+    if [[ "${DEBUG:-0}" -eq 1 ]]; then
+        echo "debug: Detected OS is '$OS'" >&2
+    fi
+fi
+# --------------------
+
+# Global variables for script state and options
+VERBOSE=0
+DEBUG=0
+DRY_RUN=0
+LIST_TOOLS=0
+VALIDATE_ONLY=0
+# Default values for tool name and data if not provided
+DEFAULT_TOOL="help"
+DEFAULT_DATA='{"message": "No data provided"}'
+
+# Global flags for output handling, needed by handle_error for cleanup
+is_temp_llm_output=0
+original_llm_output=""
+
+main() {
+    # Determine the root directory of the script
+    local root_dir
+    root_dir="$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd)"
+    # Define the script's own name for parsing logic
+    local self_name=run-tool.sh
+    
+    # Parse command line options (like -v, -d, --dry-run)
+    parse_options "$@"
+    
+    # Handle special commands that exit immediately
+    if [[ "$LIST_TOOLS" -eq 1 ]]; then
+        list_available_tools
+        return 0
+    fi
+    
+    # Parse positional arguments (tool name, tool data)
+    parse_argv "$@"
+    # Set up environment variables and directories
+    setup_env
+    # Validate the existence and executability of the tool, and JSON data
+    validate_tool
+    
+    # If only validation was requested, exit after checks
+    if [[ "$VALIDATE_ONLY" -eq 1 ]]; then
+        echo "✓ Tool '$tool_name' is valid"
+        echo "✓ JSON data is valid"
+        return 0
+    fi
+    
+    # Proceed with tool execution
+    run
+}
+
+# Parses command-line options and sets corresponding global flags.
+parse_options() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -v|--verbose)
+                VERBOSE=1
+                shift
+                ;;
+            -d|--debug)
+                DEBUG=1
+                VERBOSE=1 # Debug mode implies verbose output
+                shift
+                ;;
+            --dry-run)
+                DRY_RUN=1
+                shift
+                ;;
+            --list-tools)
+                LIST_TOOLS=1
+                shift
+                ;;
+            --validate-only)
+                VALIDATE_ONLY=1
+                shift
+                ;;
+            -*) # Handle unknown options
+                echo "warning: unknown option '$1'" >&2
+                shift
+                ;;
+            *) # Stop parsing options when a non-option argument is encountered
+                break
+                ;;
+        esac
+    done
+}
+
+# Displays the help message and usage information.
+show_help() {
+    cat << EOF
+Enhanced run-tool.sh - Flexible tool execution with robust error handling
+
+USAGE:
+    $0 [OPTIONS] [tool-name] [tool-data]
+
+OPTIONS:
+    -h, --help          Show this help message
+    -v, --verbose       Enable verbose output
+    -d, --debug         Enable debug mode
+    --dry-run           Show what would be executed without running
+    --list-tools        List available tools
+    --validate-only     Validate tool and data without execution
+
+EXAMPLES:
+    $0 my-tool '{"param": "value"}'
+    $0 --verbose my-tool '{"param": "value"}'
+    $0 --dry-run my-tool '{"param": "value"}'
+    $0 --list-tools
+    $0 --validate-only my-tool '{"param": "value"}'
+
+ENVIRONMENT VARIABLES:
+    LLM_OUTPUT          Output file path (default: stdout)
+    LLM_DUMP_RESULTS    Regex pattern for debug output
+    LLM_ROOT_DIR        Root directory (auto-detected)
+    LLM_TOOL_NAME       Tool name (auto-set)
+    LLM_TOOL_CACHE_DIR  Tool cache directory (auto-set)
+
+EOF
+}
+
+# Parses the remaining positional arguments to determine tool name and data.
+parse_argv() {
+    # Store original arguments to re-apply them if needed (though not used here currently)
+    local args=("$@")
+    
+    # Reset positional parameters to be used directly (after options are consumed)
+    set -- "${args[@]}"
+    
+    # Determine tool_name and tool_data based on how the script was invoked.
+    # If called directly as run-tool.sh, tool_name is $1 and tool_data is $2.
+    # If called by sourcing or as a binary name, logic adjusts.
+    if [[ "$0" == *"$self_name" ]]; then
+        tool_name="$1"
+        tool_data="$2"
+    else
+        # This branch might handle cases where the script is sourced or named differently.
+        tool_name="$(basename "$0")" # Infer tool name from script name
+        tool_data="$1" # Assume first argument is data
+    fi
+    
+    # Remove .sh extension from tool_name if it exists
+    if [[ "$tool_name" == *.sh ]]; then
+        tool_name="${tool_name:0:$((${#tool_name}-3))}"
+    fi
+    
+    # Apply intelligent defaults if tool_name or tool_data are missing.
+    if [[ -z "$tool_name" ]]; then
+        if [[ "${DEBUG:-0}" -eq 1 ]]; then
+            echo "debug: no tool name provided, using default '$DEFAULT_TOOL'" >&2
+        fi
+        tool_name="$DEFAULT_TOOL"
+    fi
+    
+    if [[ -z "$tool_data" ]]; then
+        if [[ "${DEBUG:-0}" -eq 1 ]]; then
+            echo "debug: no JSON data provided, using default" >&2
+        fi
+        tool_data="$DEFAULT_DATA"
+    fi
+    
+    # Log parsed arguments if verbose mode is enabled
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        echo "info: tool_name='$tool_name'" >&2
+        echo "info: tool_data='$tool_data'" >&2
+    fi
+}
+
+# Sets up necessary environment variables and directories for tool execution.
+setup_env() {
+    if [[ "${DEBUG:-0}" -eq 1 ]]; then
+        echo "debug: setting up environment" >&2
+    fi
+    
+    # Load environment variables from a .env file if it exists.
+    load_env "$root_dir/.env" 
+    
+    # Export common LLM environment variables for tools.
+    export LLM_ROOT_DIR="$root_dir"
+    export LLM_TOOL_NAME="$tool_name"
+    export LLM_TOOL_CACHE_DIR="$LLM_ROOT_DIR/cache/$tool_name"
+    
+    # Create the tool-specific cache directory if it doesn't exist.
+    mkdir -p "$LLM_TOOL_CACHE_DIR"
+    
+    # Log environment variables if verbose mode is enabled.
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        echo "info: LLM_ROOT_DIR=$LLM_ROOT_DIR" >&2
+        echo "info: LLM_TOOL_NAME=$LLM_TOOL_NAME" >&2
+        echo "info: LLM_TOOL_CACHE_DIR=$LLM_TOOL_CACHE_DIR" >&2
+    fi
+}
+
+# Loads environment variables from a specified file.
+# It avoids overwriting existing variables.
+load_env() {
+    local env_file="$1"
+    if [[ -f "$env_file" ]]; then
+        if [[ "${DEBUG:-0}" -eq 1 ]]; then
+            echo "debug: loading environment from $env_file" >&2
+        fi
+        
+        # Read the file line by line. IFS='=' handles key=value pairs.
+        # The `cat "$env_file"; echo ""` idiom ensures that trailing newlines are processed.
+        while IFS='=' read -r key value; do
+            # Skip comments and empty lines
+            if [[ "$key" == $'#'* ]] || [[ -z "$key" ]]; then
+                continue
+            fi
+            # Only export the variable if it's not already set in the current environment.
+            # This prevents overriding existing variables from the parent shell.
+            if [[ -z "${!key+x}" ]]; then
+                export "$key=$value"
+                if [[ "${DEBUG:-0}" -eq 1 ]]; then
+                    echo "debug: exported $key=$value" >&2
+                fi
+            fi
+        done < <(cat "$env_file"; echo "")
+    fi
+}
+
+# Validates the tool name and its associated data before execution.
+validate_tool() {
+    # Sanitize tool_name to prevent path traversal and other invalid characters.
+    # This check ensures tool names are simple and do not contain directory separators.
+    if [[ "$tool_name" =~ [/.] ]]; then
+        echo "error: invalid tool name '$tool_name'. Tool names cannot contain '/' or '..'." >&2
+        return 1
+    fi
+
+    # Construct the expected path to the tool script.
+    local tool_path="$root_dir/tools/$tool_name.sh"
+    
+    # Check if the tool file exists.
+    if [[ ! -f "$tool_path" ]]; then
+        echo "error: tool '$tool_name' not found at $tool_path" >&2
+        echo "info: available tools:" >&2
+        # List available tools to help the user find the correct name.
+        list_available_tools >&2
+        return 1
+    fi
+    
+    # Check if the tool is executable and attempt to fix permissions if not.
+    if [[ ! -x "$tool_path" ]]; then
+        echo "warning: tool '$tool_name' is not executable, attempting to fix permissions" >&2
+        chmod +x "$tool_path"
+    fi
+    
+    # Validate the JSON data provided for the tool.
+    if ! validate_json "$tool_data"; then
+        echo "error: invalid JSON data provided" >&2
+        return 1
+    fi
+    
+    # Log successful validation if verbose mode is enabled.
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        echo "info: tool validation passed" >&2
+    fi
+}
+
+# Validates if a given string is valid JSON using jq.
+validate_json() {
+    local data="$1"
+    # jq 'empty' succeeds if the input is valid JSON, and fails otherwise.
+    # Output is suppressed to keep the script clean.
+    echo "$data" | jq empty >/dev/null 2>&1
+}
+
+# Lists all available tools in the 'tools' directory, along with their descriptions.
+list_available_tools() {
+    echo "Available tools:"
+    if [[ -d "$root_dir/tools" ]]; then
+        # Find all .sh files in the tools directory.
+        find "$root_dir/tools" -name "*.sh" -type f | while read -r tool; do
+            local name="$(basename "$tool" .sh)"
+            local desc=""
+            
+            # Try to extract description from tools that use "# @describe" comments.
+            # Uses a more robust regex to handle leading/trailing whitespace.
+            if grep -q "# @describe" "$tool"; then
+                desc=$(grep "# @describe" "$tool" | sed -E 's/^[[:space:]]*# @describe[[:space:]]+(.*)/\1/' | head -1)
+            fi
+            
+            # Print tool name and its description, formatted for alignment.
+            printf "  %-20s %s\n" "$name" "$desc"
+        done | sort # Sort the list of tools alphabetically.
+    else
+        echo "  No tools directory found"
+    fi
+}
+
+# Executes the tool with parsed arguments and handles output/errors.
+run() {
+    if [[ "${DEBUG:-0}" -eq 1 ]]; then
+        echo "debug: starting tool execution" >&2
+    fi
+    
+    # --- Cross-Platform Path Handling ---
+    # This block is specifically for Windows environments (like Cygwin, Git Bash).
+    if [[ "$OS" == "Windows_NT" ]]; then
+        # Ignore carriage-return line endings, common in Windows files.
+        set -o igncr
+        # Use cygpath to convert POSIX-style paths to Windows-style paths.
+        tool_path="$(cygpath -w "$tool_path")"
+        # Basic escaping for Windows cmd compatibility if needed. Escaping backslashes.
+        tool_data="$(echo "$tool_data" | sed 's/\\/\\\\/g')" 
+        if [[ "$DEBUG" -eq 1 ]]; then
+            echo "debug: converted paths for Windows" >&2
+        fi
+    fi
+
+    # --- JSON to Arguments Conversion (jq script) ---
+    local jq_script
+    jq_script="$(cat <<-'EOF'
+# Function to safely escape a string for shell usage.
+def escape_shell_word:
+  tostring
+  # Escape single quotes by closing the current quote, adding an escaped single quote, and reopening.
+  | gsub("'"; "'"'"'")
+  # Escape newlines by appending them as a literal newline within single quotes.
+  | gsub("\n"; "'$'\\n''")
+  # Wrap the final result in single quotes to ensure it's treated as a single argument.
+  | "'\(.)'";
+
+# Function to convert JSON object keys/values into shell command arguments.
+def to_args:
+    to_entries | .[] | 
+    # Convert underscore_keys to dash-case options (e.g., 'user_name' -> '--user-name').
+    (.key | split("_") | join("-")) as $key |
+    if .value | type == "array" then
+        # If the value is an array, repeat the option for each element.
+        .value | .[] | "--\($key) \(. | escape_shell_word)"
+    elif .value | type == "boolean" then
+        # If the value is a boolean, include the option only if it's true.
+        if .value then "--\($key)" else "" end
+    else
+        # For simple key-value pairs, format as '--key value'.
+        "--\($key) \(.value | escape_shell_word)"
+    end;
+# Join all generated arguments into a single string, separated by spaces.
+[ to_args ] | join(" ")
+EOF
+)"
+    
+    # --- Robust JSON Parsing with Recovery ---
+    local args="" # Initialize args to an empty string.
+    # Attempt to parse JSON and convert to arguments using jq.
+    if args="$(echo "$tool_data" | jq -r "$jq_script" 2>/dev/null)"; then
+        if [[ "$DEBUG" -eq 1 ]]; then
+            echo "debug: JSON parsed successfully" >&2
+        fi
+    else
+        # If parsing fails, attempt common JSON recovery strategies.
+        echo "warning: invalid JSON data, attempting recovery..." >&2
+        
+        local fixed_data="$tool_data"
+        
+        # Fix trailing commas before closing braces/brackets (e.g., {"key": "value",})
+        fixed_data="$(echo "$fixed_data" | sed -E 's/,\s*([\}\]])/\1/g')"
+        
+        # Fix missing quotes around keys (heuristic for simple cases like '{ key:' or ', key:')
+        # This regex adds quotes around keys that are not already quoted.
+        fixed_data="$(echo "$fixed_data" | sed -E 's/([{,])\s*([^":\s]+)\s*:\s*/\1"\2": /g')"
+        
+        # Try parsing again with the potentially fixed data.
+        if args="$(echo "$fixed_data" | jq -r "$jq_script" 2>/dev/null)"; then
+            echo "info: JSON recovery successful" >&2
+        else
+            # If recovery fails, report an error and log original/fixed data for debugging.
+            echo "error: could not parse JSON data even after recovery attempts" >&2
+            echo "debug: original data: $tool_data" >&2
+            echo "debug: attempted fix: $fixed_data" >&2
+            args="" # Ensure args is empty if recovery completely fails.
+        fi
+    fi
+    
+    # --- Output Handling Setup ---
+    # Store original LLM_OUTPUT and use a temp file if LLM_OUTPUT is unset or 'stdout'.
+    # This allows for captured output to be displayed or processed later.
+    original_llm_output="$LLM_OUTPUT" # Store original value for restoration.
+    if [[ -z "$LLM_OUTPUT" ]] || [[ "$LLM_OUTPUT" == "stdout" ]]; then
+        is_temp_llm_output=1
+        LLM_OUTPUT="$(mktemp)" # Create a temporary file for output.
+        if [[ "$DEBUG" -eq 1 ]]; then
+            echo "debug: created temporary output file: $LLM_OUTPUT" >&2
+        fi
+    fi
+    export LLM_OUTPUT # Ensure LLM_OUTPUT is exported so child processes (tools) can use it.
+    
+    # --- Tool Execution ---
+    # Construct the full command string to be executed.
+    local cmd="'$tool_path' $args"
+    local exit_code=0
+    local tool_stderr_output_file # Variable to hold the path to the temp file for stderr.
+    
+    # Handle --dry-run option: print command but don't execute.
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "dry-run: would execute: $cmd" >&2
+        # If LLM_OUTPUT was a temp file, clean it up as it won't be used.
+        if [[ "$is_temp_llm_output" -eq 1 ]]; then
+            rm -f "$LLM_OUTPUT"
+            LLM_OUTPUT="$original_llm_output" # Restore original variable value.
+        fi
+        return 0
+    fi
+    
+    # Log the command being executed if verbose mode is enabled.
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        echo "info: executing: $cmd" >&2
+    fi
+    
+    # Create a temporary file to capture the tool's standard error.
+    tool_stderr_output_file=$(mktemp)
+    
+    # Execute the tool command using eval.
+    # The tool's stdout will go to the script's stdout (and thus to LLM_OUTPUT if it's a file).
+    # The tool's stderr is redirected to the temporary file for separate handling.
+    if eval "$cmd" 2>"$tool_stderr_output_file"; then
+        # Tool executed successfully.
+        if [[ "$VERBOSE" -eq 1 ]]; then
+            echo "info: tool executed successfully" >&2
+        fi
+    else
+        # Tool execution failed. Capture the exit code.
+        exit_code=$?
+        echo "warning: tool execution failed with exit code $exit_code" >&2
+        # Log stderr if in debug or verbose mode for troubleshooting.
+        if [[ "$DEBUG" -eq 1 ]]; then
+            echo "debug: command was: $cmd" >&2
+            echo "debug: tool stderr:" >&2
+            cat "$tool_stderr_output_file" >&2 # Print stderr in debug mode.
+        elif [[ "$VERBOSE" -eq 1 ]]; then
+            echo "info: tool stderr:" >&2
+            cat "$tool_stderr_output_file" >&2 # Print stderr in verbose mode.
+        fi
+    fi
+    
+    # Clean up the temporary file used for stderr capture.
+    rm -f "$tool_stderr_output_file"
+    
+    # --- Final Output Handling ---
+    # If a temporary LLM_OUTPUT file was used, cat its content and then clean it up.
+    if [[ "$is_temp_llm_output" -eq 1 ]]; then
+        if [[ -f "$LLM_OUTPUT" ]]; then
+            cat "$LLM_OUTPUT"
+            rm -f "$LLM_OUTPUT" # Clean up the temporary file.
+        fi
+        LLM_OUTPUT="$original_llm_output" # Restore original variable value.
+    else
+        # If LLM_OUTPUT was a pre-defined file, use dump_result for conditional logging.
+        dump_result "$tool_name"
+    fi
+    
+    return $exit_code # Return the exit code of the executed tool.
+}
+
+# Dumps the content of LLM_OUTPUT if conditions are met (based on LLM_DUMP_RESULTS).
+dump_result() {
+    local tool_name="$1"
+    
+    # Conditions for dumping:
+    # - LLM_OUTPUT must not be '/dev/stdout' (already printed).
+    # - LLM_DUMP_RESULTS environment variable must be set.
+    # - Output must be directed to an interactive terminal (TTY).
+    if [[ "$LLM_OUTPUT" == "/dev/stdout" ]] || [[ -z "$LLM_DUMP_RESULTS" ]] || [[ ! -t 1 ]]; then
+        return # Exit if conditions are not met.
+    fi
+    
+    # Check if the tool_name matches the LLM_DUMP_RESULTS regex pattern.
+    if grep -q -w -E "$LLM_DUMP_RESULTS" <<<"$tool_name"; then
+        # Print the content of LLM_OUTPUT with formatting to indicate a dumped result.
+        cat <<EOF
+$(echo -e "\e[2m")----------------------
+$(cat "$LLM_OUTPUT")
+----------------------$(echo -e "\e[0m")
+EOF
+    fi
+}
+
+# Enhanced error handling function called by the ERR trap.
+handle_error() {
+    # Capture the exit code of the failed command (default to last command's exit code if not passed).
+    local exit_code=${1:-$?}.
+    # $LINENO contains the line number where the ERR trap was triggered.
+    local line_number=$LINENO
+    
+    echo "error: script failed at line $line_number with exit code $exit_code" >&2
+    
+    # If debug mode is enabled, print the call stack for detailed debugging.
+    if [[ "$DEBUG" -eq 1 ]]; then
+        echo "debug: call stack:" >&2
+        local i=0
+        # Loop through caller frames until an error is returned (no more frames).
+        while caller $i &>/dev/null; do
+            caller $i >&2 # Print function name, file, and line for each frame.
+            ((i++))
+        done
+    fi
+    
+    # Attempt to clean up any temporary LLM_OUTPUT file if it was created.
+    # This ensures temporary files are removed even if the script exits due to an error.
+    if [[ "$is_temp_llm_output" -eq 1 ]] && [[ -n "$LLM_OUTPUT" ]] && [[ -f "$LLM_OUTPUT" ]]; then
+        rm -f "$LLM_OUTPUT"
+    fi
+
+    exit $exit_code # Exit the script with the captured exit code of the failed command.
+}
+
+# --- Error Trapping ---
+# Set up the ERR trap: execute handle_error function whenever a command exits with a non-zero status.
+# $LINENO is passed to handle_error to indicate the line number of the failure.
+trap 'handle_error $LINENO' ERR
+
+# --- Main Execution Entry Point ---
+# Call the main function, passing all command-line arguments received by the script.
+main "$@"

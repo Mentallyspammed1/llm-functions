@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# @describe Execute arbitrary shell command and return full output.
+# @option --command! <STRING> Command to run
+# @option --timeout <DURATION> Duration for the command (e.g. 60s, 1m, 2h)
+# @option --connect-timeout <DURATION> Connection timeout for curl commands (e.g. 10s, default: 10s)
+# @option --max-time <DURATION> Max transfer time for curl commands (e.g. 30s, default: matches --timeout)
+# @env LLM_OUTPUT=/dev/stdout The output path
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NEON COLOR PALETTE - Extended Glow Effects
+# ═══════════════════════════════════════════════════════════════════════════════
+NEON_PINK='\033[38;5;198m'
+NEON_CYAN='\033[38;5;51m'
+NEON_GREEN='\033[38;5;46m'
+NEON_ORANGE='\033[38;5;202m'
+NEON_PURPLE='\033[38;5;129m'
+NEON_YELLOW='\033[38;5;226m'
+NEON_RED='\033[38;5;196m'
+NEON_BLUE='\033[38;5;33m'
+NEON_MAGENTA='\033[38;5;201m'
+NEON_LIME='\033[38;5;82m'
+
+# Glow variants (bold + color)
+GLOW_PINK="${NEON_PINK}\033[1m"
+GLOW_CYAN="${NEON_CYAN}\033[1m"
+GLOW_GREEN="${NEON_GREEN}\033[1m"
+GLOW_RED="${NEON_RED}\033[1m"
+GLOW_YELLOW="${NEON_YELLOW}\033[1m"
+GLOW_PURPLE="${NEON_PURPLE}\033[1m"
+
+RESET='\033[0m'
+BOLD='\033[1m'
+
+# Box drawing characters
+BOX_TL='╭' BOX_TR='╮' BOX_BL='╰' BOX_BR='╯'
+BOX_V='│' BOX_H='─' BOX_LT='├' BOX_RT='┤'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPER FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# 1. Improved Cleanup Trap (signal-safe and checks existence)
+cleanup() { 
+    [[ -f "${tmp_exit_file:-}" ]] && rm -f "$tmp_exit_file"
+    [[ -f "${tmp_output_file:-}" ]] && rm -f "$tmp_output_file"
+}
+trap cleanup EXIT INT TERM
+
+# 2. Optimized Duration Parsing (handles decimals and case-insensitive suffixes)
+duration_to_seconds() {
+    local raw="${1:-0}"
+    [[ "$raw" =~ ^([0-9.]+)([sSmMhHdD]?)$ ]] || { echo "0"; return 0; }
+    local n="${BASH_REMATCH[1]}" s="${BASH_REMATCH[2],,}"
+    case "$s" in
+        m) echo "${n%.*} * 60" | bc 2>/dev/null || echo $(( ${n%.*} * 60 )) ;;
+        h) echo "${n%.*} * 3600" | bc 2>/dev/null || echo $(( ${n%.*} * 3600 )) ;;
+        d) echo "${n%.*} * 86400" | bc 2>/dev/null || echo $(( ${n%.*} * 86400 )) ;;
+        *) echo "${n%.*}" ;;
+    esac
+}
+
+# 3. Intelligent Injection (avoiding duplicate flags)
+inject_curl_timeouts() {
+    local cmd="$1" ct="$2" mt="$3"
+    if [[ "$cmd" == *"curl"* ]]; then
+        local flags=""
+        [[ "$cmd" != *"--connect-timeout"* ]] && flags+=" --connect-timeout $ct"
+        [[ "$cmd" != *"--max-time"* ]]        && flags+=" --max-time $mt"
+        [[ "$cmd" != *"--retry"* ]]           && flags+=" --retry 3 --retry-delay 2"
+        [[ "$cmd" != *"--silent"* ]]          && flags+=" --silent"
+        [[ "$cmd" != *"--fail"* ]]            && flags+=" --fail"
+        echo "${cmd/curl/curl$flags}"
+    elif [[ "$cmd" == *"wget"* ]] && [[ "$cmd" != *"--timeout"* ]]; then
+        echo "${cmd/wget/wget --timeout=$mt --no-verbose}"
+    else
+        echo "$cmd"
+    fi
+}
+
+# 4. Native millisecond fallback for high-performance timing
+now_ms() {
+    local n; if n=$(date +%s%3N 2>/dev/null) && [[ "$n" =~ ^[0-9]+$ ]]; then echo "$n"; 
+    else echo $(( $(date +%s) * 1000 )); fi
+}
+
+# 5. Get terminal width
+get_width() {
+    tput cols 2>/dev/null || echo 60
+}
+
+# 6. Detect command type for icon
+get_cmd_icon() {
+    local cmd="$1"
+    if [[ "$cmd" =~ ^(git|hg|svn) ]]; then echo "📦"
+    elif [[ "$cmd" =~ ^(npm|yarn|pnpm|apt|apt-get|yum|dnf|pacman|brew) ]]; then echo "📦"
+    elif [[ "$cmd" =~ ^(curl|wget|http) ]]; then echo "🌐"
+    elif [[ "$cmd" =~ ^(python|node|ruby|perl|php) ]]; then echo "🐍"
+    elif [[ "$cmd" =~ ^(docker|kubectl|helm) ]]; then echo "🐳"
+    elif [[ "$cmd" =~ ^(ls|cd|pwd|mkdir|rm|cp|mv|touch|cat|grep|find|awk|sed) ]]; then echo "📁"
+    elif [[ "$cmd" =~ ^(ffmpeg|convert|ffprobe) ]]; then echo "🎬"
+    elif [[ "$cmd" =~ ^(ffuf|gobuster|nmap|nikto) ]]; then echo "🔍"
+    elif [[ "$cmd" =~ ^(ssh|scp|rsync|sftp) ]]; then echo "🔐"
+    elif [[ "$cmd" =~ ^(systemctl|service|journalctl) ]]; then echo "⚙️"
+    else echo "⚡"
+    fi
+}
+
+# 7. Format timestamp
+get_timestamp() {
+    date '+%H:%M:%S'
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN FUNCTION
+# ═══════════════════════════════════════════════════════════════════════════════
+main() {
+    local start_ms; start_ms="$(now_ms)"
+    local cmd="${argc_command:?}"
+    local out="${LLM_OUTPUT:-/dev/stdout}"
+    local width; width=$(get_width)
+    
+    # Secure temporary file generation
+    tmp_exit_file="$(mktemp -t cmd_exit.XXXXXX)"
+    tmp_output_file="$(mktemp -t cmd_out.XXXXXX)"
+
+    # Resolve timeouts
+    local ct_s; ct_s="$(duration_to_seconds "${argc_connect_timeout:-10s}")"
+    local mt_s; mt_s="$(duration_to_seconds "${argc_max_time:-${argc_timeout:-30s}}")"
+    cmd="$(inject_curl_timeouts "$cmd" "$ct_s" "$mt_s")"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TTY-aware Header and UI - NEON STYLE
+    # ═══════════════════════════════════════════════════════════════════════════
+    if [[ -t 1 ]]; then
+        local icon; icon=$(get_cmd_icon "$cmd")
+        local timestamp; timestamp=$(get_timestamp)
+        
+        # Top border with glow
+        printf "${NEON_PURPLE}${BOX_TL}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_TR}${RESET}\n"
+        
+        # Header line
+        printf "${NEON_PINK} ${icon} ${GLOW_CYAN}[EXEC]${RESET} ${NEON_YELLOW}›${RESET} "
+        printf "${BOLD}%s${RESET}\n" "$cmd"
+        
+        # Info bar
+        printf "${NEON_PURPLE}${BOX_V}${RESET} ${NEON_CYAN}Time:${RESET} ${NEON_YELLOW}%s${RESET}  " "$timestamp"
+        printf "${NEON_CYAN}Timeout:${RESET} ${NEON_ORANGE}%s${RESET}\n" "${argc_timeout:-30s}"
+        
+        # Separator
+        printf "${NEON_PURPLE}${BOX_LT}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_RT}${RESET}\n"
+    fi
+
+    set +e
+    # Robust Timeout execution
+    if [[ -n "${argc_timeout:-}" ]] && command -v timeout >/dev/null; then
+        timeout --preserve-status "$(duration_to_seconds "$argc_timeout")" bash -c "$cmd" >"$tmp_output_file" 2>&1
+        echo $? >"$tmp_exit_file"
+    else
+        bash -c "$cmd" >"$tmp_output_file" 2>&1
+        echo $? >"$tmp_exit_file"
+    fi
+    local exit_code; exit_code=$(<"$tmp_exit_file")
+
+    # Guaranteed Feedback Loop (Always returns output)
+    if [[ -s "$tmp_output_file" ]]; then
+        if [[ -t 1 ]]; then
+            printf "${NEON_PURPLE}${BOX_V}${RESET} "
+        fi
+        cat "$tmp_output_file" | tee -a "$out"
+    else
+        if [[ -t 1 ]]; then
+            printf "${NEON_PURPLE}${BOX_V}${RESET} "
+        fi
+        printf "${NEON_YELLOW}Command finished with exit code %d (no output).${RESET}\n" "$exit_code" | tee -a "$out"
+    fi
+    set -e
+
+    # Performance Metric & Semantic Footer - NEON STYLE
+    local dur; dur=$(( $(now_ms) - start_ms ))
+    if [[ -t 1 ]]; then
+        # Separator
+        printf "${NEON_PURPLE}${BOX_LT}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_RT}${RESET}\n"
+        
+        # Status line
+        [[ "$exit_code" -eq 0 ]] && status_color="$NEON_GREEN" || status_color="$NEON_RED"
+        [[ "$exit_code" -eq 0 ]] && symbol="✓" || symbol="✗"
+        [[ "$exit_code" -eq 0 ]] && status_text="SUCCESS" || status_text="FAILED"
+        
+        printf "${NEON_PURPLE}${BOX_V}${RESET} ${status_color}%s${RESET} " "$symbol"
+        printf "${status_color}%s${RESET} " "$status_text"
+        printf "${NEON_CYAN}Duration:${RESET} ${NEON_LIME}%dms${RESET}  " "$dur"
+        printf "${NEON_CYAN}Exit:${RESET} ${status_color}%d${RESET}\n" "$exit_code"
+        
+        # Bottom border
+        printf "${NEON_PURPLE}${BOX_BL}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_H}${BOX_BR}${RESET}\n"
+    fi
+
+    return "$exit_code"
+}
+
+eval "$(argc --argc-eval "$0" "$@")"

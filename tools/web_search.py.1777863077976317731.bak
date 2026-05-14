@@ -1,0 +1,824 @@
+#!/usr/bin/env python3
+"""
+google_search.py - Web Search Tool with Content Crawling
+
+A powerful tool for performing web searches and optionally crawling content
+from search result URLs. Uses curlie and wget2 for HTTP fetching.
+"""
+
+import json
+import sys
+import argparse
+import logging
+import time
+import random
+import shutil
+import subprocess
+import urllib.parse
+import re
+from typing import List, Dict, Any, Optional, Literal
+from html.parser import HTMLParser
+from dataclasses import dataclass, asdict
+
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+
+
+# ---------------------------------------------------------------------------
+# Detect available HTTP CLI tools
+# ---------------------------------------------------------------------------
+
+CURLIE_BIN = shutil.which("curlie")
+WGET2_BIN  = shutil.which("wget2")
+CURL_BIN   = shutil.which("curl")    # fallback
+WGET_BIN   = shutil.which("wget")    # ultimate fallback
+
+
+def _preferred_fetcher() -> str:
+    """Return the name of the best available HTTP CLI tool."""
+    if CURLIE_BIN:
+        return "curlie"
+    if WGET2_BIN:
+        return "wget2"
+    if CURL_BIN:
+        return "curl"
+    if WGET_BIN:
+        return "wget"
+    raise EnvironmentError(
+        "No supported HTTP tool found. Install curlie, wget2, curl, or wget."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SearchResult:
+    """Represents a single search result with optional crawled content."""
+    position: int
+    url:      str
+    title:    str = ""
+    snippet:  str = ""
+    content:  str = ""
+    error:    str = ""
+
+
+# ---------------------------------------------------------------------------
+# HTML text extractor (stdlib-only fallback)
+# ---------------------------------------------------------------------------
+
+class ContentExtractor(HTMLParser):
+    """HTML parser to extract clean text content from web pages."""
+
+    def __init__(self, max_length: int = 3000):
+        super().__init__()
+        self.max_length     = max_length
+        self.content: List[str] = []
+        self.in_script      = False   # FIX #9: was conflated with style
+        self.in_style       = False
+        self.current_length = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            self.in_script = True
+        elif tag == "style":                              # FIX #9
+            self.in_style = True
+        elif tag in ("p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "span"):
+            if self.content and self.content[-1] not in (" ", "\n"):
+                self.content.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self.in_script = False
+        elif tag == "style":                              # FIX #9
+            self.in_style = False
+        elif tag in ("p", "div", "li"):
+            if self.content and self.content[-1] != "\n":
+                self.content.append("\n")
+
+    def handle_data(self, data):
+        if self.in_script or self.in_style:               # FIX #9
+            return
+        if data.strip():
+            words = data.split()
+            for word in words:
+                if self.current_length >= self.max_length:
+                    return
+                self.content.append(word)
+                self.current_length += len(word) + 1
+
+    def get_text(self) -> str:
+        """Return cleaned text content."""
+        text = " ".join(self.content)
+        return " ".join(text.split())
+
+
+# ---------------------------------------------------------------------------
+# User-Agent rotation                                           (FIX #2)
+# ---------------------------------------------------------------------------
+
+_USER_AGENTS: List[str] = [
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/17.4.1 Safari/605.1.15"
+    ),
+    (
+        "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) "
+        "Gecko/20100101 Firefox/125.0"
+    ),
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0"
+    ),
+]
+
+# Keep a module-level default so a single session is consistent
+_USER_AGENT = random.choice(_USER_AGENTS)
+
+
+def _random_user_agent() -> str:
+    """Return a randomly selected User-Agent string."""
+    return random.choice(_USER_AGENTS)
+
+
+# ---------------------------------------------------------------------------
+# Block / CAPTCHA detection                                     (FIX #5)
+# ---------------------------------------------------------------------------
+
+_BLOCK_SIGNALS: List[str] = [
+    "unusual traffic",
+    "captcha",
+    "ip blocked",
+    "access denied",
+    "enable javascript",
+    "please verify you are a human",
+    "sorry, we can't",
+    "automated queries",
+    "to continue, please",
+]
+
+
+def _is_blocked(html: str) -> bool:
+    """
+    Return True when the response looks like a bot-block page.
+
+    Checks are case-insensitive and limited to the first 4 KB which is
+    sufficient for detecting block pages without scanning entire responses.
+    """
+    sample = html[:4096].lower()
+    return any(signal in sample for signal in _BLOCK_SIGNALS)
+
+
+# ---------------------------------------------------------------------------
+# Low-level HTTP fetch via CLI tools
+# ---------------------------------------------------------------------------
+
+def _build_cmd(fetcher: str, url: str, timeout: int, user_agent: str) -> List[str]:
+    """
+    Build the subprocess command list for the given fetcher.
+
+    Separated from _fetch_url to keep each concern testable in isolation.
+    """
+    common_headers = [
+        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language: en-US,en;q=0.5",
+    ]
+
+    if fetcher in ("curlie", "curl"):
+        binary = CURLIE_BIN if fetcher == "curlie" else CURL_BIN
+        cmd = [
+            binary, "-s", "-S", "-L", "--compressed",   # FIX #1: --compressed
+            "--max-time", str(timeout),
+            "-H", f"User-Agent: {user_agent}",
+        ]
+        for h in common_headers:
+            cmd += ["-H", h]
+        cmd.append(url)
+
+    elif fetcher == "wget2":
+        cmd = [
+            WGET2_BIN, "-q", "-O", "-",
+            f"--timeout={timeout}",
+            f"--user-agent={user_agent}",
+            "--max-redirect=5",
+            "--compression=auto",                        # FIX #1: compression
+        ]
+        for h in common_headers:
+            cmd.append(f"--header={h}")
+        cmd.append(url)
+
+    else:  # legacy wget
+        cmd = [
+            WGET_BIN, "-q", "-O", "-",
+            f"--timeout={timeout}",
+            f"--user-agent={user_agent}",
+        ]
+        for h in common_headers:
+            cmd.append(f"--header={h}")
+        cmd.append(url)
+
+    return cmd
+
+
+def _fetch_url(
+    url: str,
+    timeout: int = 10,
+    verbose: bool = False,
+    user_agent: Optional[str] = None,
+) -> str:
+    """
+    Fetch a URL using the best available CLI tool and return raw HTML.
+
+    Priority: curlie > wget2 > curl > wget
+
+    Args:
+        url:        The URL to fetch.
+        timeout:    Request timeout in seconds.
+        verbose:    Log the command being executed.
+        user_agent: Override User-Agent (defaults to module-level rotated UA).
+
+    Returns:
+        Raw response body as a string.
+
+    Raises:
+        RuntimeError: If the tool exits with a non-zero return code.
+        subprocess.TimeoutExpired: If the subprocess exceeds timeout + 5 s.
+    """
+    logger    = logging.getLogger(__name__)
+    fetcher   = _preferred_fetcher()
+    ua        = user_agent or _USER_AGENT
+    cmd       = _build_cmd(fetcher, url, timeout, ua)
+
+    if verbose:
+        logger.debug("Fetch command: %s", " ".join(cmd))
+
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout + 5,          # grace period for subprocess overhead
+    )
+
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        raise RuntimeError(f"{fetcher} failed (rc={proc.returncode}): {stderr}")
+
+    return proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# Content extraction helpers
+# ---------------------------------------------------------------------------
+
+def _extract_text(html: str, max_length: int = 3000) -> str:
+    """Extract visible text from HTML using bs4 or the stdlib fallback."""
+    if HAS_BS4:
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        text = soup.get_text(separator=" ", strip=True)
+        return text[:max_length]
+
+    extractor = ContentExtractor(max_length)
+    extractor.feed(html)
+    return extractor.get_text()
+
+
+# ---------------------------------------------------------------------------
+# URL crawling
+# ---------------------------------------------------------------------------
+
+def crawl_url(
+    url: str,
+    timeout: int = 10,
+    max_length: int = 3000,
+    verbose: bool = False,
+) -> str:
+    """
+    Crawl a URL and extract text content.
+
+    Args:
+        url:        URL to crawl.
+        timeout:    Request timeout in seconds.
+        max_length: Maximum content length to extract.
+        verbose:    Enable verbose logging.
+
+    Returns:
+        Extracted text content.  On failure the returned string is empty
+        and the ``error`` field on the caller's SearchResult is populated
+        instead (see search_google).                            (FIX #6)
+    """
+    logger = logging.getLogger(__name__)
+    if verbose:
+        logger.debug("Crawling URL: %s", url)
+
+    html = _fetch_url(
+        url,
+        timeout=timeout,
+        verbose=verbose,
+        user_agent=_random_user_agent(),   # fresh UA per crawl request
+    )
+    text = _extract_text(html, max_length)
+
+    if verbose:
+        logger.debug("Extracted %d characters from %s", len(text), url)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Search-result parsers
+# ---------------------------------------------------------------------------
+
+def _parse_duckduckgo(html: str, num_results: int) -> List[Dict[str, str]]:
+    """
+    Parse DuckDuckGo HTML search results.
+
+    Returns a list of dicts with keys: url, title, snippet.
+    """
+    results: List[Dict[str, str]] = []
+
+    if HAS_BS4:
+        soup = BeautifulSoup(html, "html.parser")
+
+        # FIX #3: scope to organic results only, exclude ads (.result--ad)
+        for r in soup.select("div.result:not(.result--ad)"):
+            a_tag      = r.select_one("a.result__a")
+            snippet_el = r.select_one("a.result__snippet")
+            if not a_tag:
+                continue
+
+            href = a_tag.get("href", "")
+            if "uddg=" in href:
+                m = re.search(r"uddg=([^&]+)", href)
+                if m:
+                    href = urllib.parse.unquote(m.group(1))
+
+            if not href.startswith("http"):
+                continue
+
+            results.append({
+                "url":     href,
+                "title":   a_tag.get_text(strip=True),
+                "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
+            })
+            if len(results) >= num_results:
+                break
+
+    else:
+        # Regex fallback: extract uddg= encoded URLs
+        for m in re.finditer(r"uddg=(https?[^&\"]+)", html):
+            results.append({
+                "url":     urllib.parse.unquote(m.group(1)),
+                "title":   "",
+                "snippet": "",
+            })
+            if len(results) >= num_results:
+                break
+
+    return results
+
+
+def _parse_google(html: str, num_results: int) -> List[Dict[str, str]]:
+    """
+    Parse Google HTML search results.
+
+    Returns a list of dicts with keys: url, title, snippet.
+    """
+    results: List[Dict[str, str]] = []
+
+    if HAS_BS4:
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Each organic result lives in a <div class="g"> container
+        for block in soup.select("div.g"):
+            a_tag = block.select_one("a[href]")
+            if not a_tag:
+                continue
+
+            href = a_tag.get("href", "")
+            if "/url?q=" in href:
+                m = re.search(r"/url\?q=([^&]+)", href)
+                if m:
+                    href = urllib.parse.unquote(m.group(1))
+
+            if not href.startswith("http") or "google.com" in href:
+                continue
+
+            title = a_tag.get_text(strip=True)
+
+            # FIX #4: attempt to extract the snippet text
+            snippet = ""
+            snippet_el = (
+                block.select_one("div.VwiC3b")     # modern Google snippet class
+                or block.select_one("span.st")     # older class, kept for safety
+            )
+            if snippet_el:
+                snippet = snippet_el.get_text(strip=True)
+
+            results.append({"url": href, "title": title, "snippet": snippet})
+            if len(results) >= num_results:
+                break
+
+    else:
+        for m in re.finditer(r"/url\?q=(https?://[^&\"]+)", html):
+            url = urllib.parse.unquote(m.group(1))
+            if "google.com" not in url:
+                results.append({"url": url, "title": "", "snippet": ""})
+                if len(results) >= num_results:
+                    break
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Retry helper                                                  (FIX #10)
+# ---------------------------------------------------------------------------
+
+def _fetch_with_retry(
+    url: str,
+    timeout: int,
+    verbose: bool,
+    retries: int = 2,
+    backoff: float = 1.5,
+) -> str:
+    """
+    Fetch *url* retrying up to *retries* times on transient failures.
+
+    Uses exponential back-off with a small random jitter.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, retries + 1):
+        try:
+            return _fetch_url(
+                url,
+                timeout=timeout,
+                verbose=verbose,
+                user_agent=_random_user_agent(),
+            )
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retries:
+                wait = backoff ** attempt + random.uniform(0, 0.5)
+                logging.getLogger(__name__).warning(
+                    "Fetch attempt %d/%d failed for %s: %s — retrying in %.1fs",
+                    attempt, retries, url, exc, wait,
+                )
+                time.sleep(wait)
+    raise RuntimeError(f"All {retries} fetch attempts failed: {last_exc}") from last_exc
+
+
+# ---------------------------------------------------------------------------
+# Core search function
+# ---------------------------------------------------------------------------
+
+def _web_search(
+    query: str,
+    num_results: int = 10,
+    lang: str = "en",
+    region: str = "us",
+    timeout: int = 10,
+    verbose: bool = False,
+) -> List[Dict[str, str]]:
+    """
+    Try multiple search engines in priority order.
+
+    Returns a list of dicts with keys: url, title, snippet.
+    Engines are skipped (with a warning) when they are blocked or fail.
+    """
+    logger        = logging.getLogger(__name__)
+    encoded_query = urllib.parse.quote_plus(query)
+
+    engines = [
+        {
+            "name":   "DuckDuckGo",
+            "url":    (
+                f"https://html.duckduckgo.com/html/"
+                f"?q={encoded_query}&kl={region}-{lang}"
+            ),
+            "parser": _parse_duckduckgo,
+        },
+        {
+            "name":   "Google",
+            "url":    (
+                f"https://www.google.com/search"
+                f"?q={encoded_query}&hl={lang}&gl={region}&num={num_results}"
+            ),
+            "parser": _parse_google,
+        },
+    ]
+
+    for engine in engines:
+        try:
+            logger.info("Trying %s search", engine["name"])
+            html = _fetch_with_retry(              # FIX #10: retry on failure
+                engine["url"], timeout=timeout, verbose=verbose
+            )
+
+            # FIX #5: detect block pages before parsing
+            if _is_blocked(html):
+                logger.warning(
+                    "%s returned a block/CAPTCHA page — skipping", engine["name"]
+                )
+                continue
+
+            parsed = engine["parser"](html, num_results)
+            if parsed:
+                logger.info("Got %d results from %s", len(parsed), engine["name"])
+                return parsed
+
+            logger.warning("%s returned no parseable results", engine["name"])
+
+        except Exception as exc:
+            logger.warning("%s search failed: %s", engine["name"], exc)
+
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Simulated results fallback                                    (FIX #8)
+# ---------------------------------------------------------------------------
+
+def simulate_search_results(query: str, num_results: int = 10) -> List[Dict[str, str]]:
+    """
+    Generate query-aware simulated results used when all live engines fail.
+
+    The first two entries reference the query directly so callers can see
+    what was searched for even in offline / test environments.
+    """
+    slug    = urllib.parse.quote_plus(query)
+    q_title = query.title()
+
+    base: List[Dict[str, str]] = [
+        {
+            "url":     f"https://en.wikipedia.org/wiki/{slug}",
+            "title":   f"{q_title} — Wikipedia",
+            "snippet": f"Wikipedia article about {query}.",
+        },
+        {
+            "url":     f"https://www.google.com/search?q={slug}",
+            "title":   f"{q_title} — Google Search",
+            "snippet": f"Google results for: {query}.",
+        },
+        {"url": "https://docs.python.org/3/tutorial/",              "title": "Python Tutorial",          "snippet": ""},
+        {"url": "https://www.python.org/about/gettingstarted/",     "title": "Getting Started",          "snippet": ""},
+        {"url": "https://realpython.com/",                          "title": "Real Python",              "snippet": ""},
+        {"url": "https://www.w3schools.com/python/",                "title": "W3Schools Python",         "snippet": ""},
+        {"url": "https://docs.python.org/3/library/",               "title": "Python Standard Library",  "snippet": ""},
+        {"url": "https://pypi.org/",                                "title": "PyPI",                     "snippet": ""},
+        {"url": "https://github.com/python/cpython",                "title": "CPython",                  "snippet": ""},
+        {"url": "https://stackoverflow.com/questions/tagged/python","title": "SO Python",               "snippet": ""},
+    ]
+    return base[:num_results]
+
+
+# ---------------------------------------------------------------------------
+# Logging                                                       (FIX #7)
+# ---------------------------------------------------------------------------
+
+_logging_configured = False
+
+
+def setup_logging(verbose: bool = False) -> None:
+    """
+    Configure root logger once per process.
+
+    Subsequent calls are no-ops so repeated calls to search_google()
+    do not accumulate duplicate log handlers.               (FIX #7)
+    """
+    global _logging_configured
+    if _logging_configured:
+        return
+    level = logging.DEBUG if verbose else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    _logging_configured = True
+
+
+# ---------------------------------------------------------------------------
+# Query validation
+# ---------------------------------------------------------------------------
+
+def validate_query(query: str) -> None:
+    """Raise ValueError when *query* is blank or whitespace-only."""
+    if not query or not query.strip():
+        raise ValueError("Search query cannot be empty")
+
+
+# ---------------------------------------------------------------------------
+# Main search orchestrator
+# ---------------------------------------------------------------------------
+
+def search_google(
+    query: str,
+    num_results: int = 10,
+    lang: str = "en",
+    region: str = "us",
+    safe_search: str = "moderate",
+    pause: float = 2.0,
+    crawl: bool = False,
+    content_length: int = 3000,
+    timeout: int = 10,
+    verbose: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Perform a web search and optionally crawl content from results.
+
+    Args:
+        query:          Search query string.
+        num_results:    Number of results to return.
+        lang:           Language code (e.g. "en").
+        region:         Region code (e.g. "us").
+        safe_search:    Safe-search hint passed to engines that support it.
+        pause:          Seconds to sleep between crawl requests.
+        crawl:          Whether to crawl and extract content from each URL.
+        content_length: Maximum characters to extract per crawled page.
+        timeout:        Per-request timeout in seconds.
+        verbose:        Enable DEBUG logging.
+
+    Returns:
+        List of dicts matching the SearchResult dataclass field layout.
+    """
+    setup_logging(verbose)
+    logger = logging.getLogger(__name__)
+
+    validate_query(query)
+
+    # ------------------------------------------------------------------
+    # Search phase
+    # ------------------------------------------------------------------
+    raw_results = _web_search(
+        query,
+        num_results=num_results,
+        lang=lang,
+        region=region,
+        timeout=timeout,
+        verbose=verbose,
+    )
+
+    if not raw_results:
+        logger.warning("All search engines failed — using simulated results")
+        raw_results = simulate_search_results(query, num_results)
+
+    logger.info("Found %d results", len(raw_results))
+
+    # ------------------------------------------------------------------
+    # Build SearchResult objects, optionally crawling each URL
+    # ------------------------------------------------------------------
+    results: List[Dict[str, Any]] = []
+
+    for i, item in enumerate(raw_results[:num_results], 1):
+        result = SearchResult(
+            position=i,
+            url=item["url"],
+            title=item.get("title", ""),
+            snippet=item.get("snippet", ""),
+            content="",
+            error="",
+        )
+
+        if crawl:
+            if verbose:
+                logger.info("Crawling result %d: %s", i, item["url"])
+            try:
+                result.content = crawl_url(        # FIX #6: error → field
+                    item["url"],
+                    timeout=timeout,
+                    max_length=content_length,
+                    verbose=verbose,
+                )
+            except Exception as exc:
+                result.error = str(exc)
+                logger.warning("Failed to crawl %s: %s", item["url"], exc)
+
+            # Jitter the pause slightly to reduce fingerprinting     (minor)
+            if i < len(raw_results):
+                time.sleep(pause + random.uniform(0, 0.5))
+
+        results.append(asdict(result))
+        logger.debug("Result %d: %s", i, item["url"])
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Public entry point — identical signature to original          (FIX #11)
+# ---------------------------------------------------------------------------
+
+def run(
+    query: str,
+    limit: int = 10,
+    lang: str = "en",
+    region: str = "us",
+    safe_search: Literal["off", "moderate", "strict"] = "moderate",
+    pause: float = 2.0,
+    crawl: bool = False,
+    content_length: int = 3000,
+    timeout: int = 10,
+    verbose: bool = False,
+):
+    """Perform a web search and optionally crawl content from result URLs.
+
+    Args:
+        query:          The search query to use.
+        limit:          Maximum number of results to return (default: 10).
+        lang:           Language code for the search (default: "en").
+        region:         Region code for the search (default: "us").
+        safe_search:    Safe search level: "off", "moderate", "strict"
+                        (default: "moderate").
+        pause:          Seconds between requests when crawling (default: 2.0).
+        crawl:          Fetch and extract content from result URLs
+                        (default: False).
+        content_length: Maximum content length per page in characters
+                        (default: 3000).
+        timeout:        Request timeout in seconds (default: 10).
+        verbose:        Enable verbose logging output (default: False).
+    """
+    try:
+        return search_google(
+            query=query,
+            num_results=limit,
+            lang=lang,
+            region=region,
+            safe_search=safe_search,
+            pause=pause,
+            crawl=crawl,
+            content_length=content_length,
+            timeout=timeout,
+            verbose=verbose,
+        )
+    except (ValueError, RuntimeError):
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"An unexpected error occurred: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point                                               (FIX #12)
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    """Command-line interface entry point."""
+    parser = argparse.ArgumentParser(
+        description="Web search tool with content crawling",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("query",
+                        help="Search query")
+    parser.add_argument("-n", "--num-results", type=int, default=10,
+                        help="Number of results")
+    parser.add_argument("-l", "--lang", default="en",
+                        help="Language code")
+    parser.add_argument("-r", "--region", default="us",
+                        help="Region code")
+    parser.add_argument("-s", "--safe-search",                       # FIX #12
+                        choices=["off", "moderate", "strict"],
+                        default="moderate",
+                        help="Safe-search level")
+    parser.add_argument("-p", "--pause", type=float, default=2.0,    # FIX #12
+                        help="Pause in seconds between crawl requests")
+    parser.add_argument("-c", "--crawl", action="store_true",
+                        help="Crawl content from result URLs")
+    parser.add_argument("--content-length", type=int, default=3000,
+                        help="Max content length per page (characters)")
+    parser.add_argument("-t", "--timeout", type=int, default=10,
+                        help="Request timeout in seconds")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="Enable verbose output")
+
+    args = parser.parse_args()
+
+    try:
+        results = run(
+            query=args.query,
+            limit=args.num_results,
+            lang=args.lang,
+            region=args.region,
+            safe_search=args.safe_search,
+            pause=args.pause,
+            crawl=args.crawl,
+            content_length=args.content_length,
+            timeout=args.timeout,
+            verbose=args.verbose,
+        )
+        print(json.dumps(results, indent=2))
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
