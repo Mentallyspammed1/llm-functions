@@ -353,6 +353,10 @@ class TradingConfig:
             return ["https://api-testnet.bybit.com"]
         return [
             "https://api.bybit.com",
+            "https://api.bytick.com",
+            "https://api.bybit.nl",
+            "https://api.bybit.tr",
+            "https://api.bybit.kz",
         ]
 
     def validate(self) -> None:
@@ -8294,6 +8298,123 @@ class BybitToolDispatcher:
 
     # ══════════════════════════════════════════════════════════
     # DIAGNOSTICS
+
+    # ─────────────────────────────────────────────────────────
+    # MISSING V5 ENDPOINTS
+    # ─────────────────────────────────────────────────────────
+    def batch_place_orders(self, orders: list, category: Category = Category.LINEAR) -> dict:
+        """Place up to 20 orders in a single batch request."""
+        return self.api_request("POST", "/v5/order/create-batch", json_data={
+            "category": category.value,
+            "request": orders,
+        })
+
+    def set_tpsl_mode(self, symbol: str, tp_sl_mode: str = "Full",
+                      category: Category = Category.LINEAR) -> dict:
+        """Set TP/SL mode: 'Full' (entire position) or 'Partial'."""
+        return self.api_request("POST", "/v5/position/set-tpsl-mode", json_data={
+            "category": category.value, "symbol": symbol, "tpSlMode": tp_sl_mode,
+        })
+
+    def add_reduce_margin(self, symbol: str, margin: str, category: Category = Category.LINEAR) -> dict:
+        """Add or reduce margin for isolated position. Positive=add, negative=reduce."""
+        return self.api_request("POST", "/v5/position/add-margin", json_data={
+            "category": category.value, "symbol": symbol, "margin": margin,
+        })
+
+    def set_auto_add_margin(self, symbol: str, auto_add: bool = True,
+                            category: Category = Category.LINEAR) -> dict:
+        """Toggle auto-add-margin for isolated margin positions."""
+        return self.api_request("POST", "/v5/position/set-auto-add-margin", json_data={
+            "category": category.value, "symbol": symbol,
+            "autoAddMargin": 1 if auto_add else 0,
+        })
+
+    def get_executions(self, symbol: str = None, category: Category = Category.LINEAR,
+                       limit: int = 50, start_time: int = None, end_time: int = None) -> list:
+        """Get execution records (fills)."""
+        params = {"category": category.value, "limit": str(limit)}
+        if symbol:
+            params["symbol"] = symbol
+        if start_time:
+            params["startTime"] = str(start_time)
+        if end_time:
+            params["endTime"] = str(end_time)
+        resp = self.api_request("GET", "/v5/execution/list", params=params)
+        return resp.get("result", {}).get("list", [])
+
+    def confirm_risk_limit(self, symbol: str, category: Category = Category.LINEAR) -> dict:
+        """Confirm pending risk limit change."""
+        return self.api_request("POST", "/v5/position/confirm-pending-mmr", json_data={
+            "category": category.value, "symbol": symbol,
+        })
+
+    def set_collateral_coin(self, coin: str, switch: bool = True) -> dict:
+        """Toggle whether a coin is used as collateral in unified margin."""
+        return self.api_request("POST", "/v5/account/set-collateral-switch", json_data={
+            "coin": coin, "collateralSwitch": "ON" if switch else "OFF",
+        })
+
+    def get_premium_index_kline(self, symbol: str, interval: str = "60",
+                                 limit: int = 200, category: Category = Category.LINEAR) -> list:
+        """Get premium index price kline data."""
+        params = {"category": category.value, "symbol": symbol,
+                  "interval": interval, "limit": str(limit)}
+        resp = self.api_request("GET", "/v5/market/premium-index-price-kline", params=params)
+        return resp.get("result", {}).get("list", [])
+
+    def calculate_heikin_ashi(self, opens: list, highs: list, lows: list, closes: list) -> dict:
+        """Calculate Heikin-Ashi candles from OHLC data."""
+        ha_close = [(o + h + l + c) / 4 for o, h, l, c in zip(opens, highs, lows, closes)]
+        ha_open = [opens[0]]
+        for i in range(1, len(opens)):
+            ha_open.append((ha_open[-1] + ha_close[i - 1]) / 2)
+        ha_high = [max(h, ho, hc) for h, ho, hc in zip(highs, ha_open, ha_close)]
+        ha_low = [min(l, ho, hc) for l, ho, hc in zip(lows, ha_open, ha_close)]
+        return {
+            "ha_open": ha_open[-5:], "ha_high": ha_high[-5:],
+            "ha_low": ha_low[-5:], "ha_close": ha_close[-5:],
+            "trend": "bullish" if ha_close[-1] > ha_open[-1] else "bearish",
+            "candles": len(ha_close),
+        }
+
+    def calculate_renko(self, closes: list, brick_size: float = None) -> dict:
+        """Calculate Renko bricks from close prices."""
+        if brick_size is None:
+            atr_val = self.calculate_atr(closes, closes, closes, 14)
+            brick_size = atr_val if isinstance(atr_val, (int, float)) else closes[-1] * 0.01
+        bricks = []
+        base = closes[0]
+        for c in closes[1:]:
+            while c >= base + brick_size:
+                base += brick_size
+                bricks.append({"price": round(base, 8), "direction": "up"})
+            while c <= base - brick_size:
+                base -= brick_size
+                bricks.append({"price": round(base, 8), "direction": "down"})
+        up = sum(1 for b in bricks if b["direction"] == "up")
+        down = len(bricks) - up
+        return {
+            "brick_size": brick_size, "total_bricks": len(bricks),
+            "up_bricks": up, "down_bricks": down,
+            "last_bricks": bricks[-5:] if bricks else [],
+            "trend": "bullish" if up > down else "bearish" if down > up else "neutral",
+        }
+
+    def calculate_pivot_points(self, high: float, low: float, close: float) -> dict:
+        """Calculate classic pivot points from high/low/close."""
+        pivot = (high + low + close) / 3
+        r1 = 2 * pivot - low
+        s1 = 2 * pivot - high
+        r2 = pivot + (high - low)
+        s2 = pivot - (high - low)
+        r3 = high + 2 * (pivot - low)
+        s3 = low - 2 * (high - pivot)
+        return {
+            "pivot": round(pivot, 8), "r1": round(r1, 8), "r2": round(r2, 8),
+            "r3": round(r3, 8), "s1": round(s1, 8), "s2": round(s2, 8), "s3": round(s3, 8),
+        }
+
     # ══════════════════════════════════════════════════════════
     def connection_health(self) -> dict:
         """Score connection health from 0-100 based on response times and success rates."""
@@ -8565,6 +8686,52 @@ def run(
         "spread_analysis",
         "correlation_analysis",
         "smart_trailing_stop",
+        # ── Missing V5 Endpoints ──
+        "batch_place_orders",
+        "set_tpsl_mode",
+        "add_reduce_margin",
+        "set_auto_add_margin",
+        "get_executions",
+        "confirm_risk_limit",
+        "set_collateral_coin",
+        "get_withdrawable_amount",
+        "get_historical_klines",
+        "get_premium_index_kline",
+        # ── Missing Standalone Indicators ──
+        "calculate_rsi",
+        "calculate_ema",
+        "calculate_atr",
+        "calculate_obv",
+        "calculate_cvd",
+        "calculate_mfi",
+        "calculate_cmf",
+        "calculate_williams_r",
+        "calculate_parabolic_sar",
+        "calculate_keltner_channels",
+        "calculate_roc",
+        "calculate_trix",
+        "calculate_ultimate_oscillator",
+        "calculate_choppiness_index",
+        "calculate_aroon",
+        "calculate_dpo",
+        "calculate_hma",
+        "calculate_zlema",
+        "calculate_supertrend",
+        "calculate_elder_ray",
+        "calculate_vwma",
+        "calculate_awesome_oscillator",
+        "calculate_accumulation_distribution",
+        "calculate_heikin_ashi",
+        "calculate_renko",
+        "calculate_pivot_points",
+        "calculate_position_risk",
+        "calculate_compound_growth",
+        "calculate_linear_regression",
+        "calculate_stddev",
+        "calculate_vroc",
+        "calculate_kelly_criterion_standalone",
+        "calculate_max_position",
+        "calculate_bollinger_bandwidth",
     ],
     # ── Order fields ──────────────────────────────────────────
     symbol:         Optional[str]   = None,
@@ -8668,6 +8835,12 @@ def run(
     starting_capital: Optional[float] = None,
     maint_margin_rate: Optional[float] = None,
     account_balance: Optional[float] = None,
+    # ── New V5 endpoint params ────────────────────────────────────
+    margin:         Optional[str]   = None,
+    auto_add_margin: Optional[bool] = None,
+    tp_sl_mode:     Optional[Literal["Full", "Partial"]] = None,
+    collateral_switch: Optional[bool] = None,
+    brick_size:     Optional[float] = None,
 ) -> dict:
     """BYBIT REALM v4.0 – Comprehensive Bybit V5 trading tool with all endpoints, indicators, breakeven logic, L2 analysis, and profitable macros.
 
@@ -8761,6 +8934,11 @@ def run(
         starting_capital: Starting capital in USDT for compound growth projection
         maint_margin_rate: Maintenance margin rate for liquidation price calculation
         account_balance: Account balance for fixed fractional position sizing
+        margin: Margin amount to add (positive) or reduce (negative) for isolated positions
+        auto_add_margin: Whether to enable auto-add-margin for isolated positions
+        tp_sl_mode: TP/SL mode - 'Full' (entire position) or 'Partial'
+        collateral_switch: Whether to enable (true) or disable (false) coin as collateral
+        brick_size: Renko brick size (auto-calculated from ATR if not provided)
     """
     bot = _get_dispatcher()
 
@@ -9551,6 +9729,377 @@ def run(
                 return {"status": "error", "msg": "symbol required"}
             return bot.smart_trailing_stop(symbol=symbol, category=cat)
 
+
+        # ══════════════════════════════════════════════════════
+        # MISSING V5 ENDPOINTS
+        # ══════════════════════════════════════════════════════
+        elif action == "batch_place_orders":
+            if not _parsed_orders:
+                return {"status": "error", "msg": "orders list required (JSON string)"}
+            return bot.batch_place_orders(_parsed_orders, category=cat)
+        elif action == "set_tpsl_mode":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            return bot.set_tpsl_mode(symbol=symbol, tp_sl_mode=tp_sl_mode or "Full", category=cat)
+        elif action == "add_reduce_margin":
+            if not symbol or margin is None:
+                return {"status": "error", "msg": "symbol and margin required"}
+            return bot.add_reduce_margin(symbol=symbol, margin=margin, category=cat)
+        elif action == "set_auto_add_margin":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            return bot.set_auto_add_margin(symbol=symbol, auto_add=auto_add_margin if auto_add_margin is not None else True, category=cat)
+        elif action == "get_executions":
+            return {"executions": bot.get_executions(symbol=symbol, category=cat, limit=limit or 50, start_time=start_time, end_time=end_time)}
+        elif action == "confirm_risk_limit":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            return bot.confirm_risk_limit(symbol=symbol, category=cat)
+        elif action == "set_collateral_coin":
+            if not coin:
+                return {"status": "error", "msg": "coin required"}
+            return bot.set_collateral_coin(coin=coin, switch=collateral_switch if collateral_switch is not None else True)
+        elif action == "get_withdrawable_amount":
+            if not coin:
+                return {"status": "error", "msg": "coin required"}
+            return bot.get_withdrawable_amount(coin=coin, account_type=account_type or "FUND")
+        elif action == "get_historical_klines":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            return {"klines": bot.get_historical_klines(symbol=symbol, interval=interval or "D", limit=limit or 200, category=cat)}
+        elif action == "get_premium_index_kline":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            return {"klines": bot.get_premium_index_kline(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)}
+
+        # ══════════════════════════════════════════════════════
+        # STANDALONE INDICATORS
+        # ══════════════════════════════════════════════════════
+        elif action == "calculate_rsi":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "interval": interval or "60", "rsi": bot.calculate_rsi(closes, period=int(sl_pct or 14))}
+        elif action == "calculate_ema":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "interval": interval or "60", "ema": bot.calculate_ema(closes, period=int(sl_pct or 20))}
+        elif action == "calculate_atr":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "atr": bot.calculate_atr(highs, lows, closes, period=int(sl_pct or 14))}
+        elif action == "calculate_obv":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            volumes = [float(k[5]) for k in klines]
+            return {"symbol": symbol, "obv": bot.calculate_obv(closes, volumes)}
+        elif action == "calculate_cvd":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            volumes = [float(k[5]) for k in klines]
+            return {"symbol": symbol, "cvd": bot.calculate_cvd(closes, volumes)}
+        elif action == "calculate_mfi":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            volumes = [float(k[5]) for k in klines]
+            return {"symbol": symbol, "mfi": bot.calculate_mfi(highs, lows, closes, volumes, period=int(sl_pct or 14))}
+        elif action == "calculate_cmf":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            volumes = [float(k[5]) for k in klines]
+            return {"symbol": symbol, "cmf": bot.calculate_cmf(highs, lows, closes, volumes, period=int(sl_pct or 20))}
+        elif action == "calculate_williams_r":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "williams_r": bot.calculate_williams_r(highs, lows, closes, period=int(sl_pct or 14))}
+        elif action == "calculate_parabolic_sar":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            return bot.calculate_parabolic_sar(highs, lows, closes)
+        elif action == "calculate_keltner_channels":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            return bot.calculate_keltner_channels(highs, lows, closes)
+        elif action == "calculate_roc":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "roc": bot.calculate_roc(closes, period=int(sl_pct or 12))}
+        elif action == "calculate_trix":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "trix": bot.calculate_trix(closes, period=int(sl_pct or 15))}
+        elif action == "calculate_ultimate_oscillator":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "ultimate_oscillator": bot.calculate_ultimate_oscillator(highs, lows, closes)}
+        elif action == "calculate_choppiness_index":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "choppiness_index": bot.calculate_choppiness_index(highs, lows, closes)}
+        elif action == "calculate_aroon":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            return bot.calculate_aroon(highs, lows)
+        elif action == "calculate_dpo":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "dpo": bot.calculate_dpo(closes, period=int(sl_pct or 20))}
+        elif action == "calculate_hma":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "hma": bot.calculate_hma(closes, period=int(sl_pct or 20))}
+        elif action == "calculate_zlema":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "zlema": bot.calculate_zlema(closes, period=int(sl_pct or 20))}
+        elif action == "calculate_supertrend":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            return bot.calculate_supertrend(highs, lows, closes)
+        elif action == "calculate_elder_ray":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            return bot.calculate_elder_ray(highs, lows, closes)
+        elif action == "calculate_vwma":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            volumes = [float(k[5]) for k in klines]
+            return {"symbol": symbol, "vwma": bot.calculate_vwma(closes, volumes, period=int(sl_pct or 20))}
+        elif action == "calculate_awesome_oscillator":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            return {"symbol": symbol, "awesome_oscillator": bot.calculate_awesome_oscillator(highs, lows)}
+        elif action == "calculate_accumulation_distribution":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            volumes = [float(k[5]) for k in klines]
+            return {"symbol": symbol, "accumulation_distribution": bot.calculate_accumulation_distribution(highs, lows, closes, volumes)}
+        elif action == "calculate_heikin_ashi":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            opens = [float(k[1]) for k in klines]
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            closes = [float(k[4]) for k in klines]
+            return bot.calculate_heikin_ashi(opens, highs, lows, closes)
+        elif action == "calculate_renko":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return bot.calculate_renko(closes, brick_size=brick_size)
+        elif action == "calculate_pivot_points":
+            if price is None or qty is None or sl_price is None:
+                return {"status": "error", "msg": "price (High), qty (Low), sl_price (Close) required"}
+            return bot.calculate_pivot_points(high=price, low=qty, close=sl_price)
+        elif action == "calculate_position_risk":
+            if not symbol or price is None or qty is None or stop_loss is None:
+                return {"status": "error", "msg": "symbol, price, qty, stop_loss required"}
+            return bot.calculate_position_risk(symbol=symbol, entry_price=price, qty=qty, stop_loss=stop_loss, category=cat)
+        elif action == "calculate_compound_growth":
+            return bot.calculate_compound_growth(
+                starting_capital=starting_capital or 100.0,
+                daily_return_pct=daily_return_pct or 1.0,
+                days=days or 30,
+                win_rate_pct=win_rate_pct or 60.0,
+                trades_per_day=trades_per_day or 3,
+            )
+        elif action == "calculate_linear_regression":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "linear_regression_slope": bot.calculate_linear_regression_slope(closes, period=int(sl_pct or 20))}
+        elif action == "calculate_stddev":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            return {"symbol": symbol, "stddev": bot.calculate_stddev(closes, period=int(sl_pct or 20))}
+        elif action == "calculate_vroc":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            volumes = [float(k[5]) for k in klines]
+            return {"symbol": symbol, "vroc": bot.calculate_vroc(volumes, period=int(sl_pct or 14))}
+        elif action == "calculate_kelly_criterion_standalone":
+            return bot.calculate_kelly_criterion(
+                win_rate=win_rate_pct / 100.0 if win_rate_pct else 0.55,
+                avg_win=tp_pct or 2.0,
+                avg_loss=sl_pct or 1.0,
+            )
+        elif action == "calculate_max_position":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            return bot.calculate_max_position(symbol=symbol, category=cat)
+        elif action == "calculate_bollinger_bandwidth":
+            if not symbol:
+                return {"status": "error", "msg": "symbol required"}
+            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            if not klines:
+                return {"status": "error", "msg": "No kline data"}
+            klines.reverse()
+            closes = [float(k[4]) for k in klines]
+            bb = bot.calculate_bollinger_bands(closes, period=int(sl_pct or 20))
+            if isinstance(bb, dict) and "upper" in bb and "lower" in bb and "middle" in bb:
+                bw = (bb["upper"] - bb["lower"]) / bb["middle"] * 100 if bb["middle"] else 0
+                return {"symbol": symbol, "bollinger_bandwidth": round(bw, 4), "upper": bb["upper"], "lower": bb["lower"], "middle": bb["middle"]}
+            return {"symbol": symbol, "bollinger_bands": bb}
+
         else:
             return {
                 "status": "error",
@@ -9664,6 +10213,11 @@ Examples:
     parser.add_argument("--starting-capital", dest="starting_capital", type=float, help="Starting capital for compound growth")
     parser.add_argument("--maint-margin-rate", dest="maint_margin_rate", type=float, help="Maintenance margin rate for liquidation calc")
     parser.add_argument("--account-balance", dest="account_balance", type=float, help="Account balance for fixed fractional sizing")
+    parser.add_argument("--margin",          help="Margin to add/reduce for isolated positions")
+    parser.add_argument("--auto-add-margin", dest="auto_add_margin", action="store_true", help="Enable auto-add-margin")
+    parser.add_argument("--tp-sl-mode",      dest="tp_sl_mode", help="TP/SL mode: Full or Partial")
+    parser.add_argument("--collateral-switch", dest="collateral_switch", action="store_true", help="Toggle coin as collateral")
+    parser.add_argument("--brick-size",      dest="brick_size", type=float, help="Renko brick size")
 
     args = parser.parse_args()
 
@@ -9734,6 +10288,11 @@ Examples:
         starting_capital=getattr(args, 'starting_capital', None),
         maint_margin_rate=getattr(args, 'maint_margin_rate', None),
         account_balance=getattr(args, 'account_balance', None),
+        margin=getattr(args, 'margin', None),
+        auto_add_margin=getattr(args, 'auto_add_margin', None),
+        tp_sl_mode=getattr(args, 'tp_sl_mode', None),
+        collateral_switch=getattr(args, 'collateral_switch', None),
+        brick_size=getattr(args, 'brick_size', None),
     )
 
     output_path = args.output or os.environ.get("LLM_OUTPUT")
