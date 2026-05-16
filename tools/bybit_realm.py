@@ -1126,7 +1126,7 @@ class TorManager:
         if json_data:
             cmd += ["-d", json.dumps(json_data, sort_keys=True, separators=(",", ":"))]
         if params:
-            qs  = "&".join(f"{k}={v}" for k, v in params.items())
+            qs  = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
             url = f"{url}?{qs}"
         cmd.append(url)
 
@@ -1523,6 +1523,10 @@ class BybitToolDispatcher:
                     container["symbol"] = container["symbol"].upper()
                 if "category" in container and isinstance(container["category"], (Category, Enum)):
                     container["category"] = container["category"].value
+
+        # Sort GET params so query string order matches signature
+        if params:
+            params = dict(sorted(params.items()))
 
         ts = self._get_timestamp()
 
