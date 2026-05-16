@@ -897,6 +897,9 @@ class TorManager:
         self._circuit_failures = 0
         self._max_circuit_failures = 5
         self._last_ip         = None
+        self._renewal_broken  = False
+        self._socks_alive     = None  # None=unknown, True/False=cached probe result
+        self._socks_probe_ts  = 0.0
 
         if enabled and use_pysocks and REQUESTS_AVAILABLE:
             self._socks_session = self._build_socks_session(max_retries, socks_port)
@@ -904,73 +907,103 @@ class TorManager:
         elif enabled and use_pysocks and not REQUESTS_AVAILABLE:
             logger.warning("TOR_USE_PYSOCKS=true but requests library not installed")
 
-    def renew_tor_circuit(self, retries: int = 3) -> bool:
+    def _probe_socks(self) -> bool:
+        """Quick TCP probe to check if SOCKS proxy is listening. Cached for 30s."""
+        now = time.time()
+        if self._socks_alive is not None and (now - self._socks_probe_ts) < 30:
+            return self._socks_alive
+        try:
+            s = stdlib_socket.socket(stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM)
+            s.settimeout(2)
+            s.connect(("127.0.0.1", self.socks_port))
+            s.close()
+            self._socks_alive = True
+        except (stdlib_socket.timeout, OSError):
+            self._socks_alive = False
+            logger.warning("SOCKS5 proxy not responding on port %d", self.socks_port)
+        self._socks_probe_ts = now
+        return self._socks_alive or False
+
+    def renew_tor_circuit(self, retries: int = 2) -> bool:
         """
         Send NEWNYM signal to Tor control port with retry logic.
-        Added: exponential backoff, connection validation, and circuit verification.
+        Tries multiple auth methods: password, cookie, empty.
+        Marks renewal as broken after repeated failures to avoid future delays.
         """
+        if self._renewal_broken:
+            return False
+
+        # Build list of auth commands to try
+        auth_methods: list = []
+        if self.control_password:
+            auth_methods.append(f'AUTHENTICATE "{self.control_password}"\r\n'.encode())
+        # Try cookie auth from common Tor cookie paths
+        for cookie_path in [
+            "/var/run/tor/control.authcookie",
+            "/var/lib/tor/control_auth_cookie",
+            os.path.expanduser("~/.tor/control_auth_cookie"),
+        ]:
+            if os.path.exists(cookie_path):
+                try:
+                    with open(cookie_path, "rb") as f:
+                        cookie = f.read().hex()
+                    auth_methods.append(f'AUTHENTICATE {cookie}\r\n'.encode())
+                except Exception:
+                    pass
+        # Always try empty auth as last resort
+        auth_methods.append(b'AUTHENTICATE\r\n')
+
         for attempt in range(retries):
-            try:
-                s = stdlib_socket.socket(stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM)
-                s.settimeout(10)
-                s.connect(("127.0.0.1", self.control_port))
-
-                # Authenticate with clearer protocol handling
-                auth_cmd = f'AUTHENTICATE "{self.control_password}"\r\n'.encode() if self.control_password else b'AUTHENTICATE\r\n'
-                s.sendall(auth_cmd)
-                resp = b""
-                while True:
-                    chunk = s.recv(4096)
-                    if not chunk: break
-                    resp += chunk
-                    if b"\r\n" in resp: break
-                
-                resp_str = resp.decode().strip()
-                if "250" not in resp_str:
-                    logger.warning(f"Tor AUTHENTICATE attempt {attempt+1}/{retries} failed: {resp_str}")
+            for auth_cmd in auth_methods:
+                try:
+                    s = stdlib_socket.socket(stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM)
+                    s.settimeout(5)
+                    s.connect(("127.0.0.1", self.control_port))
+                    s.sendall(auth_cmd)
+                    resp = b""
+                    while True:
+                        chunk = s.recv(4096)
+                        if not chunk:
+                            break
+                        resp += chunk
+                        if b"\r\n" in resp:
+                            break
+                    resp_str = resp.decode().strip()
+                    if "250" not in resp_str:
+                        s.close()
+                        continue
+                    # Auth succeeded, send NEWNYM
+                    s.sendall(b'SIGNAL NEWNYM\r\n')
+                    resp = b""
+                    while True:
+                        chunk = s.recv(4096)
+                        if not chunk:
+                            break
+                        resp += chunk
+                        if b"\r\n" in resp:
+                            break
                     s.close()
-                    time.sleep(2 ** attempt)
-                    continue
-
-                # Send NEWNYM signal
-                s.sendall(b'SIGNAL NEWNYM\r\n')
-                resp = b""
-                while True:
-                    chunk = s.recv(4096)
-                    if not chunk: break
-                    resp += chunk
-                    if b"\r\n" in resp: break
-                s.close()
-                resp_str = resp.decode().strip()
-
-                if "250" in resp_str:
-                    logger.info(f"Tor circuit renewed (NEWNYM) on attempt {attempt+1}")
-                    time.sleep(2)
-                    # Verify new circuit by checking IP changed
-                    try:
-                        old_ip = self._last_ip
-                        new_ip = self._get_current_tor_ip()
-                        if new_ip and new_ip != old_ip:
-                            self._last_ip = new_ip
-                            logger.info(f"Tor exit IP changed to: {new_ip}")
-                            return True
-                        else:
-                            logger.warning("Tor IP didn't change after NEWNYM, retrying...")
-                            time.sleep(3)
-                            continue
-                    except Exception as e:
-                        logger.warning(f"Could not verify IP change: {e}")
+                    resp_str = resp.decode().strip()
+                    if "250" in resp_str:
+                        logger.info("Tor circuit renewed (NEWNYM) on attempt %d", attempt + 1)
+                        time.sleep(1)
+                        self._socks_alive = None
+                        self._socks_probe_ts = 0.0
                         return True
-                else:
-                    logger.warning(f"Tor NEWNYM attempt {attempt+1}/{retries} failed: {resp_str}")
-                    time.sleep(2 ** attempt)
-            except stdlib_socket.timeout:
-                logger.warning(f"Tor control connection timeout on attempt {attempt+1}")
-                time.sleep(2 ** attempt)
-            except Exception as exc:
-                logger.warning(f"Tor circuit renewal attempt {attempt+1}/{retries} failed: {exc}")
-                time.sleep(2 ** attempt)
-        logger.error(f"All {retries} Tor circuit renewal attempts failed")
+                except (stdlib_socket.timeout, OSError):
+                    try:
+                        s.close()
+                    except Exception:
+                        pass
+                except Exception:
+                    try:
+                        s.close()
+                    except Exception:
+                        pass
+            time.sleep(1)
+
+        logger.error("All %d Tor circuit renewal attempts failed — disabling auto-renewal", retries)
+        self._renewal_broken = True
         return False
 
     def _get_current_tor_ip(self) -> Optional[str]:
@@ -998,14 +1031,20 @@ class TorManager:
     ) -> dict:
         """
         Try network tiers in order with auto-recovery on geo-blocks.
+        Always tries SOCKS first when Tor is enabled (geo-blocked regions).
+        Falls back through torsocks → direct.
         """
-        # For signed requests, try direct first (SOCKS5 may have issues with auth headers)
-        # For unsigned requests, use SOCKS5 when available
-        if signed:
-            tiers = [self._tier_direct, self._tier_socks, self._tier_torsocks]
-        elif self.enabled and self._socks_session:
-            tiers = [self._tier_socks, self._tier_torsocks, self._tier_direct]
+        tiers: list = []
+        if self.enabled:
+            if self._socks_session and self._probe_socks():
+                tiers.append(self._tier_socks)
+            if self._torsocks_bin:
+                tiers.append(self._tier_torsocks)
+            tiers.append(self._tier_direct)
         else:
+            tiers = [self._tier_direct]
+
+        if not tiers:
             tiers = [self._tier_direct]
 
         last_exc: Optional[Exception] = None
@@ -1018,21 +1057,21 @@ class TorManager:
             except Exception as exc:
                 last_exc = exc
                 error_str = str(exc).lower()
-                
-                # Auto-recovery on geo-block
-                if any(indicator in error_str for indicator in ["403", "blocked", "forbidden", "geo"]):
+                logger.warning("Network tier %s failed: %s", tier.__name__, exc)
+
+                is_geo_block = any(w in error_str for w in ["403", "blocked", "forbidden", "geo"])
+                if is_geo_block and tier == self._tier_socks and not self._renewal_broken:
                     self._circuit_failures += 1
-                    if self._auto_recovery and self._circuit_failures < self._max_circuit_failures:
-                        logger.warning(f"Geo-block detected, attempting auto-recovery ({self._circuit_failures}/{self._max_circuit_failures})")
-                        if self.renew_tor_circuit():
-                            time.sleep(2)
-                            # Retry current tier after renewal
-                            try:
-                                return tier(method, url, headers, params, json_data)
-                            except Exception:
-                                continue
-                
-                logger.warning(f"Network tier {tier.__name__} failed: {exc}")
+                    if self._circuit_failures < self._max_circuit_failures and self.renew_tor_circuit():
+                        time.sleep(1)
+                        try:
+                            return tier(method, url, headers, params, json_data)
+                        except Exception:
+                            pass
+
+                if is_geo_block and tier == self._tier_socks:
+                    self._socks_alive = None
+                    self._socks_probe_ts = 0.0
 
         raise ConnectionError(f"All network tiers exhausted. Last error: {last_exc}")
 
@@ -1044,19 +1083,23 @@ class TorManager:
             raise RuntimeError("requests library not available")
         if not self._socks_session:
             raise RuntimeError("SOCKS session not initialized")
+        conn_timeout = min(self.timeout, 8)
+        timeouts = (conn_timeout, self.timeout)
         if json_data is not None:
             resp = self._socks_session.request(
                 method, url,
                 headers=headers, params=params,
                 data=json.dumps(json_data, sort_keys=True, separators=(",", ":")),
-                timeout=self.timeout,
+                timeout=timeouts,
             )
         else:
             resp = self._socks_session.request(
                 method, url,
                 headers=headers, params=params,
-                timeout=self.timeout,
+                timeout=timeouts,
             )
+        self._socks_alive = True
+        self._socks_probe_ts = time.time()
         return self._parse_response(resp)
 
     def _tier_torsocks(self, method, url, headers, params, json_data) -> dict:
@@ -1068,7 +1111,7 @@ class TorManager:
         for k, v in headers.items():
             cmd += ["-H", f"{k}: {v}"]
         if json_data:
-            cmd += ["-d", json.dumps(json_data, separators=(",", ":"))]
+            cmd += ["-d", json.dumps(json_data, sort_keys=True, separators=(",", ":"))]
         if params:
             qs  = "&".join(f"{k}={v}" for k, v in params.items())
             url = f"{url}?{qs}"
@@ -1782,14 +1825,19 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     def cancel_order(
         self,
-        symbol:   str,
-        order_id: str,
-        category: Category = Category.LINEAR,
+        symbol:     str,
+        order_id:   Optional[str] = None,
+        client_oid: Optional[str] = None,
+        category:   Category = Category.LINEAR,
     ) -> dict:
-        return self.api_request(
-            "POST", "/v5/order/cancel",
-            json_data={"category": category, "symbol": symbol, "orderId": order_id},
-        )
+        payload: Dict[str, Any] = {"category": category, "symbol": symbol}
+        if order_id:
+            payload["orderId"] = order_id
+        elif client_oid:
+            payload["orderLinkId"] = client_oid
+        else:
+            return {"status": "error", "msg": "order_id or client_oid required"}
+        return self.api_request("POST", "/v5/order/cancel", json_data=payload)
 
     def cancel_all_orders(
         self,
@@ -1805,19 +1853,26 @@ class BybitToolDispatcher:
     def amend_order(
         self,
         symbol:      str,
-        order_id:    str,
+        order_id:    Optional[str] = None,
+        client_oid:  Optional[str] = None,
         qty:         Optional[float] = None,
         price:       Optional[float] = None,
         category:    Category = Category.LINEAR,
         stop_loss:   Optional[float] = None,
         take_profit: Optional[float] = None,
+        trigger_price: Optional[float] = None,
     ) -> dict:
-        """Amend an existing order. FIX: uses `is not None` instead of truthiness."""
+        """Amend an existing order by order_id or client_oid."""
         payload: Dict[str, Any] = {
             "category": category,
             "symbol":   symbol,
-            "orderId":  order_id,
         }
+        if order_id:
+            payload["orderId"] = order_id
+        elif client_oid:
+            payload["orderLinkId"] = client_oid
+        else:
+            return {"status": "error", "msg": "order_id or client_oid required"}
         if qty is not None:
             payload["qty"]        = str(self.adjust_quantity(symbol, qty, category))
         if price is not None:
@@ -1826,7 +1881,99 @@ class BybitToolDispatcher:
             payload["stopLoss"]   = str(self.adjust_price(symbol, stop_loss, category))
         if take_profit is not None:
             payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
+        if trigger_price is not None:
+            payload["triggerPrice"] = str(self.adjust_price(symbol, trigger_price, category))
         return self.api_request("POST", "/v5/order/amend", json_data=payload)
+
+    def place_conditional_order(
+        self,
+        symbol:        str,
+        side:          OrderSide,
+        qty:           float,
+        trigger_price: float,
+        price:         Optional[float] = None,
+        order_type:    OrderType = OrderType.MARKET,
+        trigger_by:    str = "LastPrice",
+        category:      Category = Category.LINEAR,
+        stop_loss:     Optional[float] = None,
+        take_profit:   Optional[float] = None,
+        reduce_only:   bool = False,
+        time_in_force: TimeInForce = TimeInForce.GTC,
+        position_idx:  PositionIdx = PositionIdx.ONE_WAY,
+        client_oid:    Optional[str] = None,
+    ) -> dict:
+        """Place a conditional (stop/trigger) order."""
+        adj_qty = self.adjust_quantity(symbol, qty, category)
+        is_buy = side == OrderSide.BUY
+        payload: Dict[str, Any] = {
+            "category":         category,
+            "symbol":           symbol,
+            "side":             side,
+            "orderType":        order_type,
+            "qty":              str(adj_qty),
+            "triggerPrice":     str(self.adjust_price(symbol, trigger_price, category)),
+            "triggerDirection": 1 if is_buy else 2,
+            "triggerBy":        trigger_by,
+            "timeInForce":      time_in_force,
+            "positionIdx":      int(position_idx),
+        }
+        if price is not None:
+            payload["price"] = str(self.adjust_price(symbol, price, category))
+        if stop_loss is not None:
+            payload["stopLoss"] = str(self.adjust_price(symbol, stop_loss, category))
+        if take_profit is not None:
+            payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
+        if reduce_only:
+            payload["reduceOnly"] = True
+        if client_oid:
+            payload["orderLinkId"] = client_oid
+        return self.api_request("POST", "/v5/order/create", json_data=payload)
+
+    def batch_amend_orders(
+        self,
+        order_list: List[dict],
+        category: Category = Category.LINEAR,
+    ) -> dict:
+        """Batch amend multiple orders."""
+        if not order_list:
+            return {"status": "error", "msg": "order_list is empty"}
+        batch = []
+        for o in order_list:
+            entry: Dict[str, Any] = {"symbol": o["symbol"]}
+            if "orderId" in o:
+                entry["orderId"] = o["orderId"]
+            elif "orderLinkId" in o:
+                entry["orderLinkId"] = o["orderLinkId"]
+            if "qty" in o:
+                entry["qty"] = str(self.adjust_quantity(o["symbol"], float(o["qty"]), category))
+            if "price" in o:
+                entry["price"] = str(self.adjust_price(o["symbol"], float(o["price"]), category))
+            batch.append(entry)
+        return self.api_request(
+            "POST", "/v5/order/amend-batch",
+            json_data={"category": category, "request": batch},
+        )
+
+    def batch_cancel_orders(
+        self,
+        order_list: List[dict],
+        category: Category = Category.LINEAR,
+    ) -> dict:
+        """Batch cancel multiple orders."""
+        if not order_list:
+            return {"status": "error", "msg": "order_list is empty"}
+        batch = []
+        for o in order_list:
+            entry: Dict[str, Any] = {"symbol": o["symbol"]}
+            if "orderId" in o:
+                entry["orderId"] = o["orderId"]
+            elif "orderLinkId" in o:
+                entry["orderLinkId"] = o["orderLinkId"]
+            batch.append(entry)
+        return self.api_request(
+            "POST", "/v5/order/cancel-batch",
+            json_data={"category": category, "request": batch},
+        )
 
     def get_open_orders(
         self,
@@ -8217,6 +8364,9 @@ def run(
         "place_trailing_stop_order",
         "calculate_trailing_stop_levels",
         "get_trailing_stop_status",
+        "place_conditional_order",
+        "batch_amend_orders",
+        "batch_cancel_orders",
         # ── Positions & Account ──
         "get_positions",
         "get_wallet_balance",
@@ -8362,7 +8512,7 @@ def run(
     side:           Optional[Literal["Buy", "Sell"]] = None,
     qty:            Optional[float] = None,
     price:          Optional[float] = None,
-    order_type:     Optional[Literal["Limit", "Market", "LimitMaker", "Stop", "StopLimit"]] = None,
+    order_type:     Optional[Literal["Limit", "Market", "LimitMaker"]] = None,
     category:       Optional[Literal["linear", "inverse", "spot", "option"]] = None,
     order_id:       Optional[str]   = None,
     stop_loss:      Optional[float] = None,
@@ -8435,6 +8585,8 @@ def run(
     to_account:     Optional[str]   = None,
     risk_id:        Optional[int]   = None,
     currency:       Optional[str]   = None,
+    trigger_price:  Optional[float] = None,
+    trigger_by:     Optional[Literal["LastPrice", "IndexPrice", "MarkPrice"]] = None,
     depth:          Optional[int]   = None,
     period:         Optional[int]   = None,
     num_bins:       Optional[int]   = None,
@@ -8586,24 +8738,27 @@ def run(
         elif action == "place_order":
             if not symbol or not side or qty is None:
                 return {"status": "error", "msg": "symbol, side, and qty are required"}
+            ot = OrderType(order_type) if order_type else (OrderType.LIMIT if price is not None else OrderType.MARKET)
             return bot.place_order(
                 symbol=symbol, side=OrderSide(side), qty=qty, price=price,
-                order_type=OrderType(order_type or "Limit"), category=cat,
+                order_type=ot, category=cat,
                 stop_loss=stop_loss, take_profit=take_profit,
                 reduce_only=reduce_only or False, time_in_force=tif,
                 position_idx=pidx, client_oid=client_oid, trailing_stop=trailing_stop,
             )
         elif action == "amend_order":
-            if not symbol or not order_id:
-                return {"status": "error", "msg": "symbol and order_id are required"}
+            if not symbol or (not order_id and not client_oid):
+                return {"status": "error", "msg": "symbol and (order_id or client_oid) required"}
             return bot.amend_order(
-                symbol=symbol, order_id=order_id, qty=qty, price=price,
-                category=cat, stop_loss=stop_loss, take_profit=take_profit,
+                symbol=symbol, order_id=order_id, client_oid=client_oid,
+                qty=qty, price=price, category=cat,
+                stop_loss=stop_loss, take_profit=take_profit,
+                trigger_price=trigger_price,
             )
         elif action == "cancel_order":
-            if not symbol or not order_id:
-                return {"status": "error", "msg": "symbol and order_id are required"}
-            return bot.cancel_order(symbol=symbol, order_id=order_id, category=cat)
+            if not symbol or (not order_id and not client_oid):
+                return {"status": "error", "msg": "symbol and (order_id or client_oid) required"}
+            return bot.cancel_order(symbol=symbol, order_id=order_id, client_oid=client_oid, category=cat)
         elif action == "cancel_all_orders":
             return bot.cancel_all_orders(symbol=symbol, category=cat)
         elif action == "get_open_orders":
@@ -8615,8 +8770,11 @@ def run(
                 return {"status": "error", "msg": "orders list is required"}
             return bot.safe_execute(bot.execute_scalp_batch, orders)
         elif action == "iceberg_order":
-            if not symbol or not side or qty is None or price is None:
-                return {"status": "error", "msg": "symbol, side, qty, and price required"}
+            if not symbol or not side or qty is None:
+                return {"status": "error", "msg": "symbol, side, and qty required"}
+            if price is None:
+                ticker = bot.get_ticker(symbol, cat)
+                price = float(ticker.get("lastPrice", 0))
             results = bot.place_iceberg_order(
                 symbol=symbol, side=OrderSide(side), total_qty=qty, price=price,
                 slices=int(slices) if slices else 5, category=cat,
@@ -8643,6 +8801,26 @@ def run(
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
             return bot.get_trailing_stop_status(symbol=symbol, category=cat)
+        elif action == "place_conditional_order":
+            if not symbol or not side or qty is None or trigger_price is None:
+                return {"status": "error", "msg": "symbol, side, qty, and trigger_price required"}
+            ot = OrderType(order_type) if order_type else (OrderType.LIMIT if price is not None else OrderType.MARKET)
+            return bot.place_conditional_order(
+                symbol=symbol, side=OrderSide(side), qty=qty,
+                trigger_price=trigger_price, price=price,
+                order_type=ot, trigger_by=trigger_by or "LastPrice",
+                category=cat, stop_loss=stop_loss, take_profit=take_profit,
+                reduce_only=reduce_only or False, time_in_force=tif,
+                position_idx=pidx, client_oid=client_oid,
+            )
+        elif action == "batch_amend_orders":
+            if not orders:
+                return {"status": "error", "msg": "orders list is required"}
+            return bot.batch_amend_orders(orders, category=cat)
+        elif action == "batch_cancel_orders":
+            if not orders:
+                return {"status": "error", "msg": "orders list is required"}
+            return bot.batch_cancel_orders(orders, category=cat)
 
         # ══════════════════════════════════════════════════════
         # POSITIONS & ACCOUNT
