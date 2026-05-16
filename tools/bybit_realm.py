@@ -106,7 +106,7 @@ except ImportError:
     WEBSOCKET_AVAILABLE = False
 
 try:
-    import socks
+    import socks  # noqa: F401
     PYSOCKS_AVAILABLE = True
 except ImportError:
     PYSOCKS_AVAILABLE = False
@@ -1009,8 +1009,7 @@ class TorManager:
             tiers = [self._tier_direct]
 
         last_exc: Optional[Exception] = None
-        tier_names = ["SOCKS5", "torsocks", "direct"]
-        
+
         for i, tier in enumerate(tiers):
             try:
                 result = tier(method, url, headers, params, json_data)
@@ -1045,11 +1044,19 @@ class TorManager:
             raise RuntimeError("requests library not available")
         if not self._socks_session:
             raise RuntimeError("SOCKS session not initialized")
-        resp = self._socks_session.request(
-            method, url,
-            headers=headers, params=params, json=json_data,
-            timeout=self.timeout,
-        )
+        if json_data is not None:
+            resp = self._socks_session.request(
+                method, url,
+                headers=headers, params=params,
+                data=json.dumps(json_data, sort_keys=True, separators=(",", ":")),
+                timeout=self.timeout,
+            )
+        else:
+            resp = self._socks_session.request(
+                method, url,
+                headers=headers, params=params,
+                timeout=self.timeout,
+            )
         return self._parse_response(resp)
 
     def _tier_torsocks(self, method, url, headers, params, json_data) -> dict:
@@ -1088,11 +1095,19 @@ class TorManager:
         """Tier 3: direct connection (no proxy)."""
         if not REQUESTS_AVAILABLE:
             raise RuntimeError("requests library not available")
-        resp = self._session.request(
-            method, url,
-            headers=headers, params=params, json=json_data,
-            timeout=self.timeout,
-        )
+        if json_data is not None:
+            resp = self._session.request(
+                method, url,
+                headers=headers, params=params,
+                data=json.dumps(json_data, sort_keys=True, separators=(",", ":")),
+                timeout=self.timeout,
+            )
+        else:
+            resp = self._session.request(
+                method, url,
+                headers=headers, params=params,
+                timeout=self.timeout,
+            )
         return self._parse_response(resp)
 
     # ── Session builders ─────────────────────────────────────
@@ -1734,11 +1749,11 @@ class BybitToolDispatcher:
                 trigger_price = activation_price + trailing_distance
             if callback_rate is None and trailing_distance > 0:
                 callback_rate = (trailing_distance / current_price) * 100
-            distance_to_activation = max(0, activation_price - current_price if is_long else current_price - activation_price)
             return {
                 "symbol": symbol,
                 "activation_price": round(activation_price, 4),
                 "trigger_price": round(trigger_price, 4),
+                "distance_to_activation": round(max(0, activation_price - current_price if is_long else current_price - activation_price), 4),
                 "timestamp": time.time(),
             }
         except Exception as e:
@@ -1818,10 +1833,13 @@ class BybitToolDispatcher:
         symbol:   Optional[str] = None,
         category: Category = Category.LINEAR,
         limit:    int = 50,
+        settle_coin: str = "USDT",
     ) -> List[dict]:
         params: Dict[str, Any] = {"category": category, "limit": limit}
         if symbol:
             params["symbol"] = symbol.upper()
+        else:
+            params["settleCoin"] = settle_coin
         resp = self.api_request("GET", "/v5/order/realtime", params=params, signed=True)
         return resp.get("result", {}).get("list", [])
 
@@ -1859,10 +1877,13 @@ class BybitToolDispatcher:
         self,
         category: Category = Category.LINEAR,
         symbol:   Optional[str] = None,
+        settle_coin: str = "USDT",
     ) -> List[dict]:
         params: Dict[str, Any] = {"category": category}
         if symbol:
             params["symbol"] = symbol
+        else:
+            params["settleCoin"] = settle_coin
         resp = self.api_request("GET", "/v5/position/list", params=params)
         return resp.get("result", {}).get("list", [])
 
@@ -2107,17 +2128,17 @@ class BybitToolDispatcher:
         for item in resp.get("result", {}).get("list", []):
             results.append({
                 "symbol": item.get("symbol"),
-                "last_price": float(item.get("lastPrice", 0)),
-                "bid1_price": float(item.get("bid1Price", 0)),
-                "ask1_price": float(item.get("ask1Price", 0)),
-                "price_24h_change": float(item.get("price24hPcnt", 0)) * 100,
-                "price_24h_high": float(item.get("highPrice24h", 0)),
-                "price_24h_low": float(item.get("lowPrice24h", 0)),
-                "volume_24h": float(item.get("volume24h", 0)),
-                "turnover_24h": float(item.get("turnover24h", 0)),
-                "open_interest": float(item.get("openInterest", 0)),
-                "funding_rate": float(item.get("fundingRate", 0)),
-                "next_funding_time": int(item.get("nextFundingTime", 0)),
+                "last_price": _safe_float(item.get("lastPrice")) or 0.0,
+                "bid1_price": _safe_float(item.get("bid1Price")) or 0.0,
+                "ask1_price": _safe_float(item.get("ask1Price")) or 0.0,
+                "price_24h_change": (_safe_float(item.get("price24hPcnt")) or 0.0) * 100,
+                "price_24h_high": _safe_float(item.get("highPrice24h")) or 0.0,
+                "price_24h_low": _safe_float(item.get("lowPrice24h")) or 0.0,
+                "volume_24h": _safe_float(item.get("volume24h")) or 0.0,
+                "turnover_24h": _safe_float(item.get("turnover24h")) or 0.0,
+                "open_interest": _safe_float(item.get("openInterest")) or 0.0,
+                "funding_rate": _safe_float(item.get("fundingRate")) or 0.0,
+                "next_funding_time": int(item.get("nextFundingTime") or 0),
             })
         return results
 
@@ -2558,7 +2579,6 @@ class BybitToolDispatcher:
             tr_list.append(tr)
             pos_dm.append(pd)
             neg_dm.append(nd)
-        atr        = sum(tr_list[-period:]) / period
         sum_pos    = sum(pos_dm[-period:])
         sum_neg    = sum(neg_dm[-period:])
         denom      = sum_pos + sum_neg + 1e-9
@@ -3359,7 +3379,7 @@ class BybitToolDispatcher:
         - Market Structure (10%): ADX, Aroon, Elder Ray, CCI, DPO, Fib Pivots
         """
         try:
-            klines = self.get_klines(symbol, interval=interval, limit=lookback_periods, category=category)
+            klines = self.get_klines(symbol, interval=interval, limit=max(lookback_periods, 200), category=category)
             if not klines or len(klines) < 50:
                 return {"status": "error", "msg": f"Insufficient data ({len(klines) if klines else 0} bars, need 50+)"}
             klines.reverse()
@@ -3380,7 +3400,7 @@ class BybitToolDispatcher:
             zlema = self.calculate_zlema(closes, 21)
             supertrend = self.calculate_supertrend(highs, lows, closes)
             psar = self.calculate_parabolic_sar(highs, lows)
-            ichimoku = self.calculate_ichimoku_cloud(highs, lows, closes)
+            ichimoku = self.calculate_ichimoku_cloud(highs, lows)
 
             # EMA stack alignment (5pts)
             ema_stack = 0
@@ -3994,7 +4014,6 @@ class BybitToolDispatcher:
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
-            volumes = [float(k[5]) for k in klines]
 
             ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
             atr = self.calculate_atr(ohlcv, period=14)
@@ -4393,7 +4412,7 @@ class BybitToolDispatcher:
         except Exception as e:
             return {"status": "error", "msg": str(e)}
 
-    def macro_mean_reversion(
+    def macro_mean_reversion_scalp(
         self,
         symbol: str,
         risk_usdt: float = 5.0,
@@ -4486,7 +4505,7 @@ class BybitToolDispatcher:
         except Exception as e:
             return {"status": "error", "msg": str(e)}
 
-    def macro_funding_arb(
+    def macro_funding_arb_scan(
         self,
         top_n: int = 10,
         min_rate: float = 0.0005,
@@ -4502,10 +4521,10 @@ class BybitToolDispatcher:
             opportunities = []
             for t in tickers:
                 sym = t.get("symbol", "")
-                funding = float(t.get("fundingRate", 0))
-                volume24h = float(t.get("volume24h", 0))
-                last_price = float(t.get("lastPrice", 0))
-                turnover = float(t.get("turnover24h", 0))
+                funding = _safe_float(t.get("fundingRate")) or 0.0
+                volume24h = _safe_float(t.get("volume24h")) or 0.0
+                last_price = _safe_float(t.get("lastPrice")) or 0.0
+                turnover = _safe_float(t.get("turnover24h")) or 0.0
 
                 if abs(funding) < min_rate or volume24h <= 0:
                     continue
@@ -4835,7 +4854,6 @@ class BybitToolDispatcher:
             cumulative = 0.0
             peak = 0.0
             max_dd = 0.0
-            max_dd_start = 0
             dd_trades = 0
             equity_curve = []
             wins = 0
@@ -4859,7 +4877,6 @@ class BybitToolDispatcher:
                 dd_trades += 1
                 if dd > max_dd:
                     max_dd = dd
-                    max_dd_start = i
 
                 if pnl > 0:
                     wins += 1
@@ -5074,14 +5091,10 @@ class BybitToolDispatcher:
                 return {"status": "error", "msg": "Insufficient data"}
 
             closes = [float(k[4]) for k in klines]
-            highs = [float(k[2]) for k in klines]
-            lows = [float(k[3]) for k in klines]
             volumes = [float(k[5]) for k in klines]
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
 
             rsi = self.calculate_rsi(closes, 14)
             bb = self.calculate_bollinger_bands(closes, 20, 2.0)
-            atr = self.calculate_atr(ohlcv, 14)
             macd_data = self.calculate_macd(closes)
 
             score = 50
@@ -5336,9 +5349,6 @@ class BybitToolDispatcher:
                     continue
 
                 closes = [float(k[4]) for k in klines]
-                highs = [float(k[2]) for k in klines]
-                lows = [float(k[3]) for k in klines]
-                ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
 
                 rsi = self.calculate_rsi(closes, 14)
                 ema9 = self.calculate_ema(closes, 9)
@@ -5902,7 +5912,6 @@ class BybitToolDispatcher:
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
-            volumes = [float(k[5]) for k in klines]
             last_price = closes[-1]
 
             recent_high = max(highs[-50:])
@@ -7702,7 +7711,6 @@ class BybitToolDispatcher:
 
         side_str = pos.get("side", "")
         close_side = "Sell" if side_str == "Buy" else "Buy"
-        new_side = side_str  # Reopen same side as close_side's opposite
 
         close_result = self.place_order(
             symbol=symbol, side=OrderSide(close_side), qty=size,
@@ -9077,10 +9085,11 @@ def run(
                 order_type=order_type or "Limit", category=cat.value,
             )
         elif action == "calculate_fee_adjusted_targets":
-            if not symbol or not side or entry_price is None or qty is None:
-                return {"status": "error", "msg": "symbol, side, entry_price, and qty required"}
+            ep = entry_price if entry_price is not None else price
+            if not symbol or not side or ep is None or qty is None:
+                return {"status": "error", "msg": "symbol, side, entry_price (or price), and qty required"}
             return bot.calculate_fee_adjusted_targets(
-                symbol=symbol, side=side, entry_price=entry_price, qty=qty,
+                symbol=symbol, side=side, entry_price=ep, qty=qty,
                 tp_pct=tp_pct, sl_pct=sl_pct, category=cat.value,
             )
         elif action == "get_min_order_value":
@@ -9187,9 +9196,9 @@ def run(
         elif action == "mean_reversion_scalp":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.macro_mean_reversion(symbol=symbol, risk_usdt=risk_usdt or 5.0, category=cat)
+            return bot.macro_mean_reversion_scalp(symbol=symbol, risk_usdt=risk_usdt or 5.0, category=cat)
         elif action == "funding_arb_scan":
-            return bot.macro_funding_arb(top_n=top_n or 10, min_rate=min_rate or 0.0005, category=cat)
+            return bot.macro_funding_arb_scan(top_n=top_n or 10, min_rate=min_rate or 0.0005, category=cat)
         elif action == "smart_dca":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
