@@ -8544,7 +8544,7 @@ def run(
     holding_hours:  Optional[float] = None,
     holding_periods: Optional[int]  = None,
     # ── Batch / Iceberg ───────────────────────────────────────
-    orders:         Optional[List[Dict[str, Any]]] = None,
+    orders:         Optional[str] = None,
     slices:         Optional[int]   = 5,
     delay:          Optional[float] = None,
     # ── Time Range Filters ─────────────────────────────────────
@@ -8564,7 +8564,7 @@ def run(
     trade_notes:    Optional[str]   = None,
     trade_id:       Optional[str]   = None,
     journal_status: Optional[str]   = None,
-    journal_data:   Optional[List[Dict[str, Any]]] = None,
+    journal_data:   Optional[str] = None,
     # ── Macro params ──────────────────────────────────────────
     total_usdt:     Optional[float] = None,
     num_orders:     Optional[int]   = None,
@@ -8657,8 +8657,8 @@ def run(
         trade_notes: Notes for trade journal entry
         trade_id: Trade ID for journal lookup/update
         journal_status: Filter journal by status (open, closed, all)
-        journal_data: List of trade dicts for bulk journal import
-        orders: List of order dicts for batch operations
+        journal_data: JSON string of trade dicts for bulk journal import (e.g. '[{"symbol":"BTCUSDT",...}]')
+        orders: JSON string of order dicts for batch operations (e.g. '[{"symbol":"BTCUSDT",...}]')
         slices: Number of slices for iceberg orders
         delay: Seconds between iceberg slices
         start_time: Start timestamp in milliseconds for history queries
@@ -8704,6 +8704,19 @@ def run(
         account_balance: Account balance for fixed fractional position sizing
     """
     bot = _get_dispatcher()
+
+    _parsed_orders = None
+    if orders:
+        try:
+            _parsed_orders = json.loads(orders) if isinstance(orders, str) else orders
+        except (json.JSONDecodeError, TypeError):
+            return {"status": "error", "msg": "orders must be a valid JSON array string"}
+    _parsed_journal = None
+    if journal_data:
+        try:
+            _parsed_journal = json.loads(journal_data) if isinstance(journal_data, str) else journal_data
+        except (json.JSONDecodeError, TypeError):
+            return {"status": "error", "msg": "journal_data must be a valid JSON array string"}
 
     try:
         cat = Category(str(category).strip()) if category and str(category).strip() else Category.LINEAR
@@ -8766,9 +8779,9 @@ def run(
         elif action == "get_order_history":
             return {"orders": bot.get_order_history(symbol=symbol, category=cat, limit=limit or 50, start_time=start_time, end_time=end_time)}
         elif action == "batch_orders":
-            if not orders:
-                return {"status": "error", "msg": "orders list is required"}
-            return bot.safe_execute(bot.execute_scalp_batch, orders)
+            if not _parsed_orders:
+                return {"status": "error", "msg": "orders list is required (JSON string)"}
+            return bot.safe_execute(bot.execute_scalp_batch, _parsed_orders)
         elif action == "iceberg_order":
             if not symbol or not side or qty is None:
                 return {"status": "error", "msg": "symbol, side, and qty required"}
@@ -8814,13 +8827,13 @@ def run(
                 position_idx=pidx, client_oid=client_oid,
             )
         elif action == "batch_amend_orders":
-            if not orders:
-                return {"status": "error", "msg": "orders list is required"}
-            return bot.batch_amend_orders(orders, category=cat)
+            if not _parsed_orders:
+                return {"status": "error", "msg": "orders list is required (JSON string)"}
+            return bot.batch_amend_orders(_parsed_orders, category=cat)
         elif action == "batch_cancel_orders":
-            if not orders:
-                return {"status": "error", "msg": "orders list is required"}
-            return bot.batch_cancel_orders(orders, category=cat)
+            if not _parsed_orders:
+                return {"status": "error", "msg": "orders list is required (JSON string)"}
+            return bot.batch_cancel_orders(_parsed_orders, category=cat)
 
         # ══════════════════════════════════════════════════════
         # POSITIONS & ACCOUNT
@@ -9338,9 +9351,9 @@ def run(
         elif action == "journal_export":
             return bot.journal_export()
         elif action == "journal_import":
-            if not journal_data:
-                return {"status": "error", "msg": "journal_data (list of trade dicts) required"}
-            return bot.journal_import(trades=journal_data)
+            if not _parsed_journal:
+                return {"status": "error", "msg": "journal_data (JSON string of trade dicts) required"}
+            return bot.journal_import(trades=_parsed_journal)
 
         # ══════════════════════════════════════════════════════
         # ADVANCED POSITION SIZING
