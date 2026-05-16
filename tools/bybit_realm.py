@@ -9338,6 +9338,25 @@ Examples:
     parser.add_argument("--period",          type=int, help="Historical volatility period")
     parser.add_argument("--output",          help="Output file path")
     parser.add_argument("--orders-file",     dest="orders_file", help="JSON file with batch order list")
+    # ── New params for 30 new actions ────────────────────────
+    parser.add_argument("--num-levels",      dest="num_levels", type=int, help="Number of DCA/scale levels")
+    parser.add_argument("--num-entries",     dest="num_entries", type=int, help="Number of scale-in entries")
+    parser.add_argument("--num-exits",       dest="num_exits", type=int, help="Number of scale-out exits")
+    parser.add_argument("--spacing-pct",     dest="spacing_pct", type=float, help="Price spacing pct for scale entries")
+    parser.add_argument("--tp-spacing-pct",  dest="tp_spacing_pct", type=float, help="TP spacing pct for scale exits")
+    parser.add_argument("--hedge-pct",       dest="hedge_pct", type=float, help="Hedge percentage of position")
+    parser.add_argument("--dip-pct",         dest="dip_pct", type=float, help="Dip spacing pct for smart DCA")
+    parser.add_argument("--symbols",         nargs="+", help="List of symbols for correlation analysis")
+    parser.add_argument("--risk-fraction",   dest="risk_fraction", type=float, help="Risk fraction for fixed fractional sizing")
+    parser.add_argument("--consecutive-wins", dest="consecutive_wins", type=int, help="Consecutive wins for anti-martingale")
+    parser.add_argument("--consecutive-losses", dest="consecutive_losses", type=int, help="Consecutive losses for anti-martingale")
+    parser.add_argument("--daily-return-pct", dest="daily_return_pct", type=float, help="Daily return pct for compound growth")
+    parser.add_argument("--days",            type=int, help="Number of days for compound growth projection")
+    parser.add_argument("--win-rate-pct",    dest="win_rate_pct", type=float, help="Win rate pct for compound growth")
+    parser.add_argument("--trades-per-day",  dest="trades_per_day", type=int, help="Trades per day for compound growth")
+    parser.add_argument("--starting-capital", dest="starting_capital", type=float, help="Starting capital for compound growth")
+    parser.add_argument("--maint-margin-rate", dest="maint_margin_rate", type=float, help="Maintenance margin rate for liquidation calc")
+    parser.add_argument("--account-balance", dest="account_balance", type=float, help="Account balance for fixed fractional sizing")
 
     args = parser.parse_args()
 
@@ -9390,6 +9409,24 @@ Examples:
         currency=getattr(args, 'currency', None),
         depth=getattr(args, 'depth', None),
         period=getattr(args, 'period', None),
+        num_levels=getattr(args, 'num_levels', None),
+        num_entries=getattr(args, 'num_entries', None),
+        num_exits=getattr(args, 'num_exits', None),
+        spacing_pct=getattr(args, 'spacing_pct', None),
+        tp_spacing_pct=getattr(args, 'tp_spacing_pct', None),
+        hedge_pct=getattr(args, 'hedge_pct', None),
+        dip_pct=getattr(args, 'dip_pct', None),
+        symbols=getattr(args, 'symbols', None),
+        risk_fraction=getattr(args, 'risk_fraction', None),
+        consecutive_wins=getattr(args, 'consecutive_wins', None),
+        consecutive_losses=getattr(args, 'consecutive_losses', None),
+        daily_return_pct=getattr(args, 'daily_return_pct', None),
+        days=getattr(args, 'days', None),
+        win_rate_pct=getattr(args, 'win_rate_pct', None),
+        trades_per_day=getattr(args, 'trades_per_day', None),
+        starting_capital=getattr(args, 'starting_capital', None),
+        maint_margin_rate=getattr(args, 'maint_margin_rate', None),
+        account_balance=getattr(args, 'account_balance', None),
     )
 
     output_path = args.output or os.environ.get("LLM_OUTPUT")
