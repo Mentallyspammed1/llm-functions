@@ -2048,10 +2048,10 @@ class BybitToolDispatcher:
         symbol: str,
         category: Category = Category.LINEAR,
     ) -> dict:
-        """Get current mark price and funding info."""
+        """Get current mark price and funding info via tickers endpoint."""
         resp = self.api_request(
-            "GET", "/v5/market/mark-price-kline",
-            params={"category": category, "symbol": symbol, "limit": 1},
+            "GET", "/v5/market/tickers",
+            params={"category": category, "symbol": symbol},
             signed=False,
         )
         items = resp.get("result", {}).get("list", [])
@@ -2062,10 +2062,9 @@ class BybitToolDispatcher:
             "symbol": symbol,
             "mark_price": float(item.get("markPrice", 0)),
             "index_price": float(item.get("indexPrice", 0)),
+            "last_price": float(item.get("lastPrice", 0)),
             "funding_rate": float(item.get("fundingRate", 0)),
-            "funding_timestamp": int(item.get("fundingRateTimestamp", 0)),
             "next_funding_time": int(item.get("nextFundingTime", 0)),
-            "timestamp": int(item.get("timestamp", 0)),
         }
 
     def get_index_price(
@@ -2073,10 +2072,10 @@ class BybitToolDispatcher:
         symbol: str,
         category: Category = Category.LINEAR,
     ) -> dict:
-        """Get index price for a symbol."""
+        """Get index price for a symbol via tickers endpoint."""
         resp = self.api_request(
-            "GET", "/v5/market/index-price-kline",
-            params={"category": category, "symbol": symbol, "limit": 1},
+            "GET", "/v5/market/tickers",
+            params={"category": category, "symbol": symbol},
             signed=False,
         )
         items = resp.get("result", {}).get("list", [])
@@ -2086,7 +2085,8 @@ class BybitToolDispatcher:
         return {
             "symbol": symbol,
             "index_price": float(item.get("indexPrice", 0)),
-            "timestamp": int(item.get("timestamp", 0)),
+            "mark_price": float(item.get("markPrice", 0)),
+            "last_price": float(item.get("lastPrice", 0)),
         }
 
     def get_24hr_ticker(
@@ -5990,8 +5990,9 @@ class BybitToolDispatcher:
             if not ob:
                 return {"status": "error", "msg": "Cannot fetch orderbook"}
 
-            bids = ob.get("b", [])
-            asks = ob.get("a", [])
+            result = ob.get("result", ob)
+            bids = result.get("b", [])
+            asks = result.get("a", [])
             if not bids or not asks:
                 return {"status": "error", "msg": "Empty orderbook"}
 
@@ -8484,6 +8485,19 @@ def run(
         funding_rate: Funding rate for breakeven calculations
         holding_hours: Hours holding position (for funding cost in breakeven)
         holding_periods: Number of 8h funding periods
+        scale_pct: Percentage to scale in/out of a position
+        reduce: Whether order is reduce-only
+        scale: Scale factor for position adjustment
+        use_atr: Use ATR-based dynamic SL/TP placement
+        offset_pct: Offset percentage for trailing stop
+        entry_price: Entry price for trade journal logging
+        exit_price: Exit price for trade journal logging
+        strategy: Strategy name tag for trade journal
+        tags: Comma-separated tags for trade journal entry
+        trade_notes: Notes for trade journal entry
+        trade_id: Trade ID for journal lookup/update
+        journal_status: Filter journal by status (open, closed, all)
+        journal_data: List of trade dicts for bulk journal import
         orders: List of order dicts for batch operations
         slices: Number of slices for iceberg orders
         delay: Seconds between iceberg slices
@@ -8509,6 +8523,25 @@ def run(
         currency: Currency filter for borrow history/collateral
         depth: Orderbook depth for L2 analysis (default 50)
         period: Period for historical volatility (7, 14, 21, 30, 60, 90, 180, 270)
+        num_bins: Number of bins for volume profile analysis
+        num_levels: Number of DCA/scale levels for smart_dca
+        num_entries: Number of scale-in entry orders
+        num_exits: Number of scale-out exit orders
+        spacing_pct: Price spacing percentage between scale entries
+        tp_spacing_pct: Take-profit spacing percentage between scale exits
+        hedge_pct: Percentage of position to hedge (0-100)
+        dip_pct: Dip spacing percentage for smart DCA levels
+        symbols: List of trading symbols for correlation analysis
+        risk_fraction: Risk fraction of account for fixed fractional sizing (e.g. 0.02 = 2%)
+        consecutive_wins: Number of consecutive wins for anti-martingale sizing
+        consecutive_losses: Number of consecutive losses for anti-martingale sizing
+        daily_return_pct: Expected daily return percentage for compound growth projection
+        days: Number of days for compound growth projection
+        win_rate_pct: Win rate percentage for compound growth projection
+        trades_per_day: Number of trades per day for compound growth projection
+        starting_capital: Starting capital in USDT for compound growth projection
+        maint_margin_rate: Maintenance margin rate for liquidation price calculation
+        account_balance: Account balance for fixed fractional position sizing
     """
     bot = _get_dispatcher()
 
@@ -8761,7 +8794,7 @@ def run(
                 return {"status": "error", "msg": "symbol is required"}
             return bot.get_trend_analysis(symbol=symbol, category=cat,
                                            interval=interval or "60",
-                                           lookback_periods=limit or 200,
+                                           lookback_periods=max(limit or 200, 200),
                                            include_advanced_indicators=True)
 
         # ══════════════════════════════════════════════════════
@@ -9238,7 +9271,7 @@ def run(
         elif action == "divergence_signals":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.detect_divergence_signals(symbol=symbol, lookback=limit or 50, category=cat)
+            return bot.detect_divergence_signals(symbol=symbol, lookback=max(limit or 100, 100), category=cat)
         elif action == "optimal_entry_zones":
             if not symbol or not side:
                 return {"status": "error", "msg": "symbol and side required"}
