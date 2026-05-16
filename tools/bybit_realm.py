@@ -1049,6 +1049,7 @@ class TorManager:
 
         last_exc: Optional[Exception] = None
 
+        geo_blocked_tiers = []
         for i, tier in enumerate(tiers):
             try:
                 result = tier(method, url, headers, params, json_data)
@@ -1060,7 +1061,10 @@ class TorManager:
                 logger.warning("Network tier %s failed: %s", tier.__name__, exc)
 
                 is_geo_block = any(w in error_str for w in ["403", "blocked", "forbidden", "geo"])
-                if is_geo_block and tier == self._tier_socks and not self._renewal_broken:
+                if is_geo_block:
+                    geo_blocked_tiers.append(tier.__name__)
+
+                if is_geo_block and tier in (self._tier_socks, self._tier_torsocks) and not self._renewal_broken:
                     self._circuit_failures += 1
                     if self._circuit_failures < self._max_circuit_failures and self.renew_tor_circuit():
                         time.sleep(1)
@@ -1073,6 +1077,15 @@ class TorManager:
                     self._socks_alive = None
                     self._socks_probe_ts = 0.0
 
+        if geo_blocked_tiers:
+            raise ConnectionError(
+                f"GEO-BLOCKED: All network tiers returned 403 Forbidden "
+                f"(blocked tiers: {', '.join(geo_blocked_tiers)}). "
+                f"Bybit API is not accessible from this region. "
+                f"Ensure Tor/SOCKS5 proxy is running: "
+                f"'sudo systemctl start tor' or set BYBIT_TOR_SOCKS_PORT. "
+                f"Last error: {last_exc}"
+            )
         raise ConnectionError(f"All network tiers exhausted. Last error: {last_exc}")
 
     # ── Tier implementations ─────────────────────────────────
@@ -1107,7 +1120,7 @@ class TorManager:
         if not self._torsocks_bin:
             raise RuntimeError("torsocks binary not found")
 
-        cmd = [self._torsocks_bin, "curl", "-s", "-X", method]
+        cmd = [self._torsocks_bin, "curl", "-s", "-w", "\n%{http_code}", "-X", method]
         for k, v in headers.items():
             cmd += ["-H", f"{k}: {v}"]
         if json_data:
@@ -1123,10 +1136,20 @@ class TorManager:
         )
         if result.returncode != 0:
             raise RuntimeError(f"torsocks curl failed: {result.stderr.strip()}")
-        if not result.stdout.strip():
+        raw = result.stdout.strip()
+        if not raw:
             raise RuntimeError("torsocks curl returned empty response")
 
-        data     = json.loads(result.stdout)
+        lines = raw.rsplit("\n", 1)
+        body = lines[0] if len(lines) > 1 else raw
+        http_code = int(lines[-1]) if len(lines) > 1 and lines[-1].isdigit() else 0
+
+        if http_code == 403:
+            raise RuntimeError(f"403 Forbidden (geo-blocked) via torsocks for url: {url}")
+        if http_code >= 400:
+            raise RuntimeError(f"HTTP {http_code} via torsocks for url: {url}")
+
+        data     = json.loads(body)
         ret_code = data.get("retCode", 0)
         if ret_code != 0:
             raise RuntimeError(
@@ -1542,17 +1565,49 @@ class BybitToolDispatcher:
                 if "Circuit OPEN" in str(exc):
                     raise  # Don't try other endpoints when circuit is open
                 last_exc = exc
-                # If it might be a geo/IP block, try renewing Tor circuit
-                if "403" in str(exc) and self.config.use_tor:
-                    logger.info("[%s] Got 403, attempting Tor circuit renewal…", request_id)
-                    self.tor.renew_tor_circuit()
+                error_str = str(exc).lower()
+                is_geo = any(w in error_str for w in ["403", "blocked", "forbidden", "geo"])
+                if is_geo and self.config.use_tor:
+                    logger.info("[%s] Got 403 geo-block, renewing Tor circuit and retrying…", request_id)
+                    if self.tor.renew_tor_circuit():
+                        time.sleep(0.5)
+                        ts = self._get_timestamp()
+                        if signed:
+                            headers["X-BAPI-TIMESTAMP"] = ts
+                            headers["X-BAPI-SIGN"] = self._sign(payload_str, ts)
+                        try:
+                            return self.circuit.call(
+                                self.tor.request,
+                                method, url, headers,
+                                params    if method == "GET"  else None,
+                                json_data if method == "POST" else None,
+                                signed=signed,
+                            )
+                        except Exception as retry_exc:
+                            logger.warning("[%s] Retry after circuit renewal also failed: %s", request_id, retry_exc)
+                            last_exc = retry_exc
                 logger.warning("[%s] Endpoint %s failed: %s", request_id, base_url, exc)
+                continue
+            except ConnectionError as exc:
+                last_exc = exc
+                error_str = str(exc).lower()
+                if "geo-blocked" in error_str or "403" in error_str:
+                    logger.error("[%s] Geo-blocked on all network tiers for %s", request_id, base_url)
+                else:
+                    logger.warning("[%s] Endpoint %s connection error: %s", request_id, base_url, exc)
                 continue
             except Exception as exc:
                 last_exc = exc
                 logger.warning("[%s] Endpoint %s failed: %s", request_id, base_url, exc)
                 continue
 
+        error_str = str(last_exc).lower() if last_exc else ""
+        if any(w in error_str for w in ["403", "blocked", "forbidden", "geo"]):
+            raise ConnectionError(
+                f"[{request_id}] GEO-BLOCKED: Bybit API returned 403 Forbidden from all endpoints. "
+                f"Ensure Tor is running ('sudo systemctl start tor') or configure SOCKS5 proxy. "
+                f"Last error: {last_exc}"
+            )
         raise ConnectionError(f"[{request_id}] All API endpoints exhausted. Last error: {last_exc}")
 
     # ══════════════════════════════════════════════════════════
