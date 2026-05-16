@@ -4001,8 +4001,7 @@ class BybitToolDispatcher:
             atr_pct = (atr / last_price) * 100 if last_price > 0 else 1.0
 
             rsi = self.calculate_rsi(closes, 14)
-            adx_data = self.calculate_adx(ohlcv, 14)
-            adx_val = adx_data.get("adx", 20) if isinstance(adx_data, dict) else 20
+            adx_val = self.calculate_adx(highs, lows, closes, 14)
 
             vol_score = 1.0
             if atr_pct > 4.0:
@@ -4281,10 +4280,16 @@ class BybitToolDispatcher:
             rsi = self.calculate_rsi(closes, 14)
             macd_data = self.calculate_macd(closes)
             atr = self.calculate_atr(ohlcv, 14)
-            adx_data = self.calculate_adx(ohlcv, 14)
-            adx_val = adx_data.get("adx", 0) if isinstance(adx_data, dict) else 0
-            plus_di = adx_data.get("plus_di", 0) if isinstance(adx_data, dict) else 0
-            minus_di = adx_data.get("minus_di", 0) if isinstance(adx_data, dict) else 0
+            adx_val = self.calculate_adx(highs, lows, closes, 14)
+            plus_di = 0.0
+            minus_di = 0.0
+            if len(highs) > 14:
+                pos_dm = [max(highs[i] - highs[i-1], 0) if (highs[i] - highs[i-1]) > (lows[i-1] - lows[i]) else 0 for i in range(1, len(highs))]
+                neg_dm = [max(lows[i-1] - lows[i], 0) if (lows[i-1] - lows[i]) > (highs[i] - highs[i-1]) else 0 for i in range(1, len(lows))]
+                tr_list = [max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])) for i in range(1, len(closes))]
+                atr_sum = sum(tr_list[-14:]) + 1e-9
+                plus_di = 100 * sum(pos_dm[-14:]) / atr_sum
+                minus_di = 100 * sum(neg_dm[-14:]) / atr_sum
 
             avg_vol = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else sum(volumes) / len(volumes)
             curr_vol = volumes[-1] if volumes else 0
@@ -4991,10 +4996,16 @@ class BybitToolDispatcher:
             lows = [float(k[3]) for k in klines]
             ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
 
-            adx_data = self.calculate_adx(ohlcv, 14)
-            adx_val = adx_data.get("adx", 0) if isinstance(adx_data, dict) else 0
-            plus_di = adx_data.get("plus_di", 0) if isinstance(adx_data, dict) else 0
-            minus_di = adx_data.get("minus_di", 0) if isinstance(adx_data, dict) else 0
+            adx_val = self.calculate_adx(highs, lows, closes, 14)
+            plus_di = 0.0
+            minus_di = 0.0
+            if len(highs) > 14:
+                pos_dm = [max(highs[i] - highs[i-1], 0) if (highs[i] - highs[i-1]) > (lows[i-1] - lows[i]) else 0 for i in range(1, len(highs))]
+                neg_dm = [max(lows[i-1] - lows[i], 0) if (lows[i-1] - lows[i]) > (highs[i] - highs[i-1]) else 0 for i in range(1, len(lows))]
+                tr_list = [max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])) for i in range(1, len(closes))]
+                atr_sum = sum(tr_list[-14:]) + 1e-9
+                plus_di = 100 * sum(pos_dm[-14:]) / atr_sum
+                minus_di = 100 * sum(neg_dm[-14:]) / atr_sum
             atr = self.calculate_atr(ohlcv, 14)
             atr_pct = (atr / closes[-1]) * 100 if closes[-1] > 0 else 0
             chop = self.calculate_choppiness_index(highs, lows, closes, 14)
@@ -7736,7 +7747,8 @@ class BybitToolDispatcher:
                 highs = [float(k[2]) for k in klines]
                 lows = [float(k[3]) for k in klines]
                 closes = [float(k[4]) for k in klines]
-                atr = self.calculate_atr(highs, lows, closes, period=14)
+                ohlcv_data = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+                atr = self.calculate_atr(ohlcv_data, period=14)
                 if atr > 0:
                     if side_str == "Buy":
                         sl_price = entry - (atr * atr_mult)
