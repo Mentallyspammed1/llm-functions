@@ -1151,7 +1151,7 @@ class TorManager:
 
         data     = json.loads(body)
         ret_code = data.get("retCode", 0)
-        if ret_code != 0:
+        if ret_code != 0 and ret_code not in (110043,):
             raise RuntimeError(
                 f"Bybit API error retCode={ret_code}: {data.get('retMsg', 'unknown')}"
             )
@@ -1234,7 +1234,7 @@ class TorManager:
             resp.raise_for_status()
             raise
         ret_code = data.get("retCode", 0)
-        if ret_code != 0:
+        if ret_code != 0 and ret_code not in (110043,):
             raise RuntimeError(
                 f"Bybit API error retCode={ret_code}: {data.get('retMsg', 'unknown')}"
             )
@@ -9176,11 +9176,14 @@ def run(
                     "risk_usdt": risk_usdt, "quantity": qty_out, "leverage_used": lev}
         elif action == "calculate_volatility_adjusted_size":
             if not symbol or price is None or risk_usdt is None:
-                return {"status": "error", "msg": "symbol, price, and risk_usdt required"}
-            qty_out = bot.calculate_volatility_adjusted_size(
-                symbol=symbol, entry_price=price, risk_usdt=risk_usdt, category=cat,
+                return {"status": "error", "msg": "symbol, price, sl_price, and risk_usdt required"}
+            _sl = sl_price if sl_price is not None else price * 0.98
+            _bal = account_balance if account_balance is not None else risk_usdt / 0.02
+            result = bot.calculate_volatility_adjusted_size(
+                symbol=symbol, entry_price=price, sl_price=_sl,
+                risk_usdt=risk_usdt, account_balance=_bal, category=cat,
             )
-            return {"symbol": symbol, "entry_price": price, "risk_usdt": risk_usdt, "quantity": qty_out}
+            return result if isinstance(result, dict) else {"symbol": symbol, "entry_price": price, "risk_usdt": risk_usdt, "quantity": result}
         elif action == "calculate_breakeven":
             if price is None or qty is None or not side:
                 return {"status": "error", "msg": "price (entry), qty, and side required"}
