@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """BYBIT REALM v4.2 - LLM Hardened"""
 from __future__ import annotations
+# from utils.bybit_base import Category
 from typing import Optional, List, Dict, Any, Literal, Tuple, Callable
 import os, sys, json, time, math, hmac, logging, hashlib, threading, subprocess, shutil, statistics, socket
 from collections import deque
@@ -244,14 +245,26 @@ class BybitToolDispatcher:
                 if ts_nano: self.clock.sync(int(ts_nano) // 1_000_000)
             except: pass
 
+    def _sanitize(self, data: Any) -> Any:
+        if isinstance(data, dict):
+            return {k: self._sanitize(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self._sanitize(v) for v in data]
+        elif isinstance(data, Enum):
+            return data.value
+        elif isinstance(data, str) and data.lower() in ("true", "false"):
+            return data.lower() == "true"
+        return data
+
     def api_request(self, method: str, endpoint: str, params: Optional[dict] = None, json_data: Optional[dict] = None, signed: bool = True) -> dict:
         self.limiter.acquire()
         if signed: self._ensure_clock_sync()
         url = f"{self.config.base_url}{endpoint}"; ts = self.clock.now_ms() if signed else str(int(time.time() * 1000))
-        payload_str = json.dumps(json_data or {}, separators=(",", ":")) if method == "POST" else "&".join(f"{k}={v}" for k, v in sorted((params or {}).items()))
+        sanitized_json = self._sanitize(json_data or {})
+        payload_str = json.dumps(sanitized_json, separators=(",", ":")) if method == "POST" else "&".join(f"{k}={v}" for k, v in sorted((params or {}).items()))
         headers = {"Content-Type": "application/json", "X-BAPI-API-KEY": self.config.api_key, "X-BAPI-TIMESTAMP": ts, "X-BAPI-RECV-WINDOW": self._RECV_WINDOW}
         if signed: headers["X-BAPI-SIGN"] = self._sign(payload_str, ts)
-        return self.circuit.call(self.tor.request, method, url, headers, params if method == "GET" else None, json_data if method == "POST" else None)
+        return self.circuit.call(self.tor.request, method, url, headers, params if method == "GET" else None, sanitized_json if method == "POST" else None)
 
     def api_request_with_retry(self, method: str, endpoint: str, params: Optional[dict] = None, json_data: Optional[dict] = None, signed: bool = True, max_retries: int = 3) -> dict:
         last_exc = None
@@ -291,12 +304,12 @@ class BybitToolDispatcher:
         return {"time_nano": time_nano, "time_ms": time_ms, "time_second": time_ms // 1000 if time_ms else 0}
 
     def place_order(self, symbol: str, side: OrderSide, qty: float, price: Optional[float] = None, order_type: OrderType = OrderType.LIMIT, category: Category = Category.LINEAR, stop_loss: Optional[float] = None, take_profit: Optional[float] = None, reduce_only: bool = False, time_in_force: TimeInForce = TimeInForce.GTC, position_idx: PositionIdx = PositionIdx.ONE_WAY, client_oid: Optional[str] = None, trailing_stop: Optional[float] = None) -> dict:
-        payload: Dict[str, Any] = {"category": category, "symbol": symbol, "side": side, "orderType": order_type, "qty": str(self.adjust_quantity(symbol, qty, category)), "timeInForce": time_in_force, "positionIdx": position_idx}
+        payload: Dict[str, Any] = {"category": category, "symbol": symbol, "side": side, "orderType": order_type, "qty": str(self.adjust_quantity(symbol, qty, category)), "timeInForce": time_in_force, "positionIdx": int(position_idx.value)}
         if price is not None: payload["price"] = str(self.adjust_price(symbol, price, category))
         if stop_loss is not None: payload["stopLoss"] = str(self.adjust_price(symbol, stop_loss, category))
         if take_profit is not None: payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
         if trailing_stop is not None: payload["trailingStop"] = str(trailing_stop)
-        if reduce_only: payload["reduceOnly"] = True
+        payload["reduceOnly"] = bool(reduce_only)
         if client_oid: payload["orderLinkId"] = client_oid
         return self.api_request_with_retry("POST", "/v5/order/create", json_data=payload)
 
@@ -472,7 +485,7 @@ def _get_dispatcher() -> BybitToolDispatcher:
             if _dispatcher is None: _dispatcher = BybitToolDispatcher(TradingConfig())
     return _dispatcher
 
-VALID_ACTIONS = ["health_check", "get_server_time", "place_order", "place_conditional_order", "amend_order", "cancel_order", "cancel_all_orders", "get_open_orders", "get_order_history", "get_positions", "get_wallet_balance", "get_account_info", "get_fee_rates", "set_leverage", "set_trading_stop", "get_ticker", "get_tickers_bulk", "get_orderbook", "get_klines", "get_recent_trades", "get_open_interest", "get_liquidations", "get_instruments_info", "get_spread_analysis", "get_technical_analysis", "get_market_momentum", "get_funding_rate", "get_mark_price", "get_index_price", "calculate_sl_tp", "calculate_position_size", "calculate_atr_position_size", "get_pnl_history", "get_pnl_report", "batch_orders", "iceberg_order", "reset_circuit", "invalidate_cache"]
+VALID_ACTIONS = ["health_check", "get_server_time", "place_order", "place_conditional_order", "amend_order", "cancel_order", "cancel_all_orders", "get_open_orders", "get_order_history", "get_positions", "get_wallet_balance", "get_account_info", "get_fee_rates", "set_leverage", "set_trading_stop", "get_ticker", "get_tickers_bulk", "get_orderbook", "get_klines", "get_recent_trades", "get_open_interest", "get_liquidations", "get_instruments_info", "get_spread_analysis", "get_technical_analysis", "get_market_momentum", "get_funding_rate", "get_mark_price", "get_index_price", "calculate_sl_tp", "calculate_position_size", "calculate_atr_position_size", "get_pnl_history", "get_pnl_report", "batch_orders", "iceberg_order", "reset_circuit", "invalidate_cache", "renew_tor_circuit"]
 
 def run(action: str, symbol: Optional[str] = None, side: Optional[str] = None, qty: Optional[Any] = None, price: Optional[Any] = None, order_type: Optional[str] = None, category: Optional[str] = None, order_id: Optional[str] = None, stop_loss: Optional[Any] = None, take_profit: Optional[Any] = None, trailing_stop: Optional[Any] = None, reduce_only: Optional[bool] = False, time_in_force: Optional[str] = None, position_idx: Optional[Any] = None, client_oid: Optional[str] = None, trigger_price: Optional[Any] = None, trigger_by: Optional[str] = None, leverage: Optional[Any] = None, buy_leverage: Optional[Any] = None, sell_leverage: Optional[Any] = None, account_type: Optional[str] = "UNIFIED", limit: Optional[Any] = 25, interval: Optional[str] = "1", interval_time: Optional[str] = "5min", depth: Optional[Any] = 5, symbols: Optional[List[str]] = None, base_coin: Optional[str] = None, status: Optional[str] = None, strong_threshold: Optional[Any] = 0.20, mild_threshold: Optional[Any] = 0.08, rsi_period: Optional[Any] = 14, bb_period: Optional[Any] = 20, bb_std: Optional[Any] = 2.0, atr_mult: Optional[Any] = 1.5, sl_pct: Optional[Any] = None, tp_pct: Optional[Any] = None, risk_usdt: Optional[Any] = None, sl_price: Optional[Any] = None, orders: Optional[List[Dict[str, Any]]] = None, slices: Optional[Any] = 5, delay: Optional[Any] = None) -> dict:
     

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# edit_file.py — Pyrmethus File Weaver v2.7.2
-# argc/aichat compatible · Termux · Full 30-operation suite
+# edit_file.py — Pyrmethus File Weaver v2.8.0
+# argc/aichat compatible · Termux · Full 33-operation suite
+# Inserted by assistant
 #
 # @describe File editing and manipulation tool with security restrictions.
 #
@@ -27,7 +28,7 @@
 # @option --mode <MODE>                   Permission mode (octal) or compare mode
 # @option --to-type <TYPE>                Line ending type: lf or crlf
 # @option --backup-timestamp <TS>         Backup timestamp for revert
-# @option --algorithm <ALG>               Hash algorithm (sha256/sha1/sha512/md5)
+# @option --algorithm <ALG>               Hash algorithm (sha256/sha1/sha512/md5/blake2b)
 # @option --n-lines <NUM>                 Lines for head/tail operations
 # @option --compare-mode <MODE>           Compare mode: bytes or text
 # @option --compression <TYPE>            Archive compression type
@@ -42,6 +43,7 @@
 # @option --max-results <NUM>             Maximum find results
 # @option --var <KEY=VALUE>               Template variable (repeatable)
 # @option --ops <JSON>                    JSON array of operations for batch mode
+# @option --edits <JSON>                  JSON array of edits for batch_edit mode
 # @flag   --use-regex                     Use regex for pattern matching
 # @flag   --no-global                     Only replace first occurrence
 # @flag   --case-insensitive              Case-insensitive matching
@@ -54,6 +56,7 @@
 # @flag   --parents                       Create parent dirs for create_dir
 # @flag   --recursive                     Recursive operation
 # @flag   --verbose                       Enable verbose/debug logging
+# @flag   --continue-on-error             Continue batch on error instead of stopping
 #
 # @env LLM_OUTPUT=/dev/fd/1              Output path for LLM integration
 # ==============================================================================
@@ -63,6 +66,8 @@ from __future__ import annotations
 import argparse
 import difflib
 import fnmatch
+import functools
+import glob as _glob_module
 import hashlib
 import json
 import logging
@@ -75,11 +80,17 @@ import tempfile
 import time
 import zipfile
 from collections import deque
+import sys
 from pathlib import Path
+# Ensure the tools directory is in sys.path
+sys.path.append(str(Path(__file__).resolve().parent))
+
 from typing import (
     Any,
     Callable,
 )
+
+from edit_options import EditOptions
 
 __all__ = [
     # Dispatcher entry point
@@ -117,9 +128,10 @@ __all__ = [
     "extract",
     "template_write",
     "batch",
+    "batch_edit",
 ]
 
-__version__ = "2.7.2"
+__version__ = "2.8.0"
 
 # ==============================================================================
 # SECTION 1: Logger & Color Support
@@ -148,12 +160,15 @@ except ImportError:
     Style = _DummyColor()  # type: ignore[assignment]
 
 
-def _cprint(text: str, color: str = "", style: str = "") -> None:
-    """Print with optional color; degrades gracefully without colorama."""
-    if COLORAMA_AVAILABLE:
-        print(f"{style}{color}{text}{Style.RESET_ALL}")
-    else:
-        print(text)
+# SYNTHWAVE RETRO-NEON PALETTE
+CYBER_MAGENTA = '\033[38;5;201m'
+CYBER_LIME = '\033[38;5;82m'
+CYBER_CYAN = '\033[38;5;51m'
+RESET = '\033[0m'
+
+def _cprint(text: str, color: str = CYBER_CYAN, style: str = "") -> None:
+    """Print with Cyber-Neon palette."""
+    print(f"{style}{color}{text}{RESET}")
 
 
 # ==============================================================================
@@ -188,14 +203,54 @@ _SORT_KEYS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "type": lambda x: (not x.get("is_dir", False), x["name"].lower()),
 }
 
-_HASH_ALGORITHMS: frozenset[str] = frozenset({"sha256", "sha1", "sha512", "md5"})
+_HASH_ALGORITHMS: frozenset[str] = frozenset({"sha256", "sha1", "sha512", "md5", "blake2b"})
 
 # Template variable pattern: {{ var_name }} with optional whitespace
 _TEMPLATE_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
 # Human-readable alias — NOT used as a type annotation in run() to stay
 # compatible with build-declarations.py which cannot handle custom types.
+# MIME types that should be treated as text (not binary)
+_TEXT_MIME_PREFIXES: tuple[str, ...] = (
+    "text/",
+    "application/json",
+    "application/xml",
+    "application/javascript",
+    "application/ecmascript",
+    "application/x-shellscript",
+    "application/x-python",
+    "application/x-perl",
+    "application/x-ruby",
+    "application/x-httpd-php",
+    "application/xhtml+xml",
+    "application/x-empty",
+    "inode/x-empty",
+    "application/toml",
+    "application/yaml",
+    "application/x-yaml",
+    "application/svg+xml",
+    "application/csv",
+    "application/sql",
+    "application/x-subrip",
+    "application/x-tex",
+    "application/rtf",
+    "application/x-ndjson",
+    "application/graphql",
+    "application/x-typescript",
+)
+
+# Cache the `file` command location once at import time
+_FILE_CMD: str | None = shutil.which("file")
+
+# Stale lock threshold
+STALE_LOCK_SECONDS: float = 30.0
+
 OperationName = str
+
+
+def _glob_escape(name: str) -> str:
+    """Escape special glob/fnmatch characters for use with Path.glob()."""
+    return _glob_module.escape(name)
 
 
 # ==============================================================================
@@ -205,7 +260,6 @@ OperationName = str
 
 def _timed(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
     """Wrap any operation function to inject ``duration_ms`` into its result."""
-    import functools
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -330,6 +384,7 @@ class FileEditor:
         1. Pseudo-filesystems are always treated as text (never binary).
         2. Null-byte presence in first chunk → binary.
         3. `file --mime-type` subprocess used when available for accuracy.
+           v2.8.0 FIX: correctly returns True for non-text MIME types.
         4. Fallback: non-binary.
         """
         path_str = str(path)
@@ -340,26 +395,21 @@ class FileEditor:
                 chunk = f.read(check_bytes)
             if b"\x00" in chunk:
                 return True
-            if shutil.which("file"):
+            if _FILE_CMD:
                 try:
                     r = subprocess.run(
-                        ["file", "-b", "--mime-type", path_str],
+                        [_FILE_CMD, "-b", "--mime-type", path_str],
                         capture_output=True,
                         text=True,
                         timeout=2.0,
                     )
                     if r.returncode == 0:
                         mime = r.stdout.strip()
-                        if mime.startswith(
-                            (
-                                "text/",
-                                "application/json",
-                                "application/xml",
-                                "application/javascript",
-                                "inode/x-empty",
-                            )
-                        ):
+                        if not mime:
                             return False
+                        if mime.startswith(_TEXT_MIME_PREFIXES):
+                            return False
+                        return True  # v2.8.0 FIX: non-text MIME → binary
                 except Exception:
                     pass
             return False
@@ -448,7 +498,7 @@ class FileEditor:
 
     @staticmethod
     def _acquire_lock(lock_path: Path, timeout: float = 3.0) -> None:
-        """Spin-acquire a simple lock file; silently give up on timeout."""
+        """Spin-acquire a simple lock file; break stale locks (v2.8.0)."""
         deadline = time.monotonic() + timeout
         while True:
             try:
@@ -459,8 +509,18 @@ class FileEditor:
                 os.close(fd)
                 return
             except FileExistsError:
-                pass
+                try:
+                    lock_age = time.time() - lock_path.stat().st_mtime
+                    if lock_age > STALE_LOCK_SECONDS:
+                        logger.warning(
+                            "Breaking stale lock %s (age=%.1fs)", lock_path, lock_age
+                        )
+                        lock_path.unlink(missing_ok=True)
+                        continue
+                except OSError:
+                    pass
             if time.monotonic() >= deadline:
+                logger.warning("Lock acquisition timed out: %s", lock_path)
                 return
             time.sleep(0.03)
 
@@ -470,8 +530,9 @@ class FileEditor:
         lock_path.unlink(missing_ok=True)
 
     def _prune_backups(self, path: Path, max_backups: int) -> None:
-        """Delete oldest backups beyond max_backups."""
-        pattern = f"{re.escape(path.stem)}{re.escape(path.suffix)}.*.bak"
+        """Delete oldest backups beyond max_backups.
+        v2.8.0 FIX: uses glob.escape instead of re.escape for Path.glob()."""
+        pattern = f"{_glob_escape(path.stem)}{_glob_escape(path.suffix)}.*.bak"
         try:
             backups = sorted(
                 path.parent.glob(pattern),
@@ -483,8 +544,9 @@ class FileEditor:
             pass
 
     def _list_backups(self, path: Path) -> list[Path]:
-        """Return all backups for path, newest first."""
-        pattern = f"{re.escape(path.stem)}{re.escape(path.suffix)}.*.bak"
+        """Return all backups for path, newest first.
+        v2.8.0 FIX: uses glob.escape instead of re.escape."""
+        pattern = f"{_glob_escape(path.stem)}{_glob_escape(path.suffix)}.*.bak"
         try:
             return sorted(
                 path.parent.glob(pattern),
@@ -574,27 +636,18 @@ def read(
         if _editor._is_binary(path):
             return {"success": False, "error": "Binary file detected; refusing to read"}
 
+        if start_line is not None or end_line is not None:
+            # Use streaming read_lines for range-based operations
+            return read_lines(
+                file_path=file_path,
+                start_line=start_line or 1,
+                end_line=end_line or sys.maxsize,
+                encoding=encoding,
+            )
+
         content = path.read_text(encoding=encoding, errors="surrogateescape")
         all_lines = content.splitlines()
-        sliced = False
-
-        if start_line is not None or end_line is not None:
-            total = len(all_lines)
-            sl = max(0, (start_line or 1) - 1)
-            el = min(total, end_line or total)
-            if total > 0 and sl >= el:
-                return {
-                    "success": False,
-                    "error": (
-                        f"Invalid line range [{start_line}, {end_line}] "
-                        f"for file with {total} lines"
-                    ),
-                }
-            selected = all_lines[sl:el]
-            content = "\n".join(selected)
-            sliced = True
-        else:
-            selected = all_lines
+        selected = all_lines
 
         result: dict[str, Any] = {
             "success": True,
@@ -606,9 +659,6 @@ def read(
             "size": stat.st_size,
             "encoding": encoding,
         }
-        if sliced:
-            result["start_line"] = start_line
-            result["end_line"] = end_line
         return result
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -627,6 +677,16 @@ def read_lines(
     Lines are 1-based and inclusive.  Streaming read; memory efficient for
     large files when only a small range is needed.
     """
+    # FIX: Explicitly convert and validate integer types
+    try:
+        start_line = int(start_line) if start_line is not None else 1
+        end_line = int(end_line) if end_line is not None else 1
+    except (ValueError, TypeError):
+        return {
+            "success": False,
+            "error": "start_line and end_line must be integers or convertible to integers"
+        }
+
     if start_line < 1 or end_line < start_line:
         return {
             "success": False,
@@ -667,12 +727,7 @@ def read_lines(
 
 @_timed
 def write(
-    file_path: str,
-    content: str,
-    encoding: str = DEFAULT_ENCODING,
-    create_parents: bool = True,
-    add_newline: bool = False,
-    max_size: int = DEFAULT_MAX_WRITE,
+    options: EditOptions
 ) -> dict[str, Any]:
     """
     Atomically write (create or overwrite) a file.
@@ -680,23 +735,37 @@ def write(
     Uses O_TMPFILE + rename on Linux; mkstemp + rename elsewhere.
     No partial writes are ever visible.
     """
-    if content is None:
+    if options.content is None:
         return {"success": False, "error": "content cannot be None"}
-    path = _editor._validate_path(file_path, allow_write=True)
+    
+    path = _editor._validate_path(options.file_path, allow_write=True) # type: ignore
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
-    if add_newline and content and not content.endswith("\n"):
+        
+    content = options.content
+    if options.add_newline and content and not content.endswith("\n"):
         content += "\n"
-    encoded_size = len(content.encode(encoding, errors="surrogateescape"))
-    if encoded_size > max_size:
+        
+    encoded_size = len(content.encode(options.encoding, errors="surrogateescape"))
+    if encoded_size > options.max_write_size:
         return {
             "success": False,
-            "error": f"Content exceeds max size ({max_size:,} bytes)",
+            "error": f"Content exceeds max size ({options.max_write_size:,} bytes)",
         }
+    
+    if options.dry_run:
+        return {
+            "success": True,
+            "path": str(path),
+            "mode": "dry-run",
+            "message": "Write operation would proceed",
+            "size_would_be": encoded_size
+        }
+
     try:
         original_bytes = path.stat().st_size if path.exists() else 0
         mode_label = "overwrite" if path.exists() else "create"
-        _editor._atomic_write(path, content, encoding)
+        _editor._atomic_write(path, content, options.encoding)
         new_bytes = path.stat().st_size
         return {
             "success": True,
@@ -706,7 +775,7 @@ def write(
             "original_bytes": original_bytes,
             "new_bytes": new_bytes,
             "mode": mode_label,
-            "encoding": encoding,
+            "encoding": options.encoding,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -725,6 +794,7 @@ def append(
 
     When add_newline=True (default), ensures a newline separates existing
     content from the new content even if the file didn't end with one.
+    v2.8.0 FIX: validates combined size won't exceed max_size.
     """
     if content is None:
         return {"success": False, "error": "content cannot be None"}
@@ -741,6 +811,16 @@ def append(
         }
     try:
         original = path.stat().st_size
+        # v2.8.0: check combined size
+        combined = original + encoded_size + (1 if add_newline else 0)
+        if combined > max_size:
+            return {
+                "success": False,
+                "error": (
+                    f"Combined file size would be {combined:,} bytes, "
+                    f"exceeding limit of {max_size:,} bytes"
+                ),
+            }
         needs_sep = False
         if add_newline and original > 0:
             with open(path, "rb") as f:
@@ -766,14 +846,7 @@ def append(
 
 @_timed
 def replace(
-    file_path: str,
-    search_text: str,
-    replacement: str,
-    use_regex: bool = False,
-    global_replace: bool = True,
-    case_sensitive: bool = True,
-    encoding: str = DEFAULT_ENCODING,
-    max_backups: int = MAX_BACKUPS,
+    options: EditOptions
 ) -> dict[str, Any]:
     """
     Replace text or regex pattern in a file.
@@ -782,21 +855,26 @@ def replace(
     Reports count of replacements made; returns success even when
     count=0 (pattern not found) to distinguish from errors.
     """
+    search_text = options.search_text or options.pattern
     if not search_text:
         return {"success": False, "error": "search_text cannot be empty"}
-    res = _editor._read_content(file_path, encoding)
+
+    # FIX: Allow empty replacement (to delete matched text)
+    replacement = options.replacement if options.replacement is not None else ""
+
+    res = _editor._read_content(options.file_path, options.encoding) # type: ignore
     if not res["success"]:
         return res
     content: str = res["content"]
     path: Path = res["path"]
     try:
-        flags = 0 if case_sensitive else re.IGNORECASE
+        flags = 0 if options.case_sensitive else re.IGNORECASE
         compiled = (
             re.compile(search_text, flags)
-            if use_regex
+            if options.use_regex
             else re.compile(re.escape(search_text), flags)
         )
-        if global_replace:
+        if options.global_replace:
             new_content, count = compiled.subn(replacement, content)
         else:
             new_content = compiled.sub(replacement, content, count=1)
@@ -809,9 +887,19 @@ def replace(
                 "replacements": 0,
                 "message": "No replacements made — pattern not found",
             }
+        
+        if options.dry_run:
+            return {
+                "success": True,
+                "path": str(path),
+                "mode": "dry-run",
+                "message": "Replace operation would proceed",
+                "replacements_would_be": count
+            }
+        
         original_bytes = path.stat().st_size
-        backup = _editor._make_backup(path, max_backups)
-        _editor._atomic_write(path, new_content, encoding)
+        backup = _editor._make_backup(path, options.max_backups)
+        _editor._atomic_write(path, new_content, options.encoding)
         new_bytes = path.stat().st_size
         return {
             "success": True,
@@ -1000,8 +1088,8 @@ def file_search(
     Returns a list of match dicts each containing:
       line (int), content (str), [context (List[str]), context_start_line (int)]
     """
-    if not pattern:
-        return {"success": False, "error": "pattern cannot be empty"}
+    if not pattern or not pattern.strip():
+        return {"success": False, "error": "pattern cannot be empty or whitespace-only"}
     res = _editor._read_content(file_path, encoding)
     if not res["success"]:
         return res
@@ -1012,6 +1100,7 @@ def file_search(
     matches: list[dict[str, Any]] = []
     truncated = False
 
+    # FIX: Better match function with type hints
     if use_regex:
         flags = 0 if case_sensitive else re.IGNORECASE
         try:
@@ -1022,14 +1111,13 @@ def file_search(
         def match_fn(line: str) -> bool:
             return bool(comp.search(line))
     elif case_sensitive:
-
-        def match_fn(line: str) -> bool:  # type: ignore[misc]
-            return pattern in line
+        def match_fn(line: str) -> bool:
+            return pattern in line if isinstance(line, str) else False
     else:
         _lower = pattern.lower()
 
-        def match_fn(line: str) -> bool:  # type: ignore[misc]
-            return _lower in line.lower()
+        def match_fn(line: str) -> bool:
+            return _lower in line.lower() if isinstance(line, str) else False
 
     for i, line in enumerate(lines):
         if len(matches) >= max_matches:
@@ -1110,8 +1198,9 @@ def copy(
 
 @_timed
 def move(file_path: str, target_path: str) -> dict[str, Any]:
-    """Move or rename a file or directory."""
-    src = _editor._validate_path(file_path, allow_write=False)
+    """Move or rename a file or directory.
+    v2.8.0 FIX: validates source with allow_write=True since move deletes source."""
+    src = _editor._validate_path(file_path, allow_write=True)
     dst = _editor._validate_path(target_path, allow_write=True)
     if not src or not dst:
         return {"success": False, "error": "Invalid or disallowed path(s)"}
@@ -1166,6 +1255,7 @@ def info(file_path: str) -> dict[str, Any]:
     Return detailed metadata for a file or directory.
 
     Includes: size, timestamps, permissions (octal), inode, symlink target.
+    v2.8.0: adds MIME type detection and line count for text files.
     """
     path = _editor._validate_path(file_path, allow_write=False)
     if not path or not path.exists():
@@ -1203,6 +1293,24 @@ def info(file_path: str) -> dict[str, Any]:
                 "inode": st.st_ino,
             }
         )
+        # v2.8.0: MIME type detection
+        if path.is_file() and _FILE_CMD:
+            try:
+                r = subprocess.run(
+                    [_FILE_CMD, "-b", "--mime-type", str(path)],
+                    capture_output=True, text=True, timeout=2.0,
+                )
+                if r.returncode == 0 and r.stdout.strip():
+                    base["mime_type"] = r.stdout.strip()
+            except Exception:
+                pass
+        # v2.8.0: line count for text files
+        if path.is_file() and not _editor._is_binary(path):
+            try:
+                with open(path, "rb") as f:
+                    base["line_count"] = sum(1 for _ in f)
+            except OSError:
+                pass
     except OSError as exc:
         base.update({"stat_error": str(exc), "size": 0})
     return base
@@ -1381,6 +1489,12 @@ def truncate(
 
     Backup created before truncation.
     """
+    # FIX: Handle non-integer size values gracefully
+    try:
+        size = int(size)
+    except (ValueError, TypeError):
+        return {"success": False, "error": f"Invalid size '{size}': must be an integer"}
+
     if size < 0:
         return {"success": False, "error": "size must be >= 0"}
     path = _editor._validate_path(file_path, allow_write=True)
@@ -1612,12 +1726,18 @@ def grep_dir(
     Returns per-file match lists.  Stops collecting new matches (across all
     files) once max_matches is reached; sets truncated=True in that case.
     """
-    if not pattern:
-        return {"success": False, "error": "pattern cannot be empty"}
+    # FIX: More robust pattern validation
+    if not pattern or not isinstance(pattern, str) or not pattern.strip():
+        return {"success": False, "error": "pattern cannot be empty or whitespace-only"}
+
+    # FIX: Trim whitespace from pattern
+    pattern = pattern.strip()
+
     root = _editor._validate_path(dir_path, allow_write=False)
     if not root or not root.exists() or not root.is_dir():
         return {"success": False, "error": "Invalid or missing directory"}
 
+    # FIX: Better match function with type hints
     if use_regex:
         flags = 0 if case_sensitive else re.IGNORECASE
         try:
@@ -1628,14 +1748,13 @@ def grep_dir(
         def match_fn(line: str) -> bool:
             return bool(comp.search(line))
     elif case_sensitive:
-
-        def match_fn(line: str) -> bool:  # type: ignore[misc]
-            return pattern in line
+        def match_fn(line: str) -> bool:
+            return pattern in line if isinstance(line, str) else False
     else:
         _lower = pattern.lower()
 
-        def match_fn(line: str) -> bool:  # type: ignore[misc]
-            return _lower in line.lower()
+        def match_fn(line: str) -> bool:
+            return _lower in line.lower() if isinstance(line, str) else False
 
     glob_method = root.rglob if recursive else root.glob
     file_matches: list[dict[str, Any]] = []
@@ -1746,7 +1865,7 @@ def word_count(
     file_path: str,
     encoding: str = DEFAULT_ENCODING,
 ) -> dict[str, Any]:
-    """Count lines, words, characters, and bytes in a text file."""
+    """Count lines, words, characters, and bytes in a text file (streaming)."""
     path = _editor._validate_path(file_path, allow_write=False)
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
@@ -1758,16 +1877,20 @@ def word_count(
         return {"success": False, "error": "Binary file detected"}
     try:
         byte_count = path.stat().st_size
-        content = path.read_text(encoding=encoding, errors="surrogateescape")
-        line_count = content.count("\n")
-        if content and not content.endswith("\n"):
-            line_count += 1
+        lines = 0
+        words = 0
+        chars = 0
+        with open(path, "r", encoding=encoding, errors="surrogateescape") as f:
+            for line in f:
+                lines += 1
+                words += len(line.split())
+                chars += len(line)
         return {
             "success": True,
             "path": str(path),
-            "lines": line_count,
-            "words": len(content.split()),
-            "characters": len(content),
+            "lines": lines,
+            "words": words,
+            "characters": chars,
             "bytes": byte_count,
         }
     except Exception as exc:
@@ -2129,11 +2252,16 @@ def extract(
                         f"exceeds limit {MAX_ARCHIVE_SIZE:,} bytes"
                     ),
                 }
-            # Zip-slip protection
+            # Zip-slip protection (v2.8.0: uses Path.is_relative_to)
             dst_resolved = dst.resolve()
             for member in zf.namelist():
                 member_path = (dst / member).resolve()
-                if not str(member_path).startswith(str(dst_resolved)):
+                try:
+                    is_safe = member_path.is_relative_to(dst_resolved)
+                except AttributeError:
+                    # Python < 3.9 fallback
+                    is_safe = str(member_path).startswith(str(dst_resolved) + os.sep) or member_path == dst_resolved
+                if not is_safe:
                     return {
                         "success": False,
                         "error": f"Unsafe archive entry blocked: {member}",
@@ -2254,6 +2382,7 @@ _ALL_OPERATIONS: frozenset[str] = frozenset(
         "extract",
         "template_write",
         "batch",
+        "batch_edit",
     }
 )
 
@@ -2308,7 +2437,16 @@ def batch(operations: list[dict[str, Any]]) -> dict[str, Any]:
             }
 
         # Dispatch each operation through run()
-        res = run(**op_data)
+        try:
+            # Instantiate EditOptions from the dictionary of operation data
+            op_options = EditOptions(**op_data)
+            res = run(op_options)
+        except TypeError as e:
+            return {
+                "success": False,
+                "error": f"Invalid arguments for operation {op_name} at index {i}: {e}",
+                "completed": results,
+            }
         results.append({"index": i, "operation": op_name, "result": res})
 
         if not res.get("success"):
@@ -2325,349 +2463,416 @@ def batch(operations: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+@_timed
+def batch_edit(
+    file_path: str,
+    edits: list[dict[str, Any]],
+    encoding: str = DEFAULT_ENCODING,
+    max_backups: int = MAX_BACKUPS,
+    continue_on_error: bool = False,
+) -> dict[str, Any]:
+    """
+    Apply multiple sequential edits to a single file atomically.
+
+    Each edit in the list is a dict with:
+      - "operation": one of "replace", "insert_line", "delete_line",
+                     "replace_lines", "append"
+      - Plus the operation-specific parameters (search_text, replacement,
+        line_number, content, start_line, end_line, etc.)
+
+    All edits are applied to an in-memory copy of the file. A single backup
+    is created before any changes, and the final result is written atomically.
+    If continue_on_error is False (default), the batch stops on the first
+    failed edit and no changes are written to disk.
+
+    v2.8.0: New operation for efficient multi-edit workflows.
+    """
+    if not edits or not isinstance(edits, list):
+        return {"success": False, "error": "edits must be a non-empty list"}
+
+    _ALLOWED_EDIT_OPS = frozenset(
+        {"replace", "insert_line", "delete_line", "replace_lines", "append"}
+    )
+
+    res = _editor._read_content(file_path, encoding)
+    if not res["success"]:
+        return res
+    content: str = res["content"]
+    path: Path = res["path"]
+
+    original_content = content
+    edit_results: list[dict[str, Any]] = []
+    total_replacements = 0
+    lines_inserted = 0
+    lines_deleted = 0
+
+    for i, edit in enumerate(edits):
+        op = edit.get("operation", "replace")
+        if op not in _ALLOWED_EDIT_OPS:
+            err_msg = (
+                f"Edit {i}: unsupported operation '{op}'. "
+                f"Allowed: {sorted(_ALLOWED_EDIT_OPS)}"
+            )
+            if not continue_on_error:
+                return {
+                    "success": False,
+                    "error": err_msg,
+                    "completed": edit_results,
+                }
+            edit_results.append({"index": i, "operation": op, "success": False, "error": err_msg})
+            continue
+
+        try:
+            if op == "replace":
+                search_text = edit.get("search_text", "")
+                replacement = edit.get("replacement", "")
+                use_regex = edit.get("use_regex", False)
+                global_replace = edit.get("global_replace", True)
+                case_sensitive = edit.get("case_sensitive", True)
+
+                if not search_text:
+                    raise ValueError("search_text is required for replace")
+
+                flags = 0 if case_sensitive else re.IGNORECASE
+                compiled = (
+                    re.compile(search_text, flags)
+                    if use_regex
+                    else re.compile(re.escape(search_text), flags)
+                )
+                if global_replace:
+                    content, count = compiled.subn(replacement, content)
+                else:
+                    new = compiled.sub(replacement, content, count=1)
+                    count = 1 if new != content else 0
+                    content = new
+                total_replacements += count
+                edit_results.append(
+                    {"index": i, "operation": op, "success": True, "replacements": count}
+                )
+
+            elif op == "insert_line":
+                line_number = edit.get("line_number")
+                ins_content = edit.get("content", "")
+                if line_number is None:
+                    raise ValueError("line_number is required for insert_line")
+                line_number = int(line_number)
+                lines = content.splitlines(keepends=True)
+                line_number = max(1, min(line_number, len(lines) + 1))
+                if not ins_content.endswith("\n"):
+                    ins_content += "\n"
+                lines.insert(line_number - 1, ins_content)
+                content = "".join(lines)
+                lines_inserted += 1
+                edit_results.append(
+                    {"index": i, "operation": op, "success": True, "line_number": line_number}
+                )
+
+            elif op == "delete_line":
+                line_number = edit.get("line_number")
+                if line_number is None:
+                    raise ValueError("line_number is required for delete_line")
+                line_number = int(line_number)
+                lines = content.splitlines(keepends=True)
+                if line_number < 1 or line_number > len(lines):
+                    raise ValueError(
+                        f"Invalid line number {line_number} (file has {len(lines)} lines)"
+                    )
+                deleted = lines.pop(line_number - 1)
+                content = "".join(lines)
+                lines_deleted += 1
+                edit_results.append(
+                    {
+                        "index": i, "operation": op, "success": True,
+                        "deleted_line": line_number,
+                        "deleted_content": deleted.rstrip("\n"),
+                    }
+                )
+
+            elif op == "replace_lines":
+                start_line = edit.get("start_line")
+                end_line = edit.get("end_line")
+                repl_content = edit.get("content", "")
+                if start_line is None or end_line is None:
+                    raise ValueError("start_line and end_line are required for replace_lines")
+                start_line = int(start_line)
+                end_line = int(end_line)
+                lines = content.splitlines(keepends=True)
+                total_lines = len(lines)
+                if start_line < 1 or end_line < start_line or end_line > total_lines:
+                    raise ValueError(
+                        f"Invalid range {start_line}-{end_line} (file has {total_lines} lines)"
+                    )
+                repl_lines = repl_content.splitlines()
+                replacement_lines = [line + "\n" for line in repl_lines] if repl_lines else []
+                lines = lines[: start_line - 1] + replacement_lines + lines[end_line:]
+                content = "".join(lines)
+                edit_results.append(
+                    {
+                        "index": i, "operation": op, "success": True,
+                        "start_line": start_line, "end_line": end_line,
+                        "lines_replaced": end_line - start_line + 1,
+                        "lines_inserted": len(replacement_lines),
+                    }
+                )
+
+            elif op == "append":
+                app_content = edit.get("content", "")
+                add_newline = edit.get("add_newline", True)
+                if add_newline and content and not content.endswith("\n"):
+                    content += "\n"
+                content += app_content
+                edit_results.append(
+                    {"index": i, "operation": op, "success": True}
+                )
+
+        except (ValueError, re.error) as exc:
+            err_msg = f"Edit {i} ({op}): {exc}"
+            if not continue_on_error:
+                return {
+                    "success": False,
+                    "error": err_msg,
+                    "completed": edit_results,
+                }
+            edit_results.append({"index": i, "operation": op, "success": False, "error": str(exc)})
+
+    # Only write if content actually changed
+    if content == original_content:
+        return {
+            "success": True,
+            "path": str(path),
+            "message": "No changes made",
+            "edits": edit_results,
+            "edits_applied": len([e for e in edit_results if e.get("success")]),
+            "edits_failed": len([e for e in edit_results if not e.get("success")]),
+        }
+
+    try:
+        backup = _editor._make_backup(path, max_backups)
+        _editor._atomic_write(path, content, encoding)
+        original_bytes = len(original_content.encode(encoding, errors="surrogateescape"))
+        new_bytes = path.stat().st_size
+        return {
+            "success": True,
+            "path": str(path),
+            "edits": edit_results,
+            "edits_applied": len([e for e in edit_results if e.get("success")]),
+            "edits_failed": len([e for e in edit_results if not e.get("success")]),
+            "total_replacements": total_replacements,
+            "lines_inserted": lines_inserted,
+            "lines_deleted": lines_deleted,
+            "original_bytes": original_bytes,
+            "new_bytes": new_bytes,
+            "bytes_delta": new_bytes - original_bytes,
+            "backup_path": str(backup),
+        }
+    except Exception as exc:
+        return {"success": False, "error": f"Failed to write changes: {exc}"}
+
+
 # ==============================================================================
 # SECTION 8: Main dispatcher — run()
 # ==============================================================================
 
 
-def run(
-    # ── operation must be plain str so build-declarations.py can parse it ──
-    operation: str,
-    # ── Primary path ──────────────────────────────────────────────────────
-    file_path: str | None = None,
-    path: str | None = None,  # Backward-compat alias for file_path
-    # ── Secondary path ────────────────────────────────────────────────────
-    target_path: str | None = None,
-    # ── Content ───────────────────────────────────────────────────────────
-    content: str | None = None,
-    # ── Search / replace ──────────────────────────────────────────────────
-    search_text: str | None = None,
-    replacement: str | None = None,
-    pattern: str | None = None,
-    use_regex: bool = False,
-    global_replace: bool = True,
-    case_sensitive: bool = True,
-    # ── Line addressing ───────────────────────────────────────────────────
-    line_number: int | None = None,
-    start_line: int | None = None,
-    end_line: int | None = None,
-    # ── I/O options ───────────────────────────────────────────────────────
-    encoding: str = DEFAULT_ENCODING,
-    max_size: int = DEFAULT_MAX_READ,
-    max_write_size: int = DEFAULT_MAX_WRITE,
-    show_lines: bool = True,
-    add_newline: bool = True,
-    create_parents: bool = True,
-    # ── Directory / copy options ──────────────────────────────────────────
-    preserve_metadata: bool = True,
-    include_hidden: bool = False,
-    sort_by: str = "name",
-    descending: bool = False,
-    parents: bool = True,
-    recursive: bool = False,
-    # ── Diff / search options ─────────────────────────────────────────────
-    line_context: int = 0,
-    context_lines: int = 3,
-    max_matches: int = 1000,
-    # ── Misc operation options ────────────────────────────────────────────
-    truncate_size: int = 0,
-    max_backups: int = MAX_BACKUPS,
-    mode: str | None = None,
-    to_type: str | None = None,
-    backup_timestamp: str | None = None,
-    # ── Extended operation options ────────────────────────────────────────
-    algorithm: str = "sha256",
-    n_lines: int = 10,
-    compare_mode: str = "bytes",
-    compression: str = "deflate",
-    password: str | None = None,
-    variables: dict[str, str] | None = None,
-    undefined_var: str = "error",
-    file_pattern: str = "*",
-    min_size: int | None = None,
-    max_size_filter: int | None = None,
-    modified_after: float | None = None,
-    modified_before: float | None = None,
-    file_type: str = "any",
-    max_results: int = MAX_FIND_RESULTS,
-    # ── Batch mode ────────────────────────────────────────────────────────
-    ops: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
+def run(**kwargs: Any) -> dict[str, Any]:
+    """Compatibility wrapper for the tool infrastructure."""
+    # Resolve 'path' alias to 'file_path' if present
+    if 'path' in kwargs and 'file_path' not in kwargs:
+        kwargs['file_path'] = kwargs.pop('path')
+    
+    options = EditOptions(**kwargs)
+    return _run(options)
+
+def _run(options: EditOptions) -> dict[str, Any]:
     """
-    Execute any named file operation.
-
-    operation must be one of:
-      read, read_lines, write, append, replace, insert_line, delete_line,
-      replace_lines, search, copy, move, delete, info, create_dir, list_dir,
-      diff, truncate, set_permissions, normalize_line_endings, revert_to_backup,
-      grep_dir, file_hash, word_count, find_files, head, tail,
-      compare_files, archive, extract, template_write
-
-    All results contain 'success' (bool) and 'duration_ms' (float).
-    On failure they also contain 'error' (str).
-
-    Note: @_timed is applied so duration_ms reflects total dispatch time
-    including the inner operation's own timing; the inner value is preserved
-    as the operation's own measurement.
+    Execute any named file operation using EditOptions.
     """
+    file_path = options.file_path
+    
     # ------------------------------------------------------------------
-    # FIX: resolve 'path' alias → file_path before any validation
+    # Validate operation name
     # ------------------------------------------------------------------
-    if file_path is None and path is not None:
-        file_path = path
-
-    # ------------------------------------------------------------------
-    # Validate operation name (replaces compile-time Literal check)
-    # ------------------------------------------------------------------
-    if operation not in _ALL_OPERATIONS:
+    if options.operation not in _ALL_OPERATIONS:
         return {
             "success": False,
             "error": (
-                f"Unknown operation '{operation}'. "
+                f"Unknown operation '{options.operation}'. "
                 f"Valid: {', '.join(sorted(_ALL_OPERATIONS))}"
             ),
         }
 
-    # ------------------------------------------------------------------
-    # FIX: operations that take a directory don't need file_path
-    # grep_dir, find_files, create_dir, list_dir use file_path as dir_path
-    # archive uses file_path as source_path (no mandatory target_path check here)
-    # ------------------------------------------------------------------
-    _dir_ops: frozenset[str] = frozenset(
-        {
-            "grep_dir",
-            "find_files",
-            "create_dir",
-            "list_dir",
-        }
-    )
-    _no_path_needed: frozenset[str] = frozenset()  # all ops need some path
-
-    if operation == "batch":
-        if not ops:
+    if options.operation == "batch":
+        if not options.ops:
             return {
                 "success": False,
                 "error": "'ops' (JSON array) is required for 'batch' operation",
             }
-        return batch(ops)
+        return batch(options.ops)
+
+    if options.operation == "batch_edit":
+        if not file_path:
+            return {"success": False, "error": "file_path is required for 'batch_edit'"}
+        if not options.edits:
+            return {
+                "success": False,
+                "error": "'edits' (JSON array) is required for 'batch_edit' operation",
+            }
+        return batch_edit(
+            file_path=file_path,
+            edits=options.edits,
+            encoding=options.encoding,
+            max_backups=options.max_backups,
+            continue_on_error=options.continue_on_error,
+        )
 
     if not file_path:
         return {"success": False, "error": "file_path (or path) is required"}
 
-    # Unify search_text / pattern → effective_search
-    effective_search: str | None = search_text or pattern
+    # Unify search_text / pattern -> effective_search
+    effective_search: str | None = options.search_text or options.pattern
 
     # ------------------------------------------------------------------
-    # Required-argument pre-flight checks
+    # Dispatch table
     # ------------------------------------------------------------------
-    if operation in _NEEDS_CONTENT and content is None:
-        return {"success": False, "error": f"'content' is required for '{operation}'"}
-    if operation in _NEEDS_TARGET and not target_path:
-        return {
-            "success": False,
-            "error": f"'target_path' is required for '{operation}'",
-        }
-    if operation in _NEEDS_LINE and line_number is None:
-        return {
-            "success": False,
-            "error": f"'line_number' is required for '{operation}'",
-        }
-    if operation in _NEEDS_RANGE and (start_line is None or end_line is None):
-        return {
-            "success": False,
-            "error": f"'start_line' and 'end_line' are required for '{operation}'",
-        }
-    if operation in _NEEDS_SEARCH and not effective_search:
-        return {
-            "success": False,
-            "error": f"'search_text' or 'pattern' is required for '{operation}'",
-        }
-    if operation == "set_permissions" and mode is None:
-        return {"success": False, "error": "'mode' is required for 'set_permissions'"}
-    if operation == "normalize_line_endings" and to_type is None:
-        return {
-            "success": False,
-            "error": "'to_type' is required for 'normalize_line_endings'",
-        }
-    # FIX: template_write needs content as the template string
-    if operation == "template_write" and content is None:
-        return {
-            "success": False,
-            "error": "'content' (the template string) is required for 'template_write'",
-        }
-    # archive needs a target path for the zip file
-    if operation == "archive" and not target_path:
-        return {
-            "success": False,
-            "error": "'target_path' (archive file path) is required for 'archive'",
-        }
-
-    fp: str = file_path
-    logger.debug("Dispatching '%s' on '%s'", operation, fp)
-
-    # ------------------------------------------------------------------
-    # Dispatch table — lambdas keep argument mapping explicit and auditable
-    # FIX: template_write receives content as `template` param (was broken)
-    # FIX: grep_dir receives fp as dir_path (semantically correct)
-    # FIX: archive receives target_path as archive_path (separate from source)
-    # FIX: read_lines guards None start/end (already validated above)
-    # ------------------------------------------------------------------
-    ops: dict[str, Callable[[], dict[str, Any]]] = {
-        "read": lambda: read(fp, max_size, encoding, show_lines, start_line, end_line),
+    operation_dispatch: dict[str, Callable[[], dict[str, Any]]] = {
+        "read": lambda: read(file_path, options.max_size, options.encoding, options.show_lines, options.start_line, options.end_line),
         "read_lines": lambda: read_lines(
-            fp,
-            start_line,  # type: ignore[arg-type]  # guarded by _NEEDS_RANGE
-            end_line,  # type: ignore[arg-type]
-            encoding,
+            file_path,
+            int(options.start_line) if options.start_line is not None else None,
+            int(options.end_line) if options.end_line is not None else None,
+            options.encoding,
         ),
-        "write": lambda: write(
-            fp,
-            content,
-            encoding,
-            create_parents,
-            add_newline,
-            max_write_size,  # type: ignore[arg-type]
-        ),
+        "write": lambda: write(options),
         "append": lambda: append(
-            fp,
-            content,
-            encoding,
-            add_newline,
-            max_write_size,  # type: ignore[arg-type]
+            file_path,
+            options.content, # type: ignore
+            options.encoding,
+            options.add_newline,
+            options.max_write_size,
         ),
-        "replace": lambda: replace(
-            fp,
-            effective_search,  # type: ignore[arg-type]  # guarded by _NEEDS_SEARCH
-            replacement or "",
-            use_regex,
-            global_replace,
-            case_sensitive,
-            encoding,
-            max_backups,
-        ),
+        "replace": lambda: replace(options),
         "insert_line": lambda: insert_line(
-            fp,
-            line_number,  # type: ignore[arg-type]  # guarded by _NEEDS_LINE
-            content,  # type: ignore[arg-type]  # guarded by _NEEDS_CONTENT
-            encoding,
-            max_backups,
+            file_path,
+            options.line_number, # type: ignore
+            options.content, # type: ignore
+            options.encoding,
+            options.max_backups,
         ),
         "delete_line": lambda: delete_line(
-            fp,
-            line_number,  # type: ignore[arg-type]  # guarded by _NEEDS_LINE
-            encoding,
-            max_backups,
+            file_path,
+            options.line_number, # type: ignore
+            options.encoding,
+            options.max_backups,
         ),
         "replace_lines": lambda: replace_lines(
-            fp,
-            start_line,  # type: ignore[arg-type]
-            end_line,  # type: ignore[arg-type]
-            content,  # type: ignore[arg-type]
-            encoding,
-            max_backups,
+            file_path,
+            options.start_line, # type: ignore
+            options.end_line, # type: ignore
+            options.content, # type: ignore
+            options.encoding,
+            options.max_backups,
         ),
         "search": lambda: file_search(
-            fp,
-            effective_search,
-            use_regex,
-            case_sensitive,  # type: ignore[arg-type]
-            line_context,
-            encoding,
-            max_matches,
+            file_path,
+            effective_search, # type: ignore
+            options.use_regex,
+            options.case_sensitive,
+            options.line_context,
+            options.encoding,
+            options.max_matches,
         ),
         "copy": lambda: copy(
-            fp,
-            target_path,
-            preserve_metadata,
-            recursive,  # type: ignore[arg-type]
+            file_path,
+            options.target_path, # type: ignore
+            options.preserve_metadata,
+            options.recursive,
         ),
         "move": lambda: move(
-            fp,
-            target_path,  # type: ignore[arg-type]
+            file_path,
+            options.target_path, # type: ignore
         ),
-        "delete": lambda: delete(fp, recursive),
-        "info": lambda: info(fp),
-        "create_dir": lambda: create_dir(fp, parents),
-        "list_dir": lambda: list_dir(fp, include_hidden, sort_by, descending),
-        "diff": lambda: diff(fp, target_path, encoding, context_lines),
-        "truncate": lambda: truncate(fp, truncate_size, encoding, max_backups),
+        "delete": lambda: delete(file_path, options.recursive),
+        "info": lambda: info(file_path),
+        "create_dir": lambda: create_dir(file_path, options.parents),
+        "list_dir": lambda: list_dir(file_path, options.include_hidden, options.sort_by, options.descending),
+        "diff": lambda: diff(file_path, options.target_path, options.encoding, options.context_lines),
+        "truncate": lambda: truncate(file_path, options.truncate_size, options.encoding, options.max_backups),
         "set_permissions": lambda: set_permissions(
-            fp,
-            mode,  # type: ignore[arg-type]  # guarded above
+            file_path,
+            options.mode, # type: ignore
         ),
         "normalize_line_endings": lambda: normalize_line_endings(
-            fp,
-            to_type,
-            encoding,
-            max_backups,  # type: ignore[arg-type]  # guarded above
+            file_path,
+            options.to_type, # type: ignore
+            options.encoding,
+            options.max_backups,
         ),
-        "revert_to_backup": lambda: revert_to_backup(fp, backup_timestamp, max_backups),
-        # ── Extended ops ───────────────────────────────────────────────
-        # FIX: grep_dir takes dir_path; fp is semantically a directory here
+        "revert_to_backup": lambda: revert_to_backup(file_path, options.backup_timestamp, options.max_backups),
         "grep_dir": lambda: grep_dir(
-            fp,  # dir_path
-            effective_search,  # type: ignore[arg-type]
-            use_regex,
-            case_sensitive,
-            include_hidden,
-            file_pattern,
-            max_matches,
-            line_context,
-            encoding,
-            recursive,
+            file_path,
+            effective_search, # type: ignore
+            options.use_regex,
+            options.case_sensitive,
+            options.include_hidden,
+            options.file_pattern,
+            options.max_matches,
+            options.line_context,
+            options.encoding,
+            options.recursive,
         ),
-        "file_hash": lambda: file_hash(fp, algorithm),
-        "word_count": lambda: word_count(fp, encoding),
-        # FIX: find_files takes dir_path; fp used as directory
+        "file_hash": lambda: file_hash(file_path, options.algorithm),
+        "word_count": lambda: word_count(file_path, options.encoding),
         "find_files": lambda: find_files(
-            fp,  # dir_path
-            file_pattern,
-            use_regex,
-            include_hidden,
-            min_size,
-            max_size_filter,
-            modified_after,
-            modified_before,
-            file_type,
-            recursive,
-            max_results,
+            file_path,
+            options.file_pattern,
+            options.use_regex,
+            options.include_hidden,
+            options.min_size,
+            options.max_size_filter,
+            options.modified_after,
+            options.modified_before,
+            options.file_type,
+            options.recursive,
+            options.max_results,
         ),
-        "head": lambda: head(fp, n_lines, encoding),
-        "tail": lambda: tail(fp, n_lines, encoding),
+        "head": lambda: head(file_path, options.n_lines, options.encoding),
+        "tail": lambda: tail(file_path, options.n_lines, options.encoding),
         "compare_files": lambda: compare_files(
-            fp,
-            target_path,
-            compare_mode,
-            encoding,  # type: ignore[arg-type]
+            file_path,
+            options.target_path, # type: ignore
+            options.compare_mode,
+            options.encoding,
         ),
-        # FIX: archive(source_path, archive_path, ...) — target_path = archive
         "archive": lambda: archive(
-            fp,  # source_path
-            target_path,  # archive_path  # type: ignore[arg-type]
-            compression,
-            recursive,
+            file_path,
+            options.target_path, # type: ignore
+            options.compression,
+            options.recursive,
         ),
         "extract": lambda: extract(
-            fp,
-            target_path,
-            password,  # type: ignore[arg-type]
+            file_path,
+            options.target_path, # type: ignore
+            options.password,
         ),
-        # FIX: template_write receives content as `template`, not `content`
         "template_write": lambda: template_write(
-            fp,
-            content,  # type: ignore[arg-type]  # this IS the template
-            variables or {},
-            encoding,
-            create_parents,
-            undefined_var,
+            file_path,
+            options.content, # type: ignore
+            options.variables or {},
+            options.encoding,
+            options.create_parents,
+            options.undefined_var,
         ),
-        "batch": lambda: batch(ops),  # type: ignore[arg-type]
+        "batch_edit": lambda: batch_edit(
+            file_path, options.edits or [], options.encoding, options.max_backups, options.continue_on_error,
+        ),
     }
 
     try:
-        return ops[operation]()
+        if options.dry_run:
+            return {"success": True, "message": f"Dry-run: '{options.operation}' on '{file_path}' would be executed.", "options": options.__dict__}
+        return operation_dispatch[options.operation]()
     except Exception as exc:
-        logger.exception("Dispatcher error for '%s'", operation)
+        logger.exception("Dispatcher error for '%s'", options.operation)
         return {"success": False, "error": f"Dispatcher error: {exc}"}
 
 
@@ -2713,6 +2918,7 @@ Examples:
   python edit_file.py set_permissions myfile.txt --mode 644
   python edit_file.py normalize_line_endings myfile.txt --to-type lf
   python edit_file.py revert_to_backup myfile.txt
+  python edit_file.py batch_edit myfile.txt --edits '[{{"operation":"replace","search_text":"foo","replacement":"bar"}},{{"operation":"insert_line","line_number":1,"content":"# header"}}]'
         """,
     )
     parser.add_argument(
@@ -2816,6 +3022,20 @@ Examples:
     parser.add_argument(
         "--max-results", type=int, default=MAX_FIND_RESULTS, dest="max_results"
     )
+    # v2.8.0: batch_edit options
+    parser.add_argument(
+        "--edits", default=None,
+        help="JSON array of edits for batch_edit mode",
+    )
+    parser.add_argument(
+        "--continue-on-error", action="store_true", default=False,
+        dest="continue_on_error",
+        help="Continue batch_edit on error instead of stopping",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", default=False,
+        help="Preview changes without modifying the filesystem",
+    )
     return parser
 
 
@@ -2891,7 +3111,17 @@ if __name__ == "__main__":
         _cprint(f"   Sanctuary: {Path.home()}", Fore.BLUE)  # type: ignore[arg-type]
 
     # Dispatch
-    result = run(
+    # Handle batch operation JSON file loading
+    ops_data = []
+    if cli.operation == "batch" and cli.file_path:
+        try:
+            with open(cli.file_path, 'r') as f:
+                ops_data = json.load(f)
+        except Exception as e:
+            print(json.dumps({"success": False, "error": f"Failed to load batch JSON: {e}"}))
+            sys.exit(1)
+            
+    options = EditOptions(
         operation=cli.operation,
         file_path=cli.file_path,
         target_path=cli.target_path,
@@ -2899,9 +3129,6 @@ if __name__ == "__main__":
         search_text=cli.search_text,
         replacement=cli.replacement,
         pattern=cli.pattern,
-        line_number=cli.line_number,
-        start_line=cli.start_line,
-        end_line=cli.end_line,
         use_regex=cli.use_regex,
         global_replace=cli.global_replace,
         case_sensitive=cli.case_sensitive,
@@ -2934,7 +3161,12 @@ if __name__ == "__main__":
         modified_before=cli.modified_before,
         file_type=cli.file_type,
         max_results=cli.max_results,
+        edits=json.loads(cli.edits) if cli.edits else [],
+        continue_on_error=cli.continue_on_error,
+        dry_run=cli.dry_run,
+        ops=ops_data
     )
+    result = _run(options)
 
     # Human-readable status line
     if result.get("success"):
@@ -2949,3 +3181,14 @@ if __name__ == "__main__":
     # Machine-readable JSON output
     print(json.dumps(result, indent=2, ensure_ascii=False))
     sys.exit(0 if result.get("success") else 1)
+# ====================
+
+# NEW FEATURES (v2.9.0)
+
+# - Atomic writes for replace/append operations
+# - Dry-run preview support (no file modification)
+# - Version‑control backup hooks (timestamped .bak files)
+# - Enhanced regex handling with capture‑group substitution
+# - Batch‑edit mode for multi‑step transformations
+
+# ====================

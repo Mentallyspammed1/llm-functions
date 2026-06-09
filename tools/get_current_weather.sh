@@ -8,7 +8,7 @@ set -e
 
 main() {
     # Removed '?format=4' to allow wttr.in to output its default, potentially colored, response.
-    curl -fsSL "https://wttr.in/$(echo "$argc_location" | sed 's/ /+/g')&M" \
+    curl -fsSL "https://wttr.in/$(echo "$argc_location" | sed 's| |+|g')&M" \
     >&1
 }
 

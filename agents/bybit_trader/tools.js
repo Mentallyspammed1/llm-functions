@@ -5,10 +5,68 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Get market trend analysis with technical indicators
  * @typedef {Object} TrendArgs
  * @property {string} symbol - Trading pair symbol (e.g., BTCUSDT)
  * @property {string} [interval=15] - Timeframe interval (5, 15, 30, 60, 240, etc.)
+ */
+
+/**
+ * @typedef {Object} StatusArgs
+ * @property {string} symbol - Trading pair symbol (e.g., BTCUSDT)
+ */
+
+/**
+ * @typedef {Object} ExecuteArgs
+ * @property {string} symbol - Trading pair symbol (e.g., BTCUSDT)
+ * @property {number} risk - USDT amount to risk on stop loss
+ * @property {number} profit - Target USDT profit after fees
+ * @property {'buy'|'sell'} [side=buy] - Order side (buy or sell)
+ */
+
+/**
+ * @typedef {Object} L2Args
+ * @property {string} symbol - Trading pair symbol (e.g., BTCUSDT)
+ * @property {number} [depth=50] - Order book depth (number of levels)
+ */
+
+/**
+ * @typedef {Object} FundingArgs
+ * @property {string[]} [symbols=['BTCUSDT','ETHUSDT','SOLUSDT']] - Array of symbols to check
+ */
+
+/**
+ * @typedef {Object} RebalanceArgs
+ * @property {number} [target=0.5] - Target percentage (0.0 to 1.0)
+ * @property {string} [asset=BTC] - Target coin to rebalance
+ */
+
+/**
+ * @typedef {Object} HistoryArgs
+ * @property {string} symbol - Trading pair symbol (e.g., BTCUSDT)
+ * @property {number} [limit=5] - Number of recent executions to fetch
+ */
+
+/**
+ * @typedef {Object} IcebergArgs
+ * @property {string} side - Order side (buy or sell)
+ * @property {number} total_qty - Total quantity to execute
+ * @property {number} visible_qty - Visible quantity per slice
+ * @property {string} [symbol=BTCUSDT] - Trading pair symbol (e.g., BTCUSDT)
+ * @property {number} [price] - Optional limit price
+ */
+
+/**
+ * @typedef {Object} TelegramArgs
+ * @property {string} message - Message content to send
+ */
+
+/**
+ * @typedef {Object} LogsArgs
+ * @property {number} [limit=50] - Number of recent trades to show
+ */
+
+/**
+ * Get market trend analysis with technical indicators
  * @param {TrendArgs} args
  */
 exports.trend = function(args) {
@@ -60,8 +118,6 @@ exports.trend = function(args) {
 
 /**
  * Check active account positions and orders
- * @typedef {Object} StatusArgs
- * @property {string} symbol - Trading pair symbol (e.g., BTCUSDT)
  * @param {StatusArgs} args
  */
 exports.status = function(args) {
@@ -84,7 +140,6 @@ exports.status = function(args) {
             const activePositions = pos.result.list.filter(p => parseFloat(p.size) > 0);
             const currentPrice = tickers.result.list[0]?.lastPrice || 'N/A';
             
-            // Calculate total unrealized PnL
             let totalUnrealizedPnL = 0;
             activePositions.forEach(p => {
                 totalUnrealizedPnL += parseFloat(p.unrealizedPnl || 0);
@@ -122,11 +177,6 @@ exports.status = function(args) {
 
 /**
  * Execute a trade with net profit TP logic
- * @typedef {Object} ExecuteArgs
- * @property {string} symbol - Trading pair symbol (e.g., BTCUSDT)
- * @property {number} risk - USDT amount to risk on stop loss
- * @property {number} profit - Target USDT profit after fees
- * @property {'buy'|'sell'} [side=buy] - Order side (buy or sell)
  * @param {ExecuteArgs} args
  */
 exports.execute = function(args) {
@@ -140,17 +190,13 @@ exports.execute = function(args) {
 
     const LOG_FILE = './trade_history.csv';
 
-    // Initialize CSV with headers if it doesn't exist
     if (!fs.existsSync(LOG_FILE)) {
-        fs.writeFileSync(LOG_FILE, 'timestamp,symbol,side,qty,entry,tp,sl,status\n');
+        fs.writeFileSync(LOG_FILE, 'timestamp,symbol,side,qty,entry,tp,sl,status\\n');
     }
 
-    // Enhanced logging with file descriptor locking
     function logTrade(data) {
-        const row = `${new Date().toISOString()},${data.symbol},${data.side},${data.qty},${data.price},${data.tp},${data.sl},${data.status}\n`;
-        
+        const row = \`\${new Date().toISOString()},\${data.symbol},\${data.side},\${data.qty},\${data.price},\${data.tp},\${data.sl},\${data.status}\\n\`;
         try {
-            // Use appendFileSync with explicit encoding for safety
             fs.appendFileSync(LOG_FILE, row, { encoding: 'utf8' });
         } catch (error) {
             console.error('Failed to write to trade log:', error.message);
@@ -159,15 +205,12 @@ exports.execute = function(args) {
 
     return new Promise(async (resolve, reject) => {
         try {
-            // 1. Get Fee Rates & ATR
             const [feeRes, ticker] = await Promise.all([
                 client.getFeeRate({ category: 'linear', symbol }),
                 client.getTickers({ category: 'linear', symbol })
             ]);
             
             const price = parseFloat(ticker.result.list[0].lastPrice);
-            
-            // Minimal ATR fetch for SL calculation
             const kl = await client.getKline({ category: 'linear', symbol, interval: '15', limit: 20 });
             const atrVal = ATR.calculate({ 
                 period: 14, 
@@ -180,7 +223,6 @@ exports.execute = function(args) {
             const qty = (parseFloat(risk) / slDistance).toFixed(3);
             const feeRate = parseFloat(feeRes.result.list[0].takerFeeRate);
 
-            // 2. Net Profit TP Calculation
             let tp;
             if (side.toLowerCase() === 'buy') {
                 tp = (parseFloat(profit) + (qty * price * feeRate) + (qty * price)) / (qty * (1 - feeRate));
@@ -201,7 +243,6 @@ exports.execute = function(args) {
                 timeInForce: 'GTC'
             });
 
-            // Log the trade with enhanced data
             logTrade({ 
                 symbol, 
                 side, 
@@ -229,9 +270,6 @@ exports.execute = function(args) {
 
 /**
  * Analyze Level 2 order book for liquidity and pressure
- * @typedef {Object} L2Args
- * @property {string} symbol - Trading pair symbol (e.g., BTCUSDT)
- * @property {number} [depth=50] - Order book depth (number of levels)
  * @param {L2Args} args
  */
 exports.l2 = function(args) {
@@ -250,13 +288,11 @@ exports.l2 = function(args) {
     function calculateWeightedImbalance(levels, weight = 0.8) {
         let weightedSum = 0;
         let totalWeight = 0;
-        
         levels.forEach((level, index) => {
             const levelWeight = Math.pow(weight, index);
             weightedSum += parseFloat(level[1]) * levelWeight;
             totalWeight += levelWeight;
         });
-        
         return weightedSum / totalWeight;
     }
 
@@ -330,7 +366,7 @@ exports.l2 = function(args) {
                 recommendation = 'SELL';
             }
             
-            const result = {
+            resolve({
                 timestamp: Date.now(),
                 symbol,
                 midPrice: formatPrice(midPrice, 4),
@@ -343,9 +379,7 @@ exports.l2 = function(args) {
                 significantAskWalls: filteredAskWalls.slice(0, 3),
                 recommendation,
                 confidence: Math.abs(pressureRatio - 0.5) * 2
-            };
-            
-            resolve(result);
+            });
         } catch (error) {
             reject({ error: error.message });
         }
@@ -354,8 +388,6 @@ exports.l2 = function(args) {
 
 /**
  * Screen for high funding rate arbitrage opportunities
- * @typedef {Object} FundingArgs
- * @property {string[]} [symbols=['BTCUSDT','ETHUSDT','SOLUSDT']] - Array of symbols to check
  * @param {FundingArgs} args
  */
 exports.funding = function(args) {
@@ -398,9 +430,6 @@ exports.funding = function(args) {
 
 /**
  * Rebalance portfolio to a target percentage
- * @typedef {Object} RebalanceArgs
- * @property {number} [target=0.5] - Target percentage (0.0 to 1.0)
- * @property {string} [asset=BTC] - Target coin to rebalance
  * @param {RebalanceArgs} args
  */
 exports.rebalance = function(args) {
@@ -417,7 +446,7 @@ exports.rebalance = function(args) {
             const wallet = await client.getWalletBalance({ accountType: 'UNIFIED' });
             const totalEquity = parseFloat(wallet.result.list[0].totalEquity);
             
-            const ticker = await client.getTickers({ category: 'linear', symbol: `${asset}USDT` });
+            const ticker = await client.getTickers({ category: 'linear', symbol: \`\${asset}USDT\` });
             const lastPrice = parseFloat(ticker.result.list[0].lastPrice);
             
             const currentAssetBalance = wallet.result.list[0].coin.find(c => c.coin === asset);
@@ -448,9 +477,6 @@ exports.rebalance = function(args) {
 
 /**
  * Analyze recent trade history and performance
- * @typedef {Object} HistoryArgs
- * @property {string} symbol - Trading pair symbol (e.g., BTCUSDT)
- * @property {number} [limit=5] - Number of recent executions to fetch
  * @param {HistoryArgs} args
  */
 exports.history = function(args) {
@@ -484,12 +510,6 @@ exports.history = function(args) {
 
 /**
  * Execute large order using iceberg strategy
- * @typedef {Object} IcebergArgs
- * @property {string} side - Order side (buy or sell)
- * @property {number} total_qty - Total quantity to execute
- * @property {number} visible_qty - Visible quantity per slice
- * @property {string} [symbol=BTCUSDT] - Trading pair symbol (e.g., BTCUSDT)
- * @property {number} [price] - Optional limit price
  * @param {IcebergArgs} args
  */
 exports.iceberg = function(args) {
@@ -501,10 +521,8 @@ exports.iceberg = function(args) {
         testnet: (process.env.BYBIT_USE_TESTNET || 'true') === 'true',
     });
 
-    // Helper function to wait for order fill
     async function waitForOrderFill(orderId, symbol, timeoutMs = 30000) {
         const startTime = Date.now();
-        
         while (Date.now() - startTime < timeoutMs) {
             try {
                 const orderStatus = await client.getActiveOrders({
@@ -512,28 +530,23 @@ exports.iceberg = function(args) {
                     symbol,
                     orderId
                 });
-                
                 if (orderStatus.result.list.length === 0) {
                     const orderHistory = await client.getOrderHistory({
                         category: 'linear',
                         symbol,
                         orderId
                     });
-                    
                     const order = orderHistory.result.list.find(o => o.orderId === orderId);
                     if (order && order.orderStatus === 'Filled') {
                         return { filled: true, order };
                     }
                     return { filled: false, reason: 'Order not found' };
                 }
-                
                 await new Promise(resolve => setTimeout(resolve, 1000));
             } catch (error) {
-                console.error('Error checking order status:', error.message);
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
-        
         return { filled: false, reason: 'Timeout' };
     }
 
@@ -551,22 +564,14 @@ exports.iceberg = function(args) {
         
         try {
             let executed = 0;
-            
             while (executed < totalQty) {
                 const slice = Math.min(visibleQty, totalQty - executed);
-                
                 let orderPrice = price;
                 if (!orderPrice) {
                     const ticker = await client.getTickers({ category: 'linear', symbol });
                     orderPrice = parseFloat(ticker.result.list[0].lastPrice);
-                    
-                    if (side.toLowerCase() === 'buy') {
-                        orderPrice = orderPrice * 0.999;
-                    } else {
-                        orderPrice = orderPrice * 1.001;
-                    }
+                    orderPrice = side.toLowerCase() === 'buy' ? orderPrice * 0.999 : orderPrice * 1.001;
                 }
-                
                 const order = await client.submitOrder({
                     category: 'linear',
                     symbol,
@@ -576,20 +581,16 @@ exports.iceberg = function(args) {
                     price: orderPrice.toFixed(2),
                     timeInForce: 'PostOnly'
                 });
-                
                 results.orders.push({
                     orderId: order.result.orderId,
                     qty: slice,
                     price: orderPrice.toFixed(2),
                     status: 'PLACED'
                 });
-                
                 const fillResult = await waitForOrderFill(order.result.orderId, symbol);
-                
                 if (fillResult.filled) {
                     executed += slice;
                     results.executedQty = executed;
-                    
                     const orderIndex = results.orders.findIndex(o => o.orderId === order.result.orderId);
                     if (orderIndex !== -1) {
                         results.orders[orderIndex].status = 'FILLED';
@@ -597,34 +598,19 @@ exports.iceberg = function(args) {
                     }
                 } else {
                     try {
-                        await client.cancelOrder({
-                            category: 'linear',
-                            symbol,
-                            orderId: order.result.orderId
-                        });
-                        
+                        await client.cancelOrder({ category: 'linear', symbol, orderId: order.result.orderId });
                         const orderIndex = results.orders.findIndex(o => o.orderId === order.result.orderId);
-                        if (orderIndex !== -1) {
-                            results.orders[orderIndex].status = 'CANCELLED';
-                        }
-                    } catch (cancelError) {
-                        console.error('Failed to cancel order:', cancelError.message);
-                    }
-                    
+                        if (orderIndex !== -1) results.orders[orderIndex].status = 'CANCELLED';
+                    } catch (e) {}
                     break;
                 }
-                
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
-            
             results.status = executed >= totalQty ? 'COMPLETED' : 'PARTIALLY_FILLED';
-            
         } catch (error) {
             results.status = 'ERROR';
             results.error = error.message;
-            console.error('Iceberg execution error:', error.message);
         }
-        
         return results;
     }
 
@@ -646,74 +632,46 @@ exports.iceberg = function(args) {
 
 /**
  * Send a custom alert to Telegram
- * @typedef {Object} TelegramArgs
- * @property {string} message - Message content to send
  * @param {TelegramArgs} args
  */
 exports.telegram = function(args) {
     const { message } = args;
-    
     if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
-        return Promise.reject({ 
-            error: "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID environment variables must be set" 
-        });
+        return Promise.reject({ error: "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID environment variables must be set" });
     }
 
     return new Promise(async (resolve, reject) => {
         try {
             const https = require('https');
-            const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-            
             const postData = JSON.stringify({
                 chat_id: process.env.TELEGRAM_CHAT_ID,
                 text: message,
                 parse_mode: 'Markdown'
             });
-
             const options = {
                 hostname: 'api.telegram.org',
                 port: 443,
-                path: `/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+                path: \`/bot\${process.env.TELEGRAM_BOT_TOKEN}/sendMessage\`,
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Content-Length': Buffer.byteLength(postData)
                 }
             };
-
             const req = https.request(options, (res) => {
                 let data = '';
-                
-                res.on('data', (chunk) => {
-                    data += chunk;
-                });
-                
+                res.on('data', (chunk) => data += chunk);
                 res.on('end', () => {
                     try {
                         const response = JSON.parse(data);
-                        if (response.ok) {
-                            resolve({
-                                timestamp: Date.now(),
-                                status: "success",
-                                message: "Alert sent successfully",
-                                telegram_response: response.result
-                            });
-                        } else {
-                            reject({ error: response.description });
-                        }
-                    } catch (parseError) {
-                        reject({ error: 'Failed to parse Telegram response' });
-                    }
+                        if (response.ok) resolve({ timestamp: Date.now(), status: "success", message: "Alert sent successfully" });
+                        else reject({ error: response.description });
+                    } catch (e) { reject({ error: 'Failed to parse Telegram response' }); }
                 });
             });
-
-            req.on('error', (error) => {
-                reject({ error: error.message });
-            });
-
+            req.on('error', (error) => reject({ error: error.message }));
             req.write(postData);
             req.end();
-            
         } catch (error) {
             reject({ error: error.message });
         }
@@ -722,85 +680,37 @@ exports.telegram = function(args) {
 
 /**
  * View the local CSV log of agent-executed trades
- * @typedef {Object} LogsArgs
- * @property {number} [limit=50] - Number of recent trades to show
  * @param {LogsArgs} args
  */
 exports.logs = function(args) {
     const { limit = 50 } = args;
-    
     return new Promise((resolve, reject) => {
         try {
             const logFile = path.join('./trade_history.csv');
-            
             if (!fs.existsSync(logFile)) {
-                resolve({
-                    timestamp: Date.now(),
-                    status: "no_logs",
-                    message: "No trade history log found"
-                });
+                resolve({ timestamp: Date.now(), status: "no_logs", message: "No trade history log found" });
                 return;
             }
-            
             const content = fs.readFileSync(logFile, 'utf8');
-            const lines = content.trim().split('\n');
-            
+            const lines = content.trim().split('\\n');
             if (lines.length <= 1) {
-                resolve({
-                    timestamp: Date.now(),
-                    status: "empty_logs",
-                    message: "Trade history log is empty",
-                    headers: lines[0]
-                });
+                resolve({ timestamp: Date.now(), status: "empty_logs", message: "Trade history log is empty" });
                 return;
             }
-            
             const headers = lines[0];
             const tradeLines = lines.slice(1).slice(-limit);
-            
             const trades = tradeLines.map(line => {
                 const [timestamp, symbol, side, qty, entry, tp, sl, status] = line.split(',');
-                return {
-                    timestamp,
-                    symbol,
-                    side,
-                    qty,
-                    entry,
-                    tp,
-                    sl,
-                    status
-                };
+                return { timestamp, symbol, side, qty, entry, tp, sl, status };
             });
-            
-            // Calculate summary statistics
-            let totalPnl = 0;
-            let winningTrades = 0;
-            let losingTrades = 0;
-            
-            trades.forEach(t => {
-                if (t.status === 'CLOSED' && t.pnl) {
-                    const pnl = parseFloat(t.pnl);
-                    totalPnl += pnl;
-                    if (pnl > 0) winningTrades++;
-                    else if (pnl < 0) losingTrades++;
-                }
-            });
-            
             resolve({
                 timestamp: Date.now(),
                 status: "success",
                 total_trades: lines.length - 1,
                 shown_trades: trades.length,
                 headers,
-                trades,
-                summary: {
-                    total_pnl: totalPnl.toFixed(2),
-                    winning_trades: winningTrades,
-                    losing_trades: losingTrades,
-                    win_rate: trades.length > 0 ? ((winningTrades / trades.length) * 100).toFixed(1) + '%' : 'N/A'
-                }
+                trades
             });
-            
         } catch (error) {
             reject({ error: error.message });
         }

@@ -24,3 +24,11 @@
   ],
   "timestamp": "2026-05-14T06:26:13+00:00"
 }
+{
+  "key": "env",
+  "value": "BYBIT_API_KEY=qqnukht65yDsP1r79t\nBYBIT_API_SECRET=bcM965FGtrPyDGivezYnScPoSUwKqXyiak4X\nBYBIT_ENV=mainnet",
+  "type": "context",
+  "session": "default",
+  "tags": [],
+  "timestamp": "2026-05-18T11:42:22+00:00"
+}

@@ -7,7 +7,7 @@ import time
 import hashlib
 import hmac
 
-def run(
+def run_tool(
     category: str = "linear",
     symbol: str = "BTCUSDT",
     leverage: str = "10",
@@ -19,6 +19,7 @@ def run(
         leverage: Leverage multiplier (e.g., 1, 2, 5, 10)
     """
     import bybit_core
+    import bybit_turso_logger
     
     params = {
         "category": category,
@@ -30,6 +31,11 @@ def run(
     data = bybit_core.api_request("POST", "/v5/position/set-leverage", params=params, signed=True)
     
     if data.get("retCode") == 0 or data.get("retCode") == 110043:
+        # Log leverage change to Turso
+        bybit_turso_logger.log_event("LEVERAGE_CHANGE", {
+            "symbol": symbol,
+            "details": f"Leverage: {leverage}, Category: {category}, Resp: {data.get('retMsg')}"
+        })
         return {
             "success": True,
             "symbol": symbol,
@@ -48,5 +54,5 @@ if __name__ == "__main__":
     parser.add_argument("--leverage", default="10")
     args = parser.parse_args()
     
-    result = run(category=args.category, symbol=args.symbol, leverage=args.leverage)
+    result = run_tool(category=args.category, symbol=args.symbol, leverage=args.leverage)
     print(json.dumps(result, indent=2))

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# bybit_tor.sh — Launch bybit_trader.py transparently through torsocks.
+# bybit_tor.sh — Launch bybit_trader.py transparently through proxychains4.
 #
-# torsocks intercepts all outgoing TCP connections at the libc level and
-# redirects them through Tor's SOCKS5 proxy.  This catches any stray
+# proxychains4 intercepts all outgoing TCP connections at the libc level and
+# redirects them through Tor's SOCKS5 proxy. This catches any stray
 # connection that might bypass the Python-level proxy dict.
 #
 # Usage:
@@ -20,10 +20,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRADER="${SCRIPT_DIR}/bybit_trader.py"
 
 # ── 1. Dependency checks ──────────────────────────────────────────────────────
-for cmd in torsocks tor python3; do
+for cmd in proxychains4 tor python3; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "[ERROR] '$cmd' is not installed or not in PATH." >&2
-        echo "        Install: sudo apt install tor torsocks  &&  pip install requests[socks] stem" >&2
+        echo "        Install: sudo apt install tor proxychains4  &&  pip install requests[socks] stem" >&2
         exit 1
     fi
 done
@@ -62,15 +62,12 @@ fi
 
 # ── 5. Announce circuit info (informational, no identity leak) ────────────────
 echo "[INFO] Tor SOCKS5 proxy confirmed on 127.0.0.1:9050"
-echo "[INFO] Launching bybit_trader.py via torsocks ..."
+echo "[INFO] Launching bybit_trader.py via proxychains4 ..."
 echo "[INFO] All TCP traffic is now transparently proxied through Tor."
 
-# ── 6. torsocks invocation ────────────────────────────────────────────────────
-#   TORSOCKS_LOG_LEVEL=1   suppress torsocks debug noise (0=err, 1=warn, 2=info, 3=debug)
-#   --isolate              each torsocks invocation gets its own Tor circuit
-#
-# Forward all script arguments to bybit_trader.py unchanged.
-TORSOCKS_LOG_LEVEL=1 torsocks --isolate \
+# ── 6. proxychains4 invocation ────────────────────────────────────────────────
+#   Forward all script arguments to bybit_trader.py unchanged.
+proxychains4 \
     python3 "$TRADER" "$@"
 
 EXIT_CODE=$?

@@ -14,8 +14,8 @@ All Bybit tools support standard environment variables for proxies:
 - `HTTPS_PROXY` (Supports `socks5h://` for Tor)
 
 **Tor Usage (Termux/Android):**
-- Use `torsocks curl` for reliable routing if SOCKS5 environment variables fail.
-- Deny local address warning in `torsocks` is expected; use direct URL instead of IP if needed.
+- Use `proxychains4 curl` for reliable routing if SOCKS5 environment variables fail.
+- Deny local address warning in `proxychains4` is expected; use direct URL instead of IP if needed.
 - `RECV_WINDOW` should be set to `20000` (20s) to handle Tor latency.
 
 ### Authentication & API Notes
@@ -64,4 +64,4 @@ Use the `scripts/run-tool.py` dispatcher:
 HTTPS_PROXY="socks5h://127.0.0.1:9050" python3 scripts/run-tool.py bybit_get_balance '{"account_type": "UNIFIED", "testnet": false}'
 ```
 TRUMPUSDT trade initiated. Monitoring for profit/loss.
-TRUMPUSDT and BTCUSDT position check failed due to mcp command invocation error. Further debugging needed for script execution via torsocks.
+TRUMPUSDT and BTCUSDT position check failed due to mcp command invocation error. Further debugging needed for script execution via proxychains4.

@@ -249,7 +249,7 @@ class TradingConfig:
         # Primary and backup endpoints
         endpoints = [
             "https://api.bybit.com",
-            "https://api.bytick.com",
+            "https://api.bybit.com",
             "https://api-pro.bybit.com",
             "https://api.bybit.nl"
         ]
@@ -265,7 +265,7 @@ class TradingConfig:
         if self.testnet:
             return ["https://api-testnet.bybit.com"]
         return [
-            "https://api.bytick.com",   # Often less restricted than bybit.com
+            "https://api.bybit.com",   # Often less restricted than bybit.com
             "https://api.bybit.com",
             "https://api-pro.bybit.com",
             "https://api.bybit.nl"
@@ -518,12 +518,11 @@ class TorManager:
           4. direct connection
         """
         
-        # If request is signed OR Tor is disabled, use direct connection exclusively.
-        # Signed requests MUST be direct. Public requests use proxy if enabled.
-        if signed or not self.enabled:
+        # If Tor is disabled, use direct connection exclusively.
+        # Otherwise, use tiered approach for all requests (signed or public).
+        if not self.enabled:
             tiers = [self._tier_direct]
         else:
-            # Use tiered approach for public requests with Tor enabled
             tiers = [self._tier_pysocks, self._tier_proxy, self._tier_torsocks, self._tier_direct]
 
         last_exc: Optional[Exception] = None
@@ -789,7 +788,7 @@ class PnLReport:
 class BybitToolDispatcher:
     """Central dispatcher for all Bybit API interactions."""
 
-    _RECV_WINDOW = "5000"
+    _RECV_WINDOW = "20000"
 
     def __init__(self, config: TradingConfig) -> None:
         config.validate()

@@ -1,4 +1,1 @@
-Line 1
-Inserted line 2
-Line 2
-Line 3
+Hello, this is a test of the edit1 tool.

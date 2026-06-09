@@ -1,5 +1,2 @@
 coder
 todo
-sql
-json-viewer
-memory

@@ -141,3 +141,27 @@
   ],
   "timestamp": "2026-05-14T06:26:41+00:00"
 }
+{
+  "key": "BYBIT_API_KEY",
+  "value": "qqnukht65yDsP1r79t",
+  "type": "preference",
+  "session": "default",
+  "tags": [],
+  "timestamp": "2026-05-20T17:49:57+00:00"
+}
+{
+  "key": "BYBIT_API_SECRET",
+  "value": "bcM965FGtrPyDGivezYnScPoSUwKqXyiak4X",
+  "type": "preference",
+  "session": "default",
+  "tags": [],
+  "timestamp": "2026-05-20T17:49:59+00:00"
+}
+{
+  "key": "BYBIT_ENV",
+  "value": "mainnet",
+  "type": "preference",
+  "session": "default",
+  "tags": [],
+  "timestamp": "2026-05-20T17:50:01+00:00"
+}

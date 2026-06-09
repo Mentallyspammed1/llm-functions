@@ -1,106 +1,123 @@
-#!/usr/bin/env bash
 const ccxt = require('ccxt');
 const _ = require('lodash');
 
+async function getExchange() {
+  if (!process.env.BYBIT_API_KEY || !process.env.BYBIT_SECRET) {
+    throw new Error('BYBIT_API_KEY and BYBIT_SECRET environment variables required');
+  }
+  return new ccxt.bybit({
+    apiKey: process.env.BYBIT_API_KEY,
+    secret: process.env.BYBIT_SECRET,
+    sandbox: process.env.BYBIT_SANDBOX === 'true',
+    enableRateLimit: true,
+  });
+}
+
 /**
- * Manage orders on Bybit exchange
- * @typedef {Object} Args
- * @property {string} operation - Operation: list|cancel|modify|get
- * @property {string} [symbol] - Filter by symbol
- * @property {string} [order_id] - Order ID for specific operations
- * @property {string} [status] - Filter by status: open|closed|canceled
- * @property {number} [limit] - Number of orders to return (default: 50)
- * @property {number} [new_price] - New price for order modification
- * @property {number} [new_amount] - New amount for order modification
- * @param {Args} args
+ * List orders on Bybit
+ * @param {string} [symbol] - Filter by symbol
+ * @param {'open'|'closed'|'canceled'} [status] - Filter by status
+ * @param {number} [limit=50] - Number of orders to return
  */
-exports.run = async function ({ operation, symbol, order_id, status, limit = 50, new_price, new_amount }) {
+exports.list_orders = async function ({ symbol, status, limit = 50 }) {
   try {
-    if (!process.env.BYBIT_API_KEY || !process.env.BYBIT_SECRET) {
-      throw new Error('BYBIT_API_KEY and BYBIT_SECRET environment variables required');
+    const exchange = await getExchange();
+    const orders = await exchange.fetchOrders(symbol, undefined, limit);
+    let filteredOrders = orders;
+    if (status) {
+      filteredOrders = orders.filter(order => order.status === status);
     }
-
-    const exchange = new ccxt.bybit({
-      apiKey: process.env.BYBIT_API_KEY,
-      secret: process.env.BYBIT_SECRET,
-      sandbox: process.env.BYBIT_SANDBOX === 'true',
-      enableRateLimit: true,
-    });
-
-    let result = { exchange: 'bybit', operation };
-
-    switch (operation) {
-      case 'list':
-        const orders = await exchange.fetchOrders(symbol, undefined, limit);
-        let filteredOrders = orders;
-        
-        if (status) {
-          filteredOrders = orders.filter(order => order.status === status);
-        }
-        
-        result.orders = filteredOrders.map(order => ({
-          id: order.id,
-          symbol: order.symbol,
-          side: order.side,
-          type: order.type,
-          amount: order.amount,
-          price: order.price,
-          filled: order.filled,
-          remaining: order.remaining,
-          status: order.status,
-          timestamp: order.timestamp,
-          datetime: order.datetime
-        }));
-        
-        result.total_count = filteredOrders.length;
-        break;
-
-      case 'get':
-        if (!order_id) throw new Error('Order ID required for get operation');
-        const order = await exchange.fetchOrder(order_id, symbol);
-        result.order = {
-          id: order.id,
-          symbol: order.symbol,
-          side: order.side,
-          type: order.type,
-          amount: order.amount,
-          price: order.price,
-          filled: order.filled,
-          remaining: order.remaining,
-          status: order.status,
-          timestamp: order.timestamp,
-          datetime: order.datetime
-        };
-        break;
-
-      case 'cancel':
-        if (!order_id) throw new Error('Order ID required for cancel operation');
-        await exchange.cancelOrder(order_id, symbol);
-        result.message = `Order ${order_id} canceled successfully`;
-        break;
-
-      case 'modify':
-        if (!order_id) throw new Error('Order ID required for modify operation');
-        const modifyParams = { order: order_id };
-        if (new_price) modifyParams.price = new_price;
-        if (new_amount) modifyParams.amount = new_amount;
-        
-        await exchange.modifyOrder(modifyParams, symbol);
-        result.message = `Order ${order_id} modified successfully`;
-        break;
-
-      default:
-        throw new Error(`Unknown operation: ${operation}`);
-    }
-
-    return JSON.stringify(result, null, 2);
-
+    return {
+      exchange: 'bybit',
+      orders: filteredOrders.map(order => ({
+        id: order.id,
+        symbol: order.symbol,
+        side: order.side,
+        type: order.type,
+        amount: order.amount,
+        price: order.price,
+        filled: order.filled,
+        remaining: order.remaining,
+        status: order.status,
+        timestamp: order.timestamp,
+        datetime: order.datetime
+      })),
+      total_count: filteredOrders.length
+    };
   } catch (error) {
-    return JSON.stringify({
-      error: error.message,
-      operation,
-      symbol: symbol || 'undefined',
-      order_id: order_id || 'undefined'
-    }, null, 2);
+    return { error: error.message, symbol };
+  }
+};
+
+/**
+ * Get a specific order by ID
+ * @param {string} order_id - Order ID
+ * @param {string} [symbol] - Symbol for the order
+ */
+exports.get_order = async function ({ order_id, symbol }) {
+  try {
+    const exchange = await getExchange();
+    const order = await exchange.fetchOrder(order_id, symbol);
+    return {
+      exchange: 'bybit',
+      order: {
+        id: order.id,
+        symbol: order.symbol,
+        side: order.side,
+        type: order.type,
+        amount: order.amount,
+        price: order.price,
+        filled: order.filled,
+        remaining: order.remaining,
+        status: order.status,
+        timestamp: order.timestamp,
+        datetime: order.datetime
+      }
+    };
+  } catch (error) {
+    return { error: error.message, order_id };
+  }
+};
+
+/**
+ * Cancel an existing order
+ * @param {string} order_id - Order ID to cancel
+ * @param {string} [symbol] - Symbol for the order
+ */
+exports.cancel_order = async function ({ order_id, symbol }) {
+  try {
+    const exchange = await getExchange();
+    await exchange.cancelOrder(order_id, symbol);
+    return {
+      exchange: 'bybit',
+      message: \`Order \${order_id} canceled successfully\`,
+      order_id
+    };
+  } catch (error) {
+    return { error: error.message, order_id };
+  }
+};
+
+/**
+ * Modify an existing order
+ * @param {string} order_id - Order ID to modify
+ * @param {string} [symbol] - Symbol for the order
+ * @param {number} [new_price] - New price
+ * @param {number} [new_amount] - New amount
+ */
+exports.modify_order = async function ({ order_id, symbol, new_price, new_amount }) {
+  try {
+    const exchange = await getExchange();
+    const modifyParams = { order: order_id };
+    if (new_price) modifyParams.price = new_price;
+    if (new_amount) modifyParams.amount = new_amount;
+    await exchange.modifyOrder(modifyParams, symbol);
+    return {
+      exchange: 'bybit',
+      message: \`Order \${order_id} modified successfully\`,
+      order_id
+    };
+  } catch (error) {
+    return { error: error.message, order_id };
   }
 };

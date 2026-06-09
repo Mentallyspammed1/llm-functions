@@ -1,0 +1,23 @@
+[
+  {
+    "id": "bd5b09e8-d191-4a8d-bc0f-561304d25571",
+    "timestamp": "2026-06-05T13:55:12.806744+00:00",
+    "action": "place_order",
+    "symbol": "DOTUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "DOTUSDT",
+      "side": "Sell",
+      "orderType": "Market",
+      "qty": "10.0",
+      "timeInForce": "GTC",
+      "price": "0.0",
+      "reduceOnly": true
+    },
+    "result": {
+      "status": "error",
+      "msg": "CIRCUIT_BREAKER_TRIPPED: Equity below threshold"
+    },
+    "status": "failed"
+  }
+]

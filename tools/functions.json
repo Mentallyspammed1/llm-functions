@@ -710,50 +710,57 @@
         }
       }
     },
-    "bybit_realm_cli.py": {
-      "description": "Bybit Realm Tool - Unified Trading and Intelligence (v4.1)",
-      "category": "pro",
+    "bybit_terminal.py": {
+      "description": "Unified Bybit V5 Trading Terminal. Supports 150+ actions including Market Data, Trading, Account Management, and Advanced Analysis.",
+      "category": "trading",
       "functions": {
-        "get_balance": {
-          "description": "Get wallet balance",
+        "run": {
+          "description": "Unified entry point for all Bybit V5 actions. Supports health_check, get_wallet_balance, get_positions, place_order, set_leverage, calculate_pnl, list_actions, and more.",
           "parameters": {
-            "account_type": {
-              "type": "string"
-            }
-          }
-        },
-        "get_positions": {
-          "description": "Get open positions",
-          "parameters": {
-            "symbol": {
-              "type": "string"
+            "action": {
+              "type": "string",
+              "description": "The action to perform (e.g., get_wallet_balance, place_order, list_actions)",
+              "required": true
             },
-            "category": {
-              "type": "string"
-            }
-          }
-        },
-        "place_order": {
-          "description": "Place an order",
-          "parameters": {
             "symbol": {
               "type": "string",
-              "required": true
+              "description": "Trading pair (e.g., BTCUSDT)"
             },
             "side": {
               "type": "string",
-              "required": true
+              "description": "buy, sell (or long, short)"
             },
             "qty": {
               "type": "number",
-              "required": true
-            },
-            "order_type": {
-              "type": "string",
-              "required": true
+              "description": "Order quantity"
             },
             "price": {
-              "type": "number"
+              "type": "number",
+              "description": "Order price"
+            },
+            "category": {
+              "type": "string",
+              "description": "linear, spot, inverse (default: linear)"
+            },
+            "interval": {
+              "type": "string",
+              "description": "Kline interval: 1, 5, 15, 60, 240, D"
+            },
+            "stop_loss": {
+              "type": "number",
+              "description": "Stop loss price"
+            },
+            "take_profit": {
+              "type": "number",
+              "description": "Take profit price"
+            },
+            "leverage": {
+              "type": "integer",
+              "description": "Leverage value"
+            },
+            "reduce_only": {
+              "type": "boolean",
+              "description": "Reduce-only flag"
             }
           }
         }

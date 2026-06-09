@@ -17,7 +17,7 @@ def get_config():
 
 def api_request(method, endpoint, params=None, signed=False):
     cfg = get_config()
-    url = f"{cfg["base_url"]}{endpoint}"
+    url = f"{cfg['base_url']}{endpoint}"
     headers = {"Content-Type": "application/json"}
     proxies = cfg["proxies"] if cfg["use_tor"] else None
     
@@ -28,17 +28,27 @@ def api_request(method, endpoint, params=None, signed=False):
         if method == "POST":
             payload = json.dumps(params or {}, separators=(',', ':'))
         else:
-            payload = urllib.parse.urlencode(params or {})
+            payload = urllib.parse.urlencode(sorted((params or {}).items()))
         
-        sig = hmac.new(cfg["api_secret"].encode("utf-8"), (ts + cfg["api_key"] + rw + payload).encode("utf-8"), hashlib.sha256).hexdigest()
-        headers.update({"X-BAPI-API-KEY": cfg["api_key"], "X-BAPI-SIGN": sig, "X-BAPI-TIMESTAMP": ts, "X-BAPI-RECV-WINDOW": rw})
+        sign_str = ts + cfg["api_key"] + rw + payload
+        sig = hmac.new(cfg["api_secret"].encode("utf-8"), sign_str.encode("utf-8"), hashlib.sha256).hexdigest()
+        headers.update({
+            "X-BAPI-API-KEY": cfg["api_key"], 
+            "X-BAPI-SIGN": sig, 
+            "X-BAPI-TIMESTAMP": ts, 
+            "X-BAPI-RECV-WINDOW": rw
+        })
     
     try:
         if method == "POST":
             resp = requests.post(url, data=json.dumps(params or {}, separators=(',', ':')), headers=headers, proxies=proxies, timeout=30)
         else:
             resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=30)
+        
+        if resp.status_code != 200:
+            return {"retCode": resp.status_code, "retMsg": f"HTTP {resp.status_code}: {resp.text}"}
+            
         try: return resp.json()
-        except: print(resp.text); return {"retCode": -1, "retMsg": "Not JSON: " + resp.text}
+        except: return {"retCode": -1, "retMsg": "Not JSON: " + resp.text}
     except Exception as e:
         return {"retCode": -1, "retMsg": str(e)}

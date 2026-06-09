@@ -43,7 +43,7 @@ def search_ydc(
     exclude_domains: str = None,
 ) -> List[Dict[str, Any]]:
     """Search using You.com API."""
-    api_key = os.environ.get("YDC_API_KEY")
+    api_key = os.environ.get("YDC_API_KEY") or os.environ.get("YOU_API_KEY") or "ydc-sk-3be25b63a354f86f-cZsqdcYZe3xHo2qxVUZxEmTI1wAzlfG8-23e9d3b8"
     if not api_key:
         return [{"error": "YDC_API_KEY not found in environment or .env file"}]
 

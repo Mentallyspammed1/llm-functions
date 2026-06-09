@@ -1,7 +1,3 @@
-# @describe Get Bybit open orders
-# @option --category <linear|inverse> Product type
-# @option --symbol <SYMBOL> Symbol
-# @option --use-tor <BOOL> Use Tor
 #!/usr/bin/env python3
 import os
 import sys
@@ -13,16 +9,19 @@ from typing import Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
 import bybit_base
 
-
-def run(
+def run_tool(
     category: str,
     symbol: Optional[str] = None,
     testnet: Optional[bool] = None,
     use_tor: Optional[bool] = None,
 ):
-    """
-    View open orders from Bybit exchange using V5 API
+    """View open orders from Bybit exchange using V5 API
     with Tor support for privacy.
+    Args:
+        category: Product type (linear/inverse/option/spot)
+        symbol: Symbol name
+        testnet: Whether to use testnet
+        use_tor: Whether to use Tor
     """
     
     config = bybit_base.get_config()
@@ -53,12 +52,14 @@ def run(
     # Format Human-Readable Output
     summary_lines = []
     if orders:
-        summary_lines.append("\n--- Open Orders ---")
+        summary_lines.append("
+--- Open Orders ---")
         for o in orders:
             price = o.get('price') if o.get('orderType') == 'Limit' else 'Market'
             summary_lines.append(f"{o['symbol']} | Side: {o['side']} | Type: {o['orderType']} | Price: {price} | Qty: {o['qty']} | Status: {o['orderStatus']}")
     else:
-        summary_lines.append("\nNo open orders found.")
+        summary_lines.append("
+No open orders found.")
 
     results = {
         "category": category,
@@ -66,7 +67,9 @@ def run(
         "open_orders": orders,
     }
 
-    connection_info = f"\n🔒 Connection: Tor (Exit IP: {exit_ip})" if exit_ip else "\n🔓 Connection: Direct"
+    connection_info = f"
+🔒 Connection: Tor (Exit IP: {exit_ip})" if exit_ip else "
+🔓 Connection: Direct"
     return f"""✅ Open Orders Retrieved Successfully!{connection_info}
 {"".join(summary_lines)}
 
@@ -81,4 +84,4 @@ if __name__ == "__main__":
     parser.add_argument("--testnet", type=lambda x: str(x).lower() == "true")
     parser.add_argument("--use-tor", type=lambda x: str(x).lower() == "true")
     args = parser.parse_args()
-    print(run(args.category, args.symbol, args.testnet, args.use_tor))
+    print(run_tool(args.category, args.symbol, args.testnet, args.use_tor))

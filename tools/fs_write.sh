@@ -121,11 +121,11 @@ format_content() {
 }
 
 escape_sed_replacement() {
-    printf '%s' "$1" | sed 's/[&\]/\&/g'
+    printf '%s' "$1" | sed 's|[&\\]|\\&|g'
 }
 
 escape_sed_pattern() {
-    printf '%s' "$1" | sed 's/[&\/]/\&/g'
+    printf '%s' "$1" | sed 's|[&/]|\\&|g'
 }
 
 generate_diff() {
@@ -186,7 +186,7 @@ apply_transform() {
             local esc_pat esc_rep
             esc_pat=$(escape_sed_pattern "$pattern")
             esc_rep=$(escape_sed_replacement "$contents_to_write")
-            sed "s/${esc_pat}/${esc_rep}/g" "$source_file" > "$dest_file"
+            sed "s|${esc_pat}|${esc_rep}|g" "$source_file" > "$dest_file"
             ;;
         *) error_exit "Unknown mode '$mode'" ;;
     esac

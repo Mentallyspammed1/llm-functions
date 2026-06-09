@@ -1,1 +1,1 @@
-Final test after fixing error_exit function in error.sh
+final test content

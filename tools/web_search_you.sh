@@ -27,37 +27,26 @@ main() {
         source .env
     fi
 
+    # Set default API Key if not provided via environment or .env
+    export YOU_API_KEY="${YOU_API_KEY:-ydc-sk-3be25b63a354f86f-cZsqdcYZe3xHo2qxVUZxEmTI1wAzlfG8-23e9d3b8}"
+
     if [[ -z "${YOU_API_KEY:-}" ]]; then
         echo "Error: YOU_API_KEY not found in environment variables or .env file" >&2
         exit 1
     fi
 
-    # Build JSON payload for POST request using jq
-    local data
-    data=$(jq -n \
-        --arg q "$query" \
-        --argjson c "$limit" \
-        --argjson o "$offset" \
-        --arg ss "$safe_search" \
-        --arg id "$include_domains" \
-        --arg ed "$exclude_domains" \
-        --arg cy "$country" \
-        '{
-            query: $q, 
-            count: $c, 
-            offset: $o,
-            safesearch: $ss
-        } | 
-        if $id != "" then . + {include_domains: ($id | split(",") | map(sub("^\\s+|\\s+$"; "")))} else . end |
-        if $ed != "" then . + {exclude_domains: ($ed | split(",") | map(sub("^\\s+|\\s+$"; "")))} else . end |
-        if $cy != "" then . + {country: $cy} else . end')
-
     # Execute search
     local response
-    response=$(curl -s -X POST https://ydc-index.io/v1/search \
+    response=$(curl -s -G --compressed "https://ydc-index.io/v1/search" \
          -H "X-API-Key: $YOU_API_KEY" \
-         -H "Content-Type: application/json" \
-         -d "$data")
+         -H "Accept-Encoding: gzip, deflate" \
+         --data-urlencode "query=$query" \
+         --data-urlencode "count=$limit" \
+         --data-urlencode "offset=$offset" \
+         --data-urlencode "safesearch=$safe_search" \
+         ${include_domains:+--data-urlencode "include_domains=$include_domains"} \
+         ${exclude_domains:+--data-urlencode "exclude_domains=$exclude_domains"} \
+         ${country:+--data-urlencode "country=$country"})
 
     # Check for errors in response
     if echo "$response" | jq -e '.error' >/dev/null; then

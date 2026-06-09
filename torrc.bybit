@@ -4,22 +4,10 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 # SOCKS listener — Python connects here
-SocksPort 9050
+SocksPort 9050 IsolateDestAddr
 
 # Control port — stem uses this for NEWNYM / bootstrap checks
 ControlPort 9051
-
-# Cookie auth is safer than a plaintext password for local use.
-# stem reads the cookie file automatically when run as the same user.
-CookieAuthentication 1
-
-# Force a new circuit after this many seconds of use.
-# Trading sessions are short; 600 s (10 min) balances freshness vs latency.
-MaxCircuitDirtiness 600
-
-# One circuit per destination address — Bybit + check.torproject.org get
-# separate circuits, so a compromise of one does not correlate the other.
-SocksPort 9050 IsolateDestAddr
 
 # Reduce fingerprinting: disable unused features
 ClientOnly 1

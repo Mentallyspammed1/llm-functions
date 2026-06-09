@@ -8,6 +8,7 @@
 import json
 import argparse
 import bybit_core
+import bybit_turso_logger
 
 def run(category, symbol, side, order_type, qty, price=None, time_in_force="GTC", take_profit=None, stop_loss=None, reduce_only=False):
     params = {
@@ -24,6 +25,17 @@ def run(category, symbol, side, order_type, qty, price=None, time_in_force="GTC"
     if reduce_only: params["reduceOnly"] = True
     
     resp = bybit_core.api_request("POST", "/v5/order/create", params=params, signed=True)
+    
+    # Log successful trades to Turso
+    if resp.get("retCode") == 0:
+        bybit_turso_logger.log_event("TRADE_OPEN", {
+            "symbol": symbol,
+            "side": side,
+            "price": price or "MARKET",
+            "qty": qty,
+            "details": f"Category: {category}, OrderType: {order_type}, Resp: {resp.get('retMsg')}"
+        })
+    
     return json.dumps(resp, indent=2)
 
 if __name__ == "__main__":

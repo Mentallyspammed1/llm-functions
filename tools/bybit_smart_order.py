@@ -1,8 +1,26 @@
 #!/usr/bin/env python3
+# @describe Place a smart order with automatic position sizing and risk management.
+# @option --symbol BTCUSDT Trading pair (e.g. BTCUSDT).
+# @option --side Buy Buy or Sell.
+# @option --risk-pct <NUM> % of balance to risk (default: 1.0).
+# @option --sl-dist <NUM> Stop loss distance in price.
+# @option --sl-price <NUM> Absolute Stop Loss price.
+# @option --tp-price <NUM> Absolute Take Profit price.
+
 """Place a smart order with automatic position sizing and risk management."""
 import os
+import sys
 import json
-import bybit_core
+from pathlib import Path
+
+# Add current directory to path to import modular bybit package
+sys.path.append(str(Path(__file__).parent))
+
+try:
+    import bybit_core
+except ImportError:
+    # If standard import fails, try relative import for sub-agent environment
+    from . import bybit_core
 
 def run(
     symbol: str = "BTCUSDT",
@@ -33,7 +51,7 @@ def run(
     
     # Get balance
     try:
-        data = bybit_core.api_request("GET", "/v5/account/wallet", params={"accountType": "UNIFIED"}, signed=True)
+        data = bybit_core.api_request("GET", "/v5/account/wallet-balance", params={"accountType": "UNIFIED"}, signed=True)
         if data.get("retCode") != 0:
             return {"success": False, "error": "Failed to get balance: " + data.get("retMsg")}
         coins = data.get("result", {}).get("list", [{}])[0].get("coin", [])
@@ -125,7 +143,26 @@ def _atr(highs, lows, closes, period=14):
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
+    import os
     
+    # Check for argc environment variables first
+    if "argc_symbol" in os.environ or "argc_side" in os.environ:
+        kwargs = {}
+        for k, v in os.environ.items():
+            if k.startswith("argc_"):
+                key = k[5:].replace("-", "_")
+                # Cast common types
+                if v.lower() == "true": val = True
+                elif v.lower() == "false": val = False
+                else:
+                    try: val = float(v) if "." in v else int(v)
+                    except: val = v
+                kwargs[key] = val
+        
+        result = run(**kwargs)
+        print(json.dumps(result, indent=2))
+        sys.exit(0)
+
     parser = ArgumentParser(description="Place smart order on Bybit")
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--side", default="Buy")

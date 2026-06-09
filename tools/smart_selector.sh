@@ -25,7 +25,7 @@ main() {
     if [[ -f "tools.txt" ]]; then
         tools_list=$(grep -v '^#' tools.txt | awk '{print $1}')
     else
-        tools_list=$(ls tools/ | sed 's/\..*$//' | sort -u)
+        tools_list=$(ls tools/ | sed 's|\..*$||' | sort -u)
     fi
     
     local suggestions=""
@@ -34,11 +34,11 @@ main() {
         # Try to get description
         local description=""
         if [[ -f "tools/${tool}.sh" ]]; then
-            description=$(grep "@describe" "tools/${tool}.sh" | head -n1 | sed 's/.*@describe //')
+            description=$(grep "@describe" "tools/${tool}.sh" | head -n1 | sed 's|.*@describe ||')
         elif [[ -f "tools/${tool}.js" ]]; then
-             description=$(grep "@description" "tools/${tool}.js" | head -n1 | sed 's/.*@description //')
+             description=$(grep "@description" "tools/${tool}.js" | head -n1 | sed 's|.*@description ||')
         elif [[ -f "tools/${tool}.py" ]]; then
-             description=$(grep "@describe" "tools/${tool}.py" | head -n1 | sed 's/.*@describe //')
+             description=$(grep "@describe" "tools/${tool}.py" | head -n1 | sed 's|.*@describe ||')
         fi
         
         description="${description,,}"

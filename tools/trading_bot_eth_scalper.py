@@ -4,6 +4,10 @@
 # @option --auto-trade <BOOL> Execute trades automatically (default: false)
 # @option --qty <QTY> Quantity to trade (default: 0.2)
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import time
 import json
 import argparse
@@ -21,7 +25,11 @@ def get_market_metrics(bids, asks):
     
     return buy_vol, sell_vol, buy_walls, sell_walls
 
-def run(interval=5, auto_trade=False, qty="0.2"):
+def run(interval="5", auto_trade="false", qty="0.2"):
+    # Convert string params to proper types
+    interval = int(interval) if str(interval).isdigit() else 5
+    auto_trade = str(auto_trade).lower() == "true"
+    qty = str(qty)
     print(f"--- Monitoring ETHUSDT (Auto-Trade: {auto_trade}) ---")
     while True:
         try:

@@ -1,14 +1,11 @@
-# @describe Cancel a Bybit order
-# @option --category <linear|inverse> Product type
-# @option --symbol <SYMBOL> Symbol
-# @option --order-id <ID> Order ID
 #!/usr/bin/env python3
 import json
 import argparse
 import bybit_core
+import bybit_turso_logger
 from typing import Optional
 
-def run(
+def run_tool(
     category: str = "linear",
     symbol: str = "BTCUSDT",
     order_id: Optional[str] = None,
@@ -26,6 +23,14 @@ def run(
     if order_link_id: params["orderLinkId"] = order_link_id
     
     resp = bybit_core.api_request("POST", "/v5/order/cancel", params=params, signed=True)
+    
+    # Log cancellation to Turso
+    if resp.get("retCode") == 0:
+        bybit_turso_logger.log_event("ORDER_CANCEL", {
+            "symbol": symbol,
+            "details": f"OrderID: {order_id or order_link_id}, Category: {category}, Resp: {resp.get('retMsg')}"
+        })
+        
     return resp
 
 if __name__ == "__main__":
@@ -35,4 +40,4 @@ if __name__ == "__main__":
     parser.add_argument("--order-id")
     parser.add_argument("--order-link-id")
     args = parser.parse_args()
-    print(json.dumps(run(args.category, args.symbol, args.order_id, args.order_link_id), indent=2))
+    print(json.dumps(run_tool(args.category, args.symbol, args.order_id, args.order_link_id), indent=2))
