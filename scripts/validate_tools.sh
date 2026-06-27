@@ -16,14 +16,23 @@ check_tool() {
     local filename=$(basename "$tool_path")
     local errors=()
     
-    # Check for @describe
-    if ! grep -q "@describe" "$tool_path"; then
-        errors+=("Missing @describe comment")
+    # Check for description
+    local has_desc=0
+    if grep -q "@describe" "$tool_path"; then
+        has_desc=1
+    elif [[ "$filename" == *.py ]] && (grep -q '"""' "$tool_path" || grep -q "'''" "$tool_path"); then
+        has_desc=1
+    elif [[ "$filename" == *.js ]] && grep -q "/\*\*" "$tool_path"; then
+        has_desc=1
+    fi
+
+    if [[ $has_desc -eq 0 ]]; then
+        errors+=("Missing description (needs @describe, docstring, or JSDoc)")
     fi
     
     # Check for main/run function
     if [[ "$filename" == *.sh ]]; then
-        if ! grep -q "main()" "$tool_path"; then
+        if ! grep -qE "(main\s*\(\)|function main)" "$tool_path"; then
             errors+=("Missing main() function")
         fi
         if ! bash -n "$tool_path" 2>/dev/null; then
@@ -37,7 +46,7 @@ check_tool() {
             errors+=("Python syntax error")
         fi
     elif [[ "$filename" == *.js ]]; then
-        if ! grep -qE "(exports\.run =|function main\()" "$tool_path"; then
+        if ! grep -qE "(exports\.run\s*=|function main\()" "$tool_path"; then
             errors+=("Missing exports.run or main() function")
         fi
         if ! node --check "$tool_path" 2>/dev/null; then
