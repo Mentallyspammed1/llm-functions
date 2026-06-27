@@ -98,6 +98,52 @@ def llm_emit(text: str) -> None:
         f.write(text if text.endswith("\n") else text + "\n")
 
 
+def load_env() -> None:
+    """Load environment variables from .env file in parent repository root."""
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ[key.strip()] = val.strip()
+
+def _search_images_google_cse(query: str, limit: int) -> Tuple[List[dict], str]:
+    """Query Google CSE API for images."""
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    cx = os.environ.get("GOOGLE_SEARCH_ENGINE_ID")
+    if not api_key or not cx:
+        return [], "google_cse"
+        
+    url = "https://www.googleapis.com/customsearch/v1"
+    params = urllib.parse.urlencode({
+        "key": api_key,
+        "cx": cx,
+        "q": query,
+        "searchType": "image",
+        "num": str(min(limit, 10))
+    })
+    try:
+        status, body_bytes, hdrs = _http_get(f"{url}?{params}")
+        if status == 200:
+            data = json.loads(body_bytes.decode("utf-8", errors="replace"))
+            results = []
+            for item in data.get("items", []):
+                results.append({
+                    "title": item.get("title"),
+                    "url": item.get("link"),
+                    "page_url": item.get("image", {}).get("contextLink", ""),
+                    "snippet": item.get("snippet", ""),
+                    "score": max(0.1, 1.0 - len(results) * 0.03),
+                    "type": "image",
+                    "source": "google_cse"
+                })
+            return results, "google_cse"
+    except Exception as e:
+        _debug(f"Google CSE image search failed: {e}")
+    return [], "google_cse"
+
 def _bing_rate_limit_wait() -> None:
     global _bing_last_request
     with _bing_rl_lock:
@@ -627,14 +673,18 @@ def perform_search(
         results: List[dict] = []
         backend: Optional[str] = None
 
-        if backend_pref in ("bing", "bing-image", "bing_image"):
+        if backend_pref in ("google", "google-image", "google_image", "google_cse", "google-cse"):
+            results, backend = _search_images_google_cse(primary_q, limit)
+        elif backend_pref in ("bing", "bing-image", "bing_image"):
             results, backend = _search_images_bing(primary_q, limit)
         elif backend_pref == "ddgs":
             results, backend = _search_images_ddgs(primary_q, limit)
         elif backend_pref == "ddg_html":
             results, backend = [], "ddg_html"
         elif backend_pref == "auto":
-            results, backend = _search_images_bing(primary_q, limit)
+            results, backend = _search_images_google_cse(primary_q, limit)
+            if not results:
+                results, backend = _search_images_bing(primary_q, limit)
             if not results:
                 results, backend = _search_images_ddgs(primary_q, limit)
         else:
@@ -652,7 +702,10 @@ def perform_search(
             meta["mode"] = "web_fallback"
             results = web_rows
     else:
-        if backend_pref in ("bing", "bing-image", "bing_image"):
+        if backend_pref in ("google", "google-image", "google_image", "google_cse", "google-cse"):
+            results, backend = _search_images_google_cse(primary_q, limit)
+            meta["mode"] = "images_preview"
+        elif backend_pref in ("bing", "bing-image", "bing_image"):
             results, backend = _search_images_bing(primary_q, min(limit, 50))
             meta["mode"] = "images_preview"
         else:
@@ -676,6 +729,7 @@ def run(
     media_dir: str = "~/nsfw_media/",
     **_: Any,
 ) -> dict:
+    load_env()
     query = (query or "").strip()
     if not query:
         return {
