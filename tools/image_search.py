@@ -60,58 +60,45 @@ def search_google_images(query: str, count: int = 10) -> List[Dict[str, Any]]:
         logging.warning(f"Google Image Search failed: {e}")
         return []
 
-def search_ddg_images(query: str, count: int = 10) -> List[Dict[str, Any]]:
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-    })
+def search_bing_images(query: str, count: int = 10) -> List[Dict[str, Any]]:
+    """Free Bing Image Search fallback using HTML scraping."""
+    url = f"https://www.bing.com/images/search?q={urllib.parse.quote(query)}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
-        # Step 1: get vqd token
-        url = f"https://duckduckgo.com/?q={urllib.parse.quote(query)}"
-        res = session.get(url, timeout=10)
-        res.raise_for_status()
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
         import re
-        match = re.search(r"vqd=([0-9-]+)", res.text)
-        if not match:
-            match = re.search(r'vqd=["\']([^"\']+)["\']', res.text)
-        if not match:
-            return []
-        vqd = match.group(1)
-        
-        # Step 2: query images API
-        img_url = "https://duckduckgo.com/i.js"
-        params = {
-            "l": "us-en",
-            "o": "json",
-            "q": query,
-            "vqd": vqd,
-            "f": ",,,",
-            "p": "1"
-        }
-        headers_img = {
-            "Referer": "https://duckduckgo.com/"
-        }
-        res2 = session.get(img_url, params=params, headers=headers_img, timeout=10)
-        res2.raise_for_status()
-        data = res2.json()
-        
+        body = response.text
         results = []
-        for item in data.get("results", []):
+        matches = re.finditer(r'murl&quot;:&quot;([^&]+)&quot;.*?t&quot;:&quot;([^&]+)&quot;', body)
+        for match in matches:
+            img_url = match.group(1)
+            title = match.group(2)
+            
+            img_url = urllib.parse.unquote(img_url).replace("\\/", "/")
+            title = urllib.parse.unquote(title)
+            
+            turl_match = re.search(r'turl&quot;:&quot;([^&]+)&quot;', match.group(0))
+            turl = turl_match.group(1) if turl_match else None
+            if turl:
+                turl = urllib.parse.unquote(turl).replace("\\/", "/")
+                
             results.append({
-                "title": item.get("title"),
-                "image_url": item.get("image"),
-                "thumbnail_url": item.get("thumbnail"),
-                "width": item.get("width"),
-                "height": item.get("height"),
-                "source": item.get("source")
+                "title": title,
+                "image_url": img_url,
+                "thumbnail_url": turl,
+                "width": None,
+                "height": None,
+                "source": None
             })
             if len(results) >= count:
                 break
         return results
     except Exception as e:
-        logging.warning(f"DuckDuckGo image search failed: {e}")
+        logging.warning(f"Bing keyless image search failed: {e}")
         return []
 
 def run(query: str, limit: int = 10) -> List[Dict[str, Any]]:
@@ -120,8 +107,8 @@ def run(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     results = search_google_images(query, limit)
     if results:
         return results
-    # 2. Fallback to DuckDuckGo Keyless Image Search
-    return search_ddg_images(query, limit)
+    # 2. Fallback to Bing Keyless Image Search
+    return search_bing_images(query, limit)
 
 if __name__ == "__main__":
     # 1. Parse JSON input if passed by aichat's tool dispatcher
