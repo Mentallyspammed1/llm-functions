@@ -26,7 +26,7 @@ def setup_logging(verbose: bool = False) -> None:
 
 def load_env():
     """Load environment variables from .env file."""
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
     if os.path.exists(env_path):
         with open(env_path, "r") as f:
             for line in f:
