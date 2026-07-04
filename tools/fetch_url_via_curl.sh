@@ -8,6 +8,8 @@ set -euo pipefail
 # @option --connect-timeout=10 <INT> Connection timeout in seconds.
 # @option --user-agent=curl_tool/1.0 Custom User-Agent header.
 # @option --output= Output file path (default: LLM_OUTPUT or stdout).
+# @option --dump-header= Output file path for HTTP response headers.
+# @option --cookie-file= Path to cookie file for session management.
 # @option --method=GET HTTP method (GET, POST, PUT, DELETE, PATCH).
 # @option --data= Request body data for POST/PUT.
 # @option --headers= Comma-separated headers (e.g., "Key: Val,Key2: Val2").
@@ -63,6 +65,10 @@ build_curl_command() {
         curl_args+=(--insecure)
     fi
 
+    # Header and Cookie options
+    [[ -n "${argc_dump_header:-}" ]] && curl_args+=(--dump-header "${argc_dump_header}")
+    [[ -n "${argc_cookie_file:-}" ]] && curl_args+=(--cookie-jar "${argc_cookie_file}" --cookie "${argc_cookie_file}")
+
     # Other flags
     [[ "${argc_compressed:-false}" == "true" ]] && curl_args+=(--compressed)
     [[ "${argc_silent:-false}" == "true" ]] && curl_args+=(--silent)
@@ -115,7 +121,7 @@ execute_curl() {
     local http_code
     http_code=$(curl -s -w "%{http_code}" "${curl_args[@]}" -o "$tmp_file")
     
-    if [[ "$http_code" -eq 200 ]]; then
+    if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
         if [[ "$output_target" == "/dev/stdout" || "$output_target" == "-" ]]; then
             cat "$tmp_file"
         else
@@ -124,9 +130,9 @@ execute_curl() {
         rm -f "$tmp_file"
     else
         if [[ "$output_target" == "/dev/stdout" || "$output_target" == "-" ]]; then
-            echo "{\"status\": \"error\", \"http_code\": $http_code, \"msg\": \"Request failed with status $http_code\"}"
+            echo "{"status": "error", "http_code": $http_code, "msg": "Request failed with status $http_code"}"
         else
-            echo "{\"status\": \"error\", \"http_code\": $http_code, \"msg\": \"Request failed with status $http_code\"}" > "$output_target"
+            echo "{"status": "error", "http_code": $http_code, "msg": "Request failed with status $http_code"}" > "$output_target"
         fi
         rm -f "$tmp_file"
     fi

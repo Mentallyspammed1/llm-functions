@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# @describe Search for images on the web using Google CSE or DuckDuckGo fallbacks.
+# @describe Search for images on the web using Google CSE or Bing fallbacks, with optional automatic bulk downloading.
 # @option --query! <TEXT>                          Image search query
 # @option --limit <NUM>                            Maximum number of results to return (default: 10)
+# @option --download-dir <PATH>                    Optional directory to download the search results to
 """
 image_search.py - Search for images on the web.
 """
@@ -101,14 +102,49 @@ def search_bing_images(query: str, count: int = 10) -> List[Dict[str, Any]]:
         logging.warning(f"Bing keyless image search failed: {e}")
         return []
 
-def run(query: str, limit: int = 10) -> List[Dict[str, Any]]:
+def download_image_file(url: str, download_dir: str) -> str:
+    """Download single image file into download_dir."""
+    os.makedirs(download_dir, exist_ok=True)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        parsed_url = urllib.parse.urlparse(url)
+        filename = os.path.basename(parsed_url.path)
+        if not filename or "." not in filename:
+            filename = f"image_{hash(url) & 0xffffffff}.jpg"
+        # Sanitize filename
+        filename = "".join(c for c in filename if c.isalnum() or c in "._-")
+        output_path = os.path.join(download_dir, filename)
+        
+        response = requests.get(url, headers=headers, timeout=20, stream=True)
+        response.raise_for_status()
+        with open(output_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        return os.path.abspath(output_path)
+    except Exception as e:
+        logging.warning(f"Failed to download image from {url}: {e}")
+        return None
+
+def run(query: str, limit: int = 10, download_dir: str = None) -> List[Dict[str, Any]]:
     load_env()
     # 1. Try Google Image Search CSE first
     results = search_google_images(query, limit)
-    if results:
-        return results
-    # 2. Fallback to Bing Keyless Image Search
-    return search_bing_images(query, limit)
+    if not results:
+        # 2. Fallback to Bing Keyless Image Search
+        results = search_bing_images(query, limit)
+        
+    # 3. Perform downloading if download_dir is specified
+    if download_dir and results:
+        for item in results:
+            url = item.get("image_url")
+            if url:
+                saved_path = download_image_file(url, download_dir)
+                item["saved_path"] = saved_path
+                
+    return results
 
 if __name__ == "__main__":
     # 1. Parse JSON input if passed by aichat's tool dispatcher
@@ -117,10 +153,11 @@ if __name__ == "__main__":
             kwargs = json.loads(sys.argv[1])
             query_val = kwargs.get("query")
             limit_val = kwargs.get("limit", 10)
+            download_val = kwargs.get("download_dir") or kwargs.get("download_path")
             if not query_val:
                 print(json.dumps([{"error": "Query is required"}]))
                 sys.exit(1)
-            print(json.dumps(run(query_val, limit_val), indent=2))
+            print(json.dumps(run(query_val, limit_val, download_val), indent=2))
             sys.exit(0)
         except Exception as err:
             print(json.dumps([{"error": f"JSON argument parse error: {err}"}]))
@@ -130,5 +167,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Image search tool")
     parser.add_argument("--query", required=True)
     parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--download-dir")
     args = parser.parse_args()
-    print(json.dumps(run(args.query, args.limit), indent=2))
+    print(json.dumps(run(args.query, args.limit, args.download_dir), indent=2))

@@ -130,8 +130,8 @@ build-bin@tool() {
                 _build_win_shim tool $lang > "$bin_file"
             else
                 bin_file="$BIN_DIR/$basename"
-                if [[ "$lang" == "py" && -d "$VENV_DIR" ]]; then
-                    rm -rf "$bin_file"
+                if [[ "$lang" == "py" ]]; then
+                    rm -f "$bin_file"
                     _build_py_shim tool $lang > "$bin_file"
                     chmod +x "$bin_file"
                 else
@@ -252,9 +252,9 @@ build-bin@agent() {
                     _build_win_shim agent $lang > "$bin_file"
                 else
                     bin_file="$BIN_DIR/$name"
-                    if [[ "$lang" == "py" && -d "$VENV_DIR" ]]; then
-                        rm -rf "$bin_file"
-                        _build_py_shim tool $lang > "$bin_file"
+                    if [[ "$lang" == "py" ]]; then
+                        rm -f "$bin_file"
+                        _build_py_shim agent $lang > "$bin_file"
                         chmod +x "$bin_file"
                     else
                         ln -s -f "$PWD/scripts/run-agent.$lang" "$bin_file"
@@ -661,15 +661,17 @@ EOF
 _build_py_shim() {
     kind="$1"
     lang="$2"
-    cat <<-'EOF' | sed -e "s|__ROOT_DIR__|$PWD|g" -e "s|__VENV_DIR__|$VENV_DIR|g" -e "s/__KIND__/$kind/g"
-#!/usr/bin/env bash
+    local bash_path
+    bash_path="$(command -v bash 2>/dev/null || echo "/bin/bash")"
+    cat <<-EOF
+#!${bash_path}
 set -e
 
-if [[ -f "__ROOT_DIR__/__VENV_DIR__/bin/activate" ]]; then
-    source "__ROOT_DIR__/__VENV_DIR__/bin/activate"
+if [[ -f "$PWD/$VENV_DIR/bin/activate" ]]; then
+    source "$PWD/$VENV_DIR/bin/activate"
 fi
 
-python "__ROOT_DIR__/scripts/run-__KIND__.py" "$(basename "$0")" "$@"
+python "$PWD/scripts/run-${kind}.py" "\$(basename "\$0")" "\$@"
 EOF
 }
 

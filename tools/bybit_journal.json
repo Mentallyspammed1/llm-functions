@@ -19,5 +19,48 @@
       "msg": "CIRCUIT_BREAKER_TRIPPED: Equity below threshold"
     },
     "status": "failed"
+  },
+  {
+    "id": "23300a82-4881-4149-8daa-7f42de718ad1",
+    "timestamp": "2026-06-09T05:42:22.709858+00:00",
+    "action": "place_order",
+    "symbol": "LINKUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "LINKUSDT",
+      "side": "Sell",
+      "orderType": "Limit",
+      "qty": "1.0",
+      "timeInForce": "GTC",
+      "price": "7.99",
+      "stopLoss": "8.005",
+      "takeProfit": "7.975"
+    },
+    "result": {
+      "orderId": "240fb140-39c4-4a35-a3ee-1fd0274a5c67",
+      "orderLinkId": ""
+    },
+    "status": "success"
+  },
+  {
+    "id": "33da70fe-62bc-43fe-892d-f0196c5ecc0d",
+    "timestamp": "2026-06-30T08:19:02.310629+00:00",
+    "action": "place_order",
+    "symbol": "XLMUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "XLMUSDT",
+      "side": "SELL",
+      "orderType": "MARKET",
+      "qty": "27",
+      "timeInForce": "GTC",
+      "reduceOnly": false
+    },
+    "result": {
+      "status": "error",
+      "code": 110094,
+      "msg": "Order does not meet minimum order value 5USDT"
+    },
+    "status": "failed"
   }
 ]

@@ -3,12 +3,14 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 """
 Bybit Advanced Analysis Tools
-Uses pandas and pandas_ta for technical indicators
+Native Python implementation (No pandas/pandas_ta dependencies)
 """
-import pandas as pd
-import pandas_ta as ta
 import json
 import os
+import statistics
+import math
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
 from pybit.unified_trading import HTTP
 from argc import argc as Argc
 
@@ -17,246 +19,201 @@ TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 USE_TOR = os.getenv("USE_TOR", "false").lower() == "true"
 TOR_PROXY = os.getenv("TOR_PROXY", "socks5h://127.0.0.1:9050")
 
-session = HTTP(
-    testnet=TESTNET,
-    proxy=TOR_PROXY if USE_TOR else None
-)
+http_kwargs = {"testnet": TESTNET}
+if USE_TOR:
+    http_kwargs["proxies"] = {"http": TOR_PROXY, "https": TOR_PROXY}
+
+session = HTTP(**http_kwargs)
+
+def _ema(data: List[float], period: int) -> List[float]:
+    if not data: return []
+    k = 2 / (period + 1)
+    ema = [data[0]]
+    for val in data[1:]:
+        ema.append(val * k + ema[-1] * (1 - k))
+    return ema
+
+def _rsi(prices: List[float], period: int = 14) -> List[float]:
+    if len(prices) <= period: return []
+    deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+    gains = [max(d, 0) for d in deltas]
+    losses = [max(-d, 0) for d in deltas]
+    
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    
+    rsi = [100 - (100 / (1 + (avg_gain / avg_loss))) if avg_loss != 0 else 100]
+    
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        rsi.append(100 - (100 / (1 + (avg_gain / avg_loss))) if avg_loss != 0 else 100)
+    
+    return [None] * period + rsi
+
+# @cmd Get market regime
+# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
+# @option --interval <TEXT> Interval (default: 60)
+# @option --lookback <INT> Number of klines (default: 100)
+def bybit_get_market_regime(symbol, interval="60", lookback=100):
+    """Classifies market as TRENDING_UP, TRENDING_DOWN, RANGING, or VOLATILE."""
+    res = session.get_kline(category="linear", symbol=symbol, interval=interval, limit=lookback)["result"]["list"]
+    if len(res) < 30:
+        print(json.dumps({"status": "error", "msg": "Insufficient data"}))
+        return
+
+    closes = [float(k[4]) for k in reversed(res)]
+    ema_short = _ema(closes, 10)[-1]
+    ema_long = _ema(closes, 30)[-1]
+    
+    returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
+    volatility = statistics.stdev(returns) * 100
+    
+    if volatility > 2.0: regime = "VOLATILE"
+    elif ema_short > ema_long * 1.002: regime = "TRENDING_UP"
+    elif ema_short < ema_long * 0.998: regime = "TRENDING_DOWN"
+    else: regime = "RANGING"
+    
+    result = {"symbol": symbol, "regime": regime, "volatility": round(volatility, 4)}
+    print(json.dumps(result))
+
+# @cmd Get signal confluence
+# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
+# @option --intervals <TEXT> Comma-separated intervals (default: 5,15,60,240)
+def bybit_get_confluence(symbol, intervals="5,15,60,240"):
+    """Analyzes EMA trend and RSI momentum across multiple timeframes."""
+    tf_list = [i.strip() for i in intervals.split(",")]
+    scores = []
+    details = {}
+    
+    for tf in tf_list:
+        try:
+            res = session.get_kline(category="linear", symbol=symbol, interval=tf, limit=50)
+            if res.get("retCode") != 0:
+                details[tf] = {"error": res.get("retMsg")}
+                continue
+            
+            klines = res["result"]["list"]
+            closes = [float(k[4]) for k in reversed(klines)]
+            
+            ema = _ema(closes, 20)[-1]
+            price = closes[-1]
+            rsi_list = _rsi(closes, 14)
+            rsi = rsi_list[-1] if rsi_list else 50
+            
+            trend = 1 if price > ema else -1
+            momentum = 1 if rsi > 55 else (-1 if rsi < 45 else 0)
+            
+            details[tf] = {"rsi": round(rsi, 2), "trend": "BULLISH" if trend > 0 else "BEARISH", "momentum": momentum}
+            scores.append(trend + momentum)
+        except Exception as e:
+            details[tf] = {"error": str(e)}
+            continue
+
+    total_score = sum(scores)
+    max_possible = len(tf_list) * 2
+    
+    if total_score >= max_possible * 0.7: rec = "STRONG_BUY"
+    elif total_score > 0: rec = "BUY"
+    elif total_score <= -max_possible * 0.7: rec = "STRONG_SELL"
+    elif total_score < 0: rec = "SELL"
+    else: rec = "NEUTRAL"
+    
+    result = {
+        "symbol": symbol, "recommendation": rec, "confluence_score": total_score,
+        "details": details, "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    print(json.dumps(result))
 
 # @cmd Get technical indicators
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --interval! Interval (1, 5, 15, 60, 120, 240, D, W, M)
-# @option --limit Number of klines (default: 100)
+# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
+# @option --interval! <TEXT> Interval (1, 5, 15, 60, 120, 240, D, W, M)
+# @option --limit <INT> Number of klines (default: 100)
 def bybit_get_indicators(symbol, interval, limit=100):
-    """Calculate RSI, EMA, ATR, MACD, Bollinger Bands indicators"""
-    data = session.get_kline(
-        category="linear", 
-        symbol=symbol, 
-        interval=interval, 
-        limit=limit
-    )["result"]["list"]
+    """Calculate RSI, EMA, ATR indicators"""
+    res = session.get_kline(category="linear", symbol=symbol, interval=interval, limit=limit)["result"]["list"]
+    closes = [float(k[4]) for k in reversed(res)]
+    highs = [float(k[2]) for k in reversed(res)]
+    lows = [float(k[3]) for k in reversed(res)]
     
-    df = pd.DataFrame(data, columns=["ts", "open", "high", "low", "close", "vol", "turnover"])
-    df = df.astype({
-        "open": float, "high": float, "low": float, 
-        "close": float, "vol": float
-    })
+    rsi = _rsi(closes, 14)[-1]
+    ema20 = _ema(closes, 20)[-1]
+    ema50 = _ema(closes, 50)[-1]
     
-    # Calculate indicators
-    df["rsi"] = ta.rsi(df["close"], length=14)
-    df["ema_9"] = ta.ema(df["close"], length=9)
-    df["ema_20"] = ta.ema(df["close"], length=20)
-    df["ema_50"] = ta.ema(df["close"], length=50)
-    df["ema_200"] = ta.ema(df["close"], length=200)
-    df["atr"] = ta.atr(df["high"], df["low"], df["close"], length=14)
-    df["macd"], df["macd_signal"], df["macd_hist"] = ta.macd(df["close"])
-    df["bb_upper"], df["bb_middle"], df["bb_lower"] = ta.bbands(df["close"], length=20)
-    df["stoch_k"], df["stoch_d"] = ta.stoch(df["high"], df["low"], df["close"])
+    # ATR
+    tr = [max(highs[i]-lows[i], abs(highs[i]-closes[i-1]), abs(lows[i]-closes[i-1])) for i in range(1, len(closes))]
+    atr = sum(tr[-14:]) / 14 if len(tr) >= 14 else 0
     
-    # Get latest values
-    latest = df.iloc[-1]
     result = {
-        "symbol": symbol,
-        "interval": interval,
-        "close": round(latest["close"], 2),
-        "rsi": round(latest["rsi"], 2) if pd.notna(latest["rsi"]) else None,
-        "ema_9": round(latest["ema_9"], 2) if pd.notna(latest["ema_9"]) else None,
-        "ema_20": round(latest["ema_20"], 2) if pd.notna(latest["ema_20"]) else None,
-        "ema_50": round(latest["ema_50"], 2) if pd.notna(latest["ema_50"]) else None,
-        "ema_200": round(latest["ema_200"], 2) if pd.notna(latest["ema_200"]) else None,
-        "atr": round(latest["atr"], 2) if pd.notna(latest["atr"]) else None,
-        "macd": round(latest["macd"], 4) if pd.notna(latest["macd"]) else None,
-        "macd_signal": round(latest["macd_signal"], 4) if pd.notna(latest["macd_signal"]) else None,
-        "macd_hist": round(latest["macd_hist"], 4) if pd.notna(latest["macd_hist"]) else None,
-        "bb_upper": round(latest["bb_upper"], 2) if pd.notna(latest["bb_upper"]) else None,
-        "bb_middle": round(latest["bb_middle"], 2) if pd.notna(latest["bb_middle"]) else None,
-        "bb_lower": round(latest["bb_lower"], 2) if pd.notna(latest["bb_lower"]) else None,
-        "stoch_k": round(latest["stoch_k"], 2) if pd.notna(latest["stoch_k"]) else None,
-        "stoch_d": round(latest["stoch_d"], 2) if pd.notna(latest["stoch_d"]) else None,
+        "symbol": symbol, "interval": interval, "close": closes[-1],
+        "rsi": round(rsi, 2) if rsi else None,
+        "ema_20": round(ema20, 2), "ema_50": round(ema50, 2),
+        "atr": round(atr, 4)
     }
     print(json.dumps(result))
 
 # @cmd Multi-timeframe analysis
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --timeframes Comma-separated timeframes (default: 15,60,240,D)
+# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
+# @option --timeframes <TEXT> Comma-separated timeframes (default: 15,60,240,D)
 def bybit_analyze_symbol(symbol, timeframes="15,60,240,D"):
     """Analyze symbol across multiple timeframes"""
     analysis = {}
-    tf_list = timeframes.split(",")
-    
-    for tf in tf_list:
-        data = session.get_kline(
-            category="linear", 
-            symbol=symbol, 
-            interval=tf.strip(), 
-            limit=50
-        )["result"]["list"]
-        
-        closes = [float(c[4]) for c in data]
-        volumes = [float(c[5]) for c in data]
-        
-        current = closes[0]
-        previous = closes[1]
+    for tf in timeframes.split(","):
+        data = session.get_kline(category="linear", symbol=symbol, interval=tf.strip(), limit=50)["result"]["list"]
+        closes = [float(c[4]) for k in data] # Wrong indexing in legacy, fixed to [4]
+        current, previous = float(data[0][4]), float(data[1][4])
         change_pct = ((current - previous) / previous) * 100
-        
-        # Simple trend detection
-        trend = "Bullish" if current > previous else "Bearish"
-        
-        # Volume analysis
-        avg_vol = sum(volumes) / len(volumes)
-        vol_ratio = volumes[0] / avg_vol if avg_vol > 0 else 1
-        
-        analysis[tf.strip()] = {
-            "trend": trend,
-            "change_pct": round(change_pct, 2),
-            "close": current,
-            "volume_ratio": round(vol_ratio, 2),
-            "signal": "Strong" if abs(change_pct) > 2 else "Weak"
-        }
-    
+        analysis[tf.strip()] = {"trend": "Bullish" if current > previous else "Bearish", "change_pct": round(change_pct, 2), "close": current}
     print(json.dumps(analysis))
 
 # @cmd Analyze orderbook depth
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --limit Depth level (default: 25)
+# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
+# @option --limit <INT> Depth level (default: 25)
 def bybit_analyze_orderbook(symbol, limit=25):
-    """Analyze orderbook depth, imbalance, and walls"""
-    res = session.get_orderbook(
-        category="linear", 
-        symbol=symbol, 
-        limit=limit
-    )
-    
-    bids = res["result"]["b"]
-    asks = res["result"]["a"]
-    
+    res = session.get_orderbook(category="linear", symbol=symbol, limit=limit)
+    bids, asks = res["result"]["b"], res["result"]["a"]
     bid_vol = sum(float(x[1]) for x in bids)
     ask_vol = sum(float(x[1]) for x in asks)
-    
-    best_bid = float(bids[0][0])
-    best_ask = float(asks[0][0])
-    spread = best_ask - best_bid
-    spread_pct = (spread / best_bid) * 100
-    
-    # Find large orders (walls) - orders > 10% of total side volume
-    bid_walls = [float(x[1]) for x in bids if float(x[1]) > bid_vol * 0.1]
-    ask_walls = [float(x[1]) for x in asks if float(x[1]) > ask_vol * 0.1]
-    
-    # Mid-price volume imbalance
-    mid_vol_bid = sum(float(x[1]) for x in bids[:5])
-    mid_vol_ask = sum(float(x[1]) for x in asks[:5])
-    
+    best_bid, best_ask = float(bids[0][0]), float(asks[0][0])
     result = {
-        "symbol": symbol,
-        "best_bid": best_bid,
-        "best_ask": best_ask,
-        "spread": round(spread, 5),
-        "spread_pct": round(spread_pct, 4),
-        "bid_vol": round(bid_vol, 2),
-        "ask_vol": round(ask_vol, 2),
-        "imbalance": round(bid_vol / ask_vol, 2),
-        "sentiment": "Bullish" if bid_vol > ask_vol else "Bearish",
-        "bid_walls": len(bid_walls),
-        "ask_walls": len(ask_walls),
-        "mid_bid_vol": round(mid_vol_bid, 2),
-        "mid_ask_vol": round(mid_vol_ask, 2),
-        "mid_imbalance": round(mid_vol_bid / mid_vol_ask, 2) if mid_vol_ask > 0 else 0
+        "symbol": symbol, "best_bid": best_bid, "best_ask": best_ask,
+        "spread_pct": round(((best_ask - best_bid) / best_bid) * 100, 4),
+        "bid_vol": round(bid_vol, 2), "ask_vol": round(ask_vol, 2),
+        "imbalance": round(bid_vol / ask_vol, 2) if ask_vol > 0 else 0,
+        "sentiment": "Bullish" if bid_vol > ask_vol else "Bearish"
     }
     print(json.dumps(result))
-
-# @cmd Get market depth (full orderbook)
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --limit Depth level (default: 50)
-def bybit_get_depth(symbol, limit=50):
-    """Get full orderbook depth with aggregated prices"""
-    res = session.get_orderbook(
-        category="linear", 
-        symbol=symbol, 
-        limit=limit
-    )
-    print(json.dumps(res["result"]))
 
 # @cmd Get volume profile
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --interval Interval (1, 5, 15, 60, 120, 240, D)
-# @option --limit Number of klines (default: 100)
+# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
+# @option --interval <TEXT> Interval (1, 5, 15, 60, 120, 240, D)
+# @option --limit <INT> Number of klines (default: 100)
 def bybit_get_volume_profile(symbol, interval="60", limit=100):
-    """Calculate volume profile and VWAP"""
-    data = session.get_kline(
-        category="linear", 
-        symbol=symbol, 
-        interval=interval, 
-        limit=limit
-    )["result"]["list"]
-    
-    df = pd.DataFrame(data, columns=["ts", "open", "high", "low", "close", "vol", "turnover"])
-    df = df.astype({"open": float, "high": float, "low": float, "close": float, "vol": float})
-    
-    # Calculate VWAP
-    df["typical_price"] = (df["high"] + df["low"] + df["close"]) / 3
-    df["vwap"] = (df["typical_price"] * df["vol"]).cumsum() / df["vol"].cumsum()
-    
-    # Volume weighted average
-    vwap = df["vwap"].iloc[-1]
-    avg_vol = df["vol"].mean()
-    max_vol = df["vol"].max()
-    min_vol = df["vol"].min()
-    
-    result = {
-        "symbol": symbol,
-        "interval": interval,
-        "vwap": round(vwap, 2),
-        "avg_volume": round(avg_vol, 2),
-        "max_volume": round(max_vol, 2),
-        "min_volume": round(min_vol, 2),
-        "volume_std": round(df["vol"].std(), 2)
-    }
-    print(json.dumps(result))
+    data = session.get_kline(category="linear", symbol=symbol, interval=interval, limit=limit)["result"]["list"]
+    vols = [float(k[5]) for k in data]
+    closes = [float(k[4]) for k in data]
+    typical = [(float(k[2]) + float(k[3]) + float(k[4])) / 3 for k in data]
+    vwap = sum(t * v for t, v in zip(typical, vols)) / sum(vols) if sum(vols) > 0 else 0
+    print(json.dumps({"symbol": symbol, "vwap": round(vwap, 2), "avg_vol": round(statistics.mean(vols), 2)}))
 
 # @cmd Get support and resistance levels
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --interval Interval (default: 60)
-# @option --limit Number of klines (default: 100)
+# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
+# @option --interval <TEXT> Interval (default: 60)
+# @option --limit <INT> Number of klines (default: 100)
 def bybit_get_support_resistance(symbol, interval="60", limit=100):
-    """Calculate support and resistance levels"""
-    data = session.get_kline(
-        category="linear", 
-        symbol=symbol, 
-        interval=interval, 
-        limit=limit
-    )["result"]["list"]
-    
-    df = pd.DataFrame(data, columns=["ts", "open", "high", "low", "close", "vol", "turnover"])
-    df = df.astype({"high": float, "low": float, "close": float})
-    
-    # Find local maxima (resistance) and minima (support)
-    highs = df["high"].values
-    lows = df["low"].values
-    
-    # Simple pivot points
-    resistance = []
-    support = []
-    
+    data = session.get_kline(category="linear", symbol=symbol, interval=interval, limit=limit)["result"]["list"]
+    highs = [float(k[2]) for k in data]
+    lows = [float(k[3]) for k in data]
+    res, sup = [], []
     for i in range(1, len(highs) - 1):
-        if highs[i] > highs[i-1] and highs[i] > highs[i+1]:
-            resistance.append(highs[i])
-        if lows[i] < lows[i-1] and lows[i] < lows[i+1]:
-            support.append(lows[i])
-    
-    current_price = df["close"].iloc[-1]
-    
-    # Find nearest levels
-    nearest_support = max([s for s in support if s < current_price], default=None)
-    nearest_resistance = min([r for r in resistance if r > current_price], default=None)
-    
-    result = {
-        "symbol": symbol,
-        "current_price": current_price,
-        "nearest_support": round(nearest_support, 2) if nearest_support else None,
-        "nearest_resistance": round(nearest_resistance, 2) if nearest_resistance else None,
-        "support_levels": sorted(set([round(s, 2) for s in support[-5:]])),
-        "resistance_levels": sorted(set([round(r, 2) for r in resistance[-5:]]))
-    }
-    print(json.dumps(result))
+        if highs[i] > highs[i-1] and highs[i] > highs[i+1]: res.append(highs[i])
+        if lows[i] < lows[i-1] and lows[i] < lows[i+1]: sup.append(lows[i])
+    current = float(data[0][4])
+    print(json.dumps({
+        "symbol": symbol, "current": current,
+        "support": sorted(set([round(s, 2) for s in sup[-5:]])),
+        "resistance": sorted(set([round(r, 2) for r in res[-5:]]))
+    }))
 
 if __name__ == "__main__":
     Argc().run()

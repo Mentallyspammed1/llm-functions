@@ -1,34 +1,34 @@
 {
-  "key": "trade_monitoring_linkusdt",
-  "value": "TRADE MONITORING - LINKUSDT\nStatus: Pending Manual Execution\nCurrent Price: $10.16-$10.18 USD (CoinMarketCap/Coinbase)\nTarget Price: $10.21 USD (+$0.05 profit)\nPosition Size: 10 LINK\nExpected P&L: +$0.50 USD\nMarket Trend: Down 1.53% (24h)\nVolume: $734M USD (healthy)\nRisk Level: Conservative\nNext Action: Manual execution via web interface\nTime Sensitive: Market conditions changing",
+  "key": "bybit_api_credentials",
+  "value": "{\"api_key\":\"qqnukht65yDsP1r79t\",\"api_secret\":\"bcM965FGtrPyDGivezYnScPoSUwKqXyiak4X\"}",
   "type": "context",
   "session": "default",
   "tags": [
-    "monitoring",
-    "linkusdt",
-    "pending",
-    "trade"
+    "bybit",
+    "api"
   ],
-  "timestamp": "2026-05-14T06:05:32+00:00"
+  "timestamp": "2026-07-04T08:47:30Z"
 }
 {
-  "key": "trade_monitoring_update",
-  "value": "TRADE MONITORING UPDATE - LINKUSDT\nTimestamp: 2025-06-17\nStatus: TOR PROXY SUCCESSFUL - API ACCESS RESTORED\nCurrent Price (Bybit): $10.308-$10.309 USDT\nBest Bid: $10.308 (58.6 available)\nBest Ask: $10.309 (1,235.4 available)\nTarget Price: $10.359 USDT (+$0.05 profit)\nPosition Size: 10 LINK\nExpected P&L: +$0.50 USD\nMarket Trend: Higher than previous ($10.16-$10.18)\nAPI Status: WORKING via TOR proxy\nNext Action: Execute market buy order\nRisk Level: Conservative (tight spread)",
+  "key": "api_keys",
+  "value": "{\"BYBIT_API_KEY\":\"qqnukht65yDsP1r79t\",\"BYBIT_API_SECRET\":\"bcM965FGtrPyDGivezYnScPoSUwKqXyiak4X\"}",
   "type": "context",
   "session": "default",
   "tags": [
-    "monitoring",
-    "linkusdt",
-    "tor",
-    "api_working"
+    "api",
+    "bybit"
   ],
-  "timestamp": "2026-05-14T06:26:13+00:00"
+  "timestamp": "2026-07-04T08:47:41Z"
 }
 {
-  "key": "env",
-  "value": "BYBIT_API_KEY=qqnukht65yDsP1r79t\nBYBIT_API_SECRET=bcM965FGtrPyDGivezYnScPoSUwKqXyiak4X\nBYBIT_ENV=mainnet",
+  "key": "bybit_credentials",
+  "value": "{\"api_key\":\"qqnukht65yDsP1r79t\",\"api_secret\":\"bcM965FGtrPyDGivezYnScPoSUwKqXyiak4X\"}",
   "type": "context",
   "session": "default",
-  "tags": [],
-  "timestamp": "2026-05-18T11:42:22+00:00"
+  "tags": [
+    "bybit",
+    "api",
+    "credentials"
+  ],
+  "timestamp": "2026-07-04T08:48:38Z"
 }

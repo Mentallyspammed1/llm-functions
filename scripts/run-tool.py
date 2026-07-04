@@ -70,6 +70,9 @@ def main() -> None:
     except ToolError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(e.exit_code)
+    except KeyboardInterrupt:
+        print("\n[Aborted by user]", file=sys.stderr)
+        sys.exit(130)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(EXIT_GENERAL_ERROR)
@@ -135,7 +138,7 @@ def parse_raw_data(data: str) -> Dict[str, Any]:
     try:
         parsed = json.loads(data)
     except json.JSONDecodeError as exc:
-        raise ToolError(f"Invalid JSON data: {exc}", EXIT_INVALID_INPUT)
+        raise ToolError(f"Invalid JSON data: {exc} (raw data: {data!r})", EXIT_INVALID_INPUT)
 
     if not isinstance(parsed, dict):
         raise ToolError(

@@ -1698,12 +1698,13 @@ class TorHTTPClient:
     def request(
         self, method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
         params: Optional[Dict[str, Any]] = None, json_data: Optional[Dict[str, Any]] = None,
+        data: Optional[str] = None,
         timeout: int = 30,
     ) -> Tuple[int, Dict[str, str], str]:
         try:
             r = self.session.request(
                 method=method.upper(), url=url, headers=headers,
-                params=params, json=json_data, timeout=timeout,
+                params=params, json=json_data, data=data, timeout=timeout,
             )
         except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout,
                 requests.exceptions.ProxyError, requests.exceptions.ConnectionError) as exc:
@@ -1964,7 +1965,8 @@ class BybitToolDispatcher:
         """Get synchronized timestamp for HMAC signing."""
         if not self._time_synced:
             self._sync_server_time()
-        return str(int(time.time() * 1000) + self._time_offset)
+        # Shift back by 2500ms to avoid 'req_timestamp ahead of server' error on Tor
+        return str(int(time.time() * 1000) + self._time_offset - 2500)
 
     # ══════════════════════════════════════════════════════════
     # AUTH & REQUEST
@@ -2144,7 +2146,7 @@ class BybitToolDispatcher:
                     container["category"] = container["category"].value
                 # Ensure all numeric values are stringified for consistent API requirements
                 for k, v in container.items():
-                    if isinstance(v, (int, float)):
+                    if isinstance(v, (int, float)) and k not in ("positionIdx",):
                         container[k] = str(v)
 
         self._ensure_clock_sync()
@@ -2175,7 +2177,7 @@ class BybitToolDispatcher:
                 # Use new structured HTTP client
                 _, _, body = self.http.request(
                     method=method, url=url, headers=headers,
-                    params=params, json_data=json_data,
+                    params=params, data=payload if method != "GET" else None,
                 )
                 self._circuit_failures = 0
                 return json.loads(body)

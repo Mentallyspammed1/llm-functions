@@ -53,6 +53,7 @@ import requests
 import random
 from collections import deque
 from dataclasses import dataclass, field
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Literal, Tuple, Callable
@@ -77,6 +78,43 @@ logger = logging.getLogger("BybitRealm")
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
+@dataclass
+class LotSizeFilter:
+    qty_step: float
+    min_order_qty: float
+    max_order_qty: float
+    min_notional: float = 0.0
+
+    def adjust(self, qty: float) -> float:
+        if self.qty_step <= 0: return float(qty)
+        step = Decimal(str(self.qty_step))
+        q = Decimal(str(qty))
+        adjusted = (q / step).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * step
+        final_qty = max(Decimal(str(self.min_order_qty)), min(Decimal(str(self.max_order_qty)), adjusted))
+        return float(final_qty)
+
+@dataclass
+class PriceFilter:
+    tick_size: float
+    min_price: float = 0.0
+    max_price: float = 1e12
+
+    def adjust(self, price: float) -> float:
+        if self.tick_size <= 0: return float(price)
+        tick = Decimal(str(self.tick_size))
+        p = Decimal(str(price))
+        adjusted = (p / tick).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * tick
+        final_price = max(Decimal(str(self.min_price)), min(Decimal(str(self.max_price)), adjusted))
+        return float(final_price)
+
+@dataclass
+class InstrumentInfo:
+    lot_size: LotSizeFilter
+    price_flt: PriceFilter
+    symbol: str
+    status: str = "Trading"
+    fetched_at: float = field(default_factory=time.time)
+
 @dataclass
 class TradingConfig:
     """
@@ -418,6 +456,33 @@ class BybitRealm:
         self._limiter = RateLimiter(capacity=20, refill_per_ms=0.02)
         self.journal = TradeJournal(self.config.journal_path)
         self.breaker = CircuitBreaker(initial_equity=1000.0, max_drawdown_pct=0.05)
+        self._cache_lock = threading.Lock()
+        self._instr_cache: Dict[str, InstrumentInfo] = {}
+
+    def _fetch_instrument(self, symbol: str, category: str) -> InstrumentInfo:
+        cache_key = f"{symbol}_{category}"
+        with self._cache_lock:
+            if cache_key in self._instr_cache and time.time() - self._instr_cache[cache_key].fetched_at < 3600:
+                return self._instr_cache[cache_key]
+                
+        res = self._request("GET", "/v5/market/instruments-info", params={"category": category, "symbol": symbol.upper()}, signed=False)
+        item = res.get("list", [{}])[0]
+        lot = item.get("lotSizeFilter", {})
+        pft = item.get("priceFilter", {})
+        
+        info = InstrumentInfo(
+            lot_size=LotSizeFilter(float(lot.get("qtyStep", 1)), float(lot.get("minOrderQty", 0)), float(lot.get("maxOrderQty", 1e9))),
+            price_flt=PriceFilter(float(pft.get("tickSize", 0.01)), float(pft.get("minPrice", 0)), float(pft.get("maxPrice", 1e12))),
+            symbol=symbol.upper()
+        )
+        with self._cache_lock: self._instr_cache[cache_key] = info
+        return info
+
+    def adjust_qty(self, symbol: str, qty: float, category: str) -> float:
+        return self._fetch_instrument(symbol, category).lot_size.adjust(qty)
+
+    def adjust_price(self, symbol: str, price: float, category: str) -> float:
+        return self._fetch_instrument(symbol, category).price_flt.adjust(price)
 
     def health_check(self) -> dict:
         """Performs a basic connectivity check."""
@@ -656,18 +721,20 @@ class BybitRealm:
         trailing_stop: Optional[float] = None,
         tpsl_mode: str = "Full",
         category: str = "linear",
+        position_idx: int = 0,
     ) -> dict:
         payload: dict = {
             "category": category,
             "symbol": symbol.upper(),
             "tpslMode": tpsl_mode,
+            "positionIdx": position_idx,
         }
         if stop_loss is not None:
-            payload["stopLoss"] = str(stop_loss)
+            payload["stopLoss"] = str(self.adjust_price(symbol, stop_loss, category))
         if take_profit is not None:
-            payload["takeProfit"] = str(take_profit)
+            payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
         if trailing_stop is not None:
-            payload["trailingStop"] = str(trailing_stop)
+            payload["trailingStop"] = str(trailing_stop) # Trailing stop is usually distance or price
         
         result = self._request(
             "POST", "/v5/position/trading-stop", json_data=payload, signed=True
@@ -683,9 +750,10 @@ class BybitRealm:
                 "category": category,
                 "symbol": symbol.upper(),
                 "tpslMode": tpsl_mode,
+                "positionIdx": position_idx,
             }
-            if stop_loss is not None: tp_sl_payload["stopLoss"] = str(stop_loss)
-            if take_profit is not None: tp_sl_payload["takeProfit"] = str(take_profit)
+            if stop_loss is not None: tp_sl_payload["stopLoss"] = str(self.adjust_price(symbol, stop_loss, category))
+            if take_profit is not None: tp_sl_payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
             
             # If we had TP/SL, update them first
             if stop_loss is not None or take_profit is not None:
@@ -697,6 +765,7 @@ class BybitRealm:
                     "category": category,
                     "symbol": symbol.upper(),
                     "tpslMode": tpsl_mode,
+                    "positionIdx": position_idx,
                     "trailingStop": str(trailing_stop)
                 }
                 return self._request("POST", "/v5/position/trading-stop", json_data=ts_payload, signed=True)
@@ -714,24 +783,26 @@ class BybitRealm:
         entry_price = float(pos.get("entryPrice", pos.get("avgPrice", 0)))
         size = float(pos["size"])
         side = pos["side"]
+        pos_idx = int(pos.get("positionIdx", 0))
 
-        # Calculate Breakeven
+        # Calculate Breakeven (adjusting for entry + exit fees)
         if side == "Buy":
-            breakeven_price = entry_price * (1 + fee_rate)
+            breakeven_price = entry_price * (1 + 2 * fee_rate)
             close_side = "Sell"
         else: # Sell
-            breakeven_price = entry_price * (1 - fee_rate)
+            breakeven_price = entry_price * (1 - 2 * fee_rate)
             close_side = "Buy"
 
         return self.place_order(
             symbol=symbol,
             side=close_side,
             qty=size,
-            price=round(breakeven_price, 4), # Bybit price precision varies by symbol
+            price=breakeven_price,
             order_type="Limit",
             reduce_only=True,
             time_in_force="GTC",
-            category=category
+            category=category,
+            positionIdx=pos_idx
         )
 
     def record_loss(self):
@@ -826,20 +897,21 @@ class BybitRealm:
         sl_order_type: Optional[str] = None,
         **kwargs,
     ) -> dict:
+        adj_qty = self.adjust_qty(symbol, qty, category)
         payload: dict = {
             "category": category,
             "symbol": symbol.upper(),
             "side": side,
             "orderType": order_type,
-            "qty": str(qty),
+            "qty": str(adj_qty),
             "timeInForce": time_in_force,
         }
         if price is not None:
-            payload["price"] = str(price)
+            payload["price"] = str(self.adjust_price(symbol, price, category))
         if stop_loss is not None:
-            payload["stopLoss"] = str(stop_loss)
+            payload["stopLoss"] = str(self.adjust_price(symbol, stop_loss, category))
         if take_profit is not None:
-            payload["takeProfit"] = str(take_profit)
+            payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
         if trailing_stop is not None:
             payload["trailingStop"] = str(trailing_stop)
         if reduce_only:
@@ -847,7 +919,7 @@ class BybitRealm:
         if client_oid:
             payload["orderLinkId"] = client_oid
         if trigger_price is not None:
-            payload["triggerPrice"] = str(trigger_price)
+            payload["triggerPrice"] = str(self.adjust_price(symbol, trigger_price, category))
         if trigger_by is not None:
             payload["triggerBy"] = trigger_by
         if tp_order_type is not None:
@@ -2903,16 +2975,6 @@ def run(
                 include_regime=include_regime,
             )
 
-        # ── Journal ───────────────────────────────────────────────────────────
-        elif action == "get_pnl_summary":
-            return bot.get_pnl_summary(symbol=symbol, limit=limit)
-
-        elif action == "market_summary":
-            return bot.get_market_summary()
-
-        elif action == "analyze_symbol":
-            return bot.analyze_symbol(symbol=symbol)
-
         # ── Journal / Analysis ────────────────────────────────────────────────
         elif action == "get_journal":
             entries = bot.journal.get_entries(
@@ -2923,14 +2985,6 @@ def run(
                 "count": len(entries),
                 "entries": entries,
             }
-        elif action == "get_pnl_summary":
-            return bot.get_pnl_summary(symbol=symbol, limit=limit)
-
-        elif action == "market_summary":
-            return bot.get_market_summary()
-
-        elif action == "analyze_symbol":
-            return bot.analyze_symbol(symbol=symbol)
 
         elif action == "calculate_orderflow_delta":
             return bot.calculate_orderflow_delta(

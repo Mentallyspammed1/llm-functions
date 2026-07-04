@@ -39,3 +39,7 @@ fs_write.sh
 fs_read.sh
 fs_ls.sh
 fs_rm.sh
+nsfw_search.py
+monitor_scalp.py
+monitor_scalp.py
+monitor_scalp.py

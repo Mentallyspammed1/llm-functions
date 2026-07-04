@@ -47,35 +47,35 @@ def run(**kwargs) -> dict:
     # `side` must be one of the allowed values and must be lower‑case (only if provided)
     side = kwargs.get("side")
     if side is not None:
-        side = side.lower()
-        if side not in ("buy", "sell"):
-            raise ValueError("`side` must be either 'buy' or 'sell' (case‑insensitive).")
-        kwargs["side"] = side
-    side = kwargs.get("side", "").lower()
-    if side not in ("buy", "sell"):
-        raise ValueError("`side` must be either 'buy' or 'sell' (case‑insensitive).")
-    kwargs["side"] = side
+        if isinstance(side, str):
+            side = side.lower()
+            if side not in ("buy", "sell"):
+                raise ValueError("`side` must be either 'buy' or 'sell' (case‑insensitive).")
+            kwargs["side"] = side
+        else:
+            del kwargs["side"] # Remove if not a string (e.g. None from argparse)
 
-    # `price` must be an integer – convert from float / scientific notation
+    # `price` must be a numeric value
     price = kwargs.get("price")
     if price is not None:
         try:
-            # If it’s a float (e.g. 6.28027e+06) cast to int
-            kwargs["price"] = int(float(price))
+            kwargs["price"] = float(price)
         except (ValueError, TypeError):
-            raise ValueError("`price` must be a numeric value that can be cast to int.")
+            raise ValueError("`price` must be a numeric value.")
 
-    # `qty` must be a positive integer
+    # `qty` must be a positive numeric value (Required only for order placement)
     qty = kwargs.get("qty")
-    if qty is None:
-        raise ValueError("`qty` (quantity) is required.")
-    try:
-        qty_int = int(qty)
-        if qty_int <= 0:
-            raise ValueError()
-        kwargs["qty"] = qty_int
-    except (ValueError, TypeError):
-        raise ValueError("`qty` must be a positive integer.")
+    action = kwargs.get("action")
+    if qty is not None:
+        try:
+            qty_num = float(qty)
+            if qty_num <= 0:
+                raise ValueError()
+            kwargs["qty"] = qty_num
+        except (ValueError, TypeError):
+            raise ValueError("`qty` must be a positive numeric value.")
+    elif action == "place_order":
+        raise ValueError("`qty` (quantity) is required for 'place_order'.")
 
     # `category` defaults to 'linear' if omitted – keep it as‑is
     # (the underlying API will handle the default)

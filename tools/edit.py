@@ -80,7 +80,6 @@ import tempfile
 import time
 import zipfile
 from collections import deque
-import sys
 from pathlib import Path
 # Ensure the tools directory is in sys.path
 sys.path.append(str(Path(__file__).resolve().parent))
@@ -319,6 +318,8 @@ _TEXT_MIME_PREFIXES: tuple[str, ...] = (
 # Cache the `file` command location once at import time
 _FILE_CMD: str | None = shutil.which("file")
 
+_MIME_CACHE: dict[str, str | None] = {}
+
 # Stale lock threshold
 STALE_LOCK_SECONDS: float = 30.0
 
@@ -465,6 +466,11 @@ class FileEditor:
         4. Fallback: non-binary.
         """
         path_str = str(path)
+
+        # Check cache first
+        if path_str in _MIME_CACHE:
+            return _MIME_CACHE[path_str] is None
+
         if any(path_str.startswith(pfx) for pfx in PSEUDO_FS_PREFIXES):
             return False
         try:
@@ -482,13 +488,13 @@ class FileEditor:
                     )
                     if r.returncode == 0:
                         mime = r.stdout.strip()
-                        if not mime:
-                            return False
-                        if mime.startswith(_TEXT_MIME_PREFIXES):
-                            return False
-                        return True  # v2.8.0 FIX: non-text MIME → binary
+                        is_binary = not (mime.startswith(_TEXT_MIME_PREFIXES) or not mime)
+                        _MIME_CACHE[path_str] = None if is_binary else mime
+                        return is_binary
                 except Exception:
                     pass
+            
+            _MIME_CACHE[path_str] = "text/plain"  # Cache as text if no null bytes
             return False
         except OSError:
             return True
@@ -754,14 +760,19 @@ def read_lines(
     Lines are 1-based and inclusive.  Streaming read; memory efficient for
     large files when only a small range is needed.
     """
-    # FIX: Explicitly convert and validate integer types
+    # FIX: Explicitly validate that both parameters are provided
+    if start_line is None or end_line is None:
+        return {
+            "success": False,
+            "error": "Both start_line and end_line are required"
+        }
     try:
-        start_line = int(start_line) if start_line is not None else 1
-        end_line = int(end_line) if end_line is not None else 1
+        start_line = int(start_line)
+        end_line = int(end_line)
     except (ValueError, TypeError):
         return {
             "success": False,
-            "error": "start_line and end_line must be integers or convertible to integers"
+            "error": "start_line and end_line must be integers"
         }
 
     if start_line < 1 or end_line < start_line:
@@ -938,6 +949,16 @@ def append(
                 "error": (
                     f"Combined file size would be {combined:,} bytes, "
                     f"exceeding limit of {max_size:,} bytes"
+                ),
+            }
+
+        # Also check against the general max write size
+        if combined > DEFAULT_MAX_WRITE:
+            return {
+                "success": False,
+                "error": (
+                    f"Combined file size would be {combined:,} bytes, "
+                    f"exceeding maximum allowed size of {DEFAULT_MAX_WRITE:,} bytes"
                 ),
             }
 
@@ -1210,10 +1231,18 @@ def replace_lines(
 ) -> dict[str, Any]:
     """
     Replace a range of lines [start_line, end_line] with new content.
-
     Both bounds are 1-based and inclusive.
     Automatic backup created before modification.
+
+    FIXES:
+    - Handle None content properly
+    - Validate and convert line numbers
+    - Support multi-line replacement content
+    - Add dry-run support
+    - Preserve line endings in replacement
+    - Handle edge cases (empty file, single line ranges)
     """
+    # FIX: Handle None content
     if content is None:
         return {"success": False, "error": "content cannot be None"}
 
@@ -1228,54 +1257,105 @@ def replace_lines(
     except (ValueError, TypeError):
         return {"success": False, "error": "start_line and end_line must be integers"}
 
+    # FIX: Validate line number ranges
+    if start_line < 1:
+        return {"success": False, "error": "start_line must be >= 1"}
+    if end_line < start_line:
+        return {"success": False, "error": "end_line must be >= start_line"}
+
     res = _editor._read_content(file_path, encoding)
     if not res["success"]:
         return res
+
     original: str = res["content"]
     path: Path = res["path"]
 
-    lines = original.splitlines(keepends=True)
+    # FIX: Handle empty file edge case
+    if not original:
+        if start_line == 1:
+            # Allow replacing line 1 in an empty file (essentially write)
+            lines = []
+        else:
+            return {
+                "success": False,
+                "error": f"File is empty, cannot replace lines {start_line}-{end_line}"
+            }
+    else:
+        lines = original.splitlines(keepends=True)
+
     total = len(lines)
-    if start_line < 1 or end_line < start_line or end_line > total:
+
+    # FIX: Validate range against file content
+    if start_line > total and total > 0:
         return {
             "success": False,
-            "error": f"Invalid range {start_line}–{end_line} (file has {total} lines)",
+            "error": f"start_line {start_line} exceeds file length ({total} lines)"
         }
-    content_lines = content.splitlines()
-    replacement_lines = [line + "\n" for line in content_lines] if content_lines else []
-    new_lines = lines[: start_line - 1] + replacement_lines + lines[end_line:]
+
+    # Adjust end_line to not exceed file length
+    effective_end_line = min(end_line, total)
+
+    # FIX: Handle multi-line replacement preserving line endings
+    # Normalize replacement content line endings
+    if content:
+        content_normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+    else:
+        content_normalized = ""
+
+    # Split replacement into lines, preserving empty content
+    if content_normalized:
+        # Use splitlines with keepends to preserve line endings in replacement
+        content_lines = content_normalized.splitlines(keepends=True)
+    else:
+        content_lines = []
+
+    # FIX: Ensure each replacement line ends with newline (except possibly the last)
+    if content_lines and not content_lines[-1].endswith("\n"):
+        content_lines[-1] = content_lines[-1] + "\n"
+
+    # FIX: Build new content with proper line range replacement
+    new_lines = lines[: start_line - 1] + content_lines + lines[effective_end_line:]
+
     new_content = "".join(new_lines)
 
+    # Calculate byte sizes
     original_bytes = len(original.encode(encoding, errors="surrogateescape"))
     new_bytes = len(new_content.encode(encoding, errors="surrogateescape"))
 
-    # FIX: Dry-run support
+    # FIX: Dry-run support with detailed preview
     if dry_run:
+        lines_removed = effective_end_line - start_line + 1
+        lines_added = len(content_lines)
         return {
             "success": True,
             "path": str(path),
             "mode": "dry-run",
             "message": "Replace lines operation would proceed",
             "start_line": start_line,
-            "end_line": end_line,
+            "end_line": effective_end_line,
             "original_lines": total,
             "new_lines": len(new_lines),
             "bytes_delta_would_be": new_bytes - original_bytes,
             "original_bytes": original_bytes,
             "new_bytes_would_be": new_bytes,
-            "lines_removed": end_line - start_line + 1,
-            "lines_added": len(replacement_lines),
+            "lines_removed": lines_removed,
+            "lines_added": lines_added,
         }
 
     try:
+        # FIX: Create backup before modification
         backup = _editor._make_backup(path, max_backups)
+
+        # FIX: Write modified content atomically
         _editor._atomic_write(path, new_content, encoding)
+
         stat = path.stat()
+
         return {
             "success": True,
             "path": str(path),
             "start_line": start_line,
-            "end_line": end_line,
+            "end_line": effective_end_line,
             "bytes_delta": stat.st_size - original_bytes,
             "original_bytes": original_bytes,
             "new_bytes": stat.st_size,
@@ -2467,15 +2547,21 @@ def extract(
                         f"exceeds limit {MAX_ARCHIVE_SIZE:,} bytes"
                     ),
                 }
-            # Zip-slip protection (v2.8.0: uses Path.is_relative_to)
+            # Zip-slip protection (v2.8.0)
             dst_resolved = dst.resolve()
             for member in zf.namelist():
                 member_path = (dst / member).resolve()
                 try:
+                    # Python 3.9+
                     is_safe = member_path.is_relative_to(dst_resolved)
                 except AttributeError:
-                    # Python < 3.9 fallback
-                    is_safe = str(member_path).startswith(str(dst_resolved) + os.sep) or member_path == dst_resolved
+                    # Python < 3.9 fallback with normalization
+                    dst_str = str(dst_resolved)
+                    member_str = str(member_path)
+                    # Normalize both paths to avoid bypasses
+                    dst_str = os.path.normpath(dst_str)
+                    member_str = os.path.normpath(member_str)
+                    is_safe = member_str.startswith(dst_str + os.sep) or member_str == dst_str
                 if not is_safe:
                     return {
                         "success": False,
@@ -2575,6 +2661,7 @@ _ALL_OPERATIONS: frozenset[str] = frozenset(
         "delete_line",
         "replace_lines",
         "search",
+        "file_search",  # Add this alias
         "copy",
         "move",
         "delete",

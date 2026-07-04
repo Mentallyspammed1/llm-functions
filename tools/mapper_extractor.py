@@ -7,7 +7,7 @@ url : str (required)
     Web page URL to scan for coordinates.
 precision : int, optional (default=6)
     Decimal precision for coordinates in the output.
-output : str (optional, default=stdout)
+output : str, optional (default=stdout)
     Path to output file. If not provided, results are written to stdout.
 
 The script fetches the given URL, extracts all floating-point numbers,
@@ -15,7 +15,10 @@ pairs them sequentially as (lat, lon) coordinates, formats them with the
 requested precision, and writes a CSV-like table.
 """
 
-import re, sys, urllib.request, argparse
+import re
+import sys
+import urllib.request
+import argparse
 
 def run(url: str, precision: int = 6, output: str = None) -> None:
     """
@@ -41,7 +44,7 @@ def run(url: str, precision: int = 6, output: str = None) -> None:
     coords = [(float(numbers[i]), float(numbers[i+1])) for i in range(0, len(numbers)-1, 2)]
 
     # Format each coordinate pair with the requested precision
-    formatted_lines = [f"{lat:.{precision}f},{lon:.{precision}f}" for lat, lon in coords]
+    formatted_lines = ["{:.{p}f},{:.{p}f}".format(lat, lon, p=precision) for lat, lon in coords]
 
     # Build the output table (CSV-like)
     table = "\n".join(formatted_lines)

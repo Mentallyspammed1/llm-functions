@@ -63,6 +63,7 @@ import time
 import signal
 import logging
 import argparse
+from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 from functools import wraps
 from typing import Dict, Any, Optional, List, Tuple
@@ -81,6 +82,35 @@ except ImportError:
 # ==============================================================================
 # Configuration & Logging
 # ==============================================================================
+@dataclass
+class LotSizeFilter:
+    qty_step: float
+    min_order_qty: float
+    max_order_qty: float
+    min_notional: float = 0.0
+
+    def adjust(self, qty: float) -> float:
+        if self.qty_step <= 0: return float(qty)
+        step = Decimal(str(self.qty_step))
+        q = Decimal(str(qty))
+        adjusted = (q / step).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * step
+        final_qty = max(Decimal(str(self.min_order_qty)), min(Decimal(str(self.max_order_qty)), adjusted))
+        return float(final_qty)
+
+@dataclass
+class PriceFilter:
+    tick_size: float
+    min_price: float = 0.0
+    max_price: float = 1e12
+
+    def adjust(self, price: float) -> float:
+        if self.tick_size <= 0: return float(price)
+        tick = Decimal(str(self.tick_size))
+        p = Decimal(str(price))
+        adjusted = (p / tick).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * tick
+        final_price = max(Decimal(str(self.min_price)), min(Decimal(str(self.max_price)), adjusted))
+        return float(final_price)
+
 def setup_logging(verbose: bool = False) -> logging.Logger:
     """Configure structured multi-level logging."""
     level = logging.DEBUG if verbose else logging.INFO
@@ -137,22 +167,22 @@ def handle_api_errors(func):
 
 def get_session() -> Any:
     """Create Bybit HTTP session with optional Tor proxy."""
-    proxy = TOR_PROXY if USE_TOR else None
-    
     if USE_PYBIT:
-        return HTTP(
-            testnet=TESTNET,
-            api_key=API_KEY,
-            api_secret=API_SECRET,
-            proxy=proxy
-        )
+        http_kwargs = {
+            "testnet": TESTNET,
+            "api_key": API_KEY,
+            "api_secret": API_SECRET,
+        }
+        if USE_TOR:
+            http_kwargs["proxies"] = {"http": TOR_PROXY, "https": TOR_PROXY}
+        return HTTP(**http_kwargs)
     else:
         # Fallback: return None, will use requests-based api_request
         return None
 
 
-def get_market_rules(symbol: str, session: Any) -> Dict[str, Decimal]:
-    """Fetch tickSize, qtyStep, minOrderQty for a symbol."""
+def get_market_rules(symbol: str, session: Any) -> Dict[str, Any]:
+    """Fetch tickSize, qtyStep, minOrderQty for a symbol and return filters."""
     if USE_PYBIT:
         res = session.get_instruments_info(category="linear", symbol=symbol)
     else:
@@ -167,10 +197,32 @@ def get_market_rules(symbol: str, session: Any) -> Dict[str, Decimal]:
         raise Exception(f"{symbol} is in {data['status']} mode, not Trading.")
     
     return {
+        "lot_filter": LotSizeFilter(
+            float(data['lotSizeFilter']['qtyStep']), 
+            float(data['lotSizeFilter']['minOrderQty']),
+            float(data['lotSizeFilter']['maxOrderQty'])
+        ),
+        "price_filter": PriceFilter(
+            float(data['priceFilter']['tickSize']),
+            float(data['priceFilter']['minPrice']),
+            float(data['priceFilter']['maxPrice'])
+        ),
         "tick": Decimal(data['priceFilter']['tickSize']),
         "step": Decimal(data['lotSizeFilter']['qtyStep']),
         "min_qty": Decimal(data['lotSizeFilter']['minOrderQty'])
     }
+
+
+def get_fee_rate(symbol: str, session: Any) -> float:
+    """Fetch dynamic taker fee rate for the account."""
+    if USE_PYBIT:
+        res = session.get_fee_rate(category="linear", symbol=symbol)
+    else:
+        from utils.bybit_base import api_request
+        res = api_request("GET", "/v5/account/fee-rate", {"category": "linear", "symbol": symbol}, signed=True)
+    
+    list_data = res.get("result", {}).get("list", [{}])
+    return float(list_data[0].get("takerFeeRate", 0.0006))
 
 
 def quantize_price(price: Decimal, tick: Decimal) -> Decimal:
@@ -246,9 +298,9 @@ def bybit_smart_order(
     # Calculate position size
     risk_amount = total_equity * Decimal(str(risk_pct / 100))
     qty = risk_amount / Decimal(str(sl_dist))
-    qty = quantize_qty(qty, rules['step'])
+    qty = rules['lot_filter'].adjust(float(qty))
     
-    if qty < rules['min_qty']:
+    if qty < float(rules['min_qty']):
         return {"error": f"Calculated qty {qty} below min {rules['min_qty']}"}
     
     # Determine SL price
@@ -262,11 +314,12 @@ def bybit_smart_order(
         "side": side,
         "orderType": "Market",
         "qty": str(qty),
-        "stopLoss": str(round(sl_price, 4)),
+        "stopLoss": str(rules['price_filter'].adjust(sl_price)),
         "timeInForce": "GTC",
+        "positionIdx": 0 # Default to one-way, logic could be expanded for hedge
     }
     if tp_price:
-        order_params["takeProfit"] = str(round(tp_price, 4))
+        order_params["takeProfit"] = str(rules['price_filter'].adjust(tp_price))
     
     if USE_PYBIT:
         order_resp = session.place_order(**order_params)
@@ -634,14 +687,11 @@ def bybit_position_manager(
     symbol: str,
     action: str,
     profit_usdt: int = None,
-    fee_rate: float = 0.0006
+    fee_rate: float = None
 ) -> Dict[str, Any]:
     """
     Manage open positions: Move to Break-Even or Close if profit threshold reached.
-    
-    Actions:
-      - 'be': Move SL to break-even
-      - 'close': Close position if profit > profit_usdt
+    Enhanced with dynamic fee discovery, positionIdx fix, and precision filters.
     """
     session = get_session()
     
@@ -657,13 +707,21 @@ def bybit_position_manager(
     if not pos_list:
         return {"status": "no_position", "symbol": symbol}
     
+    # Get market rules for precision
+    rules = get_market_rules(symbol, session)
+    
     # Find active position
     for pos in pos_list:
         if float(pos.get('size', 0)) > 0:
             entry_price = float(pos['avgPrice'])
             qty = float(pos['size'])
             side = pos['side']
+            pos_idx = int(pos.get('positionIdx', 0))
             
+            # Dynamic Fee Discovery
+            if fee_rate is None:
+                fee_rate = get_fee_rate(symbol, session)
+
             # Get current price
             if USE_PYBIT:
                 ticker = session.get_tickers(category="linear", symbol=symbol)
@@ -679,39 +737,48 @@ def bybit_position_manager(
             else:
                 profit = (entry_price - current_price) * qty
             
-            # Deduct fees
+            # Deduct fees (entry + exit)
             fees = (entry_price + current_price) * qty * fee_rate
             net_profit = profit - fees
             
             if action == "be":
-                # Move to break-even
-                new_sl = str(entry_price)
-                if USE_PYBIT:
-                    session.set_trading_stop(
-                        category="linear", symbol=symbol, 
-                        stopLoss=new_sl, side=side
-                    )
+                # True Break-Even: adjust for two-way fees
+                if side == "Buy":
+                    be_price = entry_price * (1 + 2 * fee_rate)
                 else:
-                    api_request("POST", "/v5/position/set-trading-stop",
-                              {"category": "linear", "symbol": symbol, 
-                               "stopLoss": new_sl}, signed=True)
-                return {"action": "move_to_be", "new_sl": entry_price}
+                    be_price = entry_price * (1 - 2 * fee_rate)
+                
+                adj_be = str(rules['price_filter'].adjust(be_price))
+                
+                params = {
+                    "category": "linear", 
+                    "symbol": symbol, 
+                    "stopLoss": adj_be, 
+                    "slTriggerBy": "MarkPrice",
+                    "tpslMode": "Full",
+                    "positionIdx": pos_idx
+                }
+                
+                if USE_PYBIT:
+                    res = session.set_trading_stop(**params)
+                else:
+                    res = api_request("POST", "/v5/position/set-trading-stop", params, signed=True)
+                return {"action": "move_to_be", "new_sl": adj_be, "response": res}
             
             elif action == "close":
-                if net_profit >= profit_usdt:
+                if profit_usdt is not None and net_profit >= profit_usdt:
                     # Close position
                     close_side = "Sell" if side == "Buy" else "Buy"
+                    params = {
+                        "category": "linear", "symbol": symbol, "side": close_side,
+                        "orderType": "Market", "qty": pos['size'], "reduceOnly": "true",
+                        "positionIdx": pos_idx
+                    }
                     if USE_PYBIT:
-                        session.place_order(
-                            category="linear", symbol=symbol, side=close_side,
-                            orderType="Market", qty=pos['size'], reduceOnly=True
-                        )
+                        res = session.place_order(**params)
                     else:
-                        api_request("POST", "/v5/order/create",
-                                  {"category": "linear", "symbol": symbol, 
-                                   "side": close_side, "orderType": "Market",
-                                   "qty": pos['size'], "reduceOnly": "true"}, signed=True)
-                    return {"action": "close", "profit": net_profit}
+                        res = api_request("POST", "/v5/order/create", params, signed=True)
+                    return {"action": "close", "profit": net_profit, "response": res}
                 else:
                     return {"status": "skip", "profit": net_profit, "threshold": profit_usdt}
     
@@ -725,8 +792,7 @@ def bybit_set_trading_stop(
 ) -> Dict[str, Any]:
     """
     Set Trading Stop (TP/SL) with Break-Even and Profit-After-Fees logic.
-    
-    Calculates TP/SL prices based on desired USDT profit/loss.
+    Calculates TP/SL prices based on desired USDT profit/loss with precision filters.
     """
     session = get_session()
     
@@ -742,13 +808,23 @@ def bybit_set_trading_stop(
     if not pos_list:
         return {"error": "No open position"}
     
+    # Get market rules for precision
+    rules = get_market_rules(symbol, session)
+    
     for pos in pos_list:
         if float(pos.get('size', 0)) > 0:
             entry_price = float(pos['avgPrice'])
             qty = float(pos['size'])
             side = pos['side']
+            pos_idx = int(pos.get('positionIdx', 0))
             
-            params = {"category": "linear", "symbol": symbol}
+            params = {
+                "category": "linear", 
+                "symbol": symbol,
+                "positionIdx": pos_idx,
+                "tpslMode": "Full",
+                "slTriggerBy": "MarkPrice"
+            }
             
             if sl_usdt is not None:
                 # Calculate SL price for loss of sl_usdt
@@ -756,7 +832,7 @@ def bybit_set_trading_stop(
                     sl_price = entry_price - (sl_usdt / qty)
                 else:
                     sl_price = entry_price + (sl_usdt / qty)
-                params["stopLoss"] = str(round(sl_price, 4))
+                params["stopLoss"] = str(rules['price_filter'].adjust(sl_price))
             
             if tp_usdt is not None:
                 # Calculate TP price for profit of tp_usdt
@@ -764,7 +840,7 @@ def bybit_set_trading_stop(
                     tp_price = entry_price + (tp_usdt / qty)
                 else:
                     tp_price = entry_price - (tp_usdt / qty)
-                params["takeProfit"] = str(round(tp_price, 4))
+                params["takeProfit"] = str(rules['price_filter'].adjust(tp_price))
             
             if USE_PYBIT:
                 result = session.set_trading_stop(**params)
@@ -803,11 +879,22 @@ Examples:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
     # analyze_orderbook
-    subparsers.add_parser("analyze_orderbook", help="Analyze orderbook depth and imbalance")
-    subparsers.add_parser("trading_dashboard", help="Account overview with risk metrics")
-    subparsers.add_parser("get_balance", help="Get wallet balance")
-    subparsers.add_parser("get_positions", help="Get open positions")
-    subparsers.add_parser("get_open_orders", help="Get open orders")
+    ao_parser = subparsers.add_parser("analyze_orderbook", help="Analyze orderbook depth and imbalance")
+    ao_parser.add_argument("--symbol", required=True)
+    ao_parser.add_argument("--limit", type=int, default=25)
+
+    td_parser = subparsers.add_parser("trading_dashboard", help="Account overview with risk metrics")
+    td_parser.add_argument("--coin", default="USDT")
+
+    gb_parser = subparsers.add_parser("get_balance", help="Get wallet balance")
+    gb_parser.add_argument("--account-type", default="UNIFIED")
+    gb_parser.add_argument("--coin", default="USDT")
+
+    gp_parser = subparsers.add_parser("get_positions", help="Get open positions")
+    gp_parser.add_argument("--symbol")
+
+    goo_parser = subparsers.add_parser("get_open_orders", help="Get open orders")
+    goo_parser.add_argument("--symbol")
     
     # smart_order
     so_parser = subparsers.add_parser("smart_order", help="Smart order with auto-sizing")
@@ -863,8 +950,7 @@ Examples:
     co_parser.add_argument("--order-link-id")
     
     # cancel_all_orders
-    subparsers.add_parser("cancel_all_orders", help="Cancel all orders")
-    cao_parser = subparsers.add_parser("cancel_all_orders")
+    cao_parser = subparsers.add_parser("cancel_all_orders", help="Cancel all orders")
     cao_parser.add_argument("--symbol")
     
     # get_ticker
@@ -950,3 +1036,57 @@ Examples:
 
 if __name__ == "__main__":
     main()
+
+
+def run(symbol=None, side=None, order_type=None, qty=None, price=None, risk_pct=1.0, sl_dist=None, sl_price=None, tp_price=None, interval="60", limit=25, leverage=None, mode=None, action=None, profit_usdt=None, tp_usdt=None, sl_usdt=None, order_id=None, order_link_id=None, account_type="UNIFIED", coin="USDT", category="linear", time_in_force="GTC", reduce_only=False, verbose=False, testnet=None):
+    """
+    Entry point for the AI agent to call the Bybit Pro Suite.
+    Maps parameters to the internal specialized functions.
+    """
+    global logger
+    logger = setup_logging(verbose)
+    
+    try:
+        # 1. Position Management (be/close)
+        if action in ["be", "close"] and symbol:
+            return bybit_position_manager(symbol, action, profit_usdt)
+        
+        # 2. Smart Order
+        if side and (sl_dist or sl_price) and not order_type:
+            return bybit_smart_order(symbol, side, risk_pct, sl_dist, sl_price, tp_price, testnet)
+        
+        # 3. Standard Order
+        if side and order_type and qty and symbol:
+            return bybit_place_order(symbol, side, order_type, qty, price, time_in_force, reduce_only, testnet)
+        
+        # 4. Ticker / Market Data
+        if symbol and not side and not action:
+            # If limit is provided and it's a high number, it might be klines
+            if limit > 50:
+                return bybit_get_klines(symbol, interval, limit=limit)
+            # If it's just a symbol, default to ticker
+            return bybit_get_ticker(symbol)
+        
+        # 5. Account/Balance
+        if not symbol and not action:
+            return bybit_get_balance(account_type, coin)
+            
+        # 6. Leverage/Mode
+        if symbol and leverage:
+            return bybit_set_leverage(symbol, leverage, testnet)
+        if symbol and mode is not None:
+            return bybit_set_position_mode(symbol, mode)
+            
+        # 7. Trading Stop (TP/SL)
+        if symbol and (tp_usdt is not None or sl_usdt is not None):
+            return bybit_set_trading_stop(symbol, tp_usdt, sl_usdt)
+
+        # 8. Orderbook Analysis
+        is_analyze = "analyze" in str(action).lower() if action else False
+        if symbol and is_analyze:
+            return bybit_analyze_orderbook(symbol, limit)
+
+        return {"error": "Could not determine which function to call based on provided arguments. Please be more specific (e.g., provide 'symbol' and 'action')."}
+        
+    except Exception as e:
+        return {"error": f"Run execution error: {str(e)}"}

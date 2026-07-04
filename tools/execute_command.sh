@@ -89,8 +89,17 @@ inject_curl_timeouts() {
         if [[ "$cmd" != *"--silent"* ]] && [[ "$cmd" != *" -s "* ]] && [[ "$cmd" != *" -s"* ]]; then
             flags+=" --silent"
         fi
-        # Use sed to insert flags after curl (more robust)
-        cmd="$(echo "$cmd" | sed "s/^\([[:space:]]*curl\)/\1$flags/")"
+        
+        # Ensure we use the system curl to avoid shadowing by tools
+        local curl_cmd="curl"
+        if command -v /usr/bin/curl >/dev/null 2>&1; then
+            curl_cmd="/usr/bin/curl"
+        elif command -v /data/data/com.termux/files/usr/bin/curl >/dev/null 2>&1; then
+            curl_cmd="/data/data/com.termux/files/usr/bin/curl"
+        fi
+
+        # Use sed to insert flags after curl and replace with absolute path if found
+        cmd="$(echo "$cmd" | sed "s/^[[:space:]]*curl/$curl_cmd$flags/")"
     elif [[ "$cmd" =~ ^[[:space:]]*wget ]] && [[ "$cmd" != *"--timeout"* ]]; then
         cmd="$(echo "$cmd" | sed "s/^\([[:space:]]*wget\)/\1 --timeout=$mt --no-verbose/")"
     fi
@@ -146,12 +155,39 @@ get_cmd_icon() {
     fi
 }
 
-# 7. Format timestamp
+# 8. Format timestamp
 get_timestamp() {
     date '+%H:%M:%S'
 }
 
-# 8. Cross-platform timeout wrapper
+# 9. Interpret exit codes
+interpret_exit_code() {
+    local code="$1"
+    case "$code" in
+        0)   echo "Success" ;;
+        1)   echo "General error (often catch-all)" ;;
+        2)   echo "Misuse of shell builtins or file/permission error" ;;
+        124) echo "Command timed out" ;;
+        126) echo "Command invoked cannot execute (Permission denied)" ;;
+        127) echo "Command not found" ;;
+        128) echo "Invalid argument to exit" ;;
+        130) echo "Script terminated by Control-C" ;;
+        137) echo "Command killed (SIGKILL)" ;;
+        139) echo "Segmentation fault" ;;
+        141) echo "Broken pipe" ;;
+        143) echo "Command terminated (SIGTERM)" ;;
+        *)
+            if [[ "$code" -gt 128 ]]; then
+                echo "Fatal error signal $((code - 128))"
+            else
+                echo "Unknown error"
+            fi
+            ;;
+    esac
+}
+
+# 10. Cross-platform timeout wrapper
+
 run_with_timeout() {
     local timeout_val="$1"
     shift
@@ -200,6 +236,22 @@ main() {
     local cmd="${argc_command:?}"
     local out="${LLM_OUTPUT:-/dev/stdout}"
     local width; width=$(get_width)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PATH SANITIZATION
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Remove any llm-functions/bin from PATH to avoid recursive shadowing.
+    # AIChat tools in that directory expect JSON and will fail when called as shell commands.
+    local CLEAN_PATH=""
+    local OLD_IFS="$IFS"
+    IFS=':'
+    for p in $PATH; do
+        if [[ "$p" != *"/llm-functions/bin" ]]; then
+            CLEAN_PATH="${CLEAN_PATH}${CLEAN_PATH:+:}$p"
+        fi
+    done
+    IFS="$OLD_IFS"
+    export PATH="$CLEAN_PATH"
     
     # Secure temporary file generation with unique directory
     tmp_dir="$(mktemp -d)"
@@ -256,26 +308,61 @@ main() {
     exit_code=$(<"$tmp_exit_file")
     [[ -z "$exit_code" ]] && exit_code=0
     
-    # Guaranteed Feedback Loop (Always returns output)
-    if [[ -s "$tmp_output_file" ]]; then
-        [[ -t 1 ]] && printf "${NEON_PURPLE}${BOX_V}${RESET} "
-        
-        if [[ "$out" == "/dev/stdout" ]] || [[ "$out" == "/dev/stderr" ]] || [[ "$out" == "&1" ]] || [[ "$out" == "&2" ]]; then
-            cat "$tmp_output_file"
-        else
-            cat "$tmp_output_file" | tee -a "$out"
+    # ═══════════════════════════════════════════════════════════════════════════
+    # OUTPUT AND ERROR REPORTING
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    # 1. Prepare hints for shadowing
+    local hint=""
+    if grep -q "invalid JSON data" "$tmp_output_file"; then
+        hint="⚠️  HINT: Command output contains 'invalid JSON data'. This often means a system command (like curl) is being shadowed by an AIChat tool symlink.\nTry using 'command <cmd>' or absolute path to bypass shadowing."
+    fi
+
+    # 2. Write to terminal (if applicable)
+    if [[ -t 1 ]]; then
+        if [[ -n "$hint" ]]; then
+            printf "${NEON_RED}%b${RESET}\n" "$hint"
+            printf "${NEON_PURPLE}${BOX_V}${RESET} "
         fi
-    else
-        [[ -t 1 ]] && printf "${NEON_PURPLE}${BOX_V}${RESET} "
-        local msg="Command finished with exit code $exit_code (no output)."
-        if [[ "$out" == "/dev/stdout" ]] || [[ "$out" == "/dev/stderr" ]] || [[ "$out" == "&1" ]] || [[ "$out" == "&2" ]]; then
-            printf "${NEON_YELLOW}%s${RESET}\n" "$msg"
+
+        if [[ -s "$tmp_output_file" ]]; then
+            # Print with prefix for better UI
+            sed "s/^/${NEON_PURPLE}${BOX_V}${RESET} /" "$tmp_output_file"
         else
-            printf "${NEON_YELLOW}%s${RESET}\n" "$msg" | tee -a "$out"
+            printf "${NEON_PURPLE}${BOX_V}${RESET} ${NEON_YELLOW}Command finished with exit code %d (no output).${RESET}\n" "$exit_code"
         fi
     fi
 
-    # Performance Metric & Semantic Footer - NEON STYLE
+    # 3. Write to LLM_OUTPUT (clean version)
+    if [[ "$out" != "/dev/stdout" && "$out" != "/dev/stderr" && "$out" != "&1" && "$out" != "&2" ]]; then
+        # Write hint if found
+        if [[ -n "$hint" ]]; then
+            printf "%b\n\n" "$hint" >> "$out"
+        fi
+
+        # Write actual output
+        if [[ -s "$tmp_output_file" ]]; then
+            cat "$tmp_output_file" >> "$out"
+        else
+            printf "Command finished with exit code %d (no output).\n" "$exit_code" >> "$out"
+        fi
+
+        # Write structured error report
+        if [[ "$exit_code" -ne 0 ]]; then
+            local desc; desc=$(interpret_exit_code "$exit_code")
+            printf "\n--- ERROR REPORT ---\nEXIT CODE: %d (%s)\n" "$exit_code" "$desc" >> "$out"
+        fi
+    else
+        # Fallback for direct stdout/stderr redirection
+        if [[ -n "$hint" ]]; then
+            printf "%b\n\n" "$hint"
+        fi
+        if [[ -s "$tmp_output_file" ]]; then
+            cat "$tmp_output_file"
+        fi
+    fi
+
+    # Performance Metric & Semantic Footer - NEON STYLE (TTY ONLY)
     local dur; dur=$(( $(now_ms) - start_ms ))
     if [[ -t 1 ]]; then
         local border_width=$((width - 4))
@@ -294,10 +381,20 @@ main() {
         printf "${NEON_PURPLE}${BOX_V}${RESET} ${status_color}%s${RESET} " "$symbol"
         printf "${status_color}%s${RESET} " "$status_text"
         printf "${NEON_CYAN}Duration:${RESET} ${NEON_LIME}%dms${RESET}  " "$dur"
-        printf "${NEON_CYAN}Exit:${RESET} ${status_color}%d${RESET}\n" "$exit_code"
+        printf "${NEON_CYAN}Exit:${RESET} ${status_color}%d${RESET}" "$exit_code"
+        
+        if [[ "$exit_code" -ne 0 ]]; then
+            local desc; desc=$(interpret_exit_code "$exit_code")
+            printf " (${NEON_YELLOW}%s${RESET})" "$desc"
+        fi
+        printf "\n"
         
         # Bottom border
         printf "${NEON_PURPLE}${BOX_BL}${border}${BOX_BR}${RESET}\n"
+    elif [[ "$exit_code" -ne 0 ]]; then
+        # Simple non-TTY failure summary
+        local desc; desc=$(interpret_exit_code "$exit_code")
+        printf "✗ FAILED: Exit %d (%s) (Duration: %dms)\n" "$exit_code" "$desc" "$dur" >&2
     fi
 
     return "$exit_code"

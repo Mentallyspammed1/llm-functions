@@ -34,6 +34,8 @@ import sys
 import time
 import random
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import BoundedSemaphore
 import datetime
 import urllib.request
 import urllib.error
@@ -43,25 +45,81 @@ import hashlib
 import html as html_lib
 import tempfile
 import shutil
+import logging
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional, Tuple
 
-_DOWNLOAD_TIMEOUT_SEC = 15
+_DOWNLOAD_TIMEOUT_SEC = float(os.environ.get("NSFW_DOWNLOAD_TIMEOUT_SEC", "15"))
 _MAX_HTTP_READ_BYTES = 3 * 1024 * 1024
-_MAX_DOWNLOAD_BYTES = 15 * 1024 * 1024
+_MAX_DOWNLOAD_BYTES = int(os.environ.get("NSFW_MAX_DOWNLOAD_BYTES", str(15 * 1024 * 1024)))
+_MAX_GIF_DOWNLOAD_BYTES = int(os.environ.get("NSFW_MAX_GIF_DOWNLOAD_BYTES", str(50 * 1024 * 1024)))
+_MAX_GIF_FRAMES = int(os.environ.get("NSFW_MAX_GIF_FRAMES", "500"))
 _MAX_FILENAME_LEN = 200
 _MAX_TAGS = 20
 _MAX_DEEP_QUERIES = 12
-_DEFAULT_UA = "Mozilla/5.0 (compatible; nsfw_search/1.3; +https://www.bing.com/images)"
+_DEFAULT_UA = os.environ.get(
+    "NSFW_USER_AGENT",
+    "Mozilla/5.0 (compatible; nsfw_search/1.3; +https://www.bing.com/images)"
+)
 
 _BING_MIN_INTERVAL = float(os.environ.get("NSFW_BING_MIN_INTERVAL_SEC", "1.0"))
 _BING_JITTER_SEC = float(os.environ.get("NSFW_BING_JITTER_SEC", "0.35"))
 _BING_MAX_PAGES = max(1, int(os.environ.get("NSFW_BING_MAX_PAGES", "8")))
 _DOWNLOAD_INTERVAL = max(0.0, float(os.environ.get("NSFW_DOWNLOAD_INTERVAL_SEC", "0")))
-_bing_rl_lock = threading.Lock()
-_bing_last_request = 0.0
-_download_rl_lock = threading.Lock()
-_download_last = 0.0
+
+_SAFESEARCH_OFF = "off"
+_DDG_SAFESEARCH = os.environ.get("NSFW_DDG_SAFESEARCH", "off").strip().lower()
+_BING_ADULT_FILTER = os.environ.get("NSFW_BING_ADULT_FILTER", "off").strip().lower()
+_GOOGLE_MIN_INTERVAL = 1.0
+
+class RateLimitState:
+    def __init__(self, min_interval: float = 1.0, jitter: float = 0.1):
+        self.lock = threading.Lock()
+        self.last_request = 0.0
+        self.min_interval = min_interval
+        self.jitter = jitter
+
+    def wait(self, consecutive_errors: int = 0):
+        with self.lock:
+            now = time.monotonic()
+            wait = self.min_interval - (now - self.last_request)
+            if wait > 0:
+                jitter = random.uniform(0, self.jitter)
+                backoff = min(2 ** consecutive_errors, 60) if consecutive_errors else 0
+                time.sleep(wait + jitter + backoff)
+            self.last_request = time.monotonic()
+
+_bing_rl = RateLimitState(min_interval=_BING_MIN_INTERVAL, jitter=_BING_JITTER_SEC)
+_download_rl = RateLimitState(min_interval=_DOWNLOAD_INTERVAL, jitter=0.0)
+_google_rl = RateLimitState(min_interval=_GOOGLE_MIN_INTERVAL, jitter=0.0)
+
+def _google_rate_limit_wait(consecutive_errors: int = 0) -> None:
+    _google_rl.wait(consecutive_errors)
+
+import logging.handlers
+
+def setup_logging_enhanced(level: str = "INFO", max_bytes: int = 10*1024*1024, backup_count: int = 5):
+    logger = logging.getLogger()
+    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+    logger.handlers.clear()
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    logger.addHandler(console_handler)
+    try:
+        file_handler = logging.handlers.RotatingFileHandler(
+            "nsfw_search.log", maxBytes=max_bytes, backupCount=backup_count, mode="a"
+        )
+        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+        logger.addHandler(file_handler)
+    except Exception as e:
+        _debug(f"Failed to create log file handler: {e}")
+
+def _safe_json_parse(data: str) -> dict:
+    try:
+        return json.loads(data)
+    except json.JSONDecodeError as e:
+        _debug(f"JSON parse error: {e}")
+        return {}
 
 _PLATFORM_SITE_MAP = {
     "twitter": "twitter.com", "x": "twitter.com", "reddit": "reddit.com",
@@ -116,18 +174,20 @@ def _search_images_google_cse(query: str, limit: int) -> Tuple[List[dict], str]:
     if not api_key or not cx:
         return [], "google_cse"
         
+    _google_rate_limit_wait()
     url = "https://www.googleapis.com/customsearch/v1"
+    safe_query = urllib.parse.quote(query, safe='')
     params = urllib.parse.urlencode({
         "key": api_key,
         "cx": cx,
-        "q": query,
+        "q": safe_query,  # FIX: use encoded query
         "searchType": "image",
         "num": str(min(limit, 10))
     })
     try:
-        status, body_bytes, hdrs = _http_get(f"{url}?{params}")
+        status, body_bytes, hdrs = _http_get_safe(f"{url}?{params}")
         if status == 200:
-            data = json.loads(body_bytes.decode("utf-8", errors="replace"))
+            data = _safe_json_parse(body_bytes.decode("utf-8", errors="replace"))
             results = []
             for item in data.get("items", []):
                 results.append({
@@ -144,27 +204,73 @@ def _search_images_google_cse(query: str, limit: int) -> Tuple[List[dict], str]:
         _debug(f"Google CSE image search failed: {e}")
     return [], "google_cse"
 
-def _bing_rate_limit_wait() -> None:
-    global _bing_last_request
-    with _bing_rl_lock:
-        now = time.monotonic()
-        wait = _BING_MIN_INTERVAL - (now - _bing_last_request)
-        if wait > 0:
-            time.sleep(wait + random.uniform(0, _BING_JITTER_SEC))
-        _bing_last_request = time.monotonic()
+def _bing_rate_limit_wait(consecutive_errors: int = 0) -> None:
+    _bing_rl.wait(consecutive_errors)
+
+def _download_rate_limit_wait(consecutive_errors: int = 0) -> None:
+    if _DOWNLOAD_INTERVAL > 0:
+        _download_rl.wait(consecutive_errors)
 
 
-def _download_rate_limit_wait() -> None:
-    global _download_last
-    if _DOWNLOAD_INTERVAL <= 0:
-        return
-    with _download_rl_lock:
-        now = time.monotonic()
-        wait = _DOWNLOAD_INTERVAL - (now - _download_last)
-        if wait > 0:
-            time.sleep(wait)
-        _download_last = time.monotonic()
+def _http_get_safe(url: str, **kwargs) -> Tuple[int, bytes, dict]:
+    max_retries = 3
+    retry_codes = {429, 500, 502, 503, 504}
+    for attempt in range(max_retries):
+        try:
+            status, body, headers = _http_get(url, **kwargs)
+            if status in retry_codes:
+                if attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt * 5, 60)
+                    time.sleep(wait_time)
+                    continue
+            return status, body, headers
+        except urllib.error.HTTPError as e:
+            if e.code in retry_codes and attempt < max_retries - 1:
+                wait_time = min(2 ** attempt * 5, 60)
+                time.sleep(wait_time)
+                continue
+            raise
+    return _http_get(url, **kwargs)
 
+def validate_url(url: str) -> Tuple[bool, str]:
+    if not url: return False, "Empty URL"
+    if len(url) > 2048: return False, "URL exceeds maximum length"
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https", "file"): return False, f"Invalid URL scheme: {parsed.scheme}"
+    if parsed.scheme in ("http", "https"):
+        if not parsed.netloc: return False, "No domain in URL"
+        try:
+            import ipaddress
+            host = parsed.hostname
+            if host:
+                ip = ipaddress.ip_address(host)
+                if ip.is_private: return False, "URL points to private IP address"
+        except ValueError:
+            pass
+    for pattern in [r'file:///', r'javascript:', r'data:', r'vbscript:']:
+        if re.search(pattern, url, re.IGNORECASE): return False, f"Dangerous URL pattern detected: {pattern}"
+    return True, "Valid"
+
+def _monitor_memory_usage():
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_percent = process.memory_percent()
+        if memory_percent > 80: _debug(f"High memory usage: {memory_percent:.1f}%")
+        if memory_percent > 95: raise MemoryError(f"Memory usage critical: {memory_percent:.1f}%")
+        return memory_percent
+    except ImportError:
+        pass
+    return 0
+
+def download_image_safe(url: str, folder: str, **kwargs) -> str:
+    try:
+        _monitor_memory_usage()
+        return download_image(url, folder, **kwargs)
+    except MemoryError as e:
+        return f"Error: {str(e)}"
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 def _http_get(
     url: str,
@@ -195,12 +301,21 @@ def _http_get(
 
 
 def _safe_filename_from_url(url: str) -> str:
-    base = re.sub(r'[\\/*?"<>|]', '_', url.split('/')[-1].split('?')[0])
+    # Remove query parameters more safely
+    url_part = url.split('?')[0]
+    base = re.sub(r'[\\/*?:"<>|]', '_', url_part.split('/')[-1])
     base = base.strip("._")[:_MAX_FILENAME_LEN]
     if base and len(base) >= 4 and "." in base:
         return base
     digest = hashlib.sha256(url.encode("utf-8", errors="replace")).hexdigest()[:16]
-    return f"img_{digest}.jpg"
+    # Add extension detection
+    path = urllib.parse.urlparse(url).path.lower()
+    ext = ".jpg"
+    for possible_ext in [".png", ".gif", ".webp", ".bmp", ".jpeg", ".avif"]:
+        if path.endswith(possible_ext):
+            ext = possible_ext
+            break
+    return f"img_{digest}{ext}"
 
 
 def _unique_path(folder: str, filename: str) -> str:
@@ -217,6 +332,33 @@ def _unique_path(folder: str, filename: str) -> str:
     )
 
 
+def validate_image_content(filepath: str) -> bool:
+    try:
+        if not os.path.exists(filepath): return False
+        if os.path.getsize(filepath) == 0: return False
+        with open(filepath, 'rb') as f: header = f.read(12)
+        signatures = {
+            b'\xff\xd8\xff': 'jpeg',
+            b'\x89PNG\r\n\x1a\n': 'png',
+            b'GIF87a': 'gif',
+            b'GIF89a': 'gif',
+            b'RIFF': 'webp',
+        }
+        for sig in signatures:
+            if header.startswith(sig): return True
+        return False
+    except Exception as e:
+        _debug(f"Image validation failed: {e}")
+        return False
+
+def sanitize_filename(filename: str) -> str:
+    filename = os.path.basename(filename)
+    filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', filename)
+    if len(filename) > 255:
+        name, ext = os.path.splitext(filename)
+        filename = name[:250] + ext[:5]
+    return filename
+
 def download_image(url: str, folder: str, *, retry: bool = True) -> str:
     last_err = ""
     attempts = 2 if retry else 1
@@ -230,18 +372,22 @@ def download_image(url: str, folder: str, *, retry: bool = True) -> str:
             os.makedirs(folder, exist_ok=True)
             filepath = _unique_path(folder, _safe_filename_from_url(url))
 
-            req = urllib.request.Request(
-                url,
-                headers={
-                    "User-Agent": _DEFAULT_UA,
-                    "Accept": "image/*,*/*;q=0.8",
-                    "Referer": f"{parsed.scheme}://{parsed.netloc}/",
-                },
-            )
+            headers = {
+                "User-Agent": _DEFAULT_UA,
+                "Accept": "image/*,*/*;q=0.8",
+                "Referer": f"{parsed.scheme}://{parsed.netloc}/",
+            }
+            req = urllib.request.Request(url, headers=headers)
+            if "multipart/related" in url:
+                req.add_header("Content-Type", "multipart/related")
+
             with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_SEC) as response:
                 ctype = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-                if ctype and not (ctype.startswith("image/") or ctype == "application/octet-stream"):
+                if ctype and not (ctype.startswith("image/") or ctype == "application/octet-stream" or ctype == "multipart/related"):
                     return f"Error: unexpected content type {ctype}"
+
+                is_gif = ".gif" in url.lower() or "gif" in ctype
+                max_bytes = _MAX_GIF_DOWNLOAD_BYTES if is_gif else _MAX_DOWNLOAD_BYTES
 
                 chunks: List[bytes] = []
                 total = 0
@@ -250,7 +396,7 @@ def download_image(url: str, folder: str, *, retry: bool = True) -> str:
                     if not block:
                         break
                     total += len(block)
-                    if total > _MAX_DOWNLOAD_BYTES:
+                    if total > max_bytes:
                         return "Error: download exceeded size limit"
                     chunks.append(block)
 
@@ -400,8 +546,7 @@ class _DDGHTMLParser(HTMLParser):
 def _search_ddg_html(query: str, limit: int) -> List[dict]:
     data = urllib.parse.urlencode({"q": query, "kl": "us-en"}).encode("utf-8")
     try:
-        _, raw, _ = _http_get(
-            "https://html.duckduckgo.com/html/",
+        _, raw, _ = _http_get_safe("https://html.duckduckgo.com/html/",
             method="POST",
             data=data,
             headers={
@@ -423,18 +568,15 @@ def _iter_ddgs_results(method: str, **kwargs: Any) -> List[dict]:
     if DDGS is None:
         return []
     rows: List[dict] = []
-    ctx = DDGS()
-    use_with = hasattr(ctx, "__enter__")
-    ddgs = ctx.__enter__() if use_with else ctx
     try:
-        gen = getattr(ddgs, method)(**kwargs)
-        if gen:
-            for item in gen:
-                if isinstance(item, dict):
-                    rows.append(item)
-    finally:
-        if use_with:
-            ctx.__exit__(None, None, None)
+        with DDGS() as ddgs:
+            gen = getattr(ddgs, method)(**kwargs)
+            if gen:
+                for item in gen:
+                    if isinstance(item, dict):
+                        rows.append(item)
+    except Exception as e:
+        _debug(f"DDGS iteration error: {e}")
     return rows
 
 
@@ -498,8 +640,8 @@ def _search_images_ddgs(query: str, limit: int) -> Tuple[List[dict], str]:
 
 
 def _bing_adult_param() -> str:
-    mode = (os.environ.get("NSFW_BING_ADULT_FILTER") or "off").strip().lower()
-    return "off" if mode in ("off", "false", "0", "disable") else "strict"
+    mode = _BING_ADULT_FILTER
+    return "off" if mode in ("off", "false", "0", "disable") else "strict" 
 
 
 def _bing_rate_meta() -> dict:
@@ -507,6 +649,7 @@ def _bing_rate_meta() -> dict:
         "bing_min_interval_sec": _BING_MIN_INTERVAL,
         "bing_jitter_sec": _BING_JITTER_SEC,
         "bing_max_pages": _BING_MAX_PAGES,
+        "bing_adult_filter": _BING_ADULT_FILTER
     }
 
 
@@ -526,9 +669,7 @@ def _search_images_bing_scrape(query: str, limit: int) -> List[dict]:
         })
         url = f"https://www.bing.com/images/async?{params}"
         try:
-            status, body_bytes, hdrs = _http_get(
-                url,
-                headers={
+            status, body_bytes, hdrs = _http_get_safe(url, headers={
                     "Accept": "text/html,application/xhtml+xml",
                     "Referer": "https://www.bing.com/images/search",
                 },
@@ -613,7 +754,10 @@ def _search_images_bing_package(query: str, limit: int) -> List[dict]:
         _debug(f"bing package download: {e}")
         return []
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        try:
+            shutil.rmtree(tmp, ignore_errors=True)
+        except Exception as e:
+            _debug(f"Failed to cleanup temp directory {tmp}: {e}")
 
 
 def _search_images_bing(query: str, limit: int) -> Tuple[List[dict], str]:
@@ -656,7 +800,7 @@ def perform_search(
     download: bool = False,
 ) -> Tuple[List[dict], dict]:
     platform_norm = _normalize_platform(platform)
-    applied_tags = [t.strip() for t in (tags or []) if t and str(t).strip()][: _MAX_TAGS]
+    applied_tags = [str(t).strip() for t in (tags or []) if t and str(t).strip()][:_MAX_TAGS]
     queries = _build_queries(query, platform_norm, deep, applied_tags)
     primary_q = queries[0]
     backend_pref = (os.environ.get("NSFW_SEARCH_BACKEND") or "auto").strip().lower()
@@ -666,6 +810,11 @@ def perform_search(
         "search_backend": None,
         "mode": "images" if download else "web",
         "pip_hints": _pip_hints(),
+        "safe_search_status": {
+            "ddg": _DDG_SAFESEARCH,
+            "bing": _BING_ADULT_FILTER,
+            "all_disabled": _DDG_SAFESEARCH == "off" and _BING_ADULT_FILTER == "off"
+        },
         **_bing_rate_meta(),
     }
 
@@ -718,6 +867,58 @@ def perform_search(
     return results, meta
 
 
+def validate_limit(limit_value) -> int:
+    try:
+        limit = max(1, min(int(limit_value), 100))
+    except (TypeError, ValueError):
+        limit = 10
+    except OverflowError:
+        limit = 100
+    return limit
+
+class DownloadManager:
+    def __init__(self, max_concurrent: int = 3):
+        self.semaphore = BoundedSemaphore(max_concurrent)
+        self.executor = ThreadPoolExecutor(max_workers=max_concurrent)
+        self._download_lock = threading.Lock()
+        self._last_download_time = 0.0
+
+    def download_with_limit(self, url: str, folder: str) -> str:
+        with self.semaphore:
+            self._rate_limit()
+            return download_image(url, folder)
+
+    def _rate_limit(self):
+        with self._download_lock:
+            now = time.monotonic()
+            wait = _DOWNLOAD_INTERVAL - (now - self._last_download_time)
+            if wait > 0: time.sleep(wait)
+            self._last_download_time = time.monotonic()
+
+    def batch_download(self, urls: List[str], folder: str) -> List[dict]:
+        futures = []
+        results = []
+        for url in urls:
+            future = self.executor.submit(self.download_with_limit, url, folder)
+            futures.append((url, future))
+        for url, future in futures:
+            try:
+                path = future.result(timeout=_DOWNLOAD_TIMEOUT_SEC + 5)
+                results.append({"url": url, "local_path": path, "ok": not str(path).startswith("Error:")})
+            except Exception as e:
+                results.append({"url": url, "local_path": f"Error: {str(e)}", "ok": False})
+        return results
+
+def validate_configuration() -> List[str]:
+    warnings = []
+    if _DOWNLOAD_INTERVAL < 0: warnings.append("NSFW_DOWNLOAD_INTERVAL_SEC should be >= 0")
+    if _BING_MIN_INTERVAL < 0.5: warnings.append("NSFW_BING_MIN_INTERVAL_SEC should be >= 0.5")
+    if _MAX_DOWNLOAD_BYTES > 100 * 1024 * 1024: warnings.append("NSFW_MAX_DOWNLOAD_BYTES is very high (>100MB)")
+    if _MAX_GIF_DOWNLOAD_BYTES > 200 * 1024 * 1024: warnings.append("NSFW_MAX_GIF_DOWNLOAD_BYTES is very high (>200MB)")
+    if not os.environ.get("GOOGLE_API_KEY") and not os.environ.get("NSFW_SEARCH_BACKEND"):
+        warnings.append("No search backend configured.")
+    return warnings
+
 def run(
     query: str,
     limit: int,
@@ -730,92 +931,87 @@ def run(
     **_: Any,
 ) -> dict:
     load_env()
-    query = (query or "").strip()
-    if not query:
+    setup_logging_enhanced(os.environ.get("NSFW_LOG_LEVEL", "INFO"))
+
+    config_warnings = validate_configuration()
+    if config_warnings:
+        for warning in config_warnings:
+            logging.warning(warning)
+
+    media_dir = media_dir or "~/nsfw_media/"
+    target_dir = os.path.abspath(os.path.expanduser(media_dir))
+
+    if ".." in target_dir or "~" in target_dir:
         return {
-            "status": "error",
-            "success": False,
-            "error": "query must be non-empty",
+            "status": "error", "success": False, "error": "Invalid media_dir path",
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
 
-    try:
-        limit = max(1, min(int(limit), 100))
-    except (TypeError, ValueError):
-        limit = 1
+    query = (query or "").strip()
+    if not query:
+        return {
+            "status": "error", "success": False, "error": "query must be non-empty",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
 
+    limit = validate_limit(limit)
     platform_norm = _normalize_platform(platform)
-    applied_tags = [t.strip() for t in (tags or []) if t and str(t).strip()][: _MAX_TAGS]
+    applied_tags = [str(t).strip() for t in (tags or []) if t and str(t).strip()][:_MAX_TAGS]
 
     search_params = {
-        "target_query": query,
-        "target_platform": platform_norm,
-        "depth": "high" if deep else "standard",
-        "result_limit": limit,
-        "applied_tags": applied_tags,
-        "download_enabled": download,
+        "target_query": query, "target_platform": platform_norm,
+        "depth": "high" if deep else "standard", "result_limit": limit,
+        "applied_tags": applied_tags, "download_enabled": download,
     }
 
     results, search_meta = perform_search(
-        query=query,
-        limit=limit,
-        platform=platform_norm,
-        deep=deep,
-        tags=applied_tags,
-        download=download,
+        query=query, limit=limit, platform=platform_norm, deep=deep,
+        tags=applied_tags, download=download,
     )
 
     downloaded_files: List[dict] = []
-    if download:
-        target_dir = os.path.abspath(os.path.expanduser(media_dir or "~/nsfw_media/"))
+    if download and results:
         os.makedirs(target_dir, exist_ok=True)
+        download_manager = DownloadManager(max_concurrent=3)
+        urls = []
+
         for res in results:
             url = res.get("url") or ""
             existing = res.get("local_path")
-
             if existing and os.path.isfile(existing):
-                dest = _unique_path(target_dir, _safe_filename_from_url(url if url.startswith("http") else existing))
+                dest = _unique_path(target_dir, _safe_filename_from_url(url))
                 try:
                     shutil.copy2(existing, dest)
-                    path = dest
+                    downloaded_files.append({"url": url or existing, "local_path": dest, "ok": True})
                 except Exception as e:
-                    path = f"Error: {e}"
-                downloaded_files.append({
-                    "url": url or existing,
-                    "local_path": path,
-                    "ok": not str(path).startswith("Error:"),
-                })
-                continue
+                    downloaded_files.append({"url": url or existing, "local_path": f"Error: {e}", "ok": False})
+            elif url.startswith("http"):
+                urls.append(url)
 
-            if not url or url.startswith("file://"):
-                continue
-            path = download_image(url, target_dir)
-            downloaded_files.append({"url": url, "local_path": path, "ok": not str(path).startswith("Error:")})
+        if urls:
+            batch_results = download_manager.batch_download(urls, target_dir)
+            downloaded_files.extend(batch_results)
 
     ok_downloads = sum(1 for d in downloaded_files if d.get("ok"))
     status = "success"
+
     if not results:
         status = "partial"
     elif download and downloaded_files and ok_downloads == 0:
         status = "partial"
 
     output_data = {
-        "status": status,
-        "success": status != "error",
+        "status": status, "success": status != "error", "config_warnings": config_warnings,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "parameters": search_params,
-        "search_meta": search_meta,
-        "results": results,
-        "count": len(results),
-        "downloads": downloaded_files if download else "Disabled",
+        "parameters": search_params, "search_meta": search_meta, "results": results,
+        "count": len(results), "downloads": downloaded_files if download else "Disabled",
     }
 
     if save:
         try:
             save_path = os.path.expanduser(save)
             parent = os.path.dirname(save_path)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
+            if parent: os.makedirs(parent, exist_ok=True)
             tmp_path = f"{save_path}.tmp.{os.getpid()}"
             with open(tmp_path, "w", encoding="utf-8") as f:
                 f.write(json.dumps(output_data, indent=4, ensure_ascii=False))
@@ -826,15 +1022,15 @@ def run(
 
     return output_data
 
-
 def _filter_run_kwargs(kwargs: dict) -> dict:
-    allowed = {
-        "query", "limit", "platform", "deep", "tags", "save", "download", "media_dir",
+    valid_params = {
+        "query", "limit", "platform", "deep", "tags",
+        "save", "download", "media_dir"
     }
-    return {k: v for k, v in kwargs.items() if k in allowed}
-
+    return {k: v for k, v in kwargs.items() if k in valid_params}
 
 if __name__ == "__main__":
+
     if len(sys.argv) > 1 and sys.argv[1].lstrip().startswith(("{", "[")):
         try:
             kwargs = json.loads(sys.argv[1])
