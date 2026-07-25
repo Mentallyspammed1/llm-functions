@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # Bybit Position Liquidation Lookup
 # Usage: ./bybit_position_liquidation.sh [--category PERPETUAL|OPTION] [--symbol BTCUSDT]
 

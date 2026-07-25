@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # Bybit Funding Rate History Tool
 # Usage: ./bybit_funding_rate.sh [--symbol BTCUSDT] [--category PERPETUAL|OPTION]
 #        [--start 1609459200] [--end 1704067200]

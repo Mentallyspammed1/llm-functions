@@ -1,6 +1,7 @@
-#!/bin/bash
+#!/data/data/com.termux/files/usr/bin/bash
 # ════════════════════════════════════════════════════════════════════
 #  NEON FIRE THEME - Warm Reds / Oranges / Yellows / Magenta
+# @describe Fire theme output command wrapper.
 # ════════════════════════════════════════════════════════════════════
 
 export CYBER_THEME="fire"

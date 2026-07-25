@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # ==============================================================================
 # bybit_closed_pnl.sh — Bybit Closed PnL Retrieval Tool (V5 API)
 #

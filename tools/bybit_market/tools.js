@@ -14,7 +14,7 @@ async function getExchange() {
 
 /**
  * Get current ticker data for a specific symbol
- * @describe Get current ticker data for a specific symbol
+ * @cmd Get current ticker data for a specific symbol
  * @option --symbol! <TEXT> Trading symbol (e.g., 'BTC/USDT')
  * @param {string} symbol - Trading symbol (e.g., 'BTC/USDT')
  */

@@ -24,7 +24,6 @@
  * @property {string[]} array - Required array
  * @property {string[]} [array_optional] - Optional array
  */
-
 exports.run = function(args) {
     const { 
         string, 

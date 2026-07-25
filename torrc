@@ -9,7 +9,7 @@ CookieAuthFile tor_control_cookie
 
 ## Network Configuration
 # Exit nodes in regions with better crypto exchange access
-ExitNodes {us},{ca},{gb},{de},{nl},{sg},{jp}
+ExitNodes {de},{nl},{ch},{se},{is},{ee},{lv}
 StrictNodes 1
 
 ## Connection Optimization

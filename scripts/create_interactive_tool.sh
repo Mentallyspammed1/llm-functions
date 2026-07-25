@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # ==============================================================================
 # create_interactive_tool.sh — Interactive Tool Boilerplate Generator
 # 

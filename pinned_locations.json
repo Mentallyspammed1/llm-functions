@@ -37,5 +37,31 @@
     "provider": "gps",
     "label": "test_location",
     "timestamp": "2026-06-27T02:18:52.247571"
+  },
+  {
+    "latitude": 38.93957833333333,
+    "longitude": -90.92890000000001,
+    "altitude": 102.0,
+    "accuracy": 6.099999904632568,
+    "vertical_accuracy": 58.29999923706055,
+    "bearing": 0.0,
+    "speed": 0.2594200074672699,
+    "elapsedMs": 129,
+    "provider": "gps",
+    "label": "heidis hous",
+    "timestamp": "2026-07-14T02:33:16.339777"
+  },
+  {
+    "latitude": 38.723706666666665,
+    "longitude": -90.375725,
+    "altitude": 151.20000000000002,
+    "accuracy": 10.399999618530273,
+    "vertical_accuracy": 70.0,
+    "bearing": 326.8500061035156,
+    "speed": 1.291438102722168,
+    "elapsedMs": 183,
+    "provider": "gps",
+    "label": "mikes house",
+    "timestamp": "2026-07-17T03:43:06.290088"
   }
 ]

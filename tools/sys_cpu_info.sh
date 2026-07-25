@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Get CPU information and usage.
 main() {
     # lscpu itself does not have a direct --color flag, but respects TERM and LS_COLORS environment variables.

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 set -e
 
 # @describe Send SMS or Twilio Messaging Channels messages using Twilio API.

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 set -euo pipefail
 
 # @describe Identify the MIME type of a file.

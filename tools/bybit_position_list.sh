@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # ------------------------------------------------------------
 # Bybit Position List Retrieval Tool (V5 API)
 # ------------------------------------------------------------

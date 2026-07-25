@@ -1,7 +1,8 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 
 # ------------------------------------------------------------
 # neon_arcade.sh – arcade‑style neon output
+# @describe Arcade-style neon output command wrapper.
 # ------------------------------------------------------------
 # This wrapper inherits *all* functionality from execute_command.sh
 # (colour handling, timeout logic, logging, etc.) and simply

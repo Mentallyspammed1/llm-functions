@@ -2255,8 +2255,10 @@ def extract(
             dst.mkdir(parents=True, exist_ok=True)
             zf.extractall(dst, pwd=pwd)
             files_extracted = len([i for i in zf.infolist() if not i.filename.endswith("/")])
-    except zipfile.BadPassword:
-        return {"success": False, "error": "Incorrect archive password"}
+    except RuntimeError as exc:
+        if "Bad password" in str(exc) or "password required" in str(exc):
+            return {"success": False, "error": "Incorrect archive password"}
+        raise
     except Exception as exc:
         return {"success": False, "error": str(exc)}
     return {
@@ -2419,11 +2421,13 @@ def batch(
                     "completed": results,
                 }
 
+    exit_code = 0 if all(r.get("success") for r in results) else 1
     return {
         "success": not had_error,
         "results": results,
-        "count":   len(results),
-        "failed":  sum(1 for r in results if not r["result"].get("success")),
+        "count": len(results),
+        "failed": sum(1 for r in results if not r["result"].get("success")),
+        "exit_code": exit_code,
     }
 
 
@@ -3031,54 +3035,13 @@ if __name__ == "__main__":
             print(json.dumps({"success": False, "error": f"Failed to load batch JSON: {exc}"}))
             sys.exit(1)
 
-    options = EditOptions(
-        operation        = cli.operation,
-        file_path        = cli.file_path,
-        target_path      = cli.target_path,
-        content          = content_value,
-        search_text      = cli.search_text,
-        replacement      = cli.replacement,
-        pattern          = cli.pattern,
-        use_regex        = cli.use_regex,
-        global_replace   = cli.global_replace,
-        case_sensitive   = cli.case_sensitive,
-        encoding         = cli.encoding,
-        line_context     = cli.line_context,
-        include_hidden   = cli.include_hidden,
-        sort_by          = cli.sort_by,
-        descending       = cli.descending,
-        show_lines       = cli.show_lines,
-        add_newline      = cli.add_newline,
-        context_lines    = cli.context_lines,
-        truncate_size    = cli.truncate_size,
-        max_backups      = cli.max_backups,
-        max_matches      = cli.max_matches,
-        mode             = cli.mode,
-        to_type          = cli.to_type,
-        backup_timestamp = cli.backup_timestamp,
-        recursive        = cli.recursive,
-        algorithm        = cli.algorithm,
-        n_lines          = cli.n_lines,
-        compare_mode     = cli.compare_mode,
-        compression      = cli.compression,
-        password         = cli.password,
-        variables        = variables,
-        undefined_var    = cli.undefined_var,
-        file_pattern     = cli.file_pattern,
-        min_size         = cli.min_size,
-        max_size_filter  = cli.max_size_filter,
-        modified_after   = cli.modified_after,
-        modified_before  = cli.modified_before,
-        file_type        = cli.file_type,
-        max_results      = cli.max_results,
-        edits            = json.loads(cli.edits) if cli.edits else [],
-        continue_on_error = cli.continue_on_error,
-        dry_run          = cli.dry_run,
-        ops              = ops_data,
-        line_number      = cli.line_number,
-        start_line       = cli.start_line,
-        end_line         = cli.end_line,
-    )
+    # Convert CLI arguments to EditOptions
+    cli_dict = vars(cli)
+    # The CLI uses `operation` but EditOptions expects `action`
+    if "operation" in cli_dict:
+        cli_dict["action"] = cli_dict.pop("operation")
+    # Build the EditOptions instance
+    options = EditOptions(**cli_dict)
     result = _run(options)
 
     # Human-readable status line

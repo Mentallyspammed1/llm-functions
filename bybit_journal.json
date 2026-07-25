@@ -1617,5 +1617,106 @@
       "msg": "TriggerDirection invalid"
     },
     "status": "failed"
+  },
+  {
+    "id": "f36b2553-b758-4f40-958c-6a69bda85254",
+    "timestamp": "2026-07-21T19:49:33.934448+00:00",
+    "action": "place_order",
+    "symbol": "ADAUSDT",
+    "payload": {
+      "category": "spot",
+      "symbol": "ADAUSDT",
+      "side": "Buy",
+      "orderType": "Market",
+      "qty": "28.75215641173088",
+      "timeInForce": "GTC",
+      "reduceOnly": false
+    },
+    "result": {
+      "status": "error",
+      "code": 170148,
+      "msg": "Market order amount decimal too long"
+    },
+    "status": "failed"
+  },
+  {
+    "id": "f13159aa-11cb-44ff-ba8c-fd5a2040435c",
+    "timestamp": "2026-07-21T21:10:03.814647+00:00",
+    "action": "place_order",
+    "symbol": "ADAUSDT",
+    "payload": {
+      "category": "spot",
+      "symbol": "ADAUSDT",
+      "side": "Buy",
+      "orderType": "Market",
+      "qty": "500.0",
+      "timeInForce": "GTC",
+      "reduceOnly": false,
+      "price": "0.0100",
+      "trailingStop": "0.0",
+      "orderLinkId": "client_oid_1",
+      "triggerPrice": "0.0000",
+      "triggerBy": "0",
+      "tpOrderType": "0",
+      "slOrderType": "0"
+    },
+    "result": {
+      "status": "error",
+      "code": 170131,
+      "msg": "Insufficient balance."
+    },
+    "status": "failed"
+  },
+  {
+    "id": "afc4eb02-c41c-48a5-b717-d6ecdaccd1e4",
+    "timestamp": "2026-07-21T21:11:40.187846+00:00",
+    "action": "place_order",
+    "symbol": "ADAUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "ADAUSDT",
+      "side": "Buy",
+      "orderType": "Limit",
+      "qty": "13",
+      "timeInForce": "GTC",
+      "reduceOnly": false,
+      "price": "0.3800",
+      "stopLoss": "0.3000",
+      "takeProfit": "0.4800",
+      "orderLinkId": "client_oid_1",
+      "triggerPrice": "0.0000",
+      "triggerBy": "0",
+      "tpOrderType": "Limit",
+      "slOrderType": "Limit"
+    },
+    "result": {
+      "status": "error",
+      "code": 10001,
+      "msg": "TriggerDirection invalid"
+    },
+    "status": "failed"
+  },
+  {
+    "id": "cd029286-a80f-461f-b5c5-83b894bc01d3",
+    "timestamp": "2026-07-23T07:23:50.953030+00:00",
+    "action": "place_order",
+    "symbol": "BTCUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "BTCUSDT",
+      "side": "Buy",
+      "orderType": "Limit",
+      "qty": "0.001",
+      "timeInForce": "GTC",
+      "price": "65428.6",
+      "stopLoss": "62928.6",
+      "takeProfit": "70428.6"
+    },
+    "result": {
+      "status": "error",
+      "code": 110007,
+      "msg": "ab not enough for new order"
+    },
+    "status": "failed"
   }
 ]

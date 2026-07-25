@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # Bybit Order Book Depth Tool
 # Usage: ./bybit_order_book_depth.sh [--category PERPETUAL|OPTION] [--symbol BTCUSDT] [--limit 100]
 

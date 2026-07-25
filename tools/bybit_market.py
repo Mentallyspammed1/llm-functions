@@ -18,7 +18,7 @@ TOR_PROXY = os.getenv("TOR_PROXY", "socks5h://127.0.0.1:9050")
 # Bybit V5 Market Endpoints
 session = HTTP(
     testnet=TESTNET,
-    proxy=TOR_PROXY if USE_TOR else None
+    proxies={"http": TOR_PROXY, "https": TOR_PROXY} if USE_TOR else None
 )
 
 # @cmd Get orderbook depth

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Generate thumbnails from video files or URLs using ffmpeg
 # @option --input* Path to the input video file or remote URL (can be specified multiple times)
 # @option --output_dir "thumbnails" Output directory for the images

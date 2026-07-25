@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # Bybit Fee Rate Lookup Tool
 # Usage: ./bybit_fee_rate.sh [--category PERPETUAL|OPTION] [--symbol BTCUSDT]
 

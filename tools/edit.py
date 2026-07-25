@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# edit_file.py — Pyrmethus File Weaver v2.8.0
+# edit_file.py — Pyrmethus File Weaver v2.9.1
 # argc/aichat compatible · Termux · Full 33-operation suite
 # Inserted by assistant
 #
@@ -28,7 +28,7 @@
 # @option --mode <MODE>                   Permission mode (octal) or compare mode
 # @option --to-type <TYPE>                Line ending type: lf or crlf
 # @option --backup-timestamp <TS>         Backup timestamp for revert
-# @option --algorithm <ALG>               Hash algorithm (sha256/sha1/sha512/md5/blake2b)
+# @option --algorithm <ALG>               Hash algorithm (sha256/sha1/sha512/md5/blake2b/sha3_256/sha3_512)
 # @option --n-lines <NUM>                 Lines for head/tail operations
 # @option --compare-mode <MODE>           Compare mode: bytes or text
 # @option --compression <TYPE>            Archive compression type
@@ -207,7 +207,7 @@ __all__ = [
     "batch_edit",
 ]
 
-__version__ = "2.8.0"
+__version__ = "2.9.1"
 
 # ==============================================================================
 # SECTION 1: Logger & Color Support
@@ -243,8 +243,8 @@ CYBER_CYAN = '\033[38;5;51m'
 RESET = '\033[0m'
 
 def _cprint(text: str, color: str = CYBER_CYAN, style: str = "") -> None:
-    """Print with Cyber-Neon palette."""
-    print(f"{style}{color}{text}{RESET}")
+    """Print with Cyber-Neon palette to stderr to keep stdout clean for JSON."""
+    print(f"{style}{color}{text}{RESET}", file=sys.stderr)
 
 
 # ==============================================================================
@@ -279,10 +279,10 @@ _SORT_KEYS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "type": lambda x: (not x.get("is_dir", False), x["name"].lower()),
 }
 
-_HASH_ALGORITHMS: frozenset[str] = frozenset({"sha256", "sha1", "sha512", "md5", "blake2b"})
+_HASH_ALGORITHMS: frozenset[str] = frozenset({"sha256", "sha1", "sha512", "md5", "blake2b", "sha3_256", "sha3_512"})
 
 # Template variable pattern: {{ var_name }} with optional whitespace
-_TEMPLATE_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+_TEMPLATE_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}")
 
 # Human-readable alias — NOT used as a type annotation in run() to stay
 # compatible with build-declarations.py which cannot handle custom types.
@@ -462,7 +462,6 @@ class FileEditor:
         1. Pseudo-filesystems are always treated as text (never binary).
         2. Null-byte presence in first chunk → binary.
         3. `file --mime-type` subprocess used when available for accuracy.
-           v2.8.0 FIX: correctly returns True for non-text MIME types.
         4. Fallback: non-binary.
         """
         path_str = str(path)
@@ -515,6 +514,19 @@ class FileEditor:
 
         The final os.replace() is atomic on POSIX.
         """
+        # Type coerce content to prevent `.encode()` explosions
+        if not isinstance(content, str):
+            content = str(content)
+            
+        # Detect if original file exists and used CRLF line endings to preserve them
+        if path.exists():
+            try:
+                with open(path, "rb") as f:
+                    if b"\r\n" in f.read(8192):
+                        content = content.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+            except Exception:
+                pass
+            
         dir_ = path.parent
         _O_TMPFILE = getattr(os, "O_TMPFILE", None)
         tmp_link: str | None = None
@@ -593,6 +605,17 @@ class FileEditor:
                 return
             except FileExistsError:
                 try:
+                    # Liveness check (break dead locks immediately)
+                    if lock_path.exists():
+                        try:
+                            pid = int(lock_path.read_text().strip())
+                            if pid > 0:
+                                os.kill(pid, 0)
+                        except (ValueError, OSError, ProcessLookupError):
+                            logger.warning("Breaking dead lock %s (holding process is dead)", lock_path)
+                            lock_path.unlink(missing_ok=True)
+                            continue
+
                     lock_age = time.time() - lock_path.stat().st_mtime
                     if lock_age > STALE_LOCK_SECONDS:
                         logger.warning(
@@ -613,8 +636,7 @@ class FileEditor:
         lock_path.unlink(missing_ok=True)
 
     def _prune_backups(self, path: Path, max_backups: int) -> None:
-        """Delete oldest backups beyond max_backups.
-        v2.8.0 FIX: uses glob.escape instead of re.escape for Path.glob()."""
+        """Delete oldest backups beyond max_backups."""
         pattern = f"{_glob_escape(path.stem)}{_glob_escape(path.suffix)}.*.bak"
         try:
             backups = sorted(
@@ -627,8 +649,7 @@ class FileEditor:
             pass
 
     def _list_backups(self, path: Path) -> list[Path]:
-        """Return all backups for path, newest first.
-        v2.8.0 FIX: uses glob.escape instead of re.escape."""
+        """Return all backups for path, newest first."""
         pattern = f"{_glob_escape(path.stem)}{_glob_escape(path.suffix)}.*.bak"
         try:
             return sorted(
@@ -760,7 +781,6 @@ def read_lines(
     Lines are 1-based and inclusive.  Streaming read; memory efficient for
     large files when only a small range is needed.
     """
-    # FIX: Explicitly validate that both parameters are provided
     if start_line is None or end_line is None:
         return {
             "success": False,
@@ -820,15 +840,10 @@ def write(
     Atomically write (create or overwrite) a file.
     Uses O_TMPFILE + rename on Linux; mkstemp + rename elsewhere.
     No partial writes are ever visible.
-
-    FIX: Properly handle None content, validate path correctly,
-    and ensure proper encoding handling.
     """
-    # FIX: Check if content is provided, handle None explicitly
     if options.content is None:
         return {"success": False, "error": "content cannot be None"}
 
-    # FIX: Use the full file_path from options, not assuming it's positional
     file_path = options.file_path
     if not file_path:
         return {"success": False, "error": "file_path is required"}
@@ -837,7 +852,6 @@ def write(
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
 
-    # FIX: Ensure content is a string
     content = str(options.content) if not isinstance(options.content, str) else options.content
 
     if content:
@@ -847,7 +861,6 @@ def write(
     if options.add_newline and content and not content.endswith("\n"):
         content += "\n"
 
-    # FIX: Use the correct encoding from options
     encoding = options.encoding
     encoded_size = len(content.encode(encoding, errors="surrogateescape"))
     if encoded_size > options.max_write_size:
@@ -856,7 +869,6 @@ def write(
             "error": f"Content exceeds max size ({options.max_write_size:,} bytes)",
         }
 
-    # FIX: Dry-run check before any filesystem operations
     if options.dry_run:
         return {
             "success": True,
@@ -897,15 +909,10 @@ def append(
     Append text to an existing file.
     When add_newline=True (default), ensures a newline separates existing
     content from the new content even if the file didn't end with one.
-
-    FIX: Properly handle content None, validate combined size before writing,
-    and ensure the file exists before appending.
     """
-    # FIX: Handle None content
     if content is None:
         return {"success": False, "error": "content cannot be None"}
 
-    # FIX: Ensure content is a string
     if not isinstance(content, str):
         content = str(content)
 
@@ -922,14 +929,11 @@ def append(
     if _editor._is_binary(path):
         return {"success": False, "error": "Binary file detected; append refused"}
 
-    # FIX: Normalize content line endings
     if content:
         content = content.replace("\r\n", "\n").replace("\r", "\n")
 
-    # FIX: Calculate encoded size correctly
     encoded_size = len(content.encode(encoding, errors="surrogateescape"))
 
-    # FIX: Check if content itself is too large (before combined check)
     if encoded_size > max_size:
         return {
             "success": False,
@@ -937,9 +941,7 @@ def append(
         }
 
     try:
-        # FIX: Check combined size before appending
         original = path.stat().st_size
-        # Account for the newline separator if needed
         newline_size = 1 if (add_newline and original > 0 and not _ends_with_newline(path)) else 0
         combined = original + encoded_size + newline_size
 
@@ -952,7 +954,6 @@ def append(
                 ),
             }
 
-        # Also check against the general max write size
         if combined > DEFAULT_MAX_WRITE:
             return {
                 "success": False,
@@ -962,23 +963,14 @@ def append(
                 ),
             }
 
-        # FIX: Determine if we need a separator newline
+        current_content = path.read_text(encoding=encoding, errors="surrogateescape")
         needs_sep = False
         if add_newline and original > 0:
             needs_sep = not _ends_with_newline(path)
-
-        # FIX: Use atomic approach - read, modify, write back
-        if needs_sep or newline_size > 0:
-            # Read current content, append, write back atomically
-            current_content = path.read_text(encoding=encoding, errors="surrogateescape")
-            if needs_sep:
-                current_content += "\n"
-            new_content = current_content + content
-            _editor._atomic_write(path, new_content, encoding)
-        else:
-            # Simple append (no separator needed)
-            with open(path, "a", encoding=encoding, errors="surrogateescape") as f:
-                f.write(content)
+        if needs_sep:
+            current_content += "\n"
+        new_content = current_content + content
+        _editor._atomic_write(path, new_content, encoding)
 
         new_size = path.stat().st_size
         return {
@@ -1014,23 +1006,16 @@ def replace(
     A timestamped backup is created before any modification.
     Reports count of replacements made; returns success even when
     count=0 (pattern not found) to distinguish from errors.
-
-    FIX: Support 'content' as fallback for 'replacement'.
-    FIX: Properly handle line endings, empty replacements,
-    and ensure backup is created before modification.
     """
     file_path = options.file_path
     search_text = options.search_text or options.pattern
 
-    # FIX: More robust search text validation
     if not search_text:
         return {"success": False, "error": "Search text/pattern cannot be empty"}
 
-    # FIX: Ensure search_text is a string
     if not isinstance(search_text, str):
         search_text = str(search_text)
 
-    # FIX: Support 'content' as a fallback for 'replacement'
     if options.replacement is not None:
         replacement = options.replacement
     elif options.content is not None:
@@ -1038,7 +1023,6 @@ def replace(
     else:
         replacement = ""
 
-    # Ensure replacement is a string
     if not isinstance(replacement, str):
         replacement = str(replacement)
 
@@ -1048,18 +1032,15 @@ def replace(
 
     content: str = res["content"]
 
-    # FIX: Normalize line endings for consistent regex processing
     content = content.replace("\r\n", "\n").replace("\r", "\n")
 
     path: Path = res["path"]
 
     try:
-        # FIX: Handle case sensitivity properly
         flags = 0
         if not options.case_sensitive:
             flags |= re.IGNORECASE
 
-        # FIX: Compile regex with proper flags
         if options.use_regex:
             try:
                 compiled = re.compile(search_text, flags)
@@ -1067,17 +1048,16 @@ def replace(
                 return {"success": False, "error": f"Invalid regex: {exc}"}
         else:
             compiled = re.compile(re.escape(search_text), flags)
+            # Defang replacement string so literal backslashes aren't parsed by re.sub
+            replacement = replacement.replace('\\', r'\\')
 
-        # FIX: Apply replacement with proper count handling
         if options.global_replace:
             new_content, count = compiled.subn(replacement, content)
         else:
             new_content, count = compiled.subn(replacement, content, count=1)
-            # FIX: Ensure count is correct for non-global replace
             if new_content == content:
                 count = 0
 
-        # FIX: Handle the case where no replacement was made
         if new_content == content:
             return {
                 "success": True,
@@ -1086,7 +1066,6 @@ def replace(
                 "message": "No replacements made — pattern not found or already matches",
             }
 
-        # FIX: Dry-run check before any filesystem modifications
         if options.dry_run:
             return {
                 "success": True,
@@ -1096,11 +1075,9 @@ def replace(
                 "replacements_would_be": count
             }
 
-        # FIX: Create backup BEFORE modification
         original_bytes = path.stat().st_size
         backup = _editor._make_backup(path, options.max_backups)
 
-        # FIX: Write the modified content atomically
         _editor._atomic_write(path, new_content, options.encoding)
         new_bytes = path.stat().st_size
 
@@ -1135,8 +1112,16 @@ def insert_line(
     A newline is appended to content if absent.
     Automatic backup created before modification.
     """
+    if line_number is None:
+        return {"success": False, "error": "line_number is required"}
+    try:
+        line_number = int(line_number)
+    except (ValueError, TypeError):
+        return {"success": False, "error": "line_number must be an integer"}
+
     if content is None:
         return {"success": False, "error": "content cannot be None"}
+        
     res = _editor._read_content(file_path, encoding)
     if not res["success"]:
         return res
@@ -1183,6 +1168,13 @@ def delete_line(
     Returns the deleted line's content in 'deleted_content'.
     Automatic backup created before modification.
     """
+    if line_number is None:
+        return {"success": False, "error": "line_number is required"}
+    try:
+        line_number = int(line_number)
+    except (ValueError, TypeError):
+        return {"success": False, "error": "line_number must be an integer"}
+        
     res = _editor._read_content(file_path, encoding)
     if not res["success"]:
         return res
@@ -1233,31 +1225,19 @@ def replace_lines(
     Replace a range of lines [start_line, end_line] with new content.
     Both bounds are 1-based and inclusive.
     Automatic backup created before modification.
-
-    FIXES:
-    - Handle None content properly
-    - Validate and convert line numbers
-    - Support multi-line replacement content
-    - Add dry-run support
-    - Preserve line endings in replacement
-    - Handle edge cases (empty file, single line ranges)
     """
-    # FIX: Handle None content
     if content is None:
         return {"success": False, "error": "content cannot be None"}
 
-    # FIX: Ensure content is a string
     if not isinstance(content, str):
         content = str(content)
 
-    # FIX: Validate and convert line numbers
     try:
         start_line = int(start_line)
         end_line = int(end_line)
     except (ValueError, TypeError):
         return {"success": False, "error": "start_line and end_line must be integers"}
 
-    # FIX: Validate line number ranges
     if start_line < 1:
         return {"success": False, "error": "start_line must be >= 1"}
     if end_line < start_line:
@@ -1270,10 +1250,8 @@ def replace_lines(
     original: str = res["content"]
     path: Path = res["path"]
 
-    # FIX: Handle empty file edge case
     if not original:
         if start_line == 1:
-            # Allow replacing line 1 in an empty file (essentially write)
             lines = []
         else:
             return {
@@ -1285,44 +1263,34 @@ def replace_lines(
 
     total = len(lines)
 
-    # FIX: Validate range against file content
     if start_line > total and total > 0:
         return {
             "success": False,
             "error": f"start_line {start_line} exceeds file length ({total} lines)"
         }
 
-    # Adjust end_line to not exceed file length
     effective_end_line = min(end_line, total)
 
-    # FIX: Handle multi-line replacement preserving line endings
-    # Normalize replacement content line endings
     if content:
         content_normalized = content.replace("\r\n", "\n").replace("\r", "\n")
     else:
         content_normalized = ""
 
-    # Split replacement into lines, preserving empty content
     if content_normalized:
-        # Use splitlines with keepends to preserve line endings in replacement
         content_lines = content_normalized.splitlines(keepends=True)
     else:
         content_lines = []
 
-    # FIX: Ensure each replacement line ends with newline (except possibly the last)
     if content_lines and not content_lines[-1].endswith("\n"):
         content_lines[-1] = content_lines[-1] + "\n"
 
-    # FIX: Build new content with proper line range replacement
     new_lines = lines[: start_line - 1] + content_lines + lines[effective_end_line:]
 
     new_content = "".join(new_lines)
 
-    # Calculate byte sizes
     original_bytes = len(original.encode(encoding, errors="surrogateescape"))
     new_bytes = len(new_content.encode(encoding, errors="surrogateescape"))
 
-    # FIX: Dry-run support with detailed preview
     if dry_run:
         lines_removed = effective_end_line - start_line + 1
         lines_added = len(content_lines)
@@ -1343,10 +1311,8 @@ def replace_lines(
         }
 
     try:
-        # FIX: Create backup before modification
         backup = _editor._make_backup(path, max_backups)
 
-        # FIX: Write modified content atomically
         _editor._atomic_write(path, new_content, encoding)
 
         stat = path.stat()
@@ -1395,7 +1361,6 @@ def file_search(
     matches: list[dict[str, Any]] = []
     truncated = False
 
-    # FIX: Better match function with type hints
     if use_regex:
         flags = 0 if case_sensitive else re.IGNORECASE
         try:
@@ -1493,8 +1458,7 @@ def copy(
 
 @_timed
 def move(file_path: str, target_path: str) -> dict[str, Any]:
-    """Move or rename a file or directory.
-    v2.8.0 FIX: validates source with allow_write=True since move deletes source."""
+    """Move or rename a file or directory."""
     src = _editor._validate_path(file_path, allow_write=True)
     dst = _editor._validate_path(target_path, allow_write=True)
     if not src or not dst:
@@ -1550,7 +1514,7 @@ def info(file_path: str) -> dict[str, Any]:
     Return detailed metadata for a file or directory.
 
     Includes: size, timestamps, permissions (octal), inode, symlink target.
-    v2.8.0: adds MIME type detection and line count for text files.
+    Adds MIME type detection and line count for text files.
     """
     path = _editor._validate_path(file_path, allow_write=False)
     if not path or not path.exists():
@@ -1588,7 +1552,6 @@ def info(file_path: str) -> dict[str, Any]:
                 "inode": st.st_ino,
             }
         )
-        # v2.8.0: MIME type detection
         if path.is_file() and _FILE_CMD:
             try:
                 r = subprocess.run(
@@ -1599,7 +1562,6 @@ def info(file_path: str) -> dict[str, Any]:
                     base["mime_type"] = r.stdout.strip()
             except Exception:
                 pass
-        # v2.8.0: line count for text files
         if path.is_file() and not _editor._is_binary(path):
             try:
                 with open(path, "rb") as f:
@@ -1784,7 +1746,6 @@ def truncate(
 
     Backup created before truncation.
     """
-    # FIX: Handle non-integer size values gracefully
     try:
         size = int(size)
     except (ValueError, TypeError):
@@ -2021,18 +1982,15 @@ def grep_dir(
     Returns per-file match lists.  Stops collecting new matches (across all
     files) once max_matches is reached; sets truncated=True in that case.
     """
-    # FIX: More robust pattern validation
     if not pattern or not isinstance(pattern, str) or not pattern.strip():
         return {"success": False, "error": "pattern cannot be empty or whitespace-only"}
 
-    # FIX: Trim whitespace from pattern
     pattern = pattern.strip()
 
     root = _editor._validate_path(dir_path, allow_write=False)
     if not root or not root.exists() or not root.is_dir():
         return {"success": False, "error": "Invalid or missing directory"}
 
-    # FIX: Better match function with type hints
     if use_regex:
         flags = 0 if case_sensitive else re.IGNORECASE
         try:
@@ -2119,7 +2077,7 @@ def file_hash(
     Compute a cryptographic hash of a file.
 
     Streams the file in chunks; safe for arbitrarily large files.
-    algorithm: sha256 | sha1 | sha512 | md5
+    algorithm: sha256 | sha1 | sha512 | md5 | blake2b | sha3_256 | sha3_512
     """
     algo = algorithm.lower()
     if algo not in _HASH_ALGORITHMS:
@@ -2469,7 +2427,6 @@ def archive(
             "success": False,
             "error": f"Unknown compression '{compression}'. Choose: {', '.join(_COMPRESS_MAP)}",
         }
-    # FIX: validate source as read-only, archive path as writable — separate vars
     src = _editor._validate_path(source_path, allow_write=False)
     arc = _editor._validate_path(archive_path, allow_write=True)
     if not src or not arc:
@@ -2547,7 +2504,7 @@ def extract(
                         f"exceeds limit {MAX_ARCHIVE_SIZE:,} bytes"
                     ),
                 }
-            # Zip-slip protection (v2.8.0)
+            # Zip-slip protection
             dst_resolved = dst.resolve()
             for member in zf.namelist():
                 member_path = (dst / member).resolve()
@@ -2742,11 +2699,11 @@ def batch(operations: list[dict[str, Any]]) -> dict[str, Any]:
         try:
             # Instantiate EditOptions from the dictionary of operation data
             op_options = EditOptions(**op_data)
-            res = run(op_options)
-        except TypeError as e:
+            res = _run(op_options)
+        except Exception as e:
             return {
                 "success": False,
-                "error": f"Invalid arguments for operation {op_name} at index {i}: {e}",
+                "error": f"Exception executing operation {op_name} at index {i}: {e}",
                 "completed": results,
             }
         results.append({"index": i, "operation": op_name, "result": res})
@@ -2772,6 +2729,7 @@ def batch_edit(
     encoding: str = DEFAULT_ENCODING,
     max_backups: int = MAX_BACKUPS,
     continue_on_error: bool = False,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """
     Apply multiple sequential edits to a single file atomically.
@@ -2786,8 +2744,6 @@ def batch_edit(
     is created before any changes, and the final result is written atomically.
     If continue_on_error is False (default), the batch stops on the first
     failed edit and no changes are written to disk.
-
-    v2.8.0: New operation for efficient multi-edit workflows.
     """
     if not edits or not isinstance(edits, list):
         return {"success": False, "error": "edits must be a non-empty list"}
@@ -2834,6 +2790,10 @@ def batch_edit(
 
                 if not search_text:
                     raise ValueError("search_text is required for replace")
+                    
+                if not use_regex:
+                    # Defang replacement string so literal backslashes aren't parsed by re.sub
+                    replacement = replacement.replace('\\', r'\\')
 
                 flags = 0 if case_sensitive else re.IGNORECASE
                 compiled = (
@@ -2948,6 +2908,26 @@ def batch_edit(
             "edits_failed": len([e for e in edit_results if not e.get("success")]),
         }
 
+    # Dry-run check for batch_edit
+    if dry_run:
+        original_bytes = len(original_content.encode(encoding, errors="surrogateescape"))
+        new_bytes = len(content.encode(encoding, errors="surrogateescape"))
+        return {
+            "success": True,
+            "path": str(path),
+            "mode": "dry-run",
+            "message": "Batch edit would proceed",
+            "edits": edit_results,
+            "edits_applied": len([e for e in edit_results if e.get("success")]),
+            "edits_failed": len([e for e in edit_results if not e.get("success")]),
+            "total_replacements": total_replacements,
+            "lines_inserted": lines_inserted,
+            "lines_deleted": lines_deleted,
+            "original_bytes": original_bytes,
+            "new_bytes": new_bytes,
+            "bytes_delta": new_bytes - original_bytes,
+        }
+
     try:
         backup = _editor._make_backup(path, max_backups)
         _editor._atomic_write(path, content, encoding)
@@ -3025,6 +3005,7 @@ def _run(options: EditOptions) -> dict[str, Any]:
             encoding=options.encoding,
             max_backups=options.max_backups,
             continue_on_error=options.continue_on_error,
+            dry_run=options.dry_run,
         )
 
     if not file_path:
@@ -3036,8 +3017,6 @@ def _run(options: EditOptions) -> dict[str, Any]:
     # ------------------------------------------------------------------
     # Dispatch table
     # ------------------------------------------------------------------
-    # DEBUG
-    # print(f"DEBUG: start_line type: {type(options.start_line)}, value: {options.start_line}")
     operation_dispatch: dict[str, Callable[[], dict[str, Any]]] = {
         "read": lambda: read(file_path, options.max_size, options.encoding, options.show_lines, options.start_line, options.end_line),
         "read_lines": lambda: read_lines(
@@ -3168,7 +3147,7 @@ def _run(options: EditOptions) -> dict[str, Any]:
             options.undefined_var,
         ),
         "batch_edit": lambda: batch_edit(
-            file_path, options.edits or [], options.encoding, options.max_backups, options.continue_on_error,
+            file_path, options.edits or [], options.encoding, options.max_backups, options.continue_on_error, options.dry_run,
         ),
     }
 
@@ -3325,7 +3304,7 @@ Examples:
     parser.add_argument(
         "--max-results", type=int, default=MAX_FIND_RESULTS, dest="max_results"
     )
-    # v2.8.0: batch_edit options
+    # v2.9.1: batch_edit options
     parser.add_argument(
         "--edits", default=None,
         help="JSON array of edits for batch_edit mode",
@@ -3436,6 +3415,9 @@ if __name__ == "__main__":
         global_replace=cli.global_replace,
         case_sensitive=cli.case_sensitive,
         encoding=cli.encoding,
+        line_number=cli.line_number,
+        start_line=cli.start_line,
+        end_line=cli.end_line,
         line_context=cli.line_context,
         include_hidden=cli.include_hidden,
         sort_by=cli.sort_by,
@@ -3484,9 +3466,10 @@ if __name__ == "__main__":
     # Machine-readable JSON output
     print(json.dumps(result, indent=2, ensure_ascii=False))
     sys.exit(0 if result.get("success") else 1)
-# ====================
-
-# NEW FEATURES (v2.9.0)
+# ==============================================================================
+# v2.9.1 — Defanged literal string replacements; resilient batch execution;
+#          extended hash algorithm library; null/type guards on line hooks.
+# ==============================================================================
 
 # - Atomic writes for replace/append operations
 # - Dry-run preview support (no file modification)

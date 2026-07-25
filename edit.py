@@ -11,6 +11,11 @@ Version: 1.0
 """
 
 import copy
+import difflib
+import math
+import os
+import tempfile
+from decimal import Decimal
 from typing import Any, List, Dict, Optional, Set
 
 
@@ -290,8 +295,7 @@ def demonstrate_guard_clauses():
     """
     Show the benefits of guard clauses over nested conditions.
     """
-    print("
-=== Early Return / Guard Clause Refactoring ===")
+    print("\n=== Early Return / Guard Clause Refactoring ===")
 
     test_cases = [
         MockUser(exists=False),
@@ -301,8 +305,7 @@ def demonstrate_guard_clauses():
     ]
 
     for i, user in enumerate(test_cases, 1):
-        print(f"
-Test case {i}:")
+        print(f"\nTest case {i}:")
         print(f"  User exists: {user.exists}, Active: {user.is_active}, Permission: {user.has_permission}")
 
         result = process_user_guard_clauses(user)
@@ -433,6 +436,329 @@ def demonstrate_dict_access():
 
 
 # =============================================================================
+# 9. SAFE FILE READING AND EDITING
+# =============================================================================
+
+def read_file_broken(filepath: str) -> str:
+    """
+    BROKEN: Opening file without context manager (with) and not handling errors.
+    If an exception occurs or if we forget to close, the file descriptor leaks.
+    Also, if the file doesn't exist, it crashes the program.
+    """
+    f = open(filepath, 'r')
+    content = f.read()
+    f.close()  # Might not be reached if an exception occurs above
+    return content
+
+
+def read_file_fixed(filepath: str) -> Optional[str]:
+    """
+    FIXED: Use a context manager (with) to guarantee file closure,
+    and handle FileNotFoundError/IOError gracefully.
+    """
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"Error: File not found at {filepath}")
+        return None
+    except IOError as e:
+        print(f"I/O Error reading {filepath}: {e}")
+        return None
+
+
+def edit_file_fixed(filepath: str, content: str) -> bool:
+    """
+    FIXED: Write content safely using context manager and error handling.
+    Creates parent directories if they do not exist.
+    """
+    try:
+        # Ensure parent directory exists
+        dir_name = os.path.dirname(filepath)
+        if dir_name and not os.path.exists(dir_name):
+            os.makedirs(dir_name, exist_ok=True)
+            
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return True
+    except IOError as e:
+        print(f"I/O Error writing to {filepath}: {e}")
+        return False
+
+
+# =============================================================================
+# 10. SAFE FILE TEXT REPLACEMENT (ATOMIC WRITE)
+# =============================================================================
+
+def replace_in_file_broken(filepath: str, search_text: str, replacement: str) -> None:
+    """
+    BROKEN: Opening the file in 'r+' mode and writing without resetting offset
+    or truncating can cause partial writes or corrupt data.
+    Also, a crash during write leaves the file partially updated/corrupted.
+    """
+    with open(filepath, 'r+') as f:
+        content = f.read()
+        new_content = content.replace(search_text, replacement)
+        # BUG: We are at EOF, so writing here just appends unless we seek(0)
+        f.write(new_content)
+
+
+def print_colorized_diff(old_text: str, new_text: str, filename: str = "file") -> None:
+    """
+    Generate and print a human-readable, colorized unified diff.
+    """
+    COLOR_RED = "\033[91m"
+    COLOR_GREEN = "\033[92m"
+    COLOR_CYAN = "\033[96m"
+    COLOR_RESET = "\033[0m"
+    
+    old_lines = old_text.splitlines(keepends=True)
+    new_lines = new_text.splitlines(keepends=True)
+    
+    diff = difflib.unified_diff(
+        old_lines, new_lines,
+        fromfile=f"a/{filename}", tofile=f"b/{filename}"
+    )
+    
+    for line in diff:
+        if line.startswith('+') and not line.startswith('+++'):
+            print(f"{COLOR_GREEN}{line}{COLOR_RESET}", end="")
+        elif line.startswith('-') and not line.startswith('---'):
+            print(f"{COLOR_RED}{line}{COLOR_RESET}", end="")
+        elif line.startswith('@@'):
+            print(f"{COLOR_CYAN}{line}{COLOR_RESET}", end="")
+        else:
+            print(line, end="")
+
+
+def replace_in_file_fixed(filepath: str, search_text: str, replacement: str) -> bool:
+    """
+    FIXED: Read content, perform replacement in-memory, and use an atomic
+    write strategy (writing to a temp file in the same directory and renaming)
+    to prevent file corruption in case of unexpected termination/crashes.
+    """
+    try:
+        # 1. Read existing content safely
+        content = read_file_fixed(filepath)
+        if content is None:
+            return False
+            
+        # 2. Perform replacement
+        new_content = content.replace(search_text, replacement)
+        
+        # Print colorized diff of the changes
+        if content != new_content:
+            print("\nColorized Diff of Edits:")
+            print_colorized_diff(content, new_content, os.path.basename(filepath))
+        
+        # 3. Write atomically
+        dir_name = os.path.dirname(filepath) or '.'
+        # Create temp file in the same directory to ensure atomic rename
+        with tempfile.NamedTemporaryFile('w', dir=dir_name, delete=False, encoding='utf-8') as tf:
+            tf.write(new_content)
+            temp_path = tf.name
+            
+        # Rename temp file to target file (atomic on POSIX systems)
+        os.replace(temp_path, filepath)
+        return True
+    except Exception as e:
+        print(f"Error during atomic replacement in {filepath}: {e}")
+        # Clean up temp file if it was created
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            os.remove(temp_path)
+        return False
+
+
+def read(filepath: str) -> Optional[str]:
+    """
+    Exposed read function. Reads content safely.
+    """
+    return read_file_fixed(filepath)
+
+
+def replace(filepath: str, search_text: str, replacement: str) -> bool:
+    """
+    Exposed replace function. Replaces text safely and prints a colorized diff.
+    """
+    return replace_in_file_fixed(filepath, search_text, replacement)
+
+
+def edit(filepath: str, content: str) -> bool:
+    """
+    Exposed edit function. Writes/edits content safely.
+    """
+    return edit_file_fixed(filepath, content)
+
+
+def demonstrate_replace_and_edit():
+    """
+    Demonstrate safe file reading, editing, and text replacement.
+    """
+    print("\n=== Safe File Reading, Editing, and Text Replacement ===")
+    test_file = "temp_demo_file.txt"
+    
+    # 1. Safe edit
+    print("Writing initial content to file using edit()...")
+    success = edit(test_file, "Hello World!\nPython is awesome.\n")
+    if success:
+        print(f"  File created successfully.")
+        
+    # 2. Safe read
+    print("\nReading content from file using read():")
+    content = read(test_file)
+    print(f"  Content: {repr(content)}")
+    
+    # 3. Safe replace (atomic write)
+    print("\nReplacing 'awesome' with 'incredible' atomically using replace()...")
+    if replace(test_file, "awesome", "incredible"):
+        new_content = read(test_file)
+        print(f"  New Content: {repr(new_content)}")
+        
+    # Cleanup
+    if os.path.exists(test_file):
+        os.remove(test_file)
+        print("\nCleaned up demo file.")
+
+
+# =============================================================================
+# 11. MODIFYING A LIST WHILE ITERATING
+# =============================================================================
+
+def remove_negatives_broken(lst: List[int]) -> List[int]:
+    """
+    BROKEN: Modifying the list directly while iterating over it.
+    This shifts indices, causing elements adjacent to removed items to be skipped.
+    """
+    for item in lst:
+        if item < 0:
+            lst.remove(item)
+    return lst
+
+
+def remove_negatives_fixed_1(lst: List[int]) -> List[int]:
+    """
+    FIXED - Option 1: Iterating over a copy of the list instead.
+    """
+    for item in lst[:]:  # Slicing creates a shallow copy
+        if item < 0:
+            lst.remove(item)
+    return lst
+
+
+def remove_negatives_fixed_2(lst: List[int]) -> List[int]:
+    """
+    FIXED - Option 2: Using list comprehension (idiomatic, does not modify in-place).
+    """
+    return [item for item in lst if item >= 0]
+
+
+def demonstrate_iteration_modification():
+    """
+    Show the issues with modifying a list during iteration and the fixes.
+    """
+    print("\n=== Collection Modification during Iteration ===")
+    
+    # Test case with consecutive negative numbers
+    numbers_broken = [1, -2, -3, 4, -5, -6, 7]
+    print(f"Original list: {numbers_broken}")
+    
+    # Broken method leaves -3 and -6 because index shifts
+    result_broken = remove_negatives_broken(numbers_broken)
+    print(f"Broken result (items skipped): {result_broken}")
+    
+    # Fixed methods clean up properly
+    numbers_fixed = [1, -2, -3, 4, -5, -6, 7]
+    result_fixed_1 = remove_negatives_fixed_1(numbers_fixed)
+    print(f"Fixed (shallow copy iteration): {result_fixed_1}")
+    
+    numbers_comp = [1, -2, -3, 4, -5, -6, 7]
+    result_fixed_2 = remove_negatives_fixed_2(numbers_comp)
+    print(f"Fixed (list comprehension):     {result_fixed_2}")
+
+
+# =============================================================================
+# 12. FLOATING POINT PRECISION COMPARISON
+# =============================================================================
+
+def demonstrate_floating_point():
+    """
+    Demonstrate float precision issues and how to compare floats safely.
+    """
+    print("\n=== Floating Point Precision Comparison ===")
+    
+    a = 0.1
+    b = 0.2
+    c = 0.3
+    
+    # BROKEN comparison
+    print(f"Is {a} + {b} == {c}?")
+    print(f"  Result of {a} + {b} is: {a + b}")
+    print(f"  Direct comparison: {a + b == c} (due to IEEE 754 precision)")
+    
+    # FIXED - Option 1: Using math.isclose()
+    print("\nUsing math.isclose():")
+    is_close = math.isclose(a + b, c)
+    print(f"  math.isclose({a} + {b}, {c}) -> {is_close}")
+    
+    # FIXED - Option 2: Using Decimal class for exact arithmetic
+    print("\nUsing decimal.Decimal:")
+    exact_a = Decimal('0.1')
+    exact_b = Decimal('0.2')
+    exact_c = Decimal('0.3')
+    exact_equal = exact_a + exact_b == exact_c
+    print(f"  {exact_a} + {exact_b} == {exact_c} -> {exact_equal}")
+
+
+# =============================================================================
+# 13. WILDCARD EXCEPTION SWALLOWING
+# =============================================================================
+
+def divide_numbers_broken(x: float, y: float) -> Optional[float]:
+    """
+    BROKEN: Bare exception catches everything, masking errors and making
+    debugging hard, including swallowing potential typos or other errors.
+    """
+    try:
+        # Imagine a typo here: e.g. using undefined variable `result = x / Z`
+        # Or a ZeroDivisionError
+        result = x / y
+        return result
+    except:  # Swallows every exception, even KeyboardInterrupt or NameError
+        return None
+
+
+def divide_numbers_fixed(x: float, y: float) -> Optional[float]:
+    """
+    FIXED: Catch only the exceptions we expect to handle, or catch Exception
+    and log it if needed, preserving critical control flow signals.
+    """
+    try:
+        result = x / y
+        return result
+    except ZeroDivisionError:
+        print("  Error: Cannot divide by zero!")
+        return None
+    except TypeError as e:
+        print(f"  Error: Invalid types provided: {e}")
+        return None
+
+
+def demonstrate_exception_swallowing():
+    """
+    Demonstrate problems with wildcard exceptions vs specific exception catching.
+    """
+    print("\n=== Exception Catching and Swallowing ===")
+    
+    print("Dividing 10 by 0 (broken):")
+    result_broken = divide_numbers_broken(10, 0)
+    print(f"  Result: {result_broken} (silently failed)")
+    
+    print("Dividing 10 by 0 (fixed):")
+    result_fixed = divide_numbers_fixed(10, 0)
+    print(f"  Result: {result_fixed}")
+
+
+# =============================================================================
 # MAIN EXECUTION
 # =============================================================================
 
@@ -453,6 +779,10 @@ def main():
     demonstrate_guard_clauses()
     demonstrate_none_check()
     demonstrate_dict_access()
+    demonstrate_replace_and_edit()
+    demonstrate_iteration_modification()
+    demonstrate_floating_point()
+    demonstrate_exception_swallowing()
     
     print("\n" + "=" * 70)
     print("ALL DEMONSTRATIONS COMPLETED")
@@ -461,3 +791,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

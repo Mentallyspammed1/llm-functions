@@ -1,6 +1,7 @@
-#!/bin/bash
+#!/data/data/com.termux/files/usr/bin/bash
 # ════════════════════════════════════════════════════════════════════
 #  NEON OCEAN THEME - Deep Blue / Aqua / Icy Cool Tones
+# @describe Ocean theme output command wrapper.
 # ════════════════════════════════════════════════════════════════════
 
 export CYBER_THEME="ocean"

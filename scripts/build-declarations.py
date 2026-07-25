@@ -133,6 +133,13 @@ def extract_from_comments(contents: str, scriptfile: str) -> List[Dict[str, Any]
                 properties[opt_name] = {"type": json_type, "description": opt_desc}
                 if is_req:
                     required.append(opt_name)
+        elif line.startswith("@flag"):
+            # @flag --name Description
+            match = re.match(r"^@flag\s+--([\w-]+)\s*(.*)$", line)
+            if match:
+                opt_name = match.group(1).replace("-", "_")
+                opt_desc = match.group(2).strip()
+                properties[opt_name] = {"type": "boolean", "description": opt_desc}
 
     if not description:
         return []

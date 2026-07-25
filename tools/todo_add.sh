@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Add a task to a local todo.txt file.
 # @arg task! The task description.
 main() {

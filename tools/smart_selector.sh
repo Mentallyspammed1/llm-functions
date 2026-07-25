@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 set -eo pipefail
 
 # @describe AI-powered tool selection based on user intent

@@ -811,3 +811,85 @@
     ]
   }
 }
+
+  {
+    "name": "bybit_smart_order",
+    "description": "Place a smart order with automatic position sizing and risk management.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Trading pair (e.g., BTCUSDT)."
+        },
+        "side": {
+          "type": "string",
+          "description": "Buy or Sell."
+        },
+        "order_type": {
+          "type": "string",
+          "description": "Market or Limit (default: Market).",
+          "default": "Market"
+        },
+        "risk_pct": {
+          "type": "number",
+          "description": "% of balance to risk (default: 1.0).",
+          "default": 1.0
+        },
+        "sl_dist": {
+          "type": "number",
+          "description": "Stop loss distance in price."
+        },
+        "sl_price": {
+          "type": "number",
+          "description": "Absolute Stop Loss price."
+        },
+        "tp_price": {
+          "type": "number",
+          "description": "Absolute Take Profit price."
+        },
+        "sl_usdt": {
+          "type": "number",
+          "description": "Maximum Risk in absolute USDT value (overrides --risk-pct)."
+        },
+        "tp_usdt": {
+          "type": "number",
+          "description": "Target Take Profit in absolute USDT value (calculates exact exit price)."
+        },
+        "time_in_force": {
+          "type": "string",
+          "description": "Time in force: GTC, IOC, FOK, PostOnly (default: GTC).",
+          "default": "GTC"
+        },
+        "reduce_only": {
+          "type": "boolean",
+          "description": "Submit order as reduce-only (close position only).",
+          "default": false
+        },
+        "margin_mode": {
+          "type": "string",
+          "description": "Margin mode: isolated or cross (default: cross).",
+          "default": "cross"
+        },
+        "position_idx": {
+          "type": "integer",
+          "description": "Position index: 0=One-Way, 1=Buy hedge, 2=Sell hedge (default: 0).",
+          "default": 0
+        },
+        "order_link_id": {
+          "type": "string",
+          "description": "Custom order link ID (max 36 chars) for idempotency."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Calculate everything and return the order payload without submitting.",
+          "default": false
+        },
+        "max_position_usdt": {
+          "type": "number",
+          "description": "Safety cap: refuse if notional > this USDT value."
+        }
+      },
+      "required": ["symbol", "side"]
+    }
+  },

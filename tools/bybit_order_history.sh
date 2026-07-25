@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Fetches the list of recent orders for the authenticated account.
 # @option --category <spot|linear|inverse|option> Category (default: spot)
 # @option --cursor <cursor> Optional cursor for pagination.

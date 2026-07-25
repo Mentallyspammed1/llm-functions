@@ -1,4 +1,7 @@
-#!/bin/bash
+#!/data/data/com.termux/files/usr/bin/bash
+# @describe Send files via Telegram.
+# @arg file_path! Path to the file to send.
+# @arg caption Optional caption.
 
 # Check if at least one argument is provided
 if [ $# -eq 0 ]; then

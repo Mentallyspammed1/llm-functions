@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Compress a file or folder into a tar.gz archive.
 # @arg path! The path to compress.
 # @option --output! The output filename (e.g., archive.tar.gz).

@@ -1,5 +1,22 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 set -e
+
+# @describe Bybit trading tool with multiple commands: get_history, view_logs, get_trend, check_status, execute_trade, analyze_l2, check_funding, rebalance, monitor_liquidations, execute_iceberg, send_alert
+# @option --cmd <STRING> Command to execute (get_history, view_logs, get_trend, check_status, execute_trade, analyze_l2, check_funding, rebalance, monitor_liquidations, execute_iceberg, send_alert)
+# @option --symbol <STRING> Trading pair (default: BTCUSDT)
+# @option --interval <STRING> Timeframe (default: 15)
+# @option --signal <STRING> Signal (buy/sell)
+# @option --risk <STRING> USDT to risk on SL (default: 50)
+# @option --profit <STRING> Target USDT profit after fees (default: 10)
+# @option --depth <STRING> Order book depth (default: 50)
+# @option --asset <STRING> Target coin (default: BTC)
+# @option --target <STRING> Target percentage (default: 0.5)
+# @option --side <STRING> Order side (buy/sell)
+# @option --total-qty <STRING> Total quantity to execute
+# @option --visible-qty <STRING> Visible quantity per slice
+# @option --price <STRING> Optional limit price
+# @option --msg <STRING> Message content
+
 
 # Configuration
 ROOT_DIR="$(dirname "$0")"
@@ -45,21 +62,6 @@ safe_node_call() {
 # Check dependencies at script start
 check_dependencies
 
-# @describe Bybit trading tool with multiple commands: get_history, view_logs, get_trend, check_status, execute_trade, analyze_l2, check_funding, rebalance, monitor_liquidations, execute_iceberg, send_alert
-# @option --cmd <STRING> Command to execute (get_history, view_logs, get_trend, check_status, execute_trade, analyze_l2, check_funding, rebalance, monitor_liquidations, execute_iceberg, send_alert)
-# @option --symbol <STRING> Trading pair (default: BTCUSDT)
-# @option --interval <STRING> Timeframe (default: 15)
-# @option --signal <STRING> Signal (buy/sell)
-# @option --risk <STRING> USDT to risk on SL (default: 50)
-# @option --profit <STRING> Target USDT profit after fees (default: 10)
-# @option --depth <STRING> Order book depth (default: 50)
-# @option --asset <STRING> Target coin (default: BTC)
-# @option --target <STRING> Target percentage (default: 0.5)
-# @option --side <STRING> Order side (buy/sell)
-# @option --total-qty <STRING> Total quantity to execute
-# @option --visible-qty <STRING> Visible quantity per slice
-# @option --price <STRING> Optional limit price
-# @option --msg <STRING> Message content
 
 main() {
     local cmd="${argc_cmd:-get_history}"

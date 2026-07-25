@@ -5,6 +5,6 @@ def get_ipinfo():
     """
     Get the ip info
     """
-    with urllib.request.urlopen("https://httpbin.org/ip") as response:
+    with urllib.request.urlopen("https://api.ipify.org") as response:
         data = response.read()
         return data.decode("utf-8")

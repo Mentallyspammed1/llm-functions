@@ -62,5 +62,84 @@
       "msg": "Order does not meet minimum order value 5USDT"
     },
     "status": "failed"
+  },
+  {
+    "id": "0ab22680-a04a-4ae8-8085-277b4371c065",
+    "timestamp": "2026-07-18T20:10:51.945670+00:00",
+    "action": "place_order",
+    "symbol": "BTCUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "BTCUSDT",
+      "side": null,
+      "orderType": "Market",
+      "qty": "0.902",
+      "timeInForce": "GTC",
+      "price": "8.3",
+      "stopLoss": "8.3",
+      "takeProfit": "8.3",
+      "orderLinkId": "ultra_micro_001",
+      "maker_fee": "0.001",
+      "target": "0.07",
+      "risk_reward": "0.14",
+      "profit_usdt": "0.07",
+      "iceberg_slices": "1",
+      "taker_fee": "0.001",
+      "kelly_win": "0.71"
+    },
+    "result": {
+      "status": "error",
+      "code": 10001,
+      "msg": "Side invalid"
+    },
+    "status": "failed"
+  },
+  {
+    "id": "1daddc62-3883-4453-9cc1-18f7781fb610",
+    "timestamp": "2026-07-18T20:11:19.140871+00:00",
+    "action": "place_order",
+    "symbol": "BTCUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "BTCUSDT",
+      "side": "Buy",
+      "orderType": "Market",
+      "qty": "0.902",
+      "timeInForce": "GTC",
+      "price": "8.3",
+      "stopLoss": "8.3",
+      "takeProfit": "8.3",
+      "orderLinkId": "ultra_micro_001"
+    },
+    "result": {
+      "status": "error",
+      "code": 10001,
+      "msg": "PartialTakeProfit:83000 set for Buy position should be higher than base_price:645784000??LastPrice"
+    },
+    "status": "failed"
+  },
+  {
+    "id": "e1aa1f22-dc25-490a-b7af-7d810c162dba",
+    "timestamp": "2026-07-18T20:11:51.677872+00:00",
+    "action": "place_order",
+    "symbol": "BTCUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "BTCUSDT",
+      "side": null,
+      "orderType": "Limit",
+      "qty": "0.902",
+      "timeInForce": "GTC",
+      "price": "1999999.8",
+      "stopLoss": "1999999.8",
+      "takeProfit": "1999999.8",
+      "orderLinkId": "ultra_micro_001"
+    },
+    "result": {
+      "status": "error",
+      "code": 10001,
+      "msg": "Side invalid"
+    },
+    "status": "failed"
   }
 ]

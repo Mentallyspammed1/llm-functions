@@ -1,6 +1,7 @@
-#!/bin/bash
+#!/data/data/com.termux/files/usr/bin/bash
 # ════════════════════════════════════════════════════════════════════
 #  NEON MATRIX THEME - Terminal Green / Digital Rain Aesthetic
+# @describe Matrix theme output command wrapper.
 # ════════════════════════════════════════════════════════════════════
 
 export CYBER_THEME="matrix"

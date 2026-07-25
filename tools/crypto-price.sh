@@ -1,6 +1,9 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # =============================================================================
 # crypto-price.sh – fetch the current USD price of a cryptocurrency from Bybit
+#
+# @describe Fetch the current USD price of a cryptocurrency from Bybit.
+# @arg coin! The cryptocurrency name/symbol (e.g. bitcoin, BTC, ETH)
 #
 # Usage:
 #   ./crypto-price.sh <coin>

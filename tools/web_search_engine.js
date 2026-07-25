@@ -1,12 +1,19 @@
 const https = require('https');
 
 /**
- * Perform a web search using the specified query.
- * 
- * @param {string} query - The search query string.
- * @param {string} [limit='10'] - Maximum results.
- * @returns {Promise<Object>} - The search results.
+ * @describe Perform web search using a search engine.
+ * @option --query! <TEXT> The search query string.
+ * @option --limit <NUM> Maximum results.
+ * @typedef {Object} Args
+ * @property {string} query - The search query.
+ * @property {number} [limit] - Limit.
+ * @param {Args} args
  */
+exports.run = async function(args) {
+    const { query, limit } = args;
+    return search(query, limit);
+};
+
 async function search(query, limit = 10) {
     // Basic wrapper around a search service (mocked or placeholder for actual API call)
     console.error(`Searching for: ${query} (limit: ${limit})`);

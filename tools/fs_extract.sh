@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Extract a tar.gz or zip archive.
 # @arg archive! The archive file to extract.
 # @option --dir=. The directory to extract into.

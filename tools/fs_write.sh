@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Write, append, insert, or replace content in a file
 # @option --path! The path of the file to write to
 # @option --contents The contents to write/append/replace. Use '-' to read from stdin

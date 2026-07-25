@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # ==============================================================================
 # demo_sh.sh — Bash Tool Demo
 #
@@ -12,7 +12,7 @@
 # @flag --boolean Define a boolean property
 # @option --integer! <INT> Define a required integer property
 # @option --number! <NUM> Define a required number property
-# @option --array!* <VALUE> Define a required string array property
+# @option --array+ <VALUE> Define a required string array property
 # @option --array-optional* <VALUE> Define an optional string array property
 # @env LLM_OUTPUT=/dev/fd/1 Output path
 

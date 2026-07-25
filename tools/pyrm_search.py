@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# web_search_google.py — Pyrmethus Web Search v4.4.0
-# argc/aichat compatible · Termux · Google Custom Search API
+# web_search_google.py — Pyrmethus Web Search v4.4.2-STABLE
+# argc/aichat compatible · Termux · Google Custom Search API · Thread-Safe
 #
 # @describe Perform advanced web search using Google Custom Search API with
 # multiple filtering options including date range, site restriction, file type,
@@ -26,7 +26,7 @@
 # @option --output-format <FMT>             Output format: detailed, compact, json, parsed. [default: detailed]
 # @option --timeout <SECS>                  Request timeout in seconds (1-60). [default: 15]
 # @option --max-retries <NUM>               Maximum retry attempts (0-5). [default: 2]
-# @option --cache-ttl <SECS>               Cache TTL in seconds (0=disabled, max=3600). [default: 300]
+# @option --cache-ttl <SECS>                Cache TTL in seconds (0=disabled, max=3600). [default: 300]
 # @option --pages <NUM>                     Number of result pages to fetch (1-10). [default: 1]
 # @option --rate-limit-delay <SECS>         Delay between API requests (0-10). [default: 1]
 # @option --export-format <FMT>             Export format: json, csv, md, html.
@@ -78,34 +78,29 @@ from __future__ import annotations
 import argparse
 import base64
 import gzip
-import io
-import io
 import hashlib
+import io
 import json
 import logging
 import mimetypes
 import os
+import random
 import re
 import shutil
 import signal
 import struct
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
-import gzip
-import io
-import io
-import gzip
-import io
-import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-__version__ = "4.4.0"
+__version__ = "4.4.2-STABLE"
 TOOL_NAME   = "llm-functions-web-search"
 
 # ==============================================================================
@@ -121,7 +116,7 @@ YOU_API_KEY    = "ydc-sk-3be25b63a354f86f-cZsqdcYZe3xHo2qxVUZxEmTI1wAzlfG8-23e9d
 API_BASE_URL   = "https://www.googleapis.com/customsearch/v1"
 
 # ==============================================================================
-# SECTION 2: Constants
+# SECTION 2: Constants & Thread Locks
 # ==============================================================================
 
 CACHE_BASE_DIR         = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "llm_web_search"
@@ -136,6 +131,8 @@ ENCOUNTERED_LINKS_FILE = CACHE_BASE_DIR / "encountered_links.txt"
 MAX_DAILY_REQUESTS      = 100
 MAX_REQUESTS_PER_MINUTE = 10
 MAX_CACHE_MB            = 100
+
+_IO_LOCK = threading.Lock()
 
 DOMAIN_BLACKLIST = re.compile(
     r"^(ads\.google\.com|googleadservices\.com|doubleclick\.net|"
@@ -172,13 +169,14 @@ def _ts() -> str:
 
 
 def _log_json(level: str, msg: str) -> None:
-    """Append a JSON log entry to LOG_FILE (best-effort)."""
-    try:
-        CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
-        with open(LOG_FILE, "a", encoding="utf-8") as fp:
-            fp.write(json.dumps({"timestamp": _ts(), "level": level, "message": msg}) + "\n")
-    except OSError:
-        pass
+    """Append a JSON log entry to LOG_FILE (thread-safe)."""
+    with _IO_LOCK:
+        try:
+            CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
+            with open(LOG_FILE, "a", encoding="utf-8") as fp:
+                fp.write(json.dumps({"timestamp": _ts(), "level": level, "message": msg}) + "\n")
+        except OSError:
+            pass
 
 
 def _debug(msg: str) -> None:
@@ -217,23 +215,24 @@ _DIRECT_OUTPUTS = {"/dev/stdout", "/dev/stderr", "/dev/fd/1", "&1", "&2", "-"}
 
 
 def _write_output(text: str, out_path: str) -> None:
-    """Write text to LLM_OUTPUT (append) or stdout."""
-    if out_path in _DIRECT_OUTPUTS:
-        sys.stdout.write(text)
-        sys.stdout.flush()
-    else:
-        try:
-            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(out_path, "a", encoding="utf-8") as fp:
-                fp.write(text)
-        except OSError as exc:
-            _error(f"Cannot write to '{out_path}': {exc}")
+    """Write text to LLM_OUTPUT (append) or stdout safely."""
+    with _IO_LOCK:
+        if out_path in _DIRECT_OUTPUTS:
             sys.stdout.write(text)
             sys.stdout.flush()
+        else:
+            try:
+                Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                with open(out_path, "a", encoding="utf-8") as fp:
+                    fp.write(text)
+            except OSError as exc:
+                _error(f"Cannot write to '{out_path}': {exc}")
+                sys.stdout.write(text)
+                sys.stdout.flush()
 
 
 # ==============================================================================
-# SECTION 6: Utility helpers
+# SECTION 6: Utility helpers & Link Normalizer
 # ==============================================================================
 
 def _urlencode(s: str) -> str:
@@ -273,8 +272,14 @@ def _url_extension(url: str) -> str:
     return "jpg"
 
 
-def _repeat_char(ch: str, n: int) -> str:
-    return ch * n
+def _normalize_link(link: str) -> str:
+    """Unwrap Google redirect links if present."""
+    if "google.com/url?" in link:
+        parsed = urllib.parse.urlparse(link)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if "q" in qs:
+            return qs["q"][0]
+    return link
 
 
 def _is_blacklisted(domain: str) -> bool:
@@ -292,39 +297,42 @@ def _validate_int_range(value: Any, lo: int, hi: int, name: str) -> int:
 
 
 def _load_json_file(path: Path, default: Any) -> Any:
-    try:
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        pass
-    return default
+    with _IO_LOCK:
+        try:
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+        return default
 
 
 def _save_json_file(path: Path, data: Any) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except OSError:
-        pass
+    with _IO_LOCK:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError:
+            pass
 
 
 # ==============================================================================
-# SECTION 7: Rate limiting (per-minute)
+# SECTION 7: Rate limiting (per-minute, thread-safe)
 # ==============================================================================
 
 def _rate_limit_check() -> None:
-    CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
-    minute_key = str(_now() // 60)
-    data: dict = _load_json_file(RATE_LIMIT_FILE, {})
-    count = int(data.get(minute_key, 0))
-    if count >= MAX_REQUESTS_PER_MINUTE:
-        _die(f"Rate limit exceeded: {MAX_REQUESTS_PER_MINUTE} requests/minute.")
-    data[minute_key] = count + 1
-    _save_json_file(RATE_LIMIT_FILE, data)
+    with _IO_LOCK:
+        CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
+        minute_key = str(_now() // 60)
+        data: dict = _load_json_file(RATE_LIMIT_FILE, {})
+        count = int(data.get(minute_key, 0))
+        if count >= MAX_REQUESTS_PER_MINUTE:
+            _die(f"Rate limit exceeded: {MAX_REQUESTS_PER_MINUTE} requests/minute.")
+        data[minute_key] = count + 1
+        _save_json_file(RATE_LIMIT_FILE, data)
 
 
 # ==============================================================================
-# SECTION 8: Quota tracking
+# SECTION 8: Quota tracking (thread-safe)
 # ==============================================================================
 
 def _quota_check() -> None:
@@ -341,18 +349,19 @@ def _quota_check() -> None:
 
 
 def _quota_increment() -> None:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    data  = _load_json_file(QUOTA_FILE, {"date": today, "count": 0})
-    if data.get("date") != today:
-        data = {"date": today, "count": 0}
-    data["count"] = int(data.get("count", 0)) + 1
-    data["updated"] = _ts()
-    _save_json_file(QUOTA_FILE, data)
-    _debug(f"Quota: {data['count']}/{MAX_DAILY_REQUESTS}")
+    with _IO_LOCK:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        data  = _load_json_file(QUOTA_FILE, {"date": today, "count": 0})
+        if data.get("date") != today:
+            data = {"date": today, "count": 0}
+        data["count"] = int(data.get("count", 0)) + 1
+        data["updated"] = _ts()
+        _save_json_file(QUOTA_FILE, data)
+        _debug(f"Quota: {data['count']}/{MAX_DAILY_REQUESTS}")
 
 
 # ==============================================================================
-# SECTION 9: Response cache (gzip-compressed)
+# SECTION 9: Response cache (gzip-compressed, thread-safe)
 # ==============================================================================
 
 def _cache_path(params: str) -> Path:
@@ -363,57 +372,60 @@ def _cache_read(params: str, ttl: int, no_cache: bool) -> Optional[dict]:
     if no_cache or ttl == 0:
         return None
     path = _cache_path(params)
-    if not path.exists():
-        return None
-    try:
-        with gzip.open(path, "rb") as f:
-            data = json.loads(f.read().decode("utf-8"))
-        age = _now() - int(data.get("__cached_at", 0))
-        if age > ttl:
-            _debug(f"Cache expired (age={age}s ttl={ttl}s)")
-            path.unlink(missing_ok=True)
+    with _IO_LOCK:
+        if not path.exists():
             return None
-        _debug(f"Cache hit (age={age}s)")
-        return {k: v for k, v in data.items() if k != "__cached_at"}
-    except (OSError, json.JSONDecodeError, gzip.BadGzipFile):
-        return None
+        try:
+            with gzip.open(path, "rb") as f:
+                data = json.loads(f.read().decode("utf-8"))
+            age = _now() - int(data.get("__cached_at", 0))
+            if age > ttl:
+                _debug(f"Cache expired (age={age}s ttl={ttl}s)")
+                path.unlink(missing_ok=True)
+                return None
+            _debug(f"Cache hit (age={age}s)")
+            return {k: v for k, v in data.items() if k != "__cached_at"}
+        except (OSError, json.JSONDecodeError, gzip.BadGzipFile):
+            return None
 
 
 def _cache_write(params: str, response: dict, no_cache: bool, ttl: int) -> None:
     if no_cache or ttl == 0:
         return
-    CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
     path = _cache_path(params)
-    try:
-        payload = {**response, "__cached_at": _now()}
-        with gzip.open(path, "wb") as f:
-            f.write(json.dumps(payload).encode("utf-8"))
-        _debug(f"Cache written: {path}")
-        _cache_enforce_size()
-    except OSError as exc:
-        _warn(f"Cache write failed: {exc}")
+    with _IO_LOCK:
+        CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            payload = {**response, "__cached_at": _now()}
+            with gzip.open(path, "wb") as f:
+                f.write(json.dumps(payload).encode("utf-8"))
+            _debug(f"Cache written: {path}")
+        except OSError as exc:
+            _warn(f"Cache write failed: {exc}")
+    _cache_enforce_size()
 
 
 def _cache_enforce_size() -> None:
-    try:
-        total = sum(p.stat().st_size for p in CACHE_BASE_DIR.glob("*.json.gz"))
-        total_mb = total // 1_048_576
-        if total_mb <= MAX_CACHE_MB:
-            return
-        _warn(f"Cache {total_mb}MiB > {MAX_CACHE_MB}MiB — pruning.")
-        files = sorted(
-            CACHE_BASE_DIR.glob("*.json.gz"),
-            key=lambda p: p.stat().st_mtime,
-        )
-        for f in files:
-            f.unlink(missing_ok=True)
-            total_mb = sum(
-                p.stat().st_size for p in CACHE_BASE_DIR.glob("*.json.gz")
-            ) // 1_048_576
+    with _IO_LOCK:
+        try:
+            total = sum(p.stat().st_size for p in CACHE_BASE_DIR.glob("*.json.gz"))
+            total_mb = total // 1_048_576
             if total_mb <= MAX_CACHE_MB:
-                break
-    except OSError:
-        pass
+                return
+            _warn(f"Cache {total_mb}MiB > {MAX_CACHE_MB}MiB — pruning.")
+            files = sorted(
+                CACHE_BASE_DIR.glob("*.json.gz"),
+                key=lambda p: p.stat().st_mtime,
+            )
+            for f in files:
+                f.unlink(missing_ok=True)
+                total_mb = sum(
+                    p.stat().st_size for p in CACHE_BASE_DIR.glob("*.json.gz")
+                ) // 1_048_576
+                if total_mb <= MAX_CACHE_MB:
+                    break
+        except OSError:
+            pass
 
 
 def _cache_prune() -> None:
@@ -422,7 +434,9 @@ def _cache_prune() -> None:
     max_age = 3600
     now     = _now()
     pruned  = 0
-    for cache_file in CACHE_BASE_DIR.glob("*.json.gz"):
+    with _IO_LOCK:
+        files = list(CACHE_BASE_DIR.glob("*.json.gz"))
+    for cache_file in files:
         try:
             with gzip.open(cache_file, "rb") as f:
                 data = json.loads(f.read().decode("utf-8"))
@@ -440,50 +454,53 @@ def _show_cache_stats(enabled: bool) -> None:
     if not enabled:
         return
     CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
-    entries = list(CACHE_BASE_DIR.glob("*.json.gz"))
-    total   = sum(p.stat().st_size for p in entries if p.exists())
-    count   = _load_json_file(QUOTA_FILE, {}).get("count", 0)
+    with _IO_LOCK:
+        entries = list(CACHE_BASE_DIR.glob("*.json.gz"))
+        total   = sum(p.stat().st_size for p in entries if p.exists())
+    count = _load_json_file(QUOTA_FILE, {}).get("count", 0)
     _info(f"Cache: {len(entries)} entries, {_human_size(total)}, {count} API calls today")
 
 
 # ==============================================================================
-# SECTION 10: History & analytics
+# SECTION 10: History & analytics (thread-safe)
 # ==============================================================================
 
 def _add_to_history(query: str, result_count: int) -> None:
-    CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
-    history: list = _load_json_file(HISTORY_FILE, [])
-    history.insert(0, {"query": query, "result_count": result_count, "timestamp": _ts()})
-    _save_json_file(HISTORY_FILE, history[:100])
+    with _IO_LOCK:
+        CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
+        history: list = _load_json_file(HISTORY_FILE, [])
+        history.insert(0, {"query": query, "result_count": result_count, "timestamp": _ts()})
+        _save_json_file(HISTORY_FILE, history[:100])
 
 
 def _update_analytics(query: str, result_count: int) -> None:
-    CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
-    data: dict = _load_json_file(ANALYTICS_FILE, {"queries": {}})
-    queries = data.setdefault("queries", {})
-    if query in queries:
-        queries[query]["count"] = queries[query].get("count", 0) + result_count
-        queries[query]["last_seen"] = _ts()
-    else:
-        queries[query] = {"count": result_count, "last_seen": _ts()}
-    _save_json_file(ANALYTICS_FILE, data)
+    with _IO_LOCK:
+        CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
+        data: dict = _load_json_file(ANALYTICS_FILE, {"queries": {}})
+        queries = data.setdefault("queries", {})
+        if query in queries:
+            queries[query]["count"] = queries[query].get("count", 0) + result_count
+            queries[query]["last_seen"] = _ts()
+        else:
+            queries[query] = {"count": result_count, "last_seen": _ts()}
+        _save_json_file(ANALYTICS_FILE, data)
 
 
 def _log_encountered_links(items: list[dict]) -> None:
-    """Append all result URLs to the encountered-links log (best-effort)."""
-    try:
-        CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
-        links = [
-            item.get("link")
-            or (item.get("image") or {}).get("contextLink")
-            for item in items
-            if item.get("link") or (item.get("image") or {}).get("contextLink")
-        ]
-        if links:
-            with open(ENCOUNTERED_LINKS_FILE, "a", encoding="utf-8") as fp:
-                fp.write("\n".join(links) + "\n")
-    except OSError:
-        pass
+    """Append all normalized result URLs to the encountered-links log (thread-safe)."""
+    with _IO_LOCK:
+        try:
+            CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
+            links = [
+                _normalize_link(item.get("link") or (item.get("image") or {}).get("contextLink", ""))
+                for item in items
+                if item.get("link") or (item.get("image") or {}).get("contextLink")
+            ]
+            if links:
+                with open(ENCOUNTERED_LINKS_FILE, "a", encoding="utf-8") as fp:
+                    fp.write("\n".join(links) + "\n")
+        except OSError:
+            pass
 
 
 # ==============================================================================
@@ -601,7 +618,7 @@ def _params_to_qs(params: dict[str, str]) -> str:
 
 
 # ==============================================================================
-# SECTION 13: HTTP request (retry + exponential backoff + cache)
+# SECTION 13: HTTP request (retry + exponential backoff + jitter + proxy handler)
 # ==============================================================================
 
 def _do_request(
@@ -634,20 +651,21 @@ def _do_request(
         k, _, v = args.header.partition(":")
         headers[k.strip()] = v.strip()
 
-    proxies: Optional[str] = getattr(args, "proxy", None)
+    opener = urllib.request.build_opener()
+    if getattr(args, "proxy", None):
+        proxy_url = args.proxy
+        proxy_handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        opener.add_handler(proxy_handler)
 
     for attempt in range(int(args.max_retries) + 1):
         if attempt > 0:
-            wait = min(2 ** attempt + (attempt * 2), 60)
-            _debug(f"Retry {attempt}/{args.max_retries} — waiting {wait}s")
+            wait = min(2 ** attempt + (attempt * 2), 60) + random.uniform(0.1, 1.0)
+            _debug(f"Retry {attempt}/{args.max_retries} — waiting {wait:.2f}s")
             time.sleep(wait)
 
         try:
             req = urllib.request.Request(url, headers=headers)
-            if proxies:
-                req.set_proxy(proxies.replace("http://", "").replace("https://", ""), "http")
-
-            with urllib.request.urlopen(req, timeout=int(args.timeout)) as resp:
+            with opener.open(req, timeout=int(args.timeout)) as resp:
                 raw = resp.read()
 
                 encoding = resp.headers.get("Content-Encoding", "")
@@ -670,8 +688,8 @@ def _do_request(
                 _error(f"HTTP {code}: {body.get('error', {}).get('message', exc.reason)}")
                 return body
             if code == 429:
-                wait = (attempt + 1) * 10
-                _warn(f"Rate limited (HTTP 429) — waiting {wait}s.")
+                wait = (attempt + 1) * 10 + random.uniform(1, 3)
+                _warn(f"Rate limited (HTTP 429) — waiting {wait:.1f}s.")
                 time.sleep(wait)
             elif code in (500, 502, 503, 504):
                 _warn(f"Server error (HTTP {code}).")
@@ -740,7 +758,6 @@ def _detect_mime(filepath: Path) -> str:
     mime, _ = mimetypes.guess_type(str(filepath))
     if mime:
         return mime
-    # Magic-byte sniff
     try:
         with open(filepath, "rb") as f:
             magic = f.read(12)
@@ -822,7 +839,7 @@ def _encode_base64(filepath: Path, mime: str) -> str:
 
 
 # ==============================================================================
-# SECTION 16: Download single image
+# SECTION 16: Download single image (with proxy support)
 # ==============================================================================
 
 def _download_single_image(
@@ -832,7 +849,6 @@ def _download_single_image(
     title:     str,
     args:      argparse.Namespace,
 ) -> dict:
-    # Format filter
     fmt_filter = getattr(args, "image_format", None)
     if fmt_filter:
         url_ext  = _url_extension(url)
@@ -858,10 +874,16 @@ def _download_single_image(
     _debug(f"Downloading [{index}]: {url}")
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; llm-functions/4.4.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; llm-functions/4.4.2)",
         "Referer":    "https://www.google.com/",
     }
     req = urllib.request.Request(url, headers=headers)
+
+    opener = urllib.request.build_opener()
+    if getattr(args, "proxy", None):
+        proxy_url = args.proxy
+        proxy_handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        opener.add_handler(proxy_handler)
 
     max_dl_retries = 2
     success        = False
@@ -870,7 +892,7 @@ def _download_single_image(
 
     for attempt in range(max_dl_retries + 1):
         try:
-            with urllib.request.urlopen(req, timeout=int(args.download_timeout)) as resp:
+            with opener.open(req, timeout=int(args.download_timeout)) as resp:
                 http_code = resp.status
                 data      = resp.read()
                 dl_size   = len(data)
@@ -879,7 +901,7 @@ def _download_single_image(
                 break
         except Exception as exc:
             _warn(f"Download attempt {attempt+1} failed: {exc}")
-            time.sleep(2 ** attempt)
+            time.sleep(2 ** attempt + random.uniform(0.1, 0.5))
 
     if not success or not filepath.exists():
         return {"skipped": True, "reason": "download_failed", "url": url}
@@ -897,7 +919,6 @@ def _download_single_image(
 
     mime = _detect_mime(filepath)
 
-    # Dimensions
     actual_dims = "unknown"
     identify    = shutil.which("identify")
     if identify:
@@ -910,7 +931,6 @@ def _download_single_image(
         except Exception:
             pass
 
-    # Thumbnail
     thumb_path: Optional[str] = None
     if args.create_thumbnails:
         thumb_dir = dest_dir / "thumbnails"
@@ -919,7 +939,6 @@ def _download_single_image(
         if tp:
             thumb_path = str(tp)
 
-    # Base64
     b64_data = ""
     if args.encode_base64:
         b64_data = _encode_base64(filepath, mime)
@@ -1013,7 +1032,7 @@ def _export_csv(response: dict, query: str) -> str:
     lines = ["Title,URL,Source,Snippet"]
     for item in response.get("items") or []:
         title   = (item.get("title")       or "").replace('"', '""')
-        link    = item.get("link",           "")
+        link    = _normalize_link(item.get("link", ""))
         src     = item.get("displayLink",    "")
         snippet = (item.get("snippet")      or "").replace('"', '""').replace("\n", " ")
         lines.append(f'"{title}","{link}","{src}","{snippet}"')
@@ -1024,7 +1043,7 @@ def _export_markdown(response: dict, query: str) -> str:
     lines = [f"# Web Search Results: {query}", ""]
     for item in response.get("items") or []:
         title   = item.get("title")   or "Untitled"
-        link    = item.get("link",     "")
+        link    = _normalize_link(item.get("link", ""))
         src     = item.get("displayLink", "N/A")
         snippet = item.get("snippet") or "No description"
         lines += [f"* [{title}]({link})", f"  **Source:** {src}", f"  {snippet}", ""]
@@ -1035,7 +1054,7 @@ def _export_html(response: dict, query: str) -> str:
     items_html = ""
     for item in response.get("items") or []:
         title   = item.get("title")   or "Untitled"
-        link    = item.get("link",     "")
+        link    = _normalize_link(item.get("link", ""))
         src     = item.get("displayLink", "N/A")
         snippet = item.get("snippet") or "No description"
         items_html += (
@@ -1070,16 +1089,18 @@ def _format_web_results(response: dict, query: str, args: argparse.Namespace) ->
     if not items:
         return f'No results for: "{query}"\n'
 
-    # Log links
     _log_encountered_links(items)
 
-    # JSON-keys extraction
     if args.json_keys:
         keys = [k.strip() for k in args.json_keys.split(",")]
-        rows = ["\t".join(str(item.get(k, "")) for k in keys) for item in items]
+        rows = []
+        for item in items:
+            normalized_item = dict(item)
+            if "link" in normalized_item:
+                normalized_item["link"] = _normalize_link(normalized_item["link"])
+            rows.append("\t".join(str(normalized_item.get(k, "")) for k in keys))
         return "\n".join(rows) + "\n"
 
-    # Dedup by domain
     if args.no_duplicates:
         seen: set = set()
         deduped: list[dict] = []
@@ -1090,7 +1111,6 @@ def _format_web_results(response: dict, query: str, args: argparse.Namespace) ->
                 deduped.append(item)
         items = deduped
 
-    # Blacklist filter
     items = [i for i in items if not _is_blacklisted(i.get("displayLink", ""))]
 
     si     = response.get("searchInformation") or {}
@@ -1106,7 +1126,7 @@ def _format_web_results(response: dict, query: str, args: argparse.Namespace) ->
         for item in items:
             rows.append(json.dumps({
                 "title":         item.get("title"),
-                "link":          item.get("link"),
+                "link":          _normalize_link(item.get("link", "")),
                 "snippet":       item.get("snippet"),
                 "pageThumbnail": (item.get("pagemap") or {}).get("cse_image", [{}])[0].get("src"),
             }))
@@ -1119,10 +1139,9 @@ def _format_web_results(response: dict, query: str, args: argparse.Namespace) ->
             SEP60,
         ]
         for i, item in enumerate(items, 1):
-            lines += [f"[{i}] {item.get('title', '')}", f"    {item.get('link', '')}"]
+            lines += [f"[{i}] {item.get('title', '')}", f"    {_normalize_link(item.get('link', ''))}"]
         return "\n".join(lines) + "\n"
 
-    # detailed (default)
     lines = [
         SEP70, "GOOGLE WEB SEARCH RESULTS", SEP70,
         f"Query       : {query}",
@@ -1136,7 +1155,7 @@ def _format_web_results(response: dict, query: str, args: argparse.Namespace) ->
         pub_time = metatags.get("article:published_time", "")
         snippet  = re.sub(r"\s+", " ", item.get("snippet") or "").strip()
         lines   += [f"[{i}] {item.get('title', '')}",
-                    f"    URL     : {item.get('link', '')}",
+                    f"    URL     : {_normalize_link(item.get('link', ''))}",
                     f"    Source  : {item.get('displayLink', '')}"]
         if pub_time:
             lines.append(f"    Date    : {pub_time}")
@@ -1182,8 +1201,8 @@ def _format_image_results(
             img = item.get("image") or {}
             rows.append(json.dumps({
                 "title":       item.get("title"),
-                "imageUrl":    item.get("link"),
-                "contextPage": img.get("contextLink"),
+                "imageUrl":    _normalize_link(item.get("link", "")),
+                "contextPage": _normalize_link(img.get("contextLink", "")),
                 "mimeType":    item.get("mime"),
                 "width":       img.get("width"),
                 "height":      img.get("height"),
@@ -1205,8 +1224,8 @@ def _format_image_results(
             img = item.get("image") or {}
             lines += [
                 f"[{i}] {item.get('title', 'Untitled')}",
-                f"    Image : {item.get('link', '')}",
-                f"    Page  : {img.get('contextLink', 'N/A')}",
+                f"    Image : {_normalize_link(item.get('link', ''))}",
+                f"    Page  : {_normalize_link(img.get('contextLink', ''))}",
             ]
         if download_results:
             dl_c = sum(1 for r in download_results if not r.get("skipped"))
@@ -1214,7 +1233,6 @@ def _format_image_results(
             lines.append(f"\nDownloaded: {dl_c}  |  Skipped: {sk_c}")
         return "\n".join(lines) + "\n"
 
-    # detailed
     lines = [
         SEP70, "GOOGLE IMAGE SEARCH RESULTS", SEP70,
         f"Query       : {query}",
@@ -1228,8 +1246,8 @@ def _format_image_results(
         snippet = re.sub(r"\s+", " ", item.get("snippet") or "N/A").strip()
         lines  += [
             f"[{i}] {item.get('title', 'Untitled')}",
-            f"    Image URL : {item.get('link', '')}",
-            f"    Page URL  : {img.get('contextLink', 'N/A')}",
+            f"    Image URL : {_normalize_link(item.get('link', ''))}",
+            f"    Page URL  : {_normalize_link(img.get('contextLink', ''))}",
             f"    Source    : {item.get('displayLink', '')}",
         ]
         if show_meta:
@@ -1303,7 +1321,7 @@ def _process_batch_queries(args: argparse.Namespace) -> Optional[dict]:
 
 def _check_deps(args: argparse.Namespace) -> None:
     missing = []
-    for cmd in []:  # urllib is stdlib; jq not needed in Python
+    for cmd in []:
         if not shutil.which(cmd):
             missing.append(cmd)
     if missing:
@@ -1320,19 +1338,22 @@ def _check_deps(args: argparse.Namespace) -> None:
 
 
 # ==============================================================================
-# SECTION 23: Core logic
+# SECTION 23: Core logic & Signal Handlers
 # ==============================================================================
 
 def _execute(args: argparse.Namespace) -> None:
     global _debug_enabled
     _debug_enabled = args.debug
 
+    def _sig_handler(signum, frame):
+        _die("Operation interrupted by user signal.")
+    signal.signal(signal.SIGINT, _sig_handler)
+    signal.signal(signal.SIGTERM, _sig_handler)
+
     _check_deps(args)
     _validate_params(args)
     _show_cache_stats(args.show_cache_stats)
 
-    # Background cache prune (best-effort)
-    import threading
     threading.Thread(target=_cache_prune, daemon=True).start()
 
     query = args.query
@@ -1348,7 +1369,6 @@ def _execute(args: argparse.Namespace) -> None:
 
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
 
-    # ── Batch mode ────────────────────────────────────────────────────────────
     if args.queries:
         response = _process_batch_queries(args)
         if response is None:
@@ -1367,7 +1387,6 @@ def _execute(args: argparse.Namespace) -> None:
         _write_output(text, out_path)
         return
 
-    # ── Single / multi-page fetch ────────────────────────────────────────────
     num_results = int(args.num_results)
     num_pages   = int(args.pages)
     needed      = (num_results + 9) // 10
@@ -1390,7 +1409,6 @@ def _execute(args: argparse.Namespace) -> None:
     _add_to_history(query, count)
     _update_analytics(query, count)
 
-    # ── Export ────────────────────────────────────────────────────────────────
     if args.export_format:
         text = {
             "csv":  lambda: _export_csv(response, query),
@@ -1401,7 +1419,6 @@ def _execute(args: argparse.Namespace) -> None:
         _write_output(text, out_path)
         return
 
-    # ── Format & output ───────────────────────────────────────────────────────
     if args.search_type == "image":
         dl_results: list[dict] = []
         if args.download_images:
@@ -1474,12 +1491,7 @@ def run(
     show_image_metadata:  bool  = False,
     json_keys:            str   = "",
 ) -> None:
-    """
-    Primary aichat tool entry point.
-
-    Parameter names mirror the @option/@flag slugs in the module docstring
-    (hyphens → underscores). Writes all output to LLM_OUTPUT (or stdout).
-    """
+    """Primary aichat tool entry point."""
     args = argparse.Namespace(
         query=query,
         num_results=num_results,
@@ -1585,7 +1597,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--show-cache-stats",   action="store_true",   dest="show_cache_stats")
     p.add_argument("--show-progress",      action="store_true",   dest="show_progress")
     p.add_argument("--pretty-print",       action="store_true",   dest="pretty_print")
-    # Image options
     p.add_argument("--search-type",        default="web",         dest="search_type")
     p.add_argument("--image-size",         default="",            dest="image_size")
     p.add_argument("--image-type",         default="",            dest="image_type")

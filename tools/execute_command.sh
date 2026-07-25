@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 set -uo pipefail
 # Note: We removed -e to allow graceful handling of expected failures (e.g., command not found)
 

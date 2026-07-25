@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # Bybit Symbol Information Tool
 # Usage: ./bybit_symbol_info.sh [--symbol BTCUSDT] [--category PERPETUAL|OPTION]
 

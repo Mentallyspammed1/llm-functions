@@ -5,11 +5,12 @@ import hmac
 import hashlib
 import json
 import requests
+import os
 
 # @meta title Bybit Micro-Profit Scalper
 # @meta description High-frequency scalping tool optimized for tiny $0.02 to $0.20 net profit targets using orderbook and momentum conditions.
-# @option --api-key! The Bybit API key.
-# @option --api-secret! The Bybit API secret.
+# @env BYBIT_API_KEY The Bybit API key.
+# @env BYBIT_API_SECRET The Bybit API secret.
 # @option --symbol=BTCUSDT The target crypto derivative trading pair.
 # @option --qty=0.01 The order size/quantity defined in the base asset.
 # @option --target-profit=0.05 The desired micro-profit target in USDT (e.g., between 0.02 and 0.20).
@@ -97,8 +98,12 @@ def main(args):
     # ----------------------------------------------------------------------
     # 1️⃣  Parse CLI arguments (argc‑compatible)
     # ----------------------------------------------------------------------
-    api_key = args.get("api_key")
-    api_secret = args.get("api_secret")
+    api_key = args.get("api_key") or os.environ.get("BYBIT_API_KEY")
+    api_secret = args.get("api_secret") or os.environ.get("BYBIT_API_SECRET")
+    
+    if not api_key or not api_secret:
+        print(json.dumps({"status": "error", "message": "Missing BYBIT_API_KEY or BYBIT_API_SECRET in environment variables."}))
+        return
     symbol = args.get("symbol")
     qty = float(args.get("qty"))
     target_profit = float(args.get("target_profit"))

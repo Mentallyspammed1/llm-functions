@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # =============================================================================
 # edit.sh - File editing utility for LLM Functions
 # =============================================================================

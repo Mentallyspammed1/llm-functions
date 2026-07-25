@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # Bybit Wallet Balance Tool
 # Usage: ./bybit_wallet_balance.sh [--wallet-type SPOT|MARGIN|ISOLATED]
 

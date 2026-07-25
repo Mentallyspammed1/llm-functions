@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Get a summary of the git status in the current directory.
 main() {
     git_args=()

@@ -1,7 +1,13 @@
+#!/usr/bin/env python3
 # ==============================================================================
-# micro_profit.py — Micro‑Profit Estimator (v4.0)
+# micro_profit.py — Pyrmethus AIChat Micro-Profit Estimator v4.5.2-ASCENDED
+# argc/aichat compatible · Analytical Closed-Form Exit Solver · Orderbook Analytics
 #
-# @describe Estimate micro‑profit opportunities from order‑book data.
+# @describe Estimate micro-profit opportunities from order-book data with
+#           precision analytical exit solving and position sizing.
+#
+# @meta require-tools python3
+#
 # @option --symbol! <STRING>          Required trading pair (e.g., BTCUSDT).
 # @option --side! <STRING>            Required side: Buy or Sell.
 # @option --qty! <NUMBER>             Required quantity (base asset).
@@ -18,98 +24,262 @@
 # @option --risk_percent=0.0          Risk percent per trade (default 0.0).
 # @option --bids_json=[]              JSON encoded bids array.
 # @option --asks_json=[]              JSON encoded asks array.
-# @flag --use_vwap_entry              Use VWAP entry price instead of best bid/ask.
-# @flag --verbose                     Enable verbose debug logging.
-# @flag --help                        Show help message.
+# @flag   --use_vwap_entry            Use VWAP entry price instead of best bid/ask.
+# @flag   --execute_order             Submit/execute order after calculating metrics.
+# @flag   --dry_run                   Simulate order placement without sending.
+# @flag   --limit_entry               Use limit order for entry price.
+# @flag   --no_color                  Disable ANSI color output.
+# @flag   --verbose                   Enable verbose debug logging.
+#
+# @env LLM_OUTPUT=/dev/stdout         Output path for LLM integration
 # ==============================================================================
-#!/usr/bin/env python3
-"""micro_profit.py — Micro-Profit Estimator v4.0
 
-A precision utility for estimating micro-profit opportunities by analyzing
-live order-book data. Designed for compatibility with Bybit V5 API output.
+from __future__ import annotations
 
-Features
---------
-- Decimal-precision arithmetic throughout all financial calculations.
-- Bybit V5 order book JSON parsing with envelope unwrapping.
-- Convergent iterative exit price calculation with fee feedback loop.
-- Correct leveraged PnL math: gross profit scales with leverage.
-- Margin requirement and liquidation price estimation.
-- Kelly criterion position sizing with half-Kelly safety cap.
-- Order book imbalance ratio and spread basis-points metrics.
-- Confidence scoring based on spread, imbalance, and depth signals.
-- Structured JSON output with error codes for downstream tooling.
-- Zero module-level logging side-effects — logger created per invocation.
-"""
-
+import argparse
+import enum
 import json
 import logging
+import os
+import re
 import sys
-import argparse
-from dataclasses import dataclass, field, asdict
-from decimal import Decimal, ROUND_HALF_UP, InvalidOperation, getcontext
-from typing import Any, Dict, List, Optional, Tuple
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, InvalidOperation, getcontext
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-# ---------------------------------------------------------------------------
-# Decimal precision — 18 significant figures covers all crypto price ranges
-# ---------------------------------------------------------------------------
-getcontext().prec = 18
+import requests
+from requests.exceptions import RequestException
 
-# ---------------------------------------------------------------------------
-# Default configuration — aligned with Bybit V5 USDT Perpetual standards
-# ---------------------------------------------------------------------------
-DEFAULT_TARGET: float        = 5.0        # USDT profit target per trade
-DEFAULT_LEVERAGE: int        = 1          # No leverage by default (spot-safe)
-DEFAULT_FEE_RATE: float      = 0.00020    # Bybit futures maker fee  (0.020%)
-DEFAULT_TAKER_FEE: float     = 0.00055    # Bybit futures taker fee  (0.055%)
-DEFAULT_FUNDING_RATE: float  = 0.0001     # Typical 8-hour funding rate
-DEFAULT_SLIPPAGE: float      = 0.0001     # Conservative slippage estimate
-DEFAULT_KELLY_WIN: float     = 0.55       # Assumed win rate for Kelly calc
-DEFAULT_RISK_REWARD: float   = 2.0        # Minimum acceptable R:R ratio
-DEFAULT_DEPTH: int           = 40         # Levels consumed in book analysis
-MAX_EXIT_ITERATIONS: int     = 30         # Fee-loop convergence cap
-CONVERGENCE_THRESHOLD: str   = "1E-10"   # Decimal delta for convergence exit
+# Set 24-digit precision for crypto financial arithmetic
+getcontext().prec = 24
 
-# ---------------------------------------------------------------------------
-# Logging factory — no module-level handlers to prevent duplicate output
-# ---------------------------------------------------------------------------
+# Module Imports
+try:
+    import proxy_utils
+    proxy_utils.set_proxy_environment()
+except ImportError:
+    proxy_utils = None
 
-def _build_logger(verbose: bool = False) -> logging.Logger:
-    """Create and return a fresh logger instance for this run."""
-    log = logging.getLogger("micro_profit")
-    # Clear any handlers from prior invocations (e.g., during testing)
-    log.handlers.clear()
-    log.propagate = False
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(message)s"))
-    log.addHandler(handler)
-    log.setLevel(logging.DEBUG if verbose else logging.WARNING)
-    return log
+try:
+    import scientific_calculator
+except ImportError:
+    scientific_calculator = None
 
-# Module-level placeholder — replaced by main() or external callers
-logger: logging.Logger = logging.getLogger("micro_profit")
+try:
+    import bybit_smart_order
+except ImportError:
+    bybit_smart_order = None
 
-# ---------------------------------------------------------------------------
-# Data structures
-# ---------------------------------------------------------------------------
+try:
+    import bybit_core
+except ImportError:
+    bybit_core = None
 
-@dataclass
-class OrderBookLevel:
-    """A single resting price level in the order book."""
-    price: float
-    qty: float
+__version__ = "4.5.2-ASCENDED"
+__all__ = [
+    "run",
+    "calculate_micro_profit",
+    "TradeMetrics",
+    "__version__",
+]
+
+log = logging.getLogger(__name__)
+
+# ==============================================================================
+# SECTION 1: Exit Codes & JSON Serializer
+# ==============================================================================
+
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
+EXIT_INVALID_INPUT = 2
+
+
+class ToolJSONEncoder(json.JSONEncoder):
+    """Safe JSON encoder for Decimal, Path, Enum, datetime, timedelta, set."""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, Decimal):
+            return float(obj)
+        if isinstance(obj, Path):
+            return str(obj)
+        if isinstance(obj, enum.Enum):
+            return obj.value
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, timedelta):
+            return obj.total_seconds()
+        if isinstance(obj, (set, frozenset)):
+            return list(obj)
+        return super().default(obj)
+
+
+# ==============================================================================
+# SECTION 2: Terminal Color Palette & UI Helpers
+# ==============================================================================
+
+NEON_CYAN   = "\033[38;5;51m"
+NEON_GREEN  = "\033[38;5;46m"
+NEON_RED    = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK   = "\033[38;5;198m"
+RESET       = "\033[0m"
+BOLD        = "\033[1m"
+DIM         = "\033[2m"
+
+_ANSI_RE = re.compile(
+    r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])"
+    r"|\033\[[0-9;?]*[a-zA-Z]"
+)
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+def _is_tty() -> bool:
+    """
+    FIX: Unset TERM defaults to "" which previously disabled color on valid
+    TTYs. Default to "xterm" so only explicitly "dumb" terminals are blocked.
+    """
+    if not sys.stderr.isatty():
+        return False
+    term = os.environ.get("TERM", "xterm").lower()
+    return term != "dumb"
+
+
+def _cprint(
+    text: str,
+    file: Any = None,
+    no_color: bool = False,
+    end: str = "\n",
+) -> None:
+    target = file or sys.stderr
+    if no_color or not _is_tty():
+        text = _strip_ansi(text)
+    print(text, file=target, flush=True, end=end)
+
+
+def print_human_readable_ui(
+    data: Dict[str, Any],
+    no_color: bool = False,
+) -> None:
+    """Render a human-friendly box UI to stderr for interactive users."""
+    # FIX: Handle calculation errors gracefully instead of printing an empty UI
+    if not data.get("success", True):
+        err_msg = data.get("error", "Unknown calculation error.")
+        _cprint(f"{NEON_RED}✖ Error: {err_msg}{RESET}", no_color=no_color)
+        return
+
+    if not _is_tty() or no_color:
+        return
+
+    symbol = data.get("symbol", "N/A")
+    side = data.get("side", "N/A").upper()
+    side_col = NEON_GREEN if side == "BUY" else NEON_RED
+
+    box_w = 68
+    border = "─" * box_w
+
+    _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} "
+        f"{NEON_PINK}⚡ [MICRO-PROFIT ESTIMATOR v{__version__}]{RESET} "
+        f"{side_col}{BOLD}{symbol} ({side}){RESET}"
+    )
+    _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} "
+        f"{NEON_CYAN}Entry Price:{RESET}     "
+        f"${data.get('entry_price', 0.0):.4f}"
+        f"  |  {NEON_CYAN}Qty:{RESET} {data.get('requested_qty', 0.0)}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} "
+        f"{NEON_GREEN}Target Exit:{RESET}     "
+        f"${data.get('target_exit_price', 0.0):.4f}"
+        f"  (Net Profit: ${data.get('net_profit_usdt', 0.0):.2f})"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} "
+        f"{NEON_RED}Stop Loss:{RESET}       "
+        f"${data.get('stop_loss_price', 0.0):.4f}"
+        f"  (Max Risk: ${data.get('risk_amount_usdt', 0.0):.2f})"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} "
+        f"{NEON_CYAN}Liquidation:{RESET}     "
+        f"${data.get('liquidation_price', 0.0):.4f}"
+        f"  |  {NEON_CYAN}Leverage:{RESET} {data.get('leverage', 1)}x"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} "
+        f"{NEON_CYAN}Spread:{RESET}          "
+        f"{data.get('spread_bps', 0.0):.2f} bps"
+        f"  |  {NEON_CYAN}Book Imbalance:{RESET} "
+        f"{data.get('book_imbalance_ratio', 0.5):.2f}"
+    )
+
+    warnings = data.get("warnings", [])
+    if warnings:
+        _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} "
+            f"{NEON_YELLOW}{BOLD}Risk Warnings ({len(warnings)}):{RESET}"
+        )
+        for w in warnings:
+            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_YELLOW}⚑{RESET} {w}")
+
+    if "order_result" in data:
+        res = data["order_result"]
+        ok = res.get("success", False)
+        _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} "
+            f"{NEON_CYAN}Order Execution:{RESET} "
+            f"{NEON_GREEN if ok else NEON_RED}"
+            f"{'SUCCESS' if ok else 'FAILED'}{RESET}"
+        )
+
+    _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
+
+
+# ==============================================================================
+# SECTION 3: DECIMALS & DATA MODELS
+# ==============================================================================
+
+def _d(value: Any) -> Decimal:
+    """Sanitize and convert inputs safely to Decimal. Returns Decimal(0) on failure."""
+    if value is None:
+        return Decimal(0)
+    s = str(value).replace("\x00", "").strip()
+    if not s:
+        return Decimal(0)
+    try:
+        return Decimal(s)
+    except InvalidOperation:
+        return Decimal(0)
+
+
+def _round_f(value: Decimal, places: int = 8) -> float:
+    """Round a Decimal to `places` decimal places and return as float."""
+    try:
+        return float(
+            value.quantize(Decimal(10) ** -places, rounding=ROUND_HALF_UP)
+        )
+    except InvalidOperation:
+        return float(value)
 
 
 @dataclass
 class TradeMetrics:
-    """Fully computed output metrics for one trade scenario."""
-    # Identity
     symbol: str
     side: str
-    # Quantity
     requested_qty: float
     recommended_qty: float
-    # Pricing
     best_bid: float
     best_ask: float
     spread_usdt: float
@@ -118,839 +288,674 @@ class TradeMetrics:
     target_exit_price: float
     stop_loss_price: float
     liquidation_price: float
-    # Profit/Loss
     gross_profit_usdt: float
     estimated_fees_usdt: float
     funding_cost_usdt: float
     net_profit_usdt: float
-    # Risk metrics
     margin_required: float
     risk_amount_usdt: float
     kelly_fraction: float
     half_kelly_fraction: float
-    # Market signals
     book_imbalance_ratio: float
     book_depth_bid_usdt: float
     book_depth_ask_usdt: float
     confidence_score: float
     signal: str
-    # Metadata
     leverage: int
     fee_scenario: str
+    slippage_cost_usdt: float
+    risk_percent_used: float
     warnings: List[str] = field(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
-# Decimal helpers
-# ---------------------------------------------------------------------------
-
-def _d(value: Any) -> Decimal:
-    """Safely convert any numeric value to a Decimal."""
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ValueError(f"Cannot convert {value!r} to Decimal: {exc}") from exc
-
-
-def _round_f(value: Decimal, places: int = 6) -> float:
-    """Round a Decimal to `places` digits and return as float."""
-    quantizer = Decimal(10) ** -places
-    return float(value.quantize(quantizer, rounding=ROUND_HALF_UP))
-
-
-# ---------------------------------------------------------------------------
-# Order book parsing
-# ---------------------------------------------------------------------------
-
-def parse_order_book(
-    bids_str: str,
-    asks_str: str,
-) -> Dict[str, List[OrderBookLevel]]:
-    """Parse JSON-encoded bids/asks into OrderBookLevel objects.
-
-    Handles the following input shapes:
-    - Raw list:                   [["price", "qty"], ...]
-    - Flat dict with keys:        {"b": [...], "a": [...]}
-    - Bybit V5 envelope:          {"result": {"b": [...], "a": [...]}}
-    - Full envelope in one arg:   bids_str contains both b and a keys
-
-    Parameters
-    ----------
-    bids_str : str
-        JSON string representing bid levels (or full book envelope).
-    asks_str : str
-        JSON string representing ask levels (or full book envelope).
-
-    Returns
-    -------
-    Dict with keys ``"bids"`` and ``"asks"``, each a list of OrderBookLevel.
+def _get_book_execution_price(
+    levels: List[Any],
+    qty: Decimal,
+) -> Tuple[Decimal, bool]:
     """
-    bids_raw: List[Any] = []
-    asks_raw: List[Any] = []
+    Calculate VWAP walking orderbook levels for qty.
 
-    def _extract(parsed: Any, bid_side: bool) -> List[Any]:
-        """Pull the correct side from a parsed JSON structure."""
-        if isinstance(parsed, list):
-            return parsed
-        if isinstance(parsed, dict):
-            # Unwrap Bybit V5 result envelope
-            inner = parsed.get("result", parsed)
-            if not isinstance(inner, dict):
-                inner = parsed
-            if bid_side:
-                return inner.get("b", inner.get("bids", []))
-            return inner.get("a", inner.get("asks", []))
-        return []
-
-    for raw_str, is_bid, target_list_name in [
-        (bids_str, True,  "bids"),
-        (asks_str, False, "asks"),
-    ]:
-        if not raw_str or raw_str.strip() in ("", "[]", "{}"):
-            continue
-        try:
-            parsed = json.loads(raw_str)
-        except json.JSONDecodeError as exc:
-            logger.error("JSON parse failure for %s: %s", target_list_name, exc)
-            raise
-
-        extracted = _extract(parsed, bid_side=is_bid)
-        if target_list_name == "bids":
-            bids_raw = extracted
-            # If full envelope was passed in bids_str, also grab asks from it
-            if not isinstance(parsed, list) and isinstance(parsed, dict):
-                candidate = _extract(parsed, bid_side=False)
-                if candidate and not asks_raw:
-                    asks_raw = candidate
-        else:
-            asks_raw = extracted
-            # If full envelope was passed in asks_str, also grab bids from it
-            if not isinstance(parsed, list) and isinstance(parsed, dict):
-                candidate = _extract(parsed, bid_side=True)
-                if candidate and not bids_raw:
-                    bids_raw = candidate
-
-    def _to_levels(raw: List[Any]) -> List[OrderBookLevel]:
-        levels: List[OrderBookLevel] = []
-        if not isinstance(raw, list):
-            return levels
-        for row in raw:
-            try:
-                if isinstance(row, dict):
-                    price = float(row.get("price", row.get("p", 0)))
-                    qty   = float(row.get("qty",   row.get("size", row.get("q", 0))))
-                elif isinstance(row, (list, tuple)) and len(row) >= 2:
-                    price, qty = float(row[0]), float(row[1])
-                else:
-                    continue
-                if price > 0 and qty > 0:
-                    levels.append(OrderBookLevel(price=price, qty=qty))
-            except (ValueError, TypeError) as exc:
-                logger.debug("Skipping malformed level %r: %s", row, exc)
-        return levels
-
-    return {
-        "bids": _to_levels(bids_raw),
-        "asks": _to_levels(asks_raw),
-    }
-
-
-def normalize_order_book(
-    bids: List[OrderBookLevel],
-    asks: List[OrderBookLevel],
-) -> Tuple[List[OrderBookLevel], List[OrderBookLevel]]:
-    """Sort bids descending, asks ascending (standard order book order)."""
-    return (
-        sorted(bids, key=lambda x: x.price, reverse=True),
-        sorted(asks, key=lambda x: x.price),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-def validate_inputs(symbol: str, side: str, qty: float) -> None:
-    """Validate required trade parameters, raising ValueError on failure."""
-    if not symbol or not symbol.strip():
-        raise ValueError("symbol must be a non-empty string")
-    if side.lower() not in {"buy", "sell"}:
-        raise ValueError(f"side must be 'buy' or 'sell', got {side!r}")
-    if qty <= 0:
-        raise ValueError(f"qty must be positive, got {qty}")
-
-
-def validate_numeric_params(
-    target: float,
-    leverage: int,
-    maker_fee: float,
-    taker_fee: float,
-    funding_rate: float,
-    slippage: float,
-    depth: int,
-    risk_reward: float,
-) -> None:
-    """Validate all optional numeric parameters."""
-    checks = [
-        (target >= 0,       "target must be non-negative"),
-        (leverage >= 1,     "leverage must be >= 1"),
-        (maker_fee >= 0,    "maker_fee must be non-negative"),
-        (taker_fee >= 0,    "taker_fee must be non-negative"),
-        (slippage >= 0,     "slippage must be non-negative"),
-        (depth >= 1,        "depth must be >= 1"),
-        (risk_reward > 0,   "risk_reward must be positive"),
-    ]
-    for condition, message in checks:
-        if not condition:
-            raise ValueError(message)
-
-
-# ---------------------------------------------------------------------------
-# Price & fee calculations
-# ---------------------------------------------------------------------------
-
-def entry_price_for_side(
-    side: str,
-    best_bid: float,
-    best_ask: float,
-    slippage: float,
-) -> float:
-    """Return slip-adjusted entry price for a given side.
-
-    Buy orders execute at the ask + slippage (paying up).
-    Sell orders execute at the bid - slippage (receiving less).
+    Returns:
+        (vwap_price, fully_filled)
     """
-    if side == "buy":
-        return _round_f(_d(best_ask) * (_d(1) + _d(slippage)), 8)
-    return _round_f(_d(best_bid) * (_d(1) - _d(slippage)), 8)
-
-
-def vwap_for_quantity(
-    levels: List[OrderBookLevel],
-    qty: float,
-) -> Tuple[float, float]:
-    """Walk the order book and return (vwap_price, filled_qty).
-
-    Partial fills are returned if the book does not have sufficient depth.
-    """
-    remaining = _d(qty)
-    cost      = _d(0)
-    filled    = _d(0)
+    accumulated_qty = Decimal(0)
+    accumulated_value = Decimal(0)
 
     for level in levels:
-        if remaining <= 0:
+        if len(level) < 2:
+            continue
+        p = _d(level[0])
+        s = _d(level[1])
+        if p <= 0 or s <= 0:
+            continue
+        if accumulated_qty + s >= qty:
+            remaining = qty - accumulated_qty
+            accumulated_value += remaining * p
+            accumulated_qty = qty
             break
-        take    = min(remaining, _d(level.qty))
-        cost   += take * _d(level.price)
-        filled += take
-        remaining -= take
+        accumulated_value += s * p
+        accumulated_qty += s
 
-    if filled <= 0:
-        fallback = _d(levels[0].price) if levels else _d(0)
-        return float(fallback), 0.0
-
-    return _round_f(cost / filled, 8), _round_f(filled, 8)
+    fully_filled = accumulated_qty >= qty
+    if accumulated_qty > 0:
+        return accumulated_value / accumulated_qty, fully_filled
+    return Decimal(0), False
 
 
-def estimate_round_trip_fees(
-    entry_price: float,
-    exit_price: float,
-    qty: float,
-    maker_fee: float,
-    taker_fee: float,
-    entry_is_taker: bool = True,
-    exit_is_taker: bool  = False,    # Exit via limit order (maker) by default
-) -> Tuple[float, float, float]:
-    """Return (entry_fee, exit_fee, total_fee) in USDT.
+# ==============================================================================
+# SECTION 4: CORE MICRO-PROFIT CALCULATION ENGINE
+# ==============================================================================
 
-    Default assumption: entry is market (taker), exit is limit (maker).
-    This reflects best-practice scalp execution and reduces fee burden.
+def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
     """
-    e_rate = _d(taker_fee) if entry_is_taker else _d(maker_fee)
-    x_rate = _d(taker_fee) if exit_is_taker  else _d(maker_fee)
-    q      = _d(qty)
-    entry_fee = _d(entry_price) * q * e_rate
-    exit_fee  = _d(exit_price)  * q * x_rate
-    total     = entry_fee + exit_fee
-    return _round_f(entry_fee, 6), _round_f(exit_fee, 6), _round_f(total, 6)
-
-
-def calculate_exit_price(
-    entry_price: float,
-    target_usdt: float,
-    leverage: int,
-    qty: float,
-    side: str,
-    maker_fee: float,
-    taker_fee: float,
-    funding_rate: float  = 0.0,
-    max_iterations: int  = MAX_EXIT_ITERATIONS,
-) -> float:
-    """Solve for the exit price that yields `target_usdt` net profit.
-
-    Uses a convergent iterative approach because exit fees depend on the
-    exit price, which itself depends on the fees — a circular dependency.
-
-    Bybit linear USDT PnL formula (long):
-        PnL = (exit - entry) * qty
-    Fees are deducted from the gross PnL target to find the required gross move.
-    Leverage does NOT multiply fees, but it DOES multiply the position notional
-    for margin purposes. The profit target here is in USDT on the full notional.
-
-    Parameters
-    ----------
-    target_usdt   : Desired *net* profit in USDT after all fees.
-    leverage      : Margin multiplier (affects margin calc, not PnL formula).
-    funding_rate  : Rate applied to notional for one funding interval.
+    Calculate micro-profit exit/stop bounds, position sizing, and fee impact.
     """
-    if qty <= 0 or entry_price <= 0:
-        raise ValueError(f"Invalid entry_price={entry_price} or qty={qty}")
+    verbose: bool = bool(kwargs.get("verbose", False))
 
-    ep     = _d(entry_price)
-    target = _d(target_usdt)          # Target net profit (full notional USDT)
-    q      = _d(qty)
-    mk     = _d(maker_fee)
-    tk     = _d(taker_fee)
-    fr     = _d(funding_rate)
-    thresh = _d(CONVERGENCE_THRESHOLD)
-    is_buy = side == "buy"
+    # ------------------------------------------------------------------
+    # 1. Inputs & Sanitization
+    # ------------------------------------------------------------------
+    s = str(kwargs.get("symbol", "") or "").upper().strip()
+    side = str(kwargs.get("side", "") or "").lower().strip()
+    if side not in ("buy", "sell"):
+        return {
+            "success": False,
+            "error": f"Invalid side '{side}'. Must be 'buy' or 'sell'.",
+        }
 
-    # Funding cost is applied to entry notional (one interval assumed)
-    funding_cost = ep * q * fr
+    q = _d(kwargs.get("qty", 0))
+    lev = max(Decimal(1), _d(kwargs.get("leverage", 1)))
+    target = _d(kwargs.get("target", 5.0))
+    if target <= 0:
+        return {
+            "success": False,
+            "error": "--target must be > 0.",
+        }
 
-    # Seed with a naive first guess (no fee feedback)
-    exit_p = ep + (target / q) if is_buy else ep - (target / q)
+    mk = _d(kwargs.get("maker_fee", 0.0002))
+    tk = _d(kwargs.get("taker_fee", 0.00055))
+    fr = _d(kwargs.get("funding_rate", 0.0001))
+    slippage = _d(kwargs.get("slippage", 0.0001))
+    acc_bal = _d(kwargs.get("account_balance", 0))
+    risk_pct = _d(kwargs.get("risk_percent", 0.0))
 
-    for iteration in range(max(1, max_iterations)):
-        prev_exit = exit_p
-
-        # Entry: taker (market). Exit: maker (limit) — best-case scenario
-        entry_fee = ep     * q * tk     # Taker entry
-        exit_fee  = exit_p * q * mk     # Maker exit
-        total_fees = entry_fee + exit_fee + funding_cost
-
-        # Gross move needed so that (gross_move * qty) - fees = target
-        gross_needed = target + total_fees
-
-        if is_buy:
-            exit_p = ep + gross_needed / q
-        else:
-            exit_p = ep - gross_needed / q
-
-        # Guard against impossible negative prices
-        if exit_p <= _d(0):
-            exit_p = _d("0.000001")
-            break
-
-        delta = abs(exit_p - prev_exit)
-        logger.debug("Exit iteration %d: exit_p=%.8f delta=%.2e", iteration, float(exit_p), float(delta))
-
-        if delta < thresh:
-            logger.debug("Converged after %d iterations", iteration + 1)
-            break
-
-    return _round_f(exit_p, 8)
-
-
-def gross_profit_usdt(
-    entry_price: float,
-    exit_price: float,
-    qty: float,
-    side: str,
-) -> float:
-    """Calculate gross PnL in USDT on the full position notional.
-
-    For USDT-margined linear contracts, PnL = price_delta * qty.
-    Leverage amplifies *returns on margin* but the PnL in USDT is the
-    same regardless of leverage — only margin required changes.
-    """
-    delta = _d(exit_price) - _d(entry_price)
-    if side == "sell":
-        delta = -delta
-    return _round_f(delta * _d(qty), 6)
-
-
-def stop_loss_price(
-    entry_price: float,
-    target_usdt: float,
-    qty: float,
-    side: str,
-    risk_reward: float,
-    maker_fee: float,
-    taker_fee: float,
-) -> float:
-    """Calculate stop-loss price accounting for fees on the losing side.
-
-    Risk amount = target_usdt / risk_reward (the USDT we're willing to lose).
-    We then subtract fees (which are paid regardless of win/loss) so the
-    stop placement reflects true economic risk.
-    """
-    if risk_reward <= 0 or qty <= 0:
-        return entry_price
-    ep         = _d(entry_price)
-    risk_usdt  = _d(target_usdt) / _d(risk_reward)
-    q          = _d(qty)
-    # Fees paid even on a losing trade: entry (taker) + stop exit (taker)
-    fee_cost   = ep * q * (_d(maker_fee) + _d(taker_fee))
-    total_risk = risk_usdt + fee_cost
-    delta      = total_risk / q
-    sl = ep - delta if side == "buy" else ep + delta
-    return _round_f(max(sl, _d("0.000001")), 8)
-
-
-def liquidation_price(
-    entry_price: float,
-    leverage: int,
-    side: str,
-    maker_fee: float,
-) -> float:
-    """Estimate liquidation price using Bybit isolated margin formula.
-
-    Bybit linear isolated margin:
-        Long  liq ≈ entry * (1 - 1/leverage + maker_fee)
-        Short liq ≈ entry * (1 + 1/leverage - maker_fee)
-
-    This is an approximation; actual liquidation also depends on
-    maintenance margin rate which varies by tier and instrument.
-    """
-    ep  = _d(entry_price)
-    lev = _d(leverage)
-    mf  = _d(maker_fee)
-    if side == "buy":
-        liq = ep * (_d(1) - _d(1) / lev + mf)
-    else:
-        liq = ep * (_d(1) + _d(1) / lev - mf)
-    return _round_f(max(liq, _d("0.000001")), 8)
-
-
-def margin_required(entry_price: float, qty: float, leverage: int) -> float:
-    """Calculate initial margin required to open the position (USDT)."""
-    return _round_f(_d(entry_price) * _d(qty) / _d(leverage), 4)
-
-
-# ---------------------------------------------------------------------------
-# Risk & sizing metrics
-# ---------------------------------------------------------------------------
-
-def kelly_fraction(win_rate: float, risk_reward: float) -> float:
-    """Full Kelly criterion fraction.
-
-    Kelly = W - (1 - W) / R
-    where W = win rate, R = reward-to-risk ratio.
-    Clamped to [0, 1].
-    """
-    if risk_reward <= 0:
-        return 0.0
-    k = _d(win_rate) - (_d(1) - _d(win_rate)) / _d(risk_reward)
-    return _round_f(max(_d(0), min(_d(1), k)), 6)
-
-
-def compute_quantity(
-    balance: float,
-    risk_pct: float,
-    entry_price: float,
-    leverage: int,
-    maker_fee: float,
-    taker_fee: float,
-    funding_rate: float,
-) -> float:
-    """Recommend position size in base asset units.
-
-    Sizing logic:
-        risk_capital = balance * (risk_pct / 100)
-        total_cost_per_unit = entry_price / leverage + round_trip_fees + funding
-        qty = risk_capital / total_cost_per_unit
-
-    Dividing entry_price by leverage gives the *margin* cost per unit,
-    which is what's actually at risk on an isolated position.
-    """
-    if balance <= 0 or risk_pct <= 0 or entry_price <= 0:
-        return 1.0
-    risk_cap       = _d(balance) * (_d(risk_pct) / _d(100))
-    margin_per_unit = _d(entry_price) / _d(leverage)
-    fee_per_unit    = _d(entry_price) * (_d(maker_fee) + _d(taker_fee) + _d(funding_rate))
-    cost_per_unit   = margin_per_unit + fee_per_unit
-    if cost_per_unit <= 0:
-        return 1.0
-    qty = risk_cap / cost_per_unit
-    return _round_f(max(_d(1), qty), 4)
-
-
-# ---------------------------------------------------------------------------
-# Market signal metrics
-# ---------------------------------------------------------------------------
-
-def book_imbalance(
-    bids: List[OrderBookLevel],
-    asks: List[OrderBookLevel],
-    depth: int,
-) -> float:
-    """Compute bid/ask volume imbalance ratio over `depth` levels.
-
-    Ratio > 1.0 → more bid volume (buying pressure).
-    Ratio < 1.0 → more ask volume (selling pressure).
-    Ratio = 1.0 → balanced.
-    """
-    bid_vol = sum(_d(l.qty) for l in bids[:depth])
-    ask_vol = sum(_d(l.qty) for l in asks[:depth])
-    if ask_vol <= 0:
-        return 0.0
-    return _round_f(bid_vol / ask_vol, 6)
-
-
-def book_depth_usdt(levels: List[OrderBookLevel], depth: int) -> float:
-    """Total USDT notional available within `depth` levels."""
-    return _round_f(
-        sum(_d(l.price) * _d(l.qty) for l in levels[:depth]), 2
+    log.debug(
+        "Inputs: symbol=%s side=%s qty=%s lev=%s target=%s "
+        "mk=%s tk=%s fr=%s slippage=%s",
+        s, side, q, lev, target, mk, tk, fr, slippage,
     )
 
+    # ------------------------------------------------------------------
+    # 2. Parse or Fetch Orderbook Depth
+    # ------------------------------------------------------------------
+    bids_raw = str(kwargs.get("bids_json", "[]") or "[]").strip()
+    asks_raw = str(kwargs.get("asks_json", "[]") or "[]").strip()
 
-def confidence_score(
-    spread_bps: float,
-    imbalance: float,
-    side: str,
-    bid_depth_usdt: float,
-    ask_depth_usdt: float,
-    depth: int,
-) -> Tuple[float, str]:
-    """Return a 0–100 confidence score and directional signal string.
+    try:
+        bids: List[Any] = json.loads(bids_raw) if bids_raw else []
+    except Exception:
+        bids = []
 
-    Scoring components:
-    - Spread tightness  : tight spread = higher confidence (max 40 pts)
-    - Book imbalance    : alignment with direction = higher confidence (max 40 pts)
-    - Depth adequacy    : sufficient liquidity buffer (max 20 pts)
+    try:
+        asks: List[Any] = json.loads(asks_raw) if asks_raw else []
+    except Exception:
+        asks = []
 
-    Signal labels: STRONG_BUY, BUY, NEUTRAL, SELL, STRONG_SELL
-    """
-    score = _d(0)
+    if (not bids or not asks) and s:
+        proxies = proxy_utils.get_proxies() if proxy_utils else None
+        depth = int(kwargs.get("depth", 40))
 
-    # --- Spread component (40 pts): <5 bps = full, >50 bps = zero
-    spread_score = max(_d(0), _d(40) * (_d(1) - (_d(spread_bps) / _d(50))))
-    score += min(_d(40), spread_score)
+        # Bybit primary endpoint
+        try:
+            ob = None
+            if bybit_core:
+                try:
+                    resp = bybit_core.get_orderbook(symbol=s, limit=depth)
+                    if resp.get("retCode") == 0:
+                        ob = resp.get("result", {})
+                        log.debug("Fetched orderbook via bybit_core for %s", s)
+                except Exception as e_core:
+                    log.debug("bybit_core.get_orderbook failed, falling back: %s", e_core)
 
-    # --- Imbalance component (40 pts)
-    is_buy        = side == "buy"
-    # Imbalance favors buy when ratio > 1, sell when ratio < 1
-    imb           = _d(imbalance)
-    if is_buy:
-        imb_score = min(_d(40), _d(40) * ((imb - _d(1)) / _d(2) + _d("0.5")))
-    else:
-        imb_score = min(_d(40), _d(40) * ((_d(1) - imb) / _d(2) + _d("0.5")))
-    score += max(_d(0), imb_score)
+            if ob is None:
+                url = (
+                    f"https://api.bybit.com/v5/market/orderbook"
+                    f"?category=linear&symbol={s}&limit={depth}"
+                )
+                try:
+                    r = requests.get(url, proxies=proxies, timeout=5)
+                    r.raise_for_status()
+                    if r.json().get("retCode") == 0:
+                        ob = r.json().get("result", {})
+                except RequestException as e_req:
+                    log.debug("Bybit API request failed: %s", e_req)
+            
+            if ob:
+                bids = ob.get("b", [])
+                asks = ob.get("a", [])
+                log.debug("Fetched %d bids / %d asks from Bybit.", len(bids), len(asks))
+        except Exception as exc:
+            log.debug("Bybit orderbook fetch failed: %s", exc)
 
-    # --- Depth component (20 pts): enough USDT on the opposing side
-    opposing_depth = _d(ask_depth_usdt) if is_buy else _d(bid_depth_usdt)
-    min_adequate   = _d(10_000)   # $10k minimum depth considered adequate
-    depth_score    = min(_d(20), _d(20) * (opposing_depth / min_adequate))
-    score += depth_score
+        # Gate.io fallback
+        if not bids or not asks:
+            try:
+                if s.endswith("USDT"):
+                    currency_pair = f"{s[:-4]}_USDT"
+                else:
+                    currency_pair = s
+                url = (
+                    f"https://api.gateio.ws/api/v4/spot/order_book"
+                    f"?currency_pair={currency_pair}"
+                )
+                r = requests.get(url, proxies=proxies, timeout=5)
+                r.raise_for_status()
+                data = r.json()
+                bids = data.get("bids", [])
+                asks = data.get("asks", [])
+                log.debug("Fetched %d bids / %d asks from Gate.io.", len(bids), len(asks))
+            except RequestException as exc:
+                log.debug("Gate.io orderbook fetch failed: %s", exc)
 
-    total = float(min(_d(100), max(_d(0), score)))
+        # Binance tertiary fallback
+        if not bids or not asks:
+            try:
+                url = f"https://api.binance.com/api/v3/depth?symbol={s}&limit={depth}"
+                r = requests.get(url, proxies=proxies, timeout=5)
+                r.raise_for_status()
+                data = r.json()
+                bids = data.get("bids", [])
+                asks = data.get("asks", [])
+                log.debug("Fetched %d bids / %d asks from Binance.", len(bids), len(asks))
+            except RequestException as exc:
+                log.debug("Binance orderbook fetch failed: %s", exc)
 
-    if   total >= 80:  signal = "STRONG_BUY"  if is_buy else "STRONG_SELL"
-    elif total >= 60:  signal = "BUY"          if is_buy else "SELL"
-    elif total >= 40:  signal = "NEUTRAL"
-    elif total >= 20:  signal = "WEAK_BUY"     if is_buy else "WEAK_SELL"
-    else:              signal = "AVOID"
+    bid_depth_val = sum(
+        _d(p[0]) * _d(p[1]) for p in bids[:20] if len(p) >= 2
+    )
+    ask_depth_val = sum(
+        _d(p[0]) * _d(p[1]) for p in asks[:20] if len(p) >= 2
+    )
+    total_depth = bid_depth_val + ask_depth_val
+    imbalance = (
+        bid_depth_val / total_depth if total_depth > 0 else Decimal("0.5")
+    )
 
-    return round(total, 2), signal
+    best_bid = _d(bids[0][0]) if bids else Decimal(0)
+    best_ask = _d(asks[0][0]) if asks else Decimal(0)
 
-
-# ---------------------------------------------------------------------------
-# Core orchestration
-# ---------------------------------------------------------------------------
-
-def calculate_micro_profit(
-    symbol: str,
-    side: str,
-    qty: float,
-    target: float          = DEFAULT_TARGET,
-    leverage: int          = DEFAULT_LEVERAGE,
-    maker_fee: float       = DEFAULT_FEE_RATE,
-    taker_fee: float       = DEFAULT_TAKER_FEE,
-    funding_rate: float    = DEFAULT_FUNDING_RATE,
-    slippage: float        = DEFAULT_SLIPPAGE,
-    risk_reward: float     = DEFAULT_RISK_REWARD,
-    kelly_win: float       = DEFAULT_KELLY_WIN,
-    depth: int             = DEFAULT_DEPTH,
-    account_balance: float = 0.0,
-    risk_percent: float    = 0.0,
-    bids_json: str         = "[]",
-    asks_json: str         = "[]",
-    use_vwap_entry: bool   = False,
-) -> Dict[str, Any]:
-    """Orchestrate all calculations and return a structured result dict.
-
-    Parameters
-    ----------
-    symbol          : Trading pair (e.g., ``"BTCUSDT"``).
-    side            : ``"buy"`` or ``"sell"``.
-    qty             : Base asset quantity to trade.
-    target          : Desired net profit in USDT.
-    leverage        : Margin multiplier (1 = no leverage).
-    maker_fee       : Maker fee rate (decimal, e.g., 0.0002).
-    taker_fee       : Taker fee rate (decimal, e.g., 0.00055).
-    funding_rate    : Funding rate for one interval (decimal).
-    slippage        : Estimated price slippage rate (decimal).
-    risk_reward     : Reward-to-risk ratio for stop-loss placement.
-    kelly_win       : Estimated win probability for Kelly sizing.
-    depth           : Number of order book levels to analyze.
-    account_balance : Total account balance in USDT (for sizing).
-    risk_percent    : Percentage of balance to risk per trade.
-    bids_json       : JSON string of bid levels.
-    asks_json       : JSON string of ask levels.
-    use_vwap_entry  : Use volume-weighted average price as entry.
-
-    Returns
-    -------
-    Dict containing all TradeMetrics fields plus metadata.
-    Raises ValueError on invalid inputs with descriptive messages.
-    """
-    # -- Normalize and validate --
-    side   = side.lower().strip()
-    symbol = symbol.upper().strip()
-    validate_inputs(symbol, side, qty)
-    validate_numeric_params(target, leverage, maker_fee, taker_fee, funding_rate, slippage, depth, risk_reward)
-
+    # ------------------------------------------------------------------
+    # Entry Price Solver
+    # ------------------------------------------------------------------
     warnings: List[str] = []
 
-    # -- Parse and sort order book --
-    book       = parse_order_book(bids_json, asks_json)
-    bids, asks = normalize_order_book(book["bids"], book["asks"])
-
-    if not bids:
-        raise ValueError("No valid bid levels found in order book")
-    if not asks:
-        raise ValueError("No valid ask levels found in order book")
-
-    best_bid   = bids[0].price
-    best_ask   = asks[0].price
-
-    if best_ask <= best_bid:
-        warnings.append(f"Crossed book: best_ask={best_ask} <= best_bid={best_bid}")
-        logger.warning("Crossed book detected — spread is negative or zero")
-
-    spread_usdt = _round_f(_d(best_ask) - _d(best_bid), 8)
-    spread_bps  = _round_f(
-        (_d(best_ask) - _d(best_bid)) / _d(best_bid) * _d(10_000), 4
-    )
-
-    # -- Determine entry price --
-    filled_qty = qty
-    if use_vwap_entry:
-        target_levels = asks if side == "buy" else bids
-        entry_price, filled_qty = vwap_for_quantity(target_levels, qty)
-        if filled_qty < qty:
+    if kwargs.get("use_vwap_entry") and q > 0:
+        book_levels = asks if side == "buy" else bids
+        vwap, fully_filled = _get_book_execution_price(book_levels, q)
+        if not fully_filled:
             warnings.append(
-                f"Insufficient book depth: only {filled_qty} of {qty} filled for VWAP"
+                f"Order qty {float(q):.4f} exceeds available book depth; "
+                "VWAP is partial — actual fill price will be worse."
             )
-            logger.warning("Book depth insufficient — partial VWAP fill: %.4f / %.4f", filled_qty, qty)
+        entry = vwap if vwap > 0 else (best_ask if side == "buy" else best_bid)
     else:
-        entry_price = entry_price_for_side(side, best_bid, best_ask, slippage)
+        entry = best_ask if side == "buy" else best_bid
 
-    logger.info("Entry price: %.8f (VWAP=%s)", entry_price, use_vwap_entry)
-
-    # -- Exit, stop-loss, liquidation --
-    exit_price = calculate_exit_price(
-        entry_price, target, leverage, qty, side,
-        maker_fee, taker_fee, funding_rate,
-    )
-    sl_price  = stop_loss_price(entry_price, target, qty, side, risk_reward, maker_fee, taker_fee)
-    liq_price = liquidation_price(entry_price, leverage, side, maker_fee)
-    margin_req = margin_required(entry_price, qty, leverage)
-
-    # Warn if stop-loss is beyond liquidation (only meaningful with leverage)
-    if leverage > 1:
-        if side == "buy"  and sl_price <= liq_price:
-            warnings.append("Stop-loss is at or below liquidation price — position may be liquidated before stop triggers")
-        if side == "sell" and sl_price >= liq_price:
-            warnings.append("Stop-loss is at or above liquidation price — position may be liquidated before stop triggers")
-
-    # -- Fee and profit breakdown --
-    entry_fee, exit_fee, total_fees = estimate_round_trip_fees(
-        entry_price, exit_price, qty, maker_fee, taker_fee,
-        entry_is_taker=True, exit_is_taker=False,
-    )
-    funding_cost_usdt = _round_f(_d(entry_price) * _d(qty) * _d(funding_rate), 6)
-    gross_p           = gross_profit_usdt(entry_price, exit_price, qty, side)
-    net_p             = _round_f(_d(gross_p) - _d(total_fees) - _d(funding_cost_usdt), 6)
-    risk_usdt         = _round_f(_d(target) / _d(risk_reward), 6)
-
-    logger.info(
-        "Gross=%.4f | Fees=%.4f | Funding=%.4f | Net=%.4f",
-        gross_p, total_fees, funding_cost_usdt, net_p,
-    )
-
-    # -- Kelly and sizing --
-    kf            = kelly_fraction(kelly_win, risk_reward)
-    half_kf       = _round_f(_d(kf) / _d(2), 6)   # Half-Kelly: safer in practice
-    recommended_q = qty
-    if account_balance > 0.0 and risk_percent > 0.0:
-        recommended_q = compute_quantity(
-            account_balance, risk_percent, entry_price,
-            leverage, maker_fee, taker_fee, funding_rate,
+    if entry <= 0:
+        entry = Decimal(1.0)  # Safe fallback when no market data available
+        warnings.append(
+            "No market data available; using fallback entry price of $1.0."
         )
-        logger.info("Recommended qty (sized): %.4f", recommended_q)
 
-    # -- Book signal metrics --
-    imbalance      = book_imbalance(bids, asks, depth)
-    bid_depth      = book_depth_usdt(bids, depth)
-    ask_depth      = book_depth_usdt(asks, depth)
-    conf, signal   = confidence_score(spread_bps, imbalance, side, bid_depth, ask_depth, depth)
+    # ------------------------------------------------------------------
+    # 3. Fee & Slippage Configuration
+    # ------------------------------------------------------------------
+    e_fee_base = mk if kwargs.get("limit_entry") else tk
 
-    # Determine fee scenario label for transparency
-    fee_scenario = "taker_entry_maker_exit"
+    e_fee = min(e_fee_base + fr + slippage, Decimal("0.99"))
+    x_fee_tp = min(mk + slippage, Decimal("0.99"))
+    x_fee_sl = min(tk + slippage, Decimal("0.99"))
 
-    # -- Assemble result --
-    metrics = TradeMetrics(
-        symbol               = symbol,
-        side                 = side,
-        requested_qty        = qty,
-        recommended_qty      = recommended_q,
-        best_bid             = best_bid,
-        best_ask             = best_ask,
-        spread_usdt          = spread_usdt,
-        spread_bps           = spread_bps,
-        entry_price          = entry_price,
-        target_exit_price    = exit_price,
-        stop_loss_price      = sl_price,
-        liquidation_price    = liq_price,
-        gross_profit_usdt    = gross_p,
-        estimated_fees_usdt  = total_fees,
-        funding_cost_usdt    = funding_cost_usdt,
-        net_profit_usdt      = net_p,
-        margin_required      = margin_req,
-        risk_amount_usdt     = risk_usdt,
-        kelly_fraction       = kf,
-        half_kelly_fraction  = half_kf,
-        book_imbalance_ratio = imbalance,
-        book_depth_bid_usdt  = bid_depth,
-        book_depth_ask_usdt  = ask_depth,
-        confidence_score     = conf,
-        signal               = signal,
-        leverage             = leverage,
-        fee_scenario         = fee_scenario,
-        warnings             = warnings,
+    # ------------------------------------------------------------------
+    # 4. Kelly Position Sizing
+    # ------------------------------------------------------------------
+    risk_rr = max(Decimal("0.1"), _d(kwargs.get("risk_reward", 2.0)))
+    kelly_w = max(Decimal(0), min(Decimal(1), _d(kwargs.get("kelly_win", 0.55))))
+    kelly = kelly_w - ((Decimal(1) - kelly_w) / risk_rr)
+    kelly_safe = max(Decimal(0), kelly)
+    half_kelly = kelly_safe / Decimal(2)
+
+    margin_per_unit = (entry / lev) + (entry * (mk + tk + fr))
+    rec_qty = q
+
+    if acc_bal > 0 and margin_per_unit > 0:
+        if risk_pct > 0:
+            risk_budget = acc_bal * (risk_pct / Decimal(100))
+            rec_qty = risk_budget / margin_per_unit
+            log.debug(
+                "Position sized by risk_percent=%.4f → rec_qty=%.6f",
+                float(risk_pct), float(rec_qty),
+            )
+        else:
+            rec_qty = (acc_bal * half_kelly) / margin_per_unit
+            log.debug(
+                "Position sized by half-Kelly=%.4f → rec_qty=%.6f",
+                float(half_kelly), float(rec_qty),
+            )
+
+    trading_qty = q if q > 0 else rec_qty
+    if trading_qty <= 0:
+        return {
+            "success": False,
+            "error": "trading_qty resolved to zero; provide --qty > 0.",
+        }
+
+    # ------------------------------------------------------------------
+    # 5. Analytical Exit Price Solver (Closed-Form, slippage-adjusted)
+    # ------------------------------------------------------------------
+    if side == "buy":
+        denom_tp = Decimal(1) - x_fee_tp
+        if denom_tp <= 0:
+            return {
+                "success": False,
+                "error": "Exit fees and slippage are too high (>= 100%) to calculate a valid exit price.",
+            }
+        exit_p = (
+            (target / trading_qty) + entry * (Decimal(1) + e_fee)
+        ) / denom_tp
+    else:
+        exit_p = (
+            entry * (Decimal(1) - e_fee) - (target / trading_qty)
+        ) / (Decimal(1) + x_fee_tp)
+
+    log.debug("Solved exit_p=%.6f for target=%.4f", float(exit_p), float(target))
+
+    # ------------------------------------------------------------------
+    # 6. Stop-Loss Price Solver (slippage-adjusted)
+    # ------------------------------------------------------------------
+    risk_amt = target / risk_rr
+    if side == "buy":
+        denom_sl = Decimal(1) - x_fee_sl
+        if denom_sl <= 0:
+            return {
+                "success": False,
+                "error": "Stop-loss fees and slippage are too high (>= 100%) to calculate a valid stop price.",
+            }
+        sl_p = (
+            entry * (Decimal(1) + e_fee) - (risk_amt / trading_qty)
+        ) / denom_sl
+    else:
+        sl_p = (
+            (risk_amt / trading_qty) + entry * (Decimal(1) - e_fee)
+        ) / (Decimal(1) + x_fee_sl)
+
+    # ------------------------------------------------------------------
+    # 7. Liquidation Price
+    # ------------------------------------------------------------------
+    mmr = Decimal("0.005")  # 0.5% maintenance margin rate
+    if side == "buy":
+        liq = entry * (Decimal(1) - Decimal(1) / lev + mmr)
+    else:
+        liq = entry * (Decimal(1) + Decimal(1) / lev - mmr)
+
+    # ------------------------------------------------------------------
+    # 8. Risk Warnings & Wall Detection
+    # ------------------------------------------------------------------
+    if not bids or not asks:
+        warnings.append(
+            "Order book is empty; depth metrics may be inaccurate."
+        )
+
+    # FIX: Prevent negative spread if orderbook is crossed
+    spread_bps_val = (
+        ((best_ask - best_bid) / best_bid) * Decimal(10000)
+        if best_bid > 0 and best_ask >= best_bid
+        else Decimal(0)
+    )
+    if spread_bps_val > Decimal(15):
+        warnings.append(
+            "High bid-ask spread; execution slippage risk is elevated."
+        )
+
+    if side == "buy" and imbalance < Decimal("0.45"):
+        warnings.append(
+            "Bearish book imbalance; downward price pressure expected."
+        )
+    elif side == "sell" and imbalance > Decimal("0.55"):
+        warnings.append(
+            "Bullish book imbalance; upward price pressure expected."
+        )
+
+    if trading_qty > 0 and target > (entry * trading_qty * Decimal("0.05")):
+        warnings.append(
+            "Unrealistically high target profit relative to total order value."
+        )
+
+    if side == "buy" and sl_p >= entry:
+        warnings.append(
+            f"Fees+slippage exceed risk limit (${float(risk_amt):.2f}). "
+            "Stop-loss price would need to be above entry."
+        )
+    elif side == "sell" and sl_p <= entry:
+        warnings.append(
+            f"Fees+slippage exceed risk limit (${float(risk_amt):.2f}). "
+            "Stop-loss price would need to be below entry."
+        )
+
+    if exit_p <= 0:
+        warnings.append(
+            "Computed exit price is non-positive; target may be unreachable "
+            "given current fees and entry price."
+        )
+
+    # Orderbook wall detection via optional scientific_calculator module
+    if scientific_calculator:
+        for label, book in (("buy", bids), ("sell", asks)):
+            if not book:
+                continue
+            try:
+                sizes = [float(p[1]) for p in book[:20] if len(p) >= 2]
+                if not sizes:
+                    continue
+                stats = scientific_calculator.execute_tool(
+                    mode="stats", data=sizes
+                ).get("result", {})
+                b_mean  = stats.get("mean", 0)
+                b_stdev = stats.get("stdev", 0)
+                b_max   = stats.get("max", 0)
+                if b_max > b_mean + (2 * b_stdev) and b_max > 0:
+                    wall_side = "buy" if label == "buy" else "sell"
+                    warnings.append(
+                        f"Significant {wall_side} wall detected "
+                        f"(Max: {b_max:.2f} vs Mean: {b_mean:.2f})"
+                    )
+            except Exception as exc:
+                log.debug("Wall detection failed for %s side: %s", label, exc)
+
+    # ------------------------------------------------------------------
+    # 9. Confidence Score
+    # ------------------------------------------------------------------
+    conf = Decimal(75)
+    if side == "buy":
+        conf += (imbalance - Decimal("0.5")) * Decimal(40)
+    else:
+        conf += (Decimal("0.5") - imbalance) * Decimal(40)
+    if spread_bps_val > Decimal(10):
+        conf -= (spread_bps_val - Decimal(10)) * Decimal(2)
+    conf = max(Decimal(10), min(Decimal(99), conf))
+
+    # ------------------------------------------------------------------
+    # 10. P&L Components
+    # ------------------------------------------------------------------
+    gross_profit = (
+        (exit_p - entry) * trading_qty
+        if side == "buy"
+        else (entry - exit_p) * trading_qty
     )
 
-    result = asdict(metrics)
-    logger.info("Analysis complete: signal=%s confidence=%.1f", signal, conf)
+    slippage_cost = entry * trading_qty * slippage * Decimal(2)  # entry + exit
+
+    estimated_fees = (
+        (entry * trading_qty * e_fee_base)
+        + (exit_p * trading_qty * mk)
+    )
+
+    funding_cost = entry * trading_qty * fr
+
+    # ------------------------------------------------------------------
+    # 11. Optional Order Execution via bybit_smart_order
+    # ------------------------------------------------------------------
+    order_result: Optional[Dict[str, Any]] = None
+    if kwargs.get("execute_order") and bybit_smart_order:
+        try:
+            order_result = bybit_smart_order.run(
+                symbol=s,
+                side=side.capitalize(),
+                order_type="Limit" if kwargs.get("limit_entry") else "Market",
+                entry_price=float(entry) if kwargs.get("limit_entry") else None,
+                leverage=int(lev),
+                sl_price=float(sl_p),
+                tp_price=float(exit_p),
+                dry_run=bool(kwargs.get("dry_run", False)),
+            )
+            log.debug("Order result: %s", order_result)
+        except Exception as err:
+            log.exception("bybit_smart_order.run raised: %s", err)
+            order_result = {"success": False, "error": str(err)}
+
+    # ------------------------------------------------------------------
+    # 12. Assemble Result
+    # ------------------------------------------------------------------
+    metrics = TradeMetrics(
+        symbol=s,
+        side=side,
+        requested_qty=float(q),
+        recommended_qty=_round_f(max(Decimal("0.0001"), rec_qty), 4),
+        best_bid=float(best_bid),
+        best_ask=float(best_ask),
+        spread_usdt=float(best_ask - best_bid),
+        spread_bps=float(spread_bps_val),
+        entry_price=float(entry),
+        target_exit_price=float(exit_p),
+        stop_loss_price=float(sl_p),
+        liquidation_price=float(liq),
+        gross_profit_usdt=float(gross_profit),
+        estimated_fees_usdt=float(estimated_fees),
+        funding_cost_usdt=float(funding_cost),
+        net_profit_usdt=float(target),
+        margin_required=float(entry * trading_qty / lev),
+        risk_amount_usdt=float(risk_amt),
+        kelly_fraction=float(kelly_safe),
+        half_kelly_fraction=float(half_kelly),
+        book_imbalance_ratio=float(imbalance),
+        book_depth_bid_usdt=float(bid_depth_val),
+        book_depth_ask_usdt=float(ask_depth_val),
+        confidence_score=float(conf),
+        signal="BUY" if side == "buy" else "SELL",
+        leverage=int(lev),
+        fee_scenario=(
+            "limit_entry_maker_exit"
+            if kwargs.get("limit_entry")
+            else "taker_entry_maker_exit"
+        ),
+        slippage_cost_usdt=float(slippage_cost),
+        risk_percent_used=float(risk_pct),
+        warnings=warnings,
+    )
+
+    res_dict: Dict[str, Any] = asdict(metrics)
+    res_dict["success"] = True  # FIX: Explicit success flag for caller
+    if order_result is not None:
+        res_dict["order_result"] = order_result
+    return res_dict
+
+
+# ==============================================================================
+# SECTION 5: OUTPUT ROUTING (LLM_OUTPUT)
+# ==============================================================================
+
+def write_llm_output(data: Dict[str, Any]) -> None:
+    out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder)
+        + "\n"
+    )
+
+    if out_path in ("/dev/stdout", "/dev/fd/1", "-"):
+        sys.stdout.write(json_payload)
+        sys.stdout.flush()
+    else:
+        try:
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "a", encoding="utf-8") as fp:
+                fp.write(json_payload)
+        except OSError as err:
+            sys.stderr.write(
+                f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n"
+            )
+            sys.stdout.write(json_payload)
+            sys.stdout.flush()
+
+
+# ==============================================================================
+# SECTION 6: PROGRAMMATIC ENTRY POINT FOR AICHAT
+# ==============================================================================
+
+def run(**kwargs: Any) -> Dict[str, Any]:
+    """Execute micro-profit calculation and route results."""
+    verbose = bool(kwargs.get("verbose", False))
+    if verbose:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            stream=sys.stderr,
+        )
+        log.debug("Verbose logging enabled. kwargs=%s", list(kwargs.keys()))
+
+    result = calculate_micro_profit(**kwargs)
+    print_human_readable_ui(
+        result, no_color=bool(kwargs.get("no_color", False))
+    )
+    write_llm_output(result)
     return result
 
 
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
+# ==============================================================================
+# SECTION 7: CLI ARGUMENT PARSER & ENTRYPOINT
+# ==============================================================================
+
+def _coerce(val: str) -> Any:
+    """
+    Coerce env-var string to most specific Python type.
+    """
+    if val == "":
+        return None
+    low = val.lower()
+    if low in ("true", "yes", "1"):
+        return True
+    if low in ("false", "no", "0"):
+        return False
+    try:
+        return int(val)
+    except ValueError:
+        pass
+    try:
+        return float(val)
+    except ValueError:
+        pass
+    return val
+
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Construct the argument parser (separated for testability)."""
     parser = argparse.ArgumentParser(
-        prog="micro_profit",
-        description=(
-            "Micro-Profit Estimator v4.0 — Estimate execution parameters "
-            "for short-horizon scalp orders using live order-book data."
-        ),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        prog="micro_profit.py",
+        description=f"Micro-Profit Estimator Engine v{__version__}",
     )
-    req = parser.add_argument_group("required arguments")
-    req.add_argument(
-        "--symbol", type=str, required=True,
-        help="Asset ticker pair (e.g., BTCUSDT).",
+    parser.add_argument(
+        "--symbol", required=True,
+        help="Trading pair symbol (e.g. BTCUSDT)",
     )
-    req.add_argument(
-        "--side", type=str, required=True, choices=["buy", "sell", "BUY", "SELL"],
-        help="Execution side: buy or sell.",
+    parser.add_argument(
+        "--side", required=True,
+        choices=["Buy", "Sell", "buy", "sell"],
+        help="Order side",
     )
-    req.add_argument(
+    parser.add_argument(
         "--qty", type=float, required=True,
-        help="Position size in base asset units.",
+        help="Order quantity in base asset",
     )
-
-    opt = parser.add_argument_group("optional arguments")
-    opt.add_argument("--target",          type=float, default=DEFAULT_TARGET,       help="Net profit target in USDT.")
-    opt.add_argument("--leverage",        type=int,   default=DEFAULT_LEVERAGE,     help="Margin leverage multiplier.")
-    opt.add_argument("--maker_fee",       type=float, default=DEFAULT_FEE_RATE,     help="Maker fee rate (decimal).")
-    opt.add_argument("--taker_fee",       type=float, default=DEFAULT_TAKER_FEE,    help="Taker fee rate (decimal).")
-    opt.add_argument("--funding_rate",    type=float, default=DEFAULT_FUNDING_RATE, help="Funding rate per interval (decimal).")
-    opt.add_argument("--slippage",        type=float, default=DEFAULT_SLIPPAGE,     help="Price slippage rate (decimal).")
-    opt.add_argument("--risk_reward",     type=float, default=DEFAULT_RISK_REWARD,  help="Reward-to-risk ratio.")
-    opt.add_argument("--kelly_win",       type=float, default=DEFAULT_KELLY_WIN,    help="Estimated win rate for Kelly sizing.")
-    opt.add_argument("--depth",           type=int,   default=DEFAULT_DEPTH,        help="Order book levels to analyze.")
-    opt.add_argument("--account_balance", type=float, default=0.0,                  help="Total account balance in USDT.")
-    opt.add_argument("--risk_percent",    type=float, default=0.0,                  help="Percent of balance to risk per trade.")
-    opt.add_argument("--bids_json",       type=str,   default="[]",                 help='JSON bid levels: [["price","qty"],...]')
-    opt.add_argument("--asks_json",       type=str,   default="[]",                 help='JSON ask levels: [["price","qty"],...]')
-    opt.add_argument("--use_vwap_entry",  action="store_true",                      help="Use VWAP instead of best bid/ask entry.")
-    opt.add_argument("--verbose",         action="store_true",                      help="Enable debug-level logging to stderr.")
-
+    parser.add_argument(
+        "--target", type=float, default=5.0,
+        help="Target net profit in USDT",
+    )
+    parser.add_argument(
+        "--leverage", type=int, default=1,
+        help="Leverage multiplier",
+    )
+    parser.add_argument(
+        "--maker_fee", type=float, default=0.0002,
+        help="Maker fee rate",
+    )
+    parser.add_argument(
+        "--taker_fee", type=float, default=0.00055,
+        help="Taker fee rate",
+    )
+    parser.add_argument(
+        "--funding_rate", type=float, default=0.0001,
+        help="Funding rate per interval",
+    )
+    parser.add_argument(
+        "--slippage", type=float, default=0.0001,
+        help="Estimated slippage rate",
+    )
+    parser.add_argument(
+        "--risk_reward", type=float, default=2.0,
+        help="Target risk to reward ratio",
+    )
+    parser.add_argument(
+        "--kelly_win", type=float, default=0.55,
+        help="Estimated win rate for Kelly criterion",
+    )
+    parser.add_argument(
+        "--depth", type=int, default=40,
+        help="Order book depth level",
+    )
+    parser.add_argument(
+        "--account_balance", type=float, default=0.0,
+        help="Account balance for sizing",
+    )
+    parser.add_argument(
+        "--risk_percent", type=float, default=0.0,
+        help="Risk percent per trade (0 = use Kelly)",
+    )
+    parser.add_argument(
+        "--bids_json", default="[]",
+        help="JSON encoded bids array",
+    )
+    parser.add_argument(
+        "--asks_json", default="[]",
+        help="JSON encoded asks array",
+    )
+    parser.add_argument(
+        "--use_vwap_entry", action="store_true",
+        help="Use VWAP entry price from depth",
+    )
+    parser.add_argument(
+        "--execute_order", action="store_true",
+        help="Submit order after calculations",
+    )
+    parser.add_argument(
+        "--dry_run", action="store_true",
+        help="Simulate order placement",
+    )
+    parser.add_argument(
+        "--limit_entry", action="store_true",
+        help="Use limit order for entry",
+    )
+    parser.add_argument(
+        "--no_color", action="store_true",
+        help="Disable ANSI color UI",
+    )
+    parser.add_argument(
+        "--verbose", action="store_true",
+        help="Enable verbose debug logging",
+    )
     return parser
 
 
-def main() -> None:
-    """CLI entry point — parse arguments, run analysis, emit JSON to stdout."""
-    global logger
-
-    parser = _build_parser()
-    args   = parser.parse_args()
-    logger = _build_logger(verbose=args.verbose)
-
-    logger.debug("Arguments: %s", vars(args))
-
-    try:
-        result = calculate_micro_profit(
-            symbol          = args.symbol,
-            side            = args.side,
-            qty             = args.qty,
-            target          = args.target,
-            leverage        = args.leverage,
-            maker_fee       = args.maker_fee,
-            taker_fee       = args.taker_fee,
-            funding_rate    = args.funding_rate,
-            slippage        = args.slippage,
-            risk_reward     = args.risk_reward,
-            kelly_win       = args.kelly_win,
-            depth           = args.depth,
-            account_balance = args.account_balance,
-            risk_percent    = args.risk_percent,
-            bids_json       = args.bids_json,
-            asks_json       = args.asks_json,
-            use_vwap_entry  = args.use_vwap_entry,
-        )
-        # Success: clean JSON to stdout only
-        print(json.dumps(result, indent=2))
-        sys.exit(0)
-
-    except ValueError as exc:
-        # Validation errors — user-fixable
-        error_payload = {
-            "error":      "validation_error",
-            "message":    str(exc),
-            "error_code": "ERR_VALIDATION",
-        }
-        print(json.dumps(error_payload, indent=2), file=sys.stderr)
-        sys.exit(2)
-
-    except json.JSONDecodeError as exc:
-        # Malformed JSON in bids/asks arguments
-        error_payload = {
-            "error":      "json_parse_error",
-            "message":    str(exc),
-            "error_code": "ERR_JSON",
-        }
-        print(json.dumps(error_payload, indent=2), file=sys.stderr)
-        sys.exit(3)
-
-    except Exception as exc:                          # pylint: disable=broad-except
-        # Unexpected errors — include type for debugging
-        error_payload = {
-            "error":      "internal_error",
-            "message":    str(exc),
-            "error_code": "ERR_INTERNAL",
-            "type":       type(exc).__name__,
-        }
-        logger.exception("Unexpected error during analysis")
-        print(json.dumps(error_payload, indent=2), file=sys.stderr)
-        sys.exit(1)
-
-
 if __name__ == "__main__":
-    main()
+    # argc/aichat environment variable interface
+    if any(k.startswith("argc_") for k in os.environ):
+        kwargs: Dict[str, Any] = {}
+        for k, v in os.environ.items():
+            if k.startswith("argc_"):
+                coerced = _coerce(v)
+                if coerced is not None:
+                    kwargs[k[5:].lower()] = coerced
+        res = run(**kwargs)
+        sys.exit(EXIT_SUCCESS if res.get("success", False) else EXIT_ERROR)
+
+    # Standard CLI interface
+    args = _build_parser().parse_args()
+    res = run(**vars(args))
+    sys.exit(EXIT_SUCCESS if res.get("success", False) else EXIT_ERROR)

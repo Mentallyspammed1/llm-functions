@@ -63,12 +63,20 @@ def run_tool(symbol: str = "BTCUSDT", interval: str = "60", limit: int = 100):
     macd_line = (ema12 - ema26) if (ema12 and ema26) else 0
     signal_line = _ema(closes, 9)
     
+    wbta_data = None
+    try:
+        import bybit_wbta
+        wbta_data = bybit_wbta.run(symbol=symbol, interval=interval, once=True, json_out=True, silent=True)
+    except Exception as e:
+        wbta_data = {"error": str(e)}
+
     return {
         "success": True,
         "symbol": symbol,
         "current_price": current_price,
         "rsi": {"rsi14": rsi14},
-        "macd": {"macd_line": macd_line, "signal": signal_line, "histogram": macd_line - signal_line}
+        "macd": {"macd_line": macd_line, "signal": signal_line, "histogram": (macd_line - signal_line) if signal_line is not None else 0},
+        "wbta_snapshot": wbta_data
     }
 
 if __name__ == "__main__":

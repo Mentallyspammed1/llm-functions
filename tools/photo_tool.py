@@ -116,7 +116,7 @@ _NO_COLOR: bool = False
 
 
 def _is_tty() -> bool:
-    return sys.stdout.isatty()
+    return sys.stderr.isatty()
 
 
 def _strip_ansi(text: str) -> str:
@@ -125,7 +125,7 @@ def _strip_ansi(text: str) -> str:
 
 
 def _cprint(text: str, end: str = "\n", file: Any = None) -> None:
-    target = file or sys.stdout
+    target = file or sys.stderr
     if _NO_COLOR or not _is_tty():
         text = _strip_ansi(text)
     print(text, end=end, flush=True, file=target)
@@ -1302,6 +1302,8 @@ def _execute(args: argparse.Namespace) -> None:
     log_path    = Path(
         getattr(args, "log_file", None) or default_log
     ).expanduser().resolve()
+    if not _validate_sandbox(log_path):
+        _die(f"Log file '{log_path}' is outside the allowed sandbox.")
 
     max_log = int(getattr(args, "max_log_entries", 500) or 500)
 
@@ -1439,7 +1441,10 @@ def _execute(args: argparse.Namespace) -> None:
         # Watermark
         watermark = getattr(args, "watermark", None)
         if watermark:
-            if _overlay_watermark(tgt, Path(watermark).expanduser()):
+            wm_path = Path(watermark).expanduser().resolve()
+            if not _validate_sandbox(wm_path):
+                _die(f"Watermark file '{wm_path}' is outside the allowed sandbox.")
+            if _overlay_watermark(tgt, wm_path):
                 _debug("Watermark applied.")
 
         # Annotation
@@ -1538,6 +1543,8 @@ def _execute(args: argparse.Namespace) -> None:
     cmp_result: dict = {}
     if compare_with:
         cmp_path = Path(compare_with).expanduser().resolve()
+        if not _validate_sandbox(cmp_path):
+            _die(f"Comparison file '{cmp_path}' is outside the allowed sandbox.")
         cmp_result = _compare_photos(photo_path, cmp_path)
         if cmp_result:
             _info(

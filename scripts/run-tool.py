@@ -250,6 +250,7 @@ def run(
             os.path.basename(tool_path), tool_path
         )
         mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
     except PermissionError as exc:
         raise ToolError(

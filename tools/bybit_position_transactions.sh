@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # Bybit Position Transactions Tool
 # Usage: ./bybit_position_transactions.sh [--category PERPETUAL|OPTION] [--symbol BTCUSDT] [--status New,PartiallyClosed,Closed]
 

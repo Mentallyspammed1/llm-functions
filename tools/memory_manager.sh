@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Manage persistent memory for AIChat conversations and context
 # @option --action! Action (store|retrieve|search|clear|export|import|cleanup)
 # @option --key! Memory key or identifier (required for store/retrieve/search/clear)

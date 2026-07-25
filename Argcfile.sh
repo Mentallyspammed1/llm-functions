@@ -458,7 +458,11 @@ test@tool() {
     mkdir -p "$TMP_DIR"
     names_file="$TMP_DIR/tools.txt"
     declarations_file="$TMP_DIR/functions.json"
-    argc list@tool > "$names_file"
+    if [[ -f tools.txt ]]; then
+        cat tools.txt | grep -v '^#' > "$names_file"
+    else
+        argc list@tool > "$names_file"
+    fi
     argc build@tool --names-file "$names_file" --declarations-file "$declarations_file"
     test-demo@tool
 }
@@ -497,7 +501,11 @@ test-demo@tool() {
 test@agent() {
     mkdir -p "$TMP_DIR"
     names_file="$TMP_DIR/agents.txt"
-    argc list@agent > "$names_file"
+    if [[ -f agents.txt ]]; then
+        cat agents.txt | grep -v '^#' > "$names_file"
+    else
+        argc list@agent > "$names_file"
+    fi
     argc build@agent --names-file "$names_file"
     test-demo@agent
 }
@@ -772,7 +780,7 @@ _choice_code_interpreter() {
 }
 
 _choice_agent() {
-    ls -1 agents
+    (cd agents && ls -d */ 2>/dev/null | sed 's/\///')
 }
 
 _choice_agent_action() {
@@ -781,7 +789,7 @@ _choice_agent_action() {
     else
         expr="s/:.*//"
     fi
-    argc generate-declarations@agent "$1" --oneline | sed "$expr"
+    argc generate-declarations@agent "$argc_agent" --oneline | sed "$expr"
 }
 
 _choice_mcp_args() {

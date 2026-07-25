@@ -999,12 +999,13 @@ class BybitRealm:
             results.append(order)
         return {"status": "ok", "brackets": results}
 
-    def set_fee_guaranteed_breakeven(self, symbol: str, entry_price: float, side: str, taker_fee_rate: float = 0.00055) -> dict:
-        """Fix 23: Fee-Adjusted Breakeven Stop Adjustment. Offsets entry price with fee buffers and modifies position stop loss."""
+    def set_fee_guaranteed_breakeven(self, symbol: str, entry_price: float, side: str, taker_fee_rate: float = 0.00055, maker_fee_rate: float = 0.0002) -> dict:
+        """Fix 23: Fee-Adjusted Breakeven Stop Adjustment. Offsets entry price with round-trip fee cost (entry taker + exit maker)."""
+        # Round-trip cost: entry taker fee + exit maker fee (limit TP exit)
+        round_trip_rate = taker_fee_rate + maker_fee_rate
         direction = 1 if side == "Buy" else -1
-        # Compound fee padding to completely clear round-trip transaction drag
-        breakeven_price = entry_price * (1 + (direction * (taker_fee_rate * 2.1)))
-        return self.set_trading_stop(symbol, stop_loss=round(breakeven_price, 4))
+        breakeven_price = entry_price * (1 + (direction * round_trip_rate))
+        return self.set_trading_stop(symbol, stop_loss=float(self._format_price(symbol, breakeven_price)))
 
     def place_safe_stop_market(self, symbol: str, side: str, qty: float, trigger_price: float) -> dict:
         """Fix 24: Conditional Stop Order Safety Check. Verifies mark price status relative to target direction."""
@@ -1396,7 +1397,11 @@ class BybitRealm:
         return result
 
     def place_breakeven_order(self, symbol: str, fee_rate: float, category: str = "linear") -> dict:
-        """Automates placing a reduce-only limit order at the breakeven price."""
+        """Automates placing a reduce-only limit order at the breakeven price.
+        
+        fee_rate is treated as the TOTAL round-trip fee rate (entry + exit).
+        For VIP0 taker-entry + maker-exit: 0.00055 + 0.0002 = 0.00075.
+        """
         pos_data = self.get_positions(symbol=symbol, category=category)
         positions = pos_data.get("list", [])
         if not positions:
@@ -1407,19 +1412,26 @@ class BybitRealm:
         size = float(pos["size"])
         side = pos["side"]
 
-        # Calculate Breakeven
+        # If caller passes a single-leg fee, auto-detect and use round-trip
+        # Common single-leg rates are < 0.001; round-trip rates are >= 0.001
+        effective_fee = fee_rate
+        if fee_rate < 0.001:
+            # Caller likely passed a single-leg rate — double it for round-trip
+            effective_fee = fee_rate * 2
+
+        # Calculate Breakeven covering full round-trip fees
         if side == "Buy":
-            breakeven_price = entry_price * (1 + fee_rate)
+            breakeven_price = entry_price * (1 + effective_fee)
             close_side = "Sell"
-        else: # Sell
-            breakeven_price = entry_price * (1 - fee_rate)
+        else:
+            breakeven_price = entry_price * (1 - effective_fee)
             close_side = "Buy"
 
         return self.place_order(
             symbol=symbol,
             side=close_side,
             qty=size,
-            price=round(breakeven_price, 4), # Bybit price precision varies by symbol
+            price=float(self._format_price(symbol, breakeven_price)),
             order_type="Limit",
             reduce_only=True,
             time_in_force="GTC",
@@ -3733,15 +3745,36 @@ class BybitRealm:
             "margin_usage_pct": round(float(balance.get("totalMarginBalance", 0)) / equity * 100, 2)
         }
 
-    def smart_breakeven(self, symbol: str, buffer_pct: float = 0.001) -> dict:
-        """Adjusts SL to breakeven + buffer to cover fees."""
-        pos = self.get_positions(symbol=symbol).get("list", [])
-        if not pos: return {"error": "No position"}
+    def smart_breakeven(self, symbol: str, buffer_pct: float = 0.0, category: str = "linear") -> dict:
+        """Adjusts SL to breakeven + round-trip fees + optional buffer.
+        
+        Queries actual fee rates from the API so the breakeven price always
+        covers the real cost of the trade rather than a hardcoded guess.
+        """
+        pos = self.get_positions(symbol=symbol, category=category).get("list", [])
+        if not pos:
+            return {"error": "No position"}
         p = pos[0]
         entry = float(p["avgPrice"])
         side = p["side"]
-        be_price = entry * (1 + buffer_pct) if side == "Buy" else entry * (1 - buffer_pct)
-        return self.set_trading_stop(symbol, stop_loss=be_price)
+
+        # Query actual fee rates from Bybit
+        fee_resp = self.get_fee_rate(category=category, symbol=symbol)
+        fee_data = fee_resp.get("list", [{}])[0]
+        taker_fee = float(fee_data.get("takerFeeRate", 0.00055))
+        maker_fee = float(fee_data.get("makerFeeRate", 0.0002))
+
+        # Round-trip: taker entry + maker exit (limit TP)
+        round_trip_rate = taker_fee + maker_fee + buffer_pct
+
+        if side == "Buy":
+            be_price = entry * (1 + round_trip_rate)
+        else:
+            be_price = entry * (1 - round_trip_rate)
+
+        return self.set_trading_stop(
+            symbol, stop_loss=float(self._format_price(symbol, be_price)), category=category
+        )
 
     def calculate_williams_r(self, symbol: str, interval: str = "15", period: int = 14) -> dict:
         """Calculates Williams %R."""
@@ -4160,13 +4193,15 @@ class BybitRealm:
         entry = float(pos["avgPrice"])
         side = pos["side"]
         
-        # Query fee rate to compute round-trip cost
+        # Query actual fee rates — use both legs for precise round-trip cost
         fee_resp = self.get_fee_rate(category=category, symbol=symbol)
         fee_data = fee_resp.get("list", [{}])[0]
-        taker_fee = float(fee_data.get("takerFeeRate", 0.0006))
+        taker_fee = float(fee_data.get("takerFeeRate", 0.00055))
+        maker_fee = float(fee_data.get("makerFeeRate", 0.0002))
         
-        # 2.2x multiplier covers both trades plus buffer
-        offset = entry * (taker_fee * 2.2)
+        # Round-trip: taker entry + maker exit (conservative: taker exit adds more buffer)
+        round_trip_rate = taker_fee + maker_fee
+        offset = entry * round_trip_rate
         be_price = entry + offset if side == "Buy" else entry - offset
         
         return self.set_trading_stop(symbol=symbol, stop_loss=float(self._format_price(symbol, be_price)), category=category)

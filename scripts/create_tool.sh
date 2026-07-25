@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # =============================================================================
 # create_interactive_tool.sh - Interactive Tool Creation Wizard
 # Generates LLM function tools in Bash, JavaScript, or Python

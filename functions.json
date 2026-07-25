@@ -1,5 +1,290 @@
 [
   {
+    "name": "bs",
+    "description": "Performs Brave Search queries, parses multi-tier results, and downloads pages concurrently.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query term (required)"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Number of search results (default: 10, max: 50)"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Pagination offset (default: 0)"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout in seconds (default: 15)"
+        },
+        "language": {
+          "type": "string",
+          "description": "Language code filter (e.g., en, es, zh-CN)"
+        },
+        "country": {
+          "type": "string",
+          "description": "Country code filter (e.g., us, uk, jp)"
+        },
+        "safe_search": {
+          "type": "string",
+          "description": "Safe search level: safe, moderate, strict (default: moderate)"
+        },
+        "max_downloads": {
+          "type": "integer",
+          "description": "Maximum concurrent download threads (default: 3)"
+        },
+        "output_format": {
+          "type": "string",
+          "description": "Output format for LLM integration: json, jsonl, csv (default: json)"
+        },
+        "log_file": {
+          "type": "string",
+          "description": "Path for debug log file"
+        },
+        "proxy": {
+          "type": "string",
+          "description": "HTTP/HTTPS proxy URL"
+        },
+        "headers": {
+          "type": "string",
+          "description": "Custom request headers as JSON string"
+        },
+        "max_retries": {
+          "type": "integer",
+          "description": "Maximum retry attempts (default: 3)"
+        },
+        "filter_domains": {
+          "type": "string",
+          "description": "Comma-separated domains to include"
+        },
+        "exclude_domains": {
+          "type": "string",
+          "description": "Comma-separated domains to exclude"
+        },
+        "rate_limit": {
+          "type": "integer",
+          "description": "Maximum requests per second (default: 0 = unlimited)"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "Custom cache directory"
+        },
+        "download_dir": {
+          "type": "string",
+          "description": "Custom download directory"
+        },
+        "max_file_size": {
+          "type": "string",
+          "description": "Maximum file size to download in bytes (default: 10485760)"
+        },
+        "download": {
+          "type": "boolean",
+          "description": "Download HTML of each search result"
+        },
+        "include_raw": {
+          "type": "boolean",
+          "description": "Include raw search HTML payload"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        },
+        "resume": {
+          "type": "boolean",
+          "description": "Resume/use cached downloaded files"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "web_spider",
+    "description": "Unified tool for high-performance web fetching, recursive crawling,",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action: fetch, crawl, diagnose, batch (required)"
+        },
+        "url": {
+          "type": "string",
+          "description": "Target URL (required for non-batch actions)"
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method: GET, POST, PUT, DELETE, etc. (default: GET)"
+        },
+        "data": {
+          "type": "string",
+          "description": "Payload for POST/PUT requests"
+        },
+        "headers": {
+          "type": "string",
+          "description": "Custom headers \"K: V, K2: V2\""
+        },
+        "depth": {
+          "type": "integer",
+          "description": "Crawl depth (default: 1)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max pages/items to process (default: 20)"
+        },
+        "keyword": {
+          "type": "string",
+          "description": "Search keyword in crawled pages"
+        },
+        "extract": {
+          "type": "string",
+          "description": "JSONPath expression for API responses"
+        },
+        "media_dir": {
+          "type": "string",
+          "description": "Dir for downloaded images"
+        },
+        "output": {
+          "type": "string",
+          "description": "Destination file for downloads"
+        },
+        "batch": {
+          "type": "string",
+          "description": "JSON file for batch request objects"
+        },
+        "domain_restrict": {
+          "type": "boolean",
+          "description": "Restrict crawling to start domain"
+        },
+        "download_images": {
+          "type": "boolean",
+          "description": "Download images found during crawl"
+        },
+        "gen_thumbs": {
+          "type": "boolean",
+          "description": "Generate thumbnails (requires Pillow)"
+        },
+        "no_verify_ssl": {
+          "type": "boolean",
+          "description": "Ignore SSL certificate errors"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "internet_speedtest",
+    "description": "Measures internet connection performance including download, upload, and latency.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "string",
+          "description": "Specific Speedtest.net server ID (optional)"
+        },
+        "unit": {
+          "type": "string",
+          "description": "Output unit: Mbps or Kbps (default: Mbps)"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        }
+      }
+    }
+  },
+  {
+    "name": "webx",
+    "description": "Web search with multiple backends, optional crawl (News RSS, DDG, Bing, SearXNG)",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "brave_search",
+    "description": "Performs Brave Search queries, parses multi-tier results, and downloads pages concurrently.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query term (required)"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Number of search results (default: 10, max: 50)"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Pagination offset (default: 0)"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout in seconds (default: 15)"
+        },
+        "language": {
+          "type": "string",
+          "description": "Language code filter (e.g., en, es, zh-CN)"
+        },
+        "country": {
+          "type": "string",
+          "description": "Country code filter (e.g., us, uk, jp)"
+        },
+        "safe_search": {
+          "type": "string",
+          "description": "Safe search level: safe, moderate, strict (default: moderate)"
+        },
+        "max_downloads": {
+          "type": "integer",
+          "description": "Maximum concurrent download threads (default: 3)"
+        },
+        "download": {
+          "type": "boolean",
+          "description": "Download HTML of each search result"
+        },
+        "include_raw": {
+          "type": "boolean",
+          "description": "Include raw search HTML payload"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
     "name": "ydc_search",
     "description": "Web Search Tool using You.com (YDC) API with domain filtering",
     "parameters": {
@@ -20,6 +305,10 @@
         "exclude_domains": {
           "type": "string",
           "description": "Comma-separated domains to exclude"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose output"
         }
       },
       "required": [
@@ -29,7 +318,7 @@
   },
   {
     "name": "web_search",
-    "description": "Perform a web search",
+    "description": "Perform a web search using the You.com API backend",
     "parameters": {
       "type": "object",
       "properties": {
@@ -49,9 +338,25 @@
           "type": "string",
           "description": "Comma-separated domains to exclude"
         },
+        "export_format": {
+          "type": "string",
+          "description": "Output format: json|csv|md|html|table (default: json)"
+        },
+        "cache_ttl": {
+          "type": "string",
+          "description": "Cache TTL in seconds (default: 3600)"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Python call timeout in seconds (default: 30)"
+        },
         "no_cache": {
           "type": "boolean",
-          "description": "Do not use cached results\n=============================================================================="
+          "description": "Bypass cache and force a live query"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Delete all cached results and exit\n=============================================================================="
         }
       },
       "required": [
@@ -61,25 +366,73 @@
   },
   {
     "name": "web_fetcher",
-    "description": "A web fetching utility that uses Python's built-in urllib.request.",
+    "description": "Advanced web fetching utility supporting HTTP methods, batch requests, downloads, ping, trace diagnostics, headers, and JSON path extraction.",
     "parameters": {
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "description": "The only supported action is 'fetch'."
+          "description": "Action to perform: fetch, head, download, ping, headers, trace, batch (required)"
         },
         "url": {
           "type": "string",
-          "description": "The URL to fetch. Required if action is 'fetch'."
+          "description": "Target URL (required for single-URL actions)"
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS (default: GET)"
         },
         "data": {
           "type": "string",
-          "description": "Data to send in the request body (e.g., for POST/PUT)."
+          "description": "Data payload for POST/PUT/PATCH requests"
         },
         "headers": {
           "type": "string",
-          "description": "Custom headers, comma-separated (e.g., \"Header1: Value1,Header2: Value2\")."
+          "description": "Comma-separated custom headers (e.g., \"Header1: Value1,Header2: Value2\")"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout in seconds (default: 30)"
+        },
+        "auth": {
+          "type": "string",
+          "description": "Basic auth credentials in \"username:password\" format"
+        },
+        "output": {
+          "type": "string",
+          "description": "Destination file path for download action"
+        },
+        "extract": {
+          "type": "string",
+          "description": "JSONPath dotted expression to extract data (e.g. \"data.items[0].name\")"
+        },
+        "batch": {
+          "type": "string",
+          "description": "JSON file path containing list of request objects for batch mode"
+        },
+        "format": {
+          "type": "string",
+          "description": "Output format: text, json, csv (default: text)"
+        },
+        "retry": {
+          "type": "integer",
+          "description": "Number of retry attempts on failure (default: 0)"
+        },
+        "proxy": {
+          "type": "string",
+          "description": "Proxy URL (e.g., \"http://127.0.0.1:8080\")"
+        },
+        "no_verify_ssl": {
+          "type": "boolean",
+          "description": "Disable SSL certificate verification"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
         }
       },
       "required": [
@@ -106,7 +459,7 @@
     }
   },
   {
-    "name": "wget2",
+    "name": "wget2x",
     "description": "Download files or websites using GNU Wget2",
     "parameters": {
       "type": "object",
@@ -134,6 +487,22 @@
         "waitretry": {
           "type": "string",
           "description": "Wait specified seconds between retries"
+        },
+        "quiet": {
+          "type": "boolean",
+          "description": "-q Quiet mode"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "-v Verbose mode"
+        },
+        "mirror": {
+          "type": "boolean",
+          "description": "-m Mirror a website (recursive)"
+        },
+        "no_check_certificate": {
+          "type": "boolean",
+          "description": "Don't validate the server's certificate"
         }
       },
       "required": [
@@ -250,18 +619,182 @@
     }
   },
   {
-    "name": "google_search",
-    "description": "Google Search Tool (Google Custom Search primary, with You.com/DuckDuckGo fallbacks)",
+    "name": "vid_search",
+    "description": "Scrapes and searches video links, thumbnails, and metadata across multiple video platforms.",
     "parameters": {
       "type": "object",
       "properties": {
         "query": {
           "type": "string",
-          "description": "Search query"
+          "description": "Search query (required)"
+        },
+        "engine": {
+          "type": "string",
+          "description": "Engine: pexels, yahoo_video, dailymotion, bing, xnxx, xvideos, pornhub, pornhub_gifs, xhamster, spankbang, redtube, thumbzilla, eporner, beeg, youjizz, motherless, hqporner, txxx, zebra_girls (default: pexels)"
         },
         "limit": {
           "type": "integer",
-          "description": "Maximum results (default: 10)"
+          "description": "Maximum results to fetch (default: 20)"
+        },
+        "page": {
+          "type": "integer",
+          "description": "Starting page number (default: 1)"
+        },
+        "output_format": {
+          "type": "string",
+          "description": "Output format: json, html, csv (default: json)"
+        },
+        "proxy": {
+          "type": "string",
+          "description": "Proxy server URL (http/https/socks5)"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "HTTP timeout in seconds (default: 15)"
+        },
+        "custom_ua": {
+          "type": "string",
+          "description": "Override the User-Agent header string"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "Custom cache folder location"
+        },
+        "cache_ttl": {
+          "type": "string",
+          "description": "Result cache TTL in seconds (default: 3600)"
+        },
+        "exclude_words": {
+          "type": "string",
+          "description": "Comma-separated list of words to exclude from video titles"
+        },
+        "require_words": {
+          "type": "string",
+          "description": "Comma-separated list of words required to be in video titles"
+        },
+        "download_thumbs": {
+          "type": "boolean",
+          "description": "Automatically download video thumbnails locally for offline reports"
+        },
+        "no_thumbs": {
+          "type": "boolean",
+          "description": "Skip thumbnail processing"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for identical queries"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "no_verify": {
+          "type": "boolean",
+          "description": "Disable SSL verification for requests"
+        },
+        "open": {
+          "type": "boolean",
+          "description": "Automatically open generated HTML or CSV report"
+        },
+        "share": {
+          "type": "boolean",
+          "description": "Automatically trigger termux-share on report path"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging to stderr"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "fetch_url_via_jina",
+    "description": "Extract content from a URL using Jina AI Reader.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The target URL to scrape."
+        },
+        "selector": {
+          "type": "string",
+          "description": "CSS selector to extract specific elements."
+        },
+        "engine": {
+          "type": "string",
+          "description": "Parser/Browser engine (e.g. readerlm-v2)."
+        },
+        "no_cache": {
+          "type": "boolean",
+          "description": "Bypass Jina AI cache and fetch fresh content."
+        },
+        "with_links": {
+          "type": "boolean",
+          "description": "Append summary section of links/buttons."
+        },
+        "with_images": {
+          "type": "boolean",
+          "description": "Append summary section of image descriptions."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "ddg_search",
+    "description": "Perform privacy-focused web and instant-answer searches using DuckDuckGo.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query string (required)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum search results (default: 5)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)"
+        },
+        "engine": {
+          "type": "string",
+          "description": "Search mode: web/instant/hybrid (default: web)"
+        },
+        "use_cache": {
+          "type": "string",
+          "description": "Enable result caching for repeated queries"
+        },
+        "no_color": {
+          "type": "string",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "string",
+          "description": "Enable detailed debug log output"
+        },
+        "log_file": {
+          "type": "string",
+          "description": "Write debug logs to a file"
+        },
+        "output_format": {
+          "type": "string",
+          "description": "Output format for LLM: json|jsonl|csv|md (default: json)"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Request timeout in seconds (default: 15)"
+        },
+        "workers": {
+          "type": "integer",
+          "description": "Number of parallel workers (default: 1)"
         }
       },
       "required": [
@@ -387,6 +920,34 @@
           "type": "string",
           "description": "Comma-separated keys to extract (e.g. title,link,snippet)."
         },
+        "exact_terms": {
+          "type": "boolean",
+          "description": "Treat query as exact phrase match."
+        },
+        "no_duplicates": {
+          "type": "boolean",
+          "description": "Filter out duplicate domains."
+        },
+        "no_cache": {
+          "type": "boolean",
+          "description": "Bypass response cache."
+        },
+        "debug": {
+          "type": "boolean",
+          "description": "Enable verbose debug output."
+        },
+        "show_cache_stats": {
+          "type": "boolean",
+          "description": "Show cache statistics."
+        },
+        "show_progress": {
+          "type": "boolean",
+          "description": "Show download progress bars."
+        },
+        "pretty_print": {
+          "type": "boolean",
+          "description": "Format JSON response."
+        },
         "search_type": {
           "type": "string",
           "description": "Search type: web or image. [default: web]"
@@ -438,6 +999,34 @@
         "image_min_height": {
           "type": "string",
           "description": "Minimum image height in pixels. [default: 0]"
+        },
+        "download_images": {
+          "type": "boolean",
+          "description": "Download found images."
+        },
+        "encode_base64": {
+          "type": "boolean",
+          "description": "Base64 encode images for vision models."
+        },
+        "generate_manifest": {
+          "type": "boolean",
+          "description": "Generate JSON manifest of downloads."
+        },
+        "skip_existing": {
+          "type": "boolean",
+          "description": "Skip existing images."
+        },
+        "verify_images": {
+          "type": "boolean",
+          "description": "Verify downloaded files."
+        },
+        "create_thumbnails": {
+          "type": "boolean",
+          "description": "Create 200x200 thumbnails."
+        },
+        "show_image_metadata": {
+          "type": "boolean",
+          "description": "Show detailed image metadata."
         }
       },
       "required": [
@@ -462,14 +1051,38 @@
     }
   },
   {
+    "name": "download_image",
+    "description": "Download an image from a URL and save it to the local filesystem.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The direct image URL to download"
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Optional custom path/filename to save the image to"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose logs"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
     "name": "web_crawler",
-    "description": "Web crawler that parses HTML, extracts links, and recursively follows them to search for keywords or download images/thumbnails.",
+    "description": "Web crawler that parses HTML, extracts links, recursively crawls pages, searches keywords, and downloads images/thumbnails.",
     "parameters": {
       "type": "object",
       "properties": {
         "start_url": {
           "type": "string",
-          "description": "Starting URL to crawl"
+          "description": "Starting URL to crawl (required)"
         },
         "max_depth": {
           "type": "integer",
@@ -481,19 +1094,39 @@
         },
         "keyword": {
           "type": "string",
-          "description": "Search for a specific keyword in the page text"
+          "description": "Search for a specific keyword in page text"
         },
         "media_dir": {
           "type": "string",
-          "description": "Directory to save downloaded images (default: cache/crawled_media/)"
+          "description": "Directory to save downloaded images (default: cache/crawled_media)"
         },
         "thumb_dir": {
           "type": "string",
-          "description": "Directory to save thumbnails (default: cache/crawled_thumbs/)"
+          "description": "Directory to save generated thumbnails (default: cache/crawled_thumbs)"
         },
         "thumb_width": {
           "type": "integer",
-          "description": "Thumbnail width (default: 150)"
+          "description": "Thumbnail width in pixels (default: 150)"
+        },
+        "domain_restrict": {
+          "type": "boolean",
+          "description": "Restrict crawling to links on the same domain as start-url"
+        },
+        "download_images": {
+          "type": "boolean",
+          "description": "Enable automatic downloading of images found in crawled pages"
+        },
+        "generate_thumbnails": {
+          "type": "boolean",
+          "description": "Generate thumbnails for downloaded images (requires Pillow)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
         }
       },
       "required": [
@@ -550,11 +1183,56 @@
         "limit": {
           "type": "integer",
           "description": "Result limit."
+        },
+        "json": {
+          "type": "boolean",
+          "description": "Output raw JSON instead of pretty print."
         }
       },
       "required": [
         "action"
       ]
+    }
+  },
+  {
+    "name": "bybit_wbta",
+    "description": "Market Trend Observatory v3.3 — Complete L2 Orderbook Microstructure,",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Trading pair (e.g. BTCUSDT, ETHUSDT; default: BTCUSDT)"
+        },
+        "interval": {
+          "type": "string",
+          "description": "Kline timeframe: 1, 5, 15, 60, 240, D (default: 15)"
+        },
+        "delay": {
+          "type": "integer",
+          "description": "Refresh seconds between cycles in loop mode (default: 20)"
+        },
+        "use_tor": {
+          "type": "boolean",
+          "description": "Enable Tor SOCKS5 proxy routing"
+        },
+        "once": {
+          "type": "boolean",
+          "description": "Run a single analysis cycle and exit (default)"
+        },
+        "json_out": {
+          "type": "boolean",
+          "description": "Output raw JSON payload for LLM/system integration"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        }
+      }
     }
   },
   {
@@ -1170,53 +1848,65 @@
   },
   {
     "name": "bbt",
-    "description": "Unified Entry Point — Bybit Realm v5.0",
+    "description": "Unified Bybit V5 Trading, Analysis, Indicator Observatory & Execution Suite",
     "parameters": {
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "description": "health_check, get_wallet_balance, get_account_info, get_positions, get_position_risk, get_fee_rate, set_leverage, set_trading_stop, set_position_mode, get_executions, get_pnl_history, panic_close, bulk_update_tp_sl, get_account_summary, get_pnl_summary, update_trailing_stop, set_tp_sl, check_risk_limit, check_balance, close_position, get_open_positions_summary, send_telegram_alert, export_trade_history, calculate_rsi, calculate_sma, calculate_ema, calculate_macd, calculate_bollinger_bands, calculate_vwap, calculate_atr, calculate_stoch, scan_scalping_opportunities, place_order, amend_order, cancel_order, cancel_all_orders, get_open_orders, get_order_history, batch_place_orders, place_smart_trade, get_ticker, get_orderbook, get_klines, get_recent_trades, get_instruments_info, get_funding_rate, get_open_interest, get_volatility_index, get_orderbook_analysis, get_volume_at_price, get_market_regime, scan_symbols, get_journal"
+          "description": "health_check, get_wallet_balance, get_account_info, get_positions, get_position_risk, get_fee_rate, set_leverage, set_trading_stop, set_position_mode, get_executions, get_pnl_history, panic_close, bulk_update_tp_sl, get_account_summary, get_pnl_summary, update_trailing_stop, set_tp_sl, check_risk_limit, check_balance, close_position, get_open_positions_summary, send_telegram_alert, export_trade_history, calculate_rsi, calculate_sma, calculate_ema, calculate_macd, calculate_bollinger_bands, calculate_vwap, calculate_atr, calculate_stoch, scan_scalping_opportunities, place_order, amend_order, cancel_order, cancel_all_orders, get_open_orders, get_order_history, batch_place_orders, place_smart_trade, get_ticker, get_orderbook, get_klines, get_recent_trades, get_instruments_info, get_funding_rate, get_open_interest, get_volatility_index, get_orderbook_analysis, get_volume_at_price, get_market_regime, scan_symbols, get_journal, calculate_support_resistance_levels, calculate_fibonacci_levels, calculate_volume_profile, calculate_orderflow_delta, calculate_market_depth_profile, detect_high_confluence_levels, deep_level_sort, calculate_sr_levels, generate_market_depth_report, calculate_limit_micro_profit, calculate_depth_weighted_profit, calculate_all_indicators, calculate_hma, calculate_fractals, calculate_pivot_points, calculate_klinger, calculate_cmf, calculate_adx_with_di, calculate_elder_ray_index, calculate_kst, calculate_tema, calculate_ehler_rsi, calculate_ehler_stochastic, calculate_vwma, calculate_bollinger_bands_pb, calculate_roc, calculate_mfi, calculate_williams_r, analyze_symbol, place_breakeven_order"
         },
         "symbol": {
           "type": "string",
-          "description": "Trading pair (e.g. BTCUSDT)."
+          "description": "Trading pair (e.g. BTCUSDT)"
         },
         "side": {
           "type": "string",
-          "description": "Buy, Sell."
+          "description": "Buy, Sell"
         },
         "qty": {
           "type": "integer",
-          "description": "quantity."
+          "description": "Order quantity"
         },
         "price": {
           "type": "integer",
-          "description": "price."
+          "description": "Order price"
         },
         "category": {
           "type": "string",
-          "description": "linear, spot, inverse."
+          "description": "linear, spot, inverse (default: linear)"
         },
         "stop_loss": {
           "type": "integer",
-          "description": "Stop loss price."
+          "description": "Stop loss price"
         },
         "take_profit": {
           "type": "integer",
-          "description": "Take profit price."
+          "description": "Take profit price"
         },
         "leverage": {
           "type": "integer",
-          "description": "Leverage value."
+          "description": "Leverage value"
         },
         "interval": {
           "type": "string",
-          "description": "1, 5, 15, 60, 240, D."
+          "description": "Kline interval: 1, 5, 15, 60, 240, D (default: 60)"
         },
         "limit": {
           "type": "integer",
-          "description": "Result limit."
+          "description": "Result limit (default: 50)"
+        },
+        "json": {
+          "type": "boolean",
+          "description": "Output raw JSON format"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
         }
       },
       "required": [
@@ -1225,83 +1915,74 @@
     }
   },
   {
-    "name": "micro_scalp",
-    "description": "Bybit Micro‑Profit Scalper – automated micro‑profit scalping using order‑book imbalance and momentum.",
+    "name": "proxy_utils",
+    "description": "Utility tool for detecting proxy availability, probing Tor/SOCKS5 ports,",
     "parameters": {
       "type": "object",
       "properties": {
-        "api_key": {
+        "action": {
           "type": "string",
-          "description": "Bybit API key."
+          "description": "Action to perform: check, get, sync (default: check)"
         },
-        "api_secret": {
+        "proxy_url": {
           "type": "string",
-          "description": "Bybit API secret."
+          "description": "Custom proxy URL to test"
         },
-        "loop": {
-          "type": "string",
-          "description": "Continuous daemon until SIGINT/SIGTERM (flag)."
+        "timeout": {
+          "type": "integer",
+          "description": "Connection test timeout in seconds (default: 3.0)"
         },
-        "private_ws": {
-          "type": "string",
-          "description": "Private order/execution WS logs (flag)."
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
         },
-        "position_guard": {
-          "type": "string",
-          "description": "Skip new entry if open position exists on symbol (flag)."
-        },
-        "ws_fallback_rest": {
-          "type": "string",
-          "description": "On WS failure, use REST for that cycle (flag)."
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
         }
-      },
-      "required": [
-        "api_key",
-        "api_secret"
-      ]
+      }
     }
   },
   {
-    "name": "monitor_scalp",
-    "description": "Continuously monitors open positions for a symbol and triggers",
+    "name": "bybit_core",
+    "description": "Core V5 API driver for Bybit with session pooling, HMAC signing,",
     "parameters": {
       "type": "object",
       "properties": {
-        "symbol": {
+        "action": {
           "type": "string",
-          "description": "Required: Trading pair (e.g., BTCUSDT)"
+          "description": "Test action: health_check, server_time, config"
         },
-        "qty": {
-          "type": "string",
-          "description": "Required: Quantity (base asset)"
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
         },
-        "leverage": {
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "bybit_micro_scalper",
+    "description": "Compatibility shim for the argc runner – simply forwards to main().",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "args": {
           "type": "string",
-          "description": "Required: Leverage value"
-        },
-        "interval": {
-          "type": "string",
-          "description": "Optional: Check interval (default: 30)"
-        },
-        "trailing_stop": {
-          "type": "string",
-          "description": "Optional: Trailing stop distance (e.g., 50)"
-        },
-        "target_profit": {
-          "type": "string",
-          "description": "Optional: Target profit in USDT (e.g., 0.10)"
+          "description": ""
         }
       },
       "required": [
-        "symbol",
-        "qty",
-        "leverage"
+        "args"
       ]
     }
   },
   {
     "name": "micro_profit",
-    "description": "Estimate micro‑profit opportunities from order‑book data.",
+    "description": "Estimate micro-profit opportunities from order-book data with",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1316,6 +1997,30 @@
         "qty": {
           "type": "string",
           "description": "Required quantity (base asset)."
+        },
+        "use_vwap_entry": {
+          "type": "boolean",
+          "description": "Use VWAP entry price instead of best bid/ask."
+        },
+        "execute_order": {
+          "type": "boolean",
+          "description": "Submit/execute order after calculating metrics."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate order placement without sending."
+        },
+        "limit_entry": {
+          "type": "boolean",
+          "description": "Use limit order for entry price."
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output."
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose debug logging."
         }
       },
       "required": [
@@ -1569,101 +2274,251 @@
   },
   {
     "name": "bybit_smart_order",
-    "description": "Place a smart order with automatic position sizing and risk management.",
+    "description": "Place a smart order with automatic position sizing, risk management,",
     "parameters": {
       "type": "object",
       "properties": {
         "symbol": {
           "type": "string",
-          "description": "BTCUSDT Trading pair (e.g. BTCUSDT)."
+          "description": "Trading pair (e.g. BTCUSDT, default: BTCUSDT)"
         },
         "side": {
           "type": "string",
-          "description": "Buy Buy or Sell."
+          "description": "Order side: Buy, Sell (default: Buy)"
         },
         "order_type": {
           "type": "string",
-          "description": "Market Market or Limit (default: Market)."
+          "description": "Order type: Market, Limit (default: Market)"
         },
         "entry_price": {
           "type": "integer",
-          "description": "Entry price (required if order-type is Limit)."
+          "description": "Target entry price (required if Limit)"
         },
         "leverage": {
           "type": "integer",
-          "description": "Set account leverage before placing order."
+          "description": "Set account leverage before placing order"
         },
         "risk_pct": {
           "type": "integer",
-          "description": "% of balance to risk (default: 1.0)."
+          "description": "% of account balance to risk (default: 1.0)"
+        },
+        "qty": {
+          "type": "integer",
+          "description": "Explicit order quantity (overrides auto-sizing)"
         },
         "sl_dist": {
           "type": "integer",
-          "description": "Stop loss distance in price."
+          "description": "Stop loss distance in price"
         },
         "sl_price": {
           "type": "integer",
-          "description": "Absolute Stop Loss price."
+          "description": "Absolute Stop Loss price"
         },
         "tp_price": {
           "type": "integer",
-          "description": "Absolute Take Profit price."
+          "description": "Absolute Take Profit price"
         },
         "rr_ratio": {
           "type": "integer",
-          "description": "Risk to Reward ratio for Take Profit calculation (default: 2.0)."
+          "description": "Risk to Reward ratio for TP (default: 2.0)"
         },
         "tp_usdt": {
           "type": "integer",
-          "description": "Target Take Profit in absolute USDT value (calculates exact exit price)."
+          "description": "Target Take Profit in absolute USDT value"
         },
         "sl_usdt": {
           "type": "integer",
-          "description": "Maximum Risk in absolute USDT value (overrides --risk-pct)."
+          "description": "Maximum Risk in USDT (overrides risk-pct)"
         },
         "trailing_stop": {
           "type": "integer",
-          "description": "Trailing Stop activation distance in price."
+          "description": "Trailing Stop distance in price"
         },
         "trailing_activation": {
           "type": "integer",
-          "description": "Trailing Stop activation price (requires --trailing-stop)."
-        },
-        "reduce_only": {
-          "type": "string",
-          "description": "Submit order as reduce-only (close position only)."
+          "description": "Trailing Stop activation price"
         },
         "margin_mode": {
           "type": "string",
-          "description": "Margin mode: isolated or cross (sets before leverage if provided)."
+          "description": "Margin mode: isolated, cross"
         },
         "position_idx": {
           "type": "integer",
-          "description": "Position index: 0=One-Way, 1=Buy hedge, 2=Sell hedge (default: 0)."
+          "description": "Position index: 0=One-Way, 1=Buy, 2=Sell"
         },
         "time_in_force": {
           "type": "string",
-          "description": "Time in force: GTC, IOC, FOK, PostOnly (default: GTC)."
+          "description": "GTC, IOC, FOK, PostOnly (default: GTC)"
         },
         "sl_trigger_by": {
           "type": "string",
-          "description": "SL trigger price type: Mark, Index, Last (default: Mark)."
+          "description": "Mark, Index, Last (default: Mark)"
         },
         "tp_trigger_by": {
           "type": "string",
-          "description": "TP trigger price type: Mark, Index, Last (default: Mark)."
+          "description": "Mark, Index, Last (default: Mark)"
         },
         "order_link_id": {
           "type": "string",
-          "description": "Custom order link ID (max 36 chars) for idempotency."
-        },
-        "dry_run": {
-          "type": "string",
-          "description": "Calculate everything and return the order payload without submitting."
+          "description": "Custom order link ID (max 36 chars)"
         },
         "max_position_usdt": {
           "type": "integer",
-          "description": "Safety cap: refuse if notional > this USDT value."
+          "description": "Maximum notional USD safety cap"
+        },
+        "trigger_price": {
+          "type": "integer",
+          "description": "Conditional trigger price"
+        },
+        "trigger_direction": {
+          "type": "integer",
+          "description": "1=rise, 2=fall (auto if omitted)"
+        },
+        "trigger_by": {
+          "type": "string",
+          "description": "Mark, Index, Last (default: Mark)"
+        },
+        "category": {
+          "type": "string",
+          "description": "linear, inverse, spot (default: linear)"
+        },
+        "atr_mult": {
+          "type": "integer",
+          "description": "ATR multiplier for default SL (default: 2.0)"
+        },
+        "slippage_bps": {
+          "type": "integer",
+          "description": "Extra slippage buffer in bps for market entry (default: 5)"
+        },
+        "reduce_only": {
+          "type": "boolean",
+          "description": "Submit order as reduce-only"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Calculate sizing without submitting"
+        },
+        "skip_leverage": {
+          "type": "boolean",
+          "description": "Do not call set-leverage API"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        }
+      }
+    }
+  },
+  {
+    "name": "bybit_position_manager",
+    "description": "Manage open positions on Bybit: Move Stop-Loss to Breakeven or Close position if net profit threshold is met.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Trading pair symbol (e.g. BTCUSDT, default: BTCUSDT)"
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to perform: be, close (default: be)"
+        },
+        "profit_usdt": {
+          "type": "integer",
+          "description": "Target USDT net profit threshold to trigger action (default: 50)"
+        },
+        "fee_rate": {
+          "type": "integer",
+          "description": "Estimated taker fee rate for roundtrip calculation (default: 0.0006)"
+        },
+        "category": {
+          "type": "string",
+          "description": "Instrument category: linear, inverse (default: linear)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        }
+      }
+    }
+  },
+  {
+    "name": "pyrm_scalp_tool",
+    "description": "Multi-symbol high-leverage orderbook scalper bot for Bybit with",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "symbols": {
+          "type": "string",
+          "description": "Comma-separated list of symbols (default: liquid alts)"
+        },
+        "pos_pct": {
+          "type": "integer",
+          "description": "Position value as % of account balance (default: 0)"
+        },
+        "pos_value": {
+          "type": "integer",
+          "description": "USDT value per position (default: 50.0)"
+        },
+        "leverage": {
+          "type": "integer",
+          "description": "Position leverage (default: 50)"
+        },
+        "target": {
+          "type": "integer",
+          "description": "Target net profit in USDT (default: 0.04)"
+        },
+        "risk_reward": {
+          "type": "integer",
+          "description": "Risk to reward ratio (default: 1.0)"
+        },
+        "trailing_stop": {
+          "type": "integer",
+          "description": "Optional trailing stop distance"
+        },
+        "loop_delay": {
+          "type": "integer",
+          "description": "Seconds between cycles in loop mode (default: 30)"
+        },
+        "max_workers": {
+          "type": "integer",
+          "description": "Thread pool size for symbol analysis (default: 8)"
+        },
+        "max_positions": {
+          "type": "integer",
+          "description": "Max concurrent open positions (default: 5)"
+        },
+        "cooldown": {
+          "type": "integer",
+          "description": "Seconds before re-entering same symbol (default: 120)"
+        },
+        "spread_max_bps": {
+          "type": "integer",
+          "description": "Max allowed spread in bps (default: 15)"
+        },
+        "loop": {
+          "type": "boolean",
+          "description": "Run continuously in a loop"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Perform analysis without submitting live orders"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
         }
       }
     }
@@ -2068,6 +2923,18 @@
         "shell": {
           "type": "string",
           "description": "Shell to use: bash/sh/zsh (default: bash)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI colour output"
+        },
+        "strip_ansi": {
+          "type": "boolean",
+          "description": "Strip ANSI codes from command output before returning"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Show extra debug info (PATH, shell, env vars)"
         }
       },
       "required": [
@@ -2076,56 +2943,633 @@
     }
   },
   {
-    "name": "gen_thumbs",
-    "description": "Generate thumbnails from video files or URLs using ffmpeg",
+    "name": "scientific_calculator",
+    "description": "Perform advanced scientific calculations, statistical analysis, expression evaluation, and unit conversions.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "expr": {
+          "type": "string",
+          "description": "Mathematical expression to evaluate (e.g., \"sin(pi/4) + log(10)\")"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Operation mode: eval/stats/matrix/convert (default: eval)"
+        },
+        "data": {
+          "type": "string",
+          "description": "Comma-separated values or JSON array for statistics mode"
+        },
+        "matrix_a": {
+          "type": "string",
+          "description": "Matrix A for matrix operations (JSON 2D array or file path)"
+        },
+        "matrix_b": {
+          "type": "string",
+          "description": "Matrix B for matrix operations (JSON 2D array or file path)"
+        },
+        "matrix_op": {
+          "type": "string",
+          "description": "Matrix operation: add, sub, mul, det, inv, transpose (default: mul)"
+        },
+        "from_unit": {
+          "type": "string",
+          "description": "Source unit for conversion (e.g., deg, rad, m, ft, c, f, kg, lb)"
+        },
+        "to_unit": {
+          "type": "string",
+          "description": "Target unit for conversion"
+        },
+        "value": {
+          "type": "integer",
+          "description": "Numeric value for unit conversion"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "file_todo",
+    "description": "Audits files for existing TODOs and analyzes code logic to generate detailed, actionable TODO task items and TODO.md roadmaps.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target file or directory path to review (required)"
+        },
+        "todo_file": {
+          "type": "string",
+          "description": "Destination path for generated Markdown TODO report (default: TODO.md)"
+        },
+        "min_priority": {
+          "type": "string",
+          "description": "Minimum priority filter: high, medium, low (default: low)"
+        },
+        "write_md": {
+          "type": "boolean",
+          "description": "Write/update structured TODO.md file on disk"
+        },
+        "include_generated": {
+          "type": "boolean",
+          "description": "Auto-detect code smells and generate actionable TODO tasks alongside existing comments"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "task_manager",
+    "description": "A comprehensive task manager with background LLM wakeup timers and active timer process monitoring.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action: add, list, complete, delete, clear, schedule, timers, cancel-timer (required)"
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the task (required for add)"
+        },
+        "desc": {
+          "type": "string",
+          "description": "Optional description of the task"
+        },
+        "priority": {
+          "type": "string",
+          "description": "Priority: high, medium, low (default: medium)"
+        },
+        "task_id": {
+          "type": "string",
+          "description": "Task ID (required for complete, delete, cancel-timer)"
+        },
+        "file": {
+          "type": "string",
+          "description": "JSON file to store tasks (default: tasks.json)"
+        },
+        "wakeup": {
+          "type": "string",
+          "description": "Set a background wakeup timer in minutes for the task"
+        },
+        "schedule": {
+          "type": "string",
+          "description": "Schedule task at absolute time (\"2026-12-31 14:30\") or relative duration (\"2h30m\")"
+        },
+        "agent_prompt": {
+          "type": "string",
+          "description": "Agent prompt to auto-execute via aichat upon wakeup"
+        },
+        "recurring": {
+          "type": "string",
+          "description": "Make the wakeup timer recurring every N minutes"
+        },
+        "depends_on": {
+          "type": "string",
+          "description": "Task ID this task depends on"
+        },
+        "webhook": {
+          "type": "string",
+          "description": "Webhook URL to POST when agent finishes"
+        },
+        "retry_count": {
+          "type": "string",
+          "description": "Number of times to retry agent prompt on failure"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Timeout in seconds for agent execution"
+        },
+        "auto_subtasks": {
+          "type": "boolean",
+          "description": "Parse agent output to auto-create subtasks"
+        },
+        "context_file": {
+          "type": "string",
+          "description": "File path to include as context for the agent"
+        },
+        "assignee": {
+          "type": "string",
+          "description": "CLI tool/agent to use (default: aichat)"
+        },
+        "auto_resolve": {
+          "type": "boolean",
+          "description": "Automatically mark task completed when agent succeeds"
+        },
+        "condition_cmd": {
+          "type": "string",
+          "description": "Only trigger agent if this shell command exits with 0"
+        },
+        "max_runs": {
+          "type": "string",
+          "description": "Terminate recurring task after N successful runs"
+        },
+        "jitter": {
+          "type": "string",
+          "description": "Add random jitter to the wakeup timer"
+        },
+        "escalate_on_fail": {
+          "type": "string",
+          "description": "Fallback agent if all retries fail"
+        },
+        "require_approval": {
+          "type": "boolean",
+          "description": "Pause and wait for user approval before agent runs"
+        },
+        "notify_on_start": {
+          "type": "boolean",
+          "description": "Send a notification when the agent begins execution"
+        },
+        "output_file": {
+          "type": "string",
+          "description": "Save agent stdout to a specific file"
+        },
+        "silent_success": {
+          "type": "boolean",
+          "description": "Only notify LLM_OUTPUT if the agent fails"
+        },
+        "env_vars": {
+          "type": "string",
+          "description": "Custom environment variables for agent"
+        },
+        "tags": {
+          "type": "string",
+          "description": "Comma-separated tags (e.g., trading,urgent)"
+        },
+        "priority_boost": {
+          "type": "string",
+          "description": "Boost task to HIGH priority after N minutes"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "json_tool",
+    "description": "Format, minify, or validate JSON from a file path or inline string.",
     "parameters": {
       "type": "object",
       "properties": {
         "input": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Path to the input video file or remote URL (can be specified multiple times)"
+          "type": "string",
+          "description": ""
+        },
+        "action": {
+          "type": "string",
+          "description": ""
+        },
+        "indent": {
+          "type": "string",
+          "description": ""
+        },
+        "sort_keys": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "required": [
+        "input",
+        "action",
+        "indent",
+        "sort_keys"
+      ]
+    }
+  },
+  {
+    "name": "str_replace_editor",
+    "description": "A robust file editor tool supporting view, literal/regex search,",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Operation: view, replace, count, write, batch (required)"
+        },
+        "file_path": {
+          "type": "string",
+          "description": "Path to the target file (required)"
+        },
+        "search": {
+          "type": "string",
+          "description": "Search string/pattern (required for replace/count)"
+        },
+        "replacement": {
+          "type": "string",
+          "description": "Replacement string (required for replace)"
+        },
+        "content": {
+          "type": "string",
+          "description": "New content for write action"
+        },
+        "edits": {
+          "type": "string",
+          "description": "JSON array string or file path for batch replacements"
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "Starting line (1-based) for view"
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "Ending line for view"
+        },
+        "backup": {
+          "type": "boolean",
+          "description": "Create timestamped .bak before modifying"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        },
+        "regex": {
+          "type": "boolean",
+          "description": "Treat search as regex pattern"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate replace (no file write)"
+        },
+        "ignore_case": {
+          "type": "boolean",
+          "description": "Case-insensitive search/replace"
+        },
+        "decode_escapes": {
+          "type": "boolean",
+          "description": "Decode \\n, \\t, \\r in search/replacement strings"
+        },
+        "dotall": {
+          "type": "boolean",
+          "description": "Treat . in regex as matching newlines (re.DOTALL)"
+        },
+        "encoding": {
+          "type": "boolean",
+          "description": "Specify file encoding (default: utf-8)"
+        }
+      },
+      "required": [
+        "action",
+        "file_path"
+      ]
+    }
+  },
+  {
+    "name": "file_review",
+    "description": "Audits files and codebases for syntax issues, security secrets, TODOs, whitespace, file health, and modern code improvement/refactoring opportunities.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target file or directory path to review (required)"
+        },
+        "checks": {
+          "type": "string",
+          "description": "Comma-separated checks: syntax,secrets,todos,whitespace,size,upgrades (default: all)"
+        },
+        "max_file_size": {
+          "type": "string",
+          "description": "Flag files exceeding size limit in bytes (default: 1048576)"
+        },
+        "fix": {
+          "type": "boolean",
+          "description": "Automatically trim trailing whitespace where applicable"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "media_harmonizer",
+    "description": "Harmonic Media Transmuter — Transcribes, translates, summarizes media files or generates subtitles using ffmpeg & Whisper.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target video or audio file path (required)"
+        },
+        "action": {
+          "type": "string",
+          "description": "Execution action: transcribe, translate, summarize, subtitles, all (default: summarize)"
+        },
+        "model": {
+          "type": "string",
+          "description": "Whisper model size: tiny, base, small, medium, large (default: base)"
+        },
+        "language": {
+          "type": "string",
+          "description": "Source audio language code e.g. en, es, fr, auto (default: auto)"
         },
         "output_dir": {
           "type": "string",
-          "description": "\"thumbnails\" Output directory for the images"
+          "description": "Directory to save generated output files (default: same as target)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "optimizer",
+    "description": "18. Life Force Optimizer — Monitors battery, storage, CPU, RAM and suggests real-time optimizations, app-killing rituals, and performance enchantments.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target storage path to inspect (default: /)"
         },
         "interval": {
           "type": "string",
-          "description": "10 Interval in seconds between thumbnails"
+          "description": "Refresh interval in seconds when running in watch daemon mode (default: 5)"
+        },
+        "cpu_threshold": {
+          "type": "string",
+          "description": "CPU load percentage threshold to flag heavy processes (default: 80.0)"
+        },
+        "watch": {
+          "type": "boolean",
+          "description": "Run as a continuous monitoring daemon"
+        },
+        "kill_heavy": {
+          "type": "boolean",
+          "description": "Automatically identify high-resource process PIDs for termination rituals"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "lux_download",
+    "description": "Download video or extract audio tracks using lux CLI with support for quality selection, cookies, playlists, subtitles, and aria2 acceleration.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The video or playlist URL to download (required)"
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Destination directory for downloaded files"
+        },
+        "stream": {
+          "type": "string",
+          "description": "Select specific video stream/quality format (e.g., 1080p, 720p)"
+        },
+        "cookie": {
+          "type": "string",
+          "description": "Path to cookie file or raw cookie string for authenticated downloads"
+        },
+        "threads": {
+          "type": "integer",
+          "description": "Number of download threads / concurrency limit"
+        },
+        "info": {
+          "type": "boolean",
+          "description": "Output video metadata and formats without downloading"
+        },
+        "audio_only": {
+          "type": "boolean",
+          "description": "Download only the best quality audio track"
+        },
+        "playlist": {
+          "type": "boolean",
+          "description": "Download full playlist if URL points to a playlist"
+        },
+        "caption": {
+          "type": "boolean",
+          "description": "Download video captions / subtitles if available"
+        },
+        "use_aria2": {
+          "type": "boolean",
+          "description": "Use aria2c downloader engine for faster multi-connection downloads"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "fprobe_media",
+    "description": "Summarize a video or audio file (local path or URL) using ffprobe.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "required": [
+        "input"
+      ]
+    }
+  },
+  {
+    "name": "gen_thumbs",
+    "description": "Generate video thumbnails (local paths or URLs) via ffmpeg.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": "One or more video paths or URLs (separated by commas or newlines)."
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "Directory where thumbnail images are written (default: thumbnails)."
+        },
+        "interval": {
+          "type": "string",
+          "description": "Seconds between each captured frame (default: 10)."
         },
         "width": {
           "type": "string",
-          "description": "320 Width of the thumbnails (height scaled automatically)"
+          "description": "Thumbnail width in pixels; height scales automatically (default: 320)."
         },
         "format": {
           "type": "string",
-          "description": "\"png\" Output format (png or jpg)"
+          "description": "Output image format (png, jpg, webp) (default: png)."
         },
         "start": {
           "type": "string",
-          "description": "\"00:00:00\" Start time (e.g., 00:00:10)"
+          "description": "Start time as HH:MM:SS or seconds (default: 00:00:00)."
         },
         "end": {
           "type": "string",
-          "description": "\"00:00:00\" Duration or end time (e.g., 00:00:20)"
+          "description": "End time as HH:MM:SS or seconds (default: 00:00:00)."
         },
         "max_frames": {
           "type": "string",
-          "description": "\"10\" Maximum number of frames to generate"
+          "description": "Maximum number of thumbnails per input (default: 10)."
         },
         "montage": {
           "type": "string",
-          "description": "\"NxM\" Create a montage with NxM grid (e.g., 2x3)"
+          "description": "Optional montage grid, e.g. 2x3 (requires ImageMagick or GraphicsMagick)."
+        },
+        "montage_bg": {
+          "type": "string",
+          "description": "Montage background color (default: white)."
+        },
+        "tile_spacing": {
+          "type": "string",
+          "description": "Montage tile spacing in pixels (default: 2)."
+        },
+        "font": {
+          "type": "string",
+          "description": "Optional path to font file for timestamp overlay."
+        },
+        "font_size": {
+          "type": "string",
+          "description": "Font size for timestamp overlay (default: 14)."
+        },
+        "font_color": {
+          "type": "string",
+          "description": "Font color for timestamp overlay (default: white)."
+        },
+        "box_color": {
+          "type": "string",
+          "description": "Box background color for timestamp overlay (default: black)."
+        },
+        "box_opacity": {
+          "type": "string",
+          "description": "Box background opacity for timestamp overlay (0.0 to 1.0) (default: 0.5)."
+        },
+        "position": {
+          "type": "string",
+          "description": "Position of timestamp overlay (tl, tr, bl, br) (default: bl)."
+        },
+        "quality": {
+          "type": "string",
+          "description": "JPEG/WebP quality (1-100) or PNG compression (1-9) (default: 80)."
         },
         "add_timestamps": {
           "type": "boolean",
-          "description": "Add timestamps to thumbnails"
+          "description": "If set, draw the capture time on each thumbnail."
+        },
+        "strip_metadata": {
+          "type": "boolean",
+          "description": "If set, strip EXIF metadata from output thumbnails."
+        },
+        "only_montage": {
+          "type": "boolean",
+          "description": "If set, clean up individual frames and only keep the montage grid."
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose logging to stderr."
         }
       },
-      "required": []
+      "required": [
+        "input"
+      ]
     }
   },
   {
@@ -2245,6 +3689,78 @@
         "export_log": {
           "type": "string",
           "description": "Export log: json, csv, md (default: json)"
+        },
+        "front": {
+          "type": "boolean",
+          "description": "Use front camera (shortcut for --camera-id 1)"
+        },
+        "encode_base64": {
+          "type": "boolean",
+          "description": "Base64-encode image for vision model input"
+        },
+        "show_info": {
+          "type": "boolean",
+          "description": "Print detailed file metadata after capture"
+        },
+        "open": {
+          "type": "boolean",
+          "description": "Open photo after capture using termux-open"
+        },
+        "list_cameras": {
+          "type": "boolean",
+          "description": "List available cameras and exit"
+        },
+        "show_log": {
+          "type": "boolean",
+          "description": "Print the persistent photo log and exit"
+        },
+        "gps_tag": {
+          "type": "boolean",
+          "description": "Embed GPS coordinates via termux-location"
+        },
+        "scan_qr": {
+          "type": "boolean",
+          "description": "Scan QR/barcode in captured image (requires zbarimg)"
+        },
+        "analyze_brightness": {
+          "type": "boolean",
+          "description": "Report average brightness level (requires ImageMagick)"
+        },
+        "analyze_colors": {
+          "type": "boolean",
+          "description": "Report dominant colors (requires ImageMagick/convert)"
+        },
+        "histogram": {
+          "type": "boolean",
+          "description": "Save histogram PNG alongside photo"
+        },
+        "share": {
+          "type": "boolean",
+          "description": "Share photo via termux-share after capture"
+        },
+        "notify": {
+          "type": "boolean",
+          "description": "Send Termux notification when capture completes"
+        },
+        "dedupe_check": {
+          "type": "boolean",
+          "description": "Warn if a visually similar photo already exists"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate capture without writing files"
+        },
+        "no_thumbnail": {
+          "type": "boolean",
+          "description": "Skip thumbnail generation"
+        },
+        "no_log": {
+          "type": "boolean",
+          "description": "Skip writing to photo log"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose debug output"
         }
       }
     }
@@ -2345,7 +3861,7 @@
         },
         "algorithm": {
           "type": "string",
-          "description": "Hash algorithm (sha256/sha1/sha512/md5/blake2b)"
+          "description": "Hash algorithm (sha256/sha1/sha512/md5/blake2b/sha3_256/sha3_512)"
         },
         "n_lines": {
           "type": "integer",
@@ -2406,6 +3922,58 @@
         "edits": {
           "type": "string",
           "description": "JSON array of edits for batch_edit mode"
+        },
+        "use_regex": {
+          "type": "boolean",
+          "description": "Use regex for pattern matching"
+        },
+        "no_global": {
+          "type": "boolean",
+          "description": "Only replace first occurrence"
+        },
+        "case_insensitive": {
+          "type": "boolean",
+          "description": "Case-insensitive matching"
+        },
+        "show_lines": {
+          "type": "boolean",
+          "description": "Show line numbers in output"
+        },
+        "add_newline": {
+          "type": "boolean",
+          "description": "Append newline to written content"
+        },
+        "create_parents": {
+          "type": "boolean",
+          "description": "Create parent directories"
+        },
+        "preserve_metadata": {
+          "type": "boolean",
+          "description": "Preserve file metadata on copy"
+        },
+        "include_hidden": {
+          "type": "boolean",
+          "description": "Include hidden files"
+        },
+        "descending": {
+          "type": "boolean",
+          "description": "Sort in descending order"
+        },
+        "parents": {
+          "type": "boolean",
+          "description": "Create parent dirs for create_dir"
+        },
+        "recursive": {
+          "type": "boolean",
+          "description": "Recursive operation"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose/debug logging"
+        },
+        "continue_on_error": {
+          "type": "boolean",
+          "description": "Continue batch on error instead of stopping"
         }
       },
       "required": [
@@ -2570,6 +4138,62 @@
         "edits": {
           "type": "string",
           "description": "JSON array of edits for batch_edit mode"
+        },
+        "use_regex": {
+          "type": "boolean",
+          "description": "Use regex for pattern matching"
+        },
+        "no_global": {
+          "type": "boolean",
+          "description": "Only replace first occurrence"
+        },
+        "case_insensitive": {
+          "type": "boolean",
+          "description": "Case-insensitive matching"
+        },
+        "show_lines": {
+          "type": "boolean",
+          "description": "Show line numbers in output"
+        },
+        "add_newline": {
+          "type": "boolean",
+          "description": "Append newline to written content"
+        },
+        "create_parents": {
+          "type": "boolean",
+          "description": "Create parent directories"
+        },
+        "preserve_metadata": {
+          "type": "boolean",
+          "description": "Preserve file metadata on copy"
+        },
+        "include_hidden": {
+          "type": "boolean",
+          "description": "Include hidden files"
+        },
+        "descending": {
+          "type": "boolean",
+          "description": "Sort in descending order"
+        },
+        "parents": {
+          "type": "boolean",
+          "description": "Create parent dirs for create_dir"
+        },
+        "recursive": {
+          "type": "boolean",
+          "description": "Recursive operation"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose/debug logging"
+        },
+        "continue_on_error": {
+          "type": "boolean",
+          "description": "Continue batch on error instead of stopping"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Preview changes without modifying filesystem"
         }
       },
       "required": [
@@ -2579,18 +4203,115 @@
   },
   {
     "name": "maps_tool",
-    "description": "Dispatcher entry point.",
+    "description": "Secure interactive mapping tool with Nominatim geocoding and OSRM routing.",
     "parameters": {
       "type": "object",
       "properties": {
         "operation": {
           "type": "string",
-          "description": ""
+          "description": "Operation: create, search, reverse, list, delete, update, distance, directions, batch (default: create)"
+        },
+        "coordinates": {
+          "type": "string",
+          "description": "Coords array or address string to map (e.g., \"[[-33.86,151.2],[34.05,-118.2]]\" or \"Sydney, Australia\")"
+        },
+        "style": {
+          "type": "string",
+          "description": "Map tile theme: streets, satellite, dark, light, outdoors (default: streets)"
+        },
+        "custom_tiles": {
+          "type": "string",
+          "description": "Direct URL schema for custom tile servers (e.g., \"https://{s}.tile.example.com/{z}/{x}/{y}.png\")"
+        },
+        "markers": {
+          "type": "string",
+          "description": "Marker visual type: circles, popups (default: circles)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Location filename for saving metadata (default: auto)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description to include in location metadata"
+        },
+        "category": {
+          "type": "string",
+          "description": "Location category color: home, work, none (default: none)"
+        },
+        "query": {
+          "type": "string",
+          "description": "Search text for Nominatim place finder"
+        },
+        "limit": {
+          "type": "string",
+          "description": "Maximum search result entries (default: 5)"
+        },
+        "save_search": {
+          "type": "string",
+          "description": "Save search result metadata to this location filename"
+        },
+        "lat": {
+          "type": "string",
+          "description": "Latitude coordinate for reverse search (default: 0.0)"
+        },
+        "lon": {
+          "type": "string",
+          "description": "Longitude coordinate for reverse search (default: 0.0)"
+        },
+        "loc1": {
+          "type": "string",
+          "description": "Start location filename or coordinates for distance calculations"
+        },
+        "loc2": {
+          "type": "string",
+          "description": "End location filename or coordinates for distance calculations"
+        },
+        "points": {
+          "type": "string",
+          "description": "Points list for batch routing (comma-separated or JSON list)"
+        },
+        "operations": {
+          "type": "string",
+          "description": "JSON array of sequential operations for batch running"
+        },
+        "zoom": {
+          "type": "string",
+          "description": "Default map zoom level (1 to 18) (default: 12)"
+        },
+        "unit": {
+          "type": "string",
+          "description": "Distance calculation unit: km, miles, nm (default: km)"
+        },
+        "accuracy": {
+          "type": "string",
+          "description": "Termux GPS accuracy parameter: gps, network, cell (default: gps)"
+        },
+        "maps_dir": {
+          "type": "string",
+          "description": "Custom sandbox directory for saved maps"
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent header override for Nominatim requests"
+        },
+        "use_termux_location": {
+          "type": "boolean",
+          "description": "Use Termux GPS data for current location"
+        },
+        "save": {
+          "type": "boolean",
+          "description": "Save folium map to disk"
+        },
+        "share": {
+          "type": "boolean",
+          "description": "Trigger termux-share to distribute output map file"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed warning output to stderr"
         }
-      },
-      "required": [
-        "operation"
-      ]
+      }
     }
   },
   {
@@ -2648,13 +4369,37 @@
   },
   {
     "name": "execute_py_code",
-    "description": "Execute the python code.",
+    "description": "Execute Python code with output capturing, timing, timeout safety, and context management.",
     "parameters": {
       "type": "object",
       "properties": {
         "code": {
           "type": "string",
-          "description": "Python code to execute."
+          "description": "Python code to execute (required)"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Execution timeout limit in seconds (default: 30)"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory for code execution"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "<KEY=VALUE>          Custom environment variable (repeatable)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for idempotent operations"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
         }
       },
       "required": [
@@ -2672,25 +4417,25 @@
   },
   {
     "name": "memory_manager",
-    "description": "Manage persistent memory for AIChat conversations and context",
+    "description": "Manage persistent memory for AIChat conversations and context (store, retrieve, search, clear, export, import, cleanup).",
     "parameters": {
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "description": "Action (store|retrieve|search|clear|export|import|cleanup)"
+          "description": "Action to perform: store, retrieve, search, clear, export, import, cleanup (required)"
         },
         "key": {
           "type": "string",
-          "description": "Memory key or identifier (required for store/retrieve/search/clear)"
+          "description": "Memory key or identifier"
         },
         "value": {
           "type": "string",
-          "description": "Value to store (required for store)"
+          "description": "Value to store, query string, or import file path"
         },
         "type": {
           "type": "string",
-          "description": "Memory type (conversation|preference|context|knowledge) (default: context)"
+          "description": "Memory type: conversation, preference, context, knowledge (default: context)"
         },
         "session": {
           "type": "string",
@@ -2698,43 +4443,49 @@
         },
         "tags": {
           "type": "string",
-          "description": "Comma-separated tags for categorisation (optional)"
+          "description": "Comma-separated tags for categorization"
         },
         "days": {
           "type": "string",
           "description": "Retention period in days for cleanup (default: 30)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
         }
       },
       "required": [
-        "action",
-        "key",
-        "value",
-        "type",
-        "session",
-        "tags",
-        "days"
+        "action"
       ]
     }
   },
   {
     "name": "memory_analytics",
-    "description": "Generate memory analytics and insights.",
+    "description": "Generates usage analytics, access patterns, growth trends, and optimization recommendations for persistent memory stores.",
     "parameters": {
       "type": "object",
       "properties": {
         "analytics_type": {
           "type": "string",
-          "description": ""
+          "description": "Type of analysis: summary, patterns, trends, recommendations (default: summary)"
         },
         "days": {
           "type": "string",
-          "description": ""
+          "description": "Number of past days to include in analysis (default: 7)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
         }
-      },
-      "required": [
-        "analytics_type",
-        "days"
-      ]
+      }
     }
   },
   {
@@ -2851,21 +4602,114 @@
   },
   {
     "name": "get_my_location",
-    "description": "Get location, address, map link, weather, and altitude.",
+    "description": "Query location coordinates, reverse address lookup, weather, and altitude.",
     "parameters": {
       "type": "object",
-      "properties": {}
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Location provider: gps, network, cell (default: gps)"
+        },
+        "fallbacks": {
+          "type": "string",
+          "description": "Comma-separated fallback providers in order of execution (default: network)"
+        },
+        "unit": {
+          "type": "string",
+          "description": "Temperature unit: celsius, fahrenheit (default: celsius)"
+        },
+        "speed_unit": {
+          "type": "string",
+          "description": "Speed representation unit: ms, kmh, mph (default: ms)"
+        },
+        "alt_unit": {
+          "type": "string",
+          "description": "Altitude representation unit: meters, feet (default: meters)"
+        },
+        "precision": {
+          "type": "string",
+          "description": "Decimal places to round coordinates (default: 6)"
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "HTTP User-Agent header for API requests"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Subprocess and connection timeouts in seconds (default: 15)"
+        },
+        "output": {
+          "type": "string",
+          "description": "Write output report directly to this file"
+        },
+        "lat": {
+          "type": "string",
+          "description": "Coordinate latitude override (mocks GPS location query)"
+        },
+        "lon": {
+          "type": "string",
+          "description": "Coordinate longitude override (mocks GPS location query)"
+        },
+        "loop_delay": {
+          "type": "string",
+          "description": "Seconds to wait between queries in continuous monitoring mode"
+        },
+        "json": {
+          "type": "boolean",
+          "description": "Output result formatted as a raw JSON payload"
+        },
+        "open": {
+          "type": "boolean",
+          "description": "Automatically open the Google Maps link in browser"
+        },
+        "share": {
+          "type": "boolean",
+          "description": "Share output report text via termux-share command"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose logging outputs to stderr"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate geocoding/weather calls with dummy coordinates"
+        }
+      }
     }
   },
   {
     "name": "http_headers",
-    "description": "Fetch HTTP headers.",
+    "description": "Fetch and analyze HTTP headers for a URL.",
     "parameters": {
       "type": "object",
       "properties": {
         "url": {
           "type": "string",
-          "description": ""
+          "description": "The target URL."
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method to use: HEAD or GET (default: HEAD)."
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent string."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Request timeout in seconds (default: 10)."
+        },
+        "ignore_ssl": {
+          "type": "string",
+          "description": "If true, bypass SSL certificate verification."
+        },
+        "follow_redirects": {
+          "type": "string",
+          "description": "If true, follow redirects (default: true)."
+        },
+        "output": {
+          "type": "string",
+          "description": "Output format: json or pretty (default: json)."
         }
       },
       "required": [
@@ -2936,97 +4780,345 @@
   },
   {
     "name": "nsfw_search",
-    "description": "Performs advanced NSFW-focused searches and optionally downloads",
+    "description": "Unified OSINT / Media Intelligence Platform (Pyrmethus Edition)",
     "parameters": {
       "type": "object",
       "properties": {
+        "mode": {
+          "type": "string",
+          "description": "headers | search | pipeline  (default: search)"
+        },
+        "url": {
+          "type": "string",
+          "description": "Target URL"
+        },
+        "method": {
+          "type": "string",
+          "description": "HEAD | GET | OPTIONS  (default: HEAD)"
+        },
+        "follow_redirects": {
+          "type": "string",
+          "description": "Follow HTTP redirects  (default: true)"
+        },
+        "output": {
+          "type": "string",
+          "description": "json | pretty          (default: json)"
+        },
         "query": {
           "type": "string",
-          "description": "The search query or target identifier"
-        },
-        "platform": {
-          "type": "string",
-          "description": "Specific platform to target (e.g., twitter, reddit, onlyfans)"
+          "description": "Search query"
         },
         "limit": {
           "type": "integer",
-          "description": "Number of results to return"
+          "description": "Maximum results        (default: 15)"
+        },
+        "platform": {
+          "type": "string",
+          "description": "Restrict to domain"
+        },
+        "tags": {
+          "type": "string",
+          "description": "Extra tag (repeatable)"
+        },
+        "backend": {
+          "type": "string",
+          "description": "yandex|bing|bing_dl|e621|rule34|danbooru"
         },
         "save": {
           "type": "string",
-          "description": "Path to save results JSON"
+          "description": "Save JSON results"
+        },
+        "html": {
+          "type": "string",
+          "description": "Save HTML gallery"
+        },
+        "download": {
+          "type": "boolean",
+          "description": "Download found images"
         },
         "media_dir": {
           "type": "string",
-          "description": "Directory to save downloaded images (default: \\~/nsfw_media/)"
+          "description": "Download directory     (default: ~/osint_media/)"
+        },
+        "verify_headers": {
+          "type": "boolean",
+          "description": "Verify each URL's headers before downloading"
+        },
+        "mime_check": {
+          "type": "boolean",
+          "description": "Reject downloads whose Content-Type isn't image/*"
+        },
+        "deep": {
+          "type": "boolean",
+          "description": "Multi-page deep search"
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Request timeout        (default: 10)"
+        },
+        "ignore_ssl": {
+          "type": "boolean",
+          "description": "Bypass SSL verification"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "On-disk HTTP cache dir (default: ~/.osint_cache/)"
+        },
+        "workers": {
+          "type": "integer",
+          "description": "Parallel download workers (default: 4)"
+        }
+      }
+    }
+  },
+  {
+    "name": "grep_text",
+    "description": "Find lines in a text file that contain a string or regex pattern.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": ""
+        },
+        "pattern": {
+          "type": "string",
+          "description": ""
+        },
+        "ignore_case": {
+          "type": "string",
+          "description": ""
+        },
+        "max_matches": {
+          "type": "string",
+          "description": ""
+        },
+        "context_lines": {
+          "type": "string",
+          "description": ""
+        },
+        "use_regex": {
+          "type": "string",
+          "description": ""
+        },
+        "encoding": {
+          "type": "string",
+          "description": ""
         }
       },
       "required": [
-        "query",
-        "limit"
+        "input",
+        "pattern",
+        "ignore_case",
+        "max_matches",
+        "context_lines",
+        "use_regex",
+        "encoding"
       ]
     }
   },
   {
-    "name": "micro_scalp",
-    "description": "Bybit Micro‑Profit Scalper – automated micro‑profit scalping using order‑book imbalance and momentum.",
+    "name": "file_patch",
+    "description": "High-performance file editor supporting line viewing, safe literal string replacement, match counting, and dependency-free unified diff patching.",
     "parameters": {
       "type": "object",
       "properties": {
-        "api_key": {
+        "action": {
           "type": "string",
-          "description": "Bybit API key."
+          "description": "Operation to perform: view, replace, count, patch (required)"
         },
-        "api_secret": {
+        "file_path": {
           "type": "string",
-          "description": "Bybit API secret."
+          "description": "Path to the target file or directory (required)"
         },
-        "loop": {
+        "search": {
           "type": "string",
-          "description": "Continuous daemon until SIGINT/SIGTERM (flag)."
+          "description": "Search string (literal matching; required for replace/count)"
         },
-        "private_ws": {
+        "replacement": {
           "type": "string",
-          "description": "Private order/execution WS logs (flag)."
+          "description": "Replacement string (literal replacement; required for replace)"
         },
-        "position_guard": {
+        "contents": {
           "type": "string",
-          "description": "Skip new entry if open position exists on symbol (flag)."
+          "description": "Unified diff patch contents to apply (required for patch)"
         },
-        "ws_fallback_rest": {
-          "type": "string",
-          "description": "On WS failure, use REST for that cycle (flag)."
+        "start_line": {
+          "type": "integer",
+          "description": "Starting line number for view operation (1-based index)"
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "Ending line number for view operation"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Preview changes without modifying target files"
+        },
+        "backup": {
+          "type": "boolean",
+          "description": "Create backup files (.bak) before modifying"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for read-only operations"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
         }
       },
       "required": [
-        "api_key",
-        "api_secret"
+        "action",
+        "file_path"
       ]
     }
   },
   {
-    "name": "micro_profit",
-    "description": "Estimate micro‑profit opportunities from order‑book data.",
+    "name": "image_intel",
+    "description": "Inspects image EXIF metadata, resizes/downsamples images for LLM vision tokens, and strips GPS tags.",
     "parameters": {
       "type": "object",
       "properties": {
-        "symbol": {
+        "target": {
           "type": "string",
-          "description": "Required trading pair (e.g., BTCUSDT)."
+          "description": "Target image path (required)"
         },
-        "side": {
+        "resize": {
           "type": "string",
-          "description": "Required side: Buy or Sell."
+          "description": "Max bounding dimensions WxH (e.g. 1024x1024)"
         },
-        "qty": {
+        "output": {
           "type": "string",
-          "description": "Required quantity (base asset)."
+          "description": "Destination file path for modified image"
+        },
+        "strip_exif": {
+          "type": "boolean",
+          "description": "Remove all EXIF metadata and GPS location tags"
+        },
+        "metadata_only": {
+          "type": "boolean",
+          "description": "Only output metadata without modifying the image"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
         }
       },
       "required": [
-        "symbol",
-        "side",
-        "qty"
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "pdf_intel",
+    "description": "Extracts page text, metadata, table previews, and structural information from PDF documents.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target PDF file path (required)"
+        },
+        "pages": {
+          "type": "string",
+          "description": "Specific page numbers or ranges (e.g. 1-5, 8, 10)"
+        },
+        "max_characters": {
+          "type": "integer",
+          "description": "Maximum characters to extract per page (default: 4000)"
+        },
+        "metadata_only": {
+          "type": "boolean",
+          "description": "Only inspect document metadata without extracting body text"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "cron_job_schedualer",
+    "description": "Manages background cron jobs and scheduled tasks within Termux, allowing inspecting active jobs, setting new timers, and auditing execution logs.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target file or directory path (default: ~/)"
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to perform: list/add/remove/audit (default: list)"
+        },
+        "schedule": {
+          "type": "string",
+          "description": "Standard 5-part cron schedule expression"
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute or search"
+        },
+        "log_limit": {
+          "type": "integer",
+          "description": "Maximum log entries to audit (default: 50)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum items to process (default: 100)"
+        },
+        "file_pattern": {
+          "type": "string",
+          "description": "File glob pattern filter (e.g., *.log)"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "<KEY=VALUE>          Custom environment variable (repeatable)"
+        },
+        "recursive": {
+          "type": "boolean",
+          "description": "Process directories recursively"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for expensive operations"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
       ]
     }
   }

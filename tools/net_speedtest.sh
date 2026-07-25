@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # @describe Run a basic network speed test using curl.
 main() {
     echo "Testing download speed from Speedtest.net (10MB)..."

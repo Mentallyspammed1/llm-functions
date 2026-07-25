@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 set -eo pipefail
 
 # @describe Manage AIChat sessions with persistent context (tool-based)

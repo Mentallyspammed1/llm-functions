@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 
 # Validation functions for tool declarations
 # @describe Build tool/agent declarations from argc scripts
