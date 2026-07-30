@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# edit_file.py — Pyrmethus File Weaver v2.9.1
+# edit_file.py — Pyrmethus File Weaver v2.9.2
 # argc/aichat compatible · Termux · Full 33-operation suite
 # Inserted by assistant
 #
@@ -38,7 +38,7 @@
 # @option --min-size <NUM>                Minimum file size filter
 # @option --max-size-filter <NUM>         Maximum file size filter
 # @option --modified-after <TIMESTAMP>    Modified after (unix timestamp)
-# @option --modified-before <TIMESTAMP>   Modified before (unix timestamp)
+# @option --modified-before <TIMESTAMP>    Modified before (unix timestamp)
 # @option --file-type <TYPE>              File type filter: any/file/dir
 # @option --max-results <NUM>             Maximum find results
 # @option --var <KEY=VALUE>               Template variable (repeatable)
@@ -81,6 +81,7 @@ import time
 import zipfile
 from collections import deque
 from pathlib import Path
+
 # Ensure the tools directory is in sys.path
 sys.path.append(str(Path(__file__).resolve().parent))
 
@@ -88,9 +89,6 @@ sys.path.append(str(Path(__file__).resolve().parent))
 # PATH SANITIZATION
 # ═══════════════════════════════════════════════════════════════════════════
 # Remove any llm-functions/bin from PATH to avoid recursive shadowing.
-# This ensures that when we call external tools (like 'file'), we use
-# the system version, not the AIChat tool symlink.
-import os
 _raw_path = os.environ.get("PATH", "")
 _path_parts = _raw_path.split(os.pathsep)
 _clean_path_parts = [p for p in _path_parts if not p.endswith("/llm-functions/bin")]
@@ -103,7 +101,7 @@ from typing import (
 
 class EditOptions(dict):
     """Simple dict-subclass that supports attribute access with defaults."""
-    
+
     DEFAULTS = {
         "operation": None,
         "file_path": None,
@@ -159,6 +157,9 @@ class EditOptions(dict):
     }
 
     def __init__(self, **kwargs):
+        # Normalize 'path' alias to 'file_path'
+        if 'path' in kwargs and 'file_path' not in kwargs:
+            kwargs['file_path'] = kwargs.pop('path')
         # Merge defaults with provided kwargs
         data = self.DEFAULTS.copy()
         data.update(kwargs)
@@ -169,9 +170,7 @@ class EditOptions(dict):
     __delattr__ = dict.__delitem__
 
 __all__ = [
-    # Dispatcher entry point
     "run",
-    # Original operations
     "read",
     "write",
     "append",
@@ -192,7 +191,6 @@ __all__ = [
     "set_permissions",
     "normalize_line_endings",
     "revert_to_backup",
-    # Extended operations
     "grep_dir",
     "file_hash",
     "word_count",
@@ -207,7 +205,7 @@ __all__ = [
     "batch_edit",
 ]
 
-__version__ = "2.9.1"
+__version__ = "2.9.2"
 
 # ==============================================================================
 # SECTION 1: Logger & Color Support
@@ -271,7 +269,6 @@ PSEUDO_FS_PREFIXES: tuple[str, ...] = (
     "/data/data/com.termux",
 )
 
-# Sort key lambdas for list_dir
 _SORT_KEYS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "name": lambda x: x["name"].lower(),
     "size": lambda x: x.get("size", 0),
@@ -281,12 +278,8 @@ _SORT_KEYS: dict[str, Callable[[dict[str, Any]], Any]] = {
 
 _HASH_ALGORITHMS: frozenset[str] = frozenset({"sha256", "sha1", "sha512", "md5", "blake2b", "sha3_256", "sha3_512"})
 
-# Template variable pattern: {{ var_name }} with optional whitespace
 _TEMPLATE_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}")
 
-# Human-readable alias — NOT used as a type annotation in run() to stay
-# compatible with build-declarations.py which cannot handle custom types.
-# MIME types that should be treated as text (not binary)
 _TEXT_MIME_PREFIXES: tuple[str, ...] = (
     "text/",
     "application/json",
@@ -315,12 +308,11 @@ _TEXT_MIME_PREFIXES: tuple[str, ...] = (
     "application/x-typescript",
 )
 
-# Cache the `file` command location once at import time
 _FILE_CMD: str | None = shutil.which("file")
 
 _MIME_CACHE: dict[str, str | None] = {}
+_MAX_MIME_CACHE_SIZE: int = 1000
 
-# Stale lock threshold
 STALE_LOCK_SECONDS: float = 30.0
 
 OperationName = str
@@ -343,7 +335,6 @@ def _timed(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
     def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
         t0 = time.perf_counter()
         result = fn(*args, **kwargs)
-        # Guard: result must be a dict (defensive against buggy ops)
         if not isinstance(result, dict):
             result = {"success": False, "error": "Operation returned non-dict"}
         result["duration_ms"] = round((time.perf_counter() - t0) * 1000, 3)
@@ -371,28 +362,12 @@ class FileEditor:
         self.temp: Path = Path(tempfile.gettempdir()).resolve()
         self._home_str: str = str(self.home) + os.sep
         self._temp_str: str = str(self.temp) + os.sep
-        self._termux_home: str = "/data/data/com.termux/files/home"
-
-    # -------------------------------------------------------------------------
-    # Path validation
-    # -------------------------------------------------------------------------
+        self._termux_home: str = "/data/data/com.termux/files/home" + os.sep
 
     def _validate_path(
         self, file_path: str, allow_write: bool = True
     ) -> Path | None:
-        """
-        Return a resolved, sandbox-confined Path or None on any violation.
-
-        Checks performed (in order):
-        1. Type and emptiness
-        2. Null-byte injection
-        3. Path length limit
-        4. Directory traversal (..)
-        5. Sandbox boundary (home or temp)
-        6. Symlink escape
-        7. Read permission (read-only ops)
-        8. Parent creation (write ops)
-        """
+        """Return a resolved, sandbox-confined Path or None on any violation."""
         if not file_path or not isinstance(file_path, str):
             return None
         if "\x00" in file_path:
@@ -416,7 +391,6 @@ class FileEditor:
             logger.warning("Path outside allowed realm: %s", path)
             return None
 
-        # Symlink safety — resolve the link target relative to link's parent
         if path.is_symlink():
             try:
                 raw_target = os.readlink(path)
@@ -442,31 +416,19 @@ class FileEditor:
     def _is_allowed(self, path: Path) -> bool:
         """True if path is inside the home or temp sandbox."""
         s = str(path)
+        s_dir = s + os.sep if not s.endswith(os.sep) else s
         return (
-            s.startswith(self._home_str)
+            s_dir.startswith(self._home_str)
             or path == self.home
-            or s.startswith(self._temp_str)
+            or s_dir.startswith(self._temp_str)
             or path == self.temp
-            or s.startswith(self._termux_home)
+            or s_dir.startswith(self._termux_home)
         )
 
-    # -------------------------------------------------------------------------
-    # Binary detection
-    # -------------------------------------------------------------------------
-
     def _is_binary(self, path: Path, check_bytes: int = BINARY_CHECK_BYTES) -> bool:
-        """
-        Return True if path appears to be a binary file.
-
-        Strategy:
-        1. Pseudo-filesystems are always treated as text (never binary).
-        2. Null-byte presence in first chunk → binary.
-        3. `file --mime-type` subprocess used when available for accuracy.
-        4. Fallback: non-binary.
-        """
+        """Return True if path appears to be a binary file."""
         path_str = str(path)
 
-        # Check cache first
         if path_str in _MIME_CACHE:
             return _MIME_CACHE[path_str] is None
 
@@ -488,37 +450,27 @@ class FileEditor:
                     if r.returncode == 0:
                         mime = r.stdout.strip()
                         is_binary = not (mime.startswith(_TEXT_MIME_PREFIXES) or not mime)
+                        if len(_MIME_CACHE) >= _MAX_MIME_CACHE_SIZE:
+                            _MIME_CACHE.clear()
                         _MIME_CACHE[path_str] = None if is_binary else mime
                         return is_binary
                 except Exception:
                     pass
-            
-            _MIME_CACHE[path_str] = "text/plain"  # Cache as text if no null bytes
+
+            if len(_MIME_CACHE) >= _MAX_MIME_CACHE_SIZE:
+                _MIME_CACHE.clear()
+            _MIME_CACHE[path_str] = "text/plain"
             return False
         except OSError:
             return True
 
-    # -------------------------------------------------------------------------
-    # Atomic write
-    # -------------------------------------------------------------------------
-
     def _atomic_write(
         self, path: Path, content: str, encoding: str = DEFAULT_ENCODING
     ) -> None:
-        """
-        Write content to path atomically.
-
-        Attempt order:
-        1. O_TMPFILE (Linux, avoids temp-file name in directory).
-        2. mkstemp fallback (portable).
-
-        The final os.replace() is atomic on POSIX.
-        """
-        # Type coerce content to prevent `.encode()` explosions
+        """Write content to path atomically."""
         if not isinstance(content, str):
             content = str(content)
-            
-        # Detect if original file exists and used CRLF line endings to preserve them
+
         if path.exists():
             try:
                 with open(path, "rb") as f:
@@ -526,7 +478,7 @@ class FileEditor:
                         content = content.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
             except Exception:
                 pass
-            
+
         dir_ = path.parent
         _O_TMPFILE = getattr(os, "O_TMPFILE", None)
         tmp_link: str | None = None
@@ -558,7 +510,6 @@ class FileEditor:
                     except OSError:
                         pass
 
-        # Portable mkstemp fallback
         fd2, tmp_name = tempfile.mkstemp(dir=dir_, prefix=".~tmp_")
         try:
             os.chmod(tmp_name, 0o600)
@@ -573,10 +524,6 @@ class FileEditor:
             except OSError:
                 pass
             raise
-
-    # -------------------------------------------------------------------------
-    # Backup system
-    # -------------------------------------------------------------------------
 
     def _make_backup(self, path: Path, max_backups: int = MAX_BACKUPS) -> Path:
         """Copy path to a timestamped .bak file; prune excess backups."""
@@ -593,7 +540,7 @@ class FileEditor:
 
     @staticmethod
     def _acquire_lock(lock_path: Path, timeout: float = 3.0) -> None:
-        """Spin-acquire a simple lock file; break stale locks (v2.8.0)."""
+        """Spin-acquire a simple lock file; break stale locks."""
         deadline = time.monotonic() + timeout
         while True:
             try:
@@ -605,22 +552,19 @@ class FileEditor:
                 return
             except FileExistsError:
                 try:
-                    # Liveness check (break dead locks immediately)
                     if lock_path.exists():
                         try:
                             pid = int(lock_path.read_text().strip())
                             if pid > 0:
                                 os.kill(pid, 0)
                         except (ValueError, OSError, ProcessLookupError):
-                            logger.warning("Breaking dead lock %s (holding process is dead)", lock_path)
+                            logger.warning("Breaking dead lock %s", lock_path)
                             lock_path.unlink(missing_ok=True)
                             continue
 
                     lock_age = time.time() - lock_path.stat().st_mtime
                     if lock_age > STALE_LOCK_SECONDS:
-                        logger.warning(
-                            "Breaking stale lock %s (age=%.1fs)", lock_path, lock_age
-                        )
+                        logger.warning("Breaking stale lock %s (age=%.1fs)", lock_path, lock_age)
                         lock_path.unlink(missing_ok=True)
                         continue
                 except OSError:
@@ -632,7 +576,7 @@ class FileEditor:
 
     @staticmethod
     def _release_lock(lock_path: Path) -> None:
-        """Remove the lock file created by _acquire_lock."""
+        """Remove lock file."""
         lock_path.unlink(missing_ok=True)
 
     def _prune_backups(self, path: Path, max_backups: int) -> None:
@@ -660,23 +604,13 @@ class FileEditor:
         except OSError:
             return []
 
-    # -------------------------------------------------------------------------
-    # Shared content reader
-    # -------------------------------------------------------------------------
-
     def _read_content(
         self,
         file_path: str,
         encoding: str = DEFAULT_ENCODING,
         allow_binary: bool = False,
     ) -> dict[str, Any]:
-        """
-        Validate path and read text content.
-
-        Returns dict with keys:
-          success (bool), content (str), path (Path)  — on success
-          success (bool), error (str)                 — on failure
-        """
+        """Validate path and read text content."""
         path = self._validate_path(file_path, allow_write=False)
         if not path:
             return {"success": False, "error": "Invalid or disallowed file path"}
@@ -699,7 +633,6 @@ class FileEditor:
             return {"success": False, "error": str(exc)}
 
 
-# Module-level singleton — all public functions share one editor instance
 _editor = FileEditor()
 
 
@@ -717,12 +650,7 @@ def read(
     start_line: int | None = None,
     end_line: int | None = None,
 ) -> dict[str, Any]:
-    """
-    Read file contents with optional line slicing.
-
-    Returns content as a string plus per-line list when show_lines=True.
-    Slicing is 1-based inclusive on both ends.
-    """
+    """Read file contents with optional line slicing."""
     path = _editor._validate_path(file_path, allow_write=False)
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
@@ -741,11 +669,10 @@ def read(
             return {"success": False, "error": "Binary file detected; refusing to read"}
 
         if start_line is not None or end_line is not None:
-            # Use streaming read_lines for range-based operations
             return read_lines(
                 file_path=file_path,
-                start_line=start_line or 1,
-                end_line=end_line or sys.maxsize,
+                start_line=start_line if start_line is not None else 1,
+                end_line=end_line if end_line is not None else sys.maxsize,
                 encoding=encoding,
             )
 
@@ -775,12 +702,7 @@ def read_lines(
     end_line: int,
     encoding: str = DEFAULT_ENCODING,
 ) -> dict[str, Any]:
-    """
-    Efficiently read a contiguous line range without loading the whole file.
-
-    Lines are 1-based and inclusive.  Streaming read; memory efficient for
-    large files when only a small range is needed.
-    """
+    """Efficiently read a contiguous line range without loading the whole file."""
     if start_line is None or end_line is None:
         return {
             "success": False,
@@ -834,13 +756,8 @@ def read_lines(
 
 
 @_timed
-def write(
-    options: EditOptions) -> dict[str, Any]:
-    """
-    Atomically write (create or overwrite) a file.
-    Uses O_TMPFILE + rename on Linux; mkstemp + rename elsewhere.
-    No partial writes are ever visible.
-    """
+def write(options: EditOptions) -> dict[str, Any]:
+    """Atomically write (create or overwrite) a file."""
     if options.content is None:
         return {"success": False, "error": "content cannot be None"}
 
@@ -855,7 +772,6 @@ def write(
     content = str(options.content) if not isinstance(options.content, str) else options.content
 
     if content:
-        # Normalize to LF to ensure consistent handling
         content = content.replace("\r\n", "\n").replace("\r", "\n")
 
     if options.add_newline and content and not content.endswith("\n"):
@@ -905,11 +821,7 @@ def append(
     add_newline: bool = True,
     max_size: int = DEFAULT_MAX_WRITE,
 ) -> dict[str, Any]:
-    """
-    Append text to an existing file.
-    When add_newline=True (default), ensures a newline separates existing
-    content from the new content even if the file didn't end with one.
-    """
+    """Append text to an existing file."""
     if content is None:
         return {"success": False, "error": "content cannot be None"}
 
@@ -985,6 +897,7 @@ def append(
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
+
 def _ends_with_newline(path: Path) -> bool:
     """Check if a file ends with a newline character."""
     try:
@@ -999,14 +912,8 @@ def _ends_with_newline(path: Path) -> bool:
 
 
 @_timed
-def replace(
-    options: EditOptions) -> dict[str, Any]:
-    """
-    Replace text or regex pattern in a file.
-    A timestamped backup is created before any modification.
-    Reports count of replacements made; returns success even when
-    count=0 (pattern not found) to distinguish from errors.
-    """
+def replace(options: EditOptions) -> dict[str, Any]:
+    """Replace text or regex pattern in a file."""
     file_path = options.file_path
     search_text = options.search_text or options.pattern
 
@@ -1031,32 +938,44 @@ def replace(
         return res
 
     content: str = res["content"]
-
     content = content.replace("\r\n", "\n").replace("\r", "\n")
-
     path: Path = res["path"]
 
     try:
-        flags = 0
-        if not options.case_sensitive:
-            flags |= re.IGNORECASE
-
         if options.use_regex:
+            flags = 0 if options.case_sensitive else re.IGNORECASE
             try:
                 compiled = re.compile(search_text, flags)
             except re.error as exc:
                 return {"success": False, "error": f"Invalid regex: {exc}"}
-        else:
-            compiled = re.compile(re.escape(search_text), flags)
-            # Defang replacement string so literal backslashes aren't parsed by re.sub
-            replacement = replacement.replace('\\', r'\\')
 
-        if options.global_replace:
-            new_content, count = compiled.subn(replacement, content)
+            if options.global_replace:
+                new_content, count = compiled.subn(replacement, content)
+            else:
+                new_content, count = compiled.subn(replacement, content, count=1)
+                if new_content == content:
+                    count = 0
         else:
-            new_content, count = compiled.subn(replacement, content, count=1)
-            if new_content == content:
-                count = 0
+            # High-performance native string replacement for literal matches
+            if options.case_sensitive:
+                count = content.count(search_text)
+                if count > 0:
+                    if options.global_replace:
+                        new_content = content.replace(search_text, replacement)
+                    else:
+                        new_content = content.replace(search_text, replacement, 1)
+                        count = 1
+                else:
+                    new_content = content
+            else:
+                compiled = re.compile(re.escape(search_text), re.IGNORECASE)
+                def_replacement = replacement.replace('\\', r'\\')
+                if options.global_replace:
+                    new_content, count = compiled.subn(def_replacement, content)
+                else:
+                    new_content, count = compiled.subn(def_replacement, content, count=1)
+                    if new_content == content:
+                        count = 0
 
         if new_content == content:
             return {
@@ -1091,8 +1010,6 @@ def replace(
             "backup_path": str(backup),
             "size": new_bytes,
         }
-    except re.error as exc:
-        return {"success": False, "error": f"Invalid regex: {exc}"}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -1105,13 +1022,7 @@ def insert_line(
     encoding: str = DEFAULT_ENCODING,
     max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
-    """
-    Insert a line at position line_number (1-based).
-
-    line_number is clamped to [1, len(lines)+1].
-    A newline is appended to content if absent.
-    Automatic backup created before modification.
-    """
+    """Insert a line at position line_number (1-based)."""
     if line_number is None:
         return {"success": False, "error": "line_number is required"}
     try:
@@ -1121,7 +1032,7 @@ def insert_line(
 
     if content is None:
         return {"success": False, "error": "content cannot be None"}
-        
+
     res = _editor._read_content(file_path, encoding)
     if not res["success"]:
         return res
@@ -1162,19 +1073,14 @@ def delete_line(
     encoding: str = DEFAULT_ENCODING,
     max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
-    """
-    Delete line line_number (1-based) from a file.
-
-    Returns the deleted line's content in 'deleted_content'.
-    Automatic backup created before modification.
-    """
+    """Delete line line_number (1-based) from a file."""
     if line_number is None:
         return {"success": False, "error": "line_number is required"}
     try:
         line_number = int(line_number)
     except (ValueError, TypeError):
         return {"success": False, "error": "line_number must be an integer"}
-        
+
     res = _editor._read_content(file_path, encoding)
     if not res["success"]:
         return res
@@ -1221,11 +1127,7 @@ def replace_lines(
     max_backups: int = MAX_BACKUPS,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """
-    Replace a range of lines [start_line, end_line] with new content.
-    Both bounds are 1-based and inclusive.
-    Automatic backup created before modification.
-    """
+    """Replace a range of lines [start_line, end_line] with new content."""
     if content is None:
         return {"success": False, "error": "content cannot be None"}
 
@@ -1271,21 +1173,13 @@ def replace_lines(
 
     effective_end_line = min(end_line, total)
 
-    if content:
-        content_normalized = content.replace("\r\n", "\n").replace("\r", "\n")
-    else:
-        content_normalized = ""
-
-    if content_normalized:
-        content_lines = content_normalized.splitlines(keepends=True)
-    else:
-        content_lines = []
+    content_normalized = content.replace("\r\n", "\n").replace("\r", "\n") if content else ""
+    content_lines = content_normalized.splitlines(keepends=True) if content_normalized else []
 
     if content_lines and not content_lines[-1].endswith("\n"):
         content_lines[-1] = content_lines[-1] + "\n"
 
     new_lines = lines[: start_line - 1] + content_lines + lines[effective_end_line:]
-
     new_content = "".join(new_lines)
 
     original_bytes = len(original.encode(encoding, errors="surrogateescape"))
@@ -1312,9 +1206,7 @@ def replace_lines(
 
     try:
         backup = _editor._make_backup(path, max_backups)
-
         _editor._atomic_write(path, new_content, encoding)
-
         stat = path.stat()
 
         return {
@@ -1343,12 +1235,7 @@ def file_search(
     encoding: str = DEFAULT_ENCODING,
     max_matches: int = 1000,
 ) -> dict[str, Any]:
-    """
-    Search for a pattern inside a single file.
-
-    Returns a list of match dicts each containing:
-      line (int), content (str), [context (List[str]), context_start_line (int)]
-    """
+    """Search for a pattern inside a single file."""
     if not pattern or not pattern.strip():
         return {"success": False, "error": "pattern cannot be empty or whitespace-only"}
     res = _editor._read_content(file_path, encoding)
@@ -1409,12 +1296,7 @@ def copy(
     preserve_metadata: bool = True,
     recursive: bool = False,
 ) -> dict[str, Any]:
-    """
-    Copy a file or directory.
-
-    Directories require recursive=True.
-    target_path must not already exist when copying directories.
-    """
+    """Copy a file or directory."""
     src = _editor._validate_path(file_path, allow_write=False)
     dst = _editor._validate_path(target_path, allow_write=True)
     if not src or not dst:
@@ -1477,12 +1359,7 @@ def move(file_path: str, target_path: str) -> dict[str, Any]:
 
 @_timed
 def delete(file_path: str, recursive: bool = False) -> dict[str, Any]:
-    """
-    Delete a file or directory.
-
-    Directories require recursive=True.
-    Reports total bytes freed.
-    """
+    """Delete a file or directory."""
     path = _editor._validate_path(file_path, allow_write=True)
     if not path or not path.exists():
         return {"success": False, "error": f"Path not found: {file_path}"}
@@ -1510,12 +1387,7 @@ def delete(file_path: str, recursive: bool = False) -> dict[str, Any]:
 
 @_timed
 def info(file_path: str) -> dict[str, Any]:
-    """
-    Return detailed metadata for a file or directory.
-
-    Includes: size, timestamps, permissions (octal), inode, symlink target.
-    Adds MIME type detection and line count for text files.
-    """
+    """Return detailed metadata for a file or directory."""
     path = _editor._validate_path(file_path, allow_write=False)
     if not path or not path.exists():
         return {"success": False, "error": f"Path not found: {file_path}"}
@@ -1599,13 +1471,7 @@ def list_dir(
     sort_by: str = "name",
     descending: bool = False,
 ) -> dict[str, Any]:
-    """
-    List directory contents with per-entry metadata.
-
-    sort_by: 'name' | 'size' | 'modified' | 'type'
-    Each item dict contains: name, path, is_file, is_dir, is_symlink,
-    size, modified, permissions, extension.
-    """
+    """List directory contents with per-entry metadata."""
     path = _editor._validate_path(file_path, allow_write=False)
     if not path or not path.exists() or not path.is_dir():
         return {"success": False, "error": "Invalid or missing directory"}
@@ -1667,11 +1533,7 @@ def diff(
     encoding: str = DEFAULT_ENCODING,
     context_lines: int = 3,
 ) -> dict[str, Any]:
-    """
-    Produce a unified diff between two files or a file and its newest backup.
-
-    If target_path is omitted the most recent timestamped backup is used.
-    """
+    """Produce a unified diff between two files or a file and its newest backup."""
     path = _editor._validate_path(file_path, allow_write=False)
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
@@ -1741,11 +1603,7 @@ def truncate(
     encoding: str = DEFAULT_ENCODING,
     max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
-    """
-    Truncate a file to exactly size bytes (default 0 → empty the file).
-
-    Backup created before truncation.
-    """
+    """Truncate a file to exactly size bytes (default 0 → empty the file)."""
     try:
         size = int(size)
     except (ValueError, TypeError):
@@ -1781,12 +1639,7 @@ def truncate(
 
 @_timed
 def set_permissions(file_path: str, mode: str) -> dict[str, Any]:
-    """
-    Set POSIX permissions on a file or directory.
-
-    mode accepts: '755', '0o644', '644', etc. (octal strings).
-    Maximum allowed: 0o7777.
-    """
+    """Set POSIX permissions on a file or directory."""
     path = _editor._validate_path(file_path, allow_write=True)
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
@@ -1829,13 +1682,7 @@ def normalize_line_endings(
     encoding: str = DEFAULT_ENCODING,
     max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
-    """
-    Convert all line endings to 'lf' or 'crlf'.
-
-    Uses binary write to prevent Python from re-applying OS line-end
-    translation on top of our explicit conversion.
-    Backup created before modification.
-    """
+    """Convert all line endings to 'lf' or 'crlf'."""
     if to_type not in ("lf", "crlf"):
         return {
             "success": False,
@@ -1905,12 +1752,7 @@ def revert_to_backup(
     backup_timestamp: str | None = None,
     max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
-    """
-    Restore a file from one of its timestamped backups.
-
-    With backup_timestamp=None the most recent backup is used.
-    The current file is itself backed up before restoration.
-    """
+    """Restore a file from one of its timestamped backups."""
     path = _editor._validate_path(file_path, allow_write=True)
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
@@ -1976,12 +1818,7 @@ def grep_dir(
     encoding: str = DEFAULT_ENCODING,
     recursive: bool = True,
 ) -> dict[str, Any]:
-    """
-    Recursively search all text files in a directory for a pattern.
-
-    Returns per-file match lists.  Stops collecting new matches (across all
-    files) once max_matches is reached; sets truncated=True in that case.
-    """
+    """Recursively search all text files in a directory for a pattern."""
     if not pattern or not isinstance(pattern, str) or not pattern.strip():
         return {"success": False, "error": "pattern cannot be empty or whitespace-only"}
 
@@ -2020,10 +1857,15 @@ def grep_dir(
             break
         if not fpath.is_file():
             continue
-        if not include_hidden and any(
-            part.startswith(".") for part in fpath.relative_to(root).parts
-        ):
-            continue
+        if not include_hidden:
+            try:
+                rel_parts = fpath.relative_to(root).parts
+                if any(part.startswith(".") for part in rel_parts):
+                    continue
+            except ValueError:
+                if any(part.startswith(".") for part in fpath.parts):
+                    continue
+
         if _editor._is_binary(fpath):
             continue
         files_searched += 1
@@ -2073,12 +1915,7 @@ def file_hash(
     algorithm: str = "sha256",
     chunk_size: int = 65_536,
 ) -> dict[str, Any]:
-    """
-    Compute a cryptographic hash of a file.
-
-    Streams the file in chunks; safe for arbitrarily large files.
-    algorithm: sha256 | sha1 | sha512 | md5 | blake2b | sha3_256 | sha3_512
-    """
+    """Compute a cryptographic hash of a file."""
     algo = algorithm.lower()
     if algo not in _HASH_ALGORITHMS:
         return {
@@ -2164,12 +2001,7 @@ def find_files(
     recursive: bool = True,
     max_results: int = MAX_FIND_RESULTS,
 ) -> dict[str, Any]:
-    """
-    Discover files/directories matching flexible criteria.
-
-    file_type: 'any' | 'file' | 'dir'
-    Size filters apply only to files (not directories).
-    """
+    """Discover files/directories matching flexible criteria."""
     root = _editor._validate_path(dir_path, allow_write=False)
     if not root or not root.exists() or not root.is_dir():
         return {"success": False, "error": "Invalid or missing directory"}
@@ -2194,10 +2026,14 @@ def find_files(
     truncated = False
 
     for entry in sorted(glob_method("*")):
-        if not include_hidden and any(
-            part.startswith(".") for part in entry.relative_to(root).parts
-        ):
-            continue
+        if not include_hidden:
+            try:
+                rel_parts = entry.relative_to(root).parts
+                if any(part.startswith(".") for part in rel_parts):
+                    continue
+            except ValueError:
+                if any(part.startswith(".") for part in entry.parts):
+                    continue
         if not name_match(entry.name):
             continue
         if file_type == "file" and not entry.is_file():
@@ -2246,11 +2082,7 @@ def head(
     n: int = 10,
     encoding: str = DEFAULT_ENCODING,
 ) -> dict[str, Any]:
-    """
-    Read the first n lines of a file efficiently.
-
-    Streams line-by-line; does not load the full file into memory.
-    """
+    """Read the first n lines of a file efficiently."""
     if n < 1:
         return {"success": False, "error": "n must be >= 1"}
     path = _editor._validate_path(file_path, allow_write=False)
@@ -2283,11 +2115,7 @@ def tail(
     n: int = 10,
     encoding: str = DEFAULT_ENCODING,
 ) -> dict[str, Any]:
-    """
-    Read the last n lines of a file efficiently using a circular buffer.
-
-    Memory usage is O(n) regardless of file size.
-    """
+    """Read the last n lines of a file efficiently using a circular buffer."""
     if n < 1:
         return {"success": False, "error": "n must be >= 1"}
     path = _editor._validate_path(file_path, allow_write=False)
@@ -2320,12 +2148,7 @@ def compare_files(
     mode: str = "bytes",
     encoding: str = DEFAULT_ENCODING,
 ) -> dict[str, Any]:
-    """
-    Compare two files for equality.
-
-    mode='bytes' → byte-exact comparison, reports first differing byte offset.
-    mode='text'  → normalised line-ending comparison, reports first differing line.
-    """
+    """Compare two files for equality."""
     if mode not in ("bytes", "text"):
         return {"success": False, "error": "mode must be 'bytes' or 'text'"}
     src = _editor._validate_path(file_path, allow_write=False)
@@ -2410,12 +2233,7 @@ def archive(
     compression: str = "deflate",
     recursive: bool = True,
 ) -> dict[str, Any]:
-    """
-    Create a ZIP archive from a file or directory.
-
-    compression: 'deflate' | 'store' | 'bz2' | 'lzma'
-    '.zip' extension is appended automatically if absent.
-    """
+    """Create a ZIP archive from a file or directory."""
     _COMPRESS_MAP: dict[str, int] = {
         "deflate": zipfile.ZIP_DEFLATED,
         "store": zipfile.ZIP_STORED,
@@ -2479,12 +2297,7 @@ def extract(
     target_path: str,
     password: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Extract a ZIP archive to a target directory.
-
-    Validates all member paths to prevent path-traversal (zip-slip) attacks.
-    Enforces MAX_ARCHIVE_SIZE to prevent decompression bombs.
-    """
+    """Extract a ZIP archive to a target directory."""
     arc = _editor._validate_path(archive_path, allow_write=False)
     dst = _editor._validate_path(target_path, allow_write=True)
     if not arc or not dst:
@@ -2504,20 +2317,15 @@ def extract(
                         f"exceeds limit {MAX_ARCHIVE_SIZE:,} bytes"
                     ),
                 }
-            # Zip-slip protection
+
             dst_resolved = dst.resolve()
             for member in zf.namelist():
                 member_path = (dst / member).resolve()
                 try:
-                    # Python 3.9+
                     is_safe = member_path.is_relative_to(dst_resolved)
                 except AttributeError:
-                    # Python < 3.9 fallback with normalization
-                    dst_str = str(dst_resolved)
-                    member_str = str(member_path)
-                    # Normalize both paths to avoid bypasses
-                    dst_str = os.path.normpath(dst_str)
-                    member_str = os.path.normpath(member_str)
+                    dst_str = os.path.normpath(str(dst_resolved))
+                    member_str = os.path.normpath(str(member_path))
                     is_safe = member_str.startswith(dst_str + os.sep) or member_str == dst_str
                 if not is_safe:
                     return {
@@ -2552,14 +2360,7 @@ def template_write(
     create_parents: bool = True,
     undefined_var: str = "error",
 ) -> dict[str, Any]:
-    """
-    Render a {{variable}} template and write it to a file.
-
-    undefined_var controls behaviour for missing keys:
-      'error' → fail with list of missing variables (default)
-      'keep'  → leave {{ placeholder }} unchanged
-      'empty' → replace with empty string
-    """
+    """Render a {{variable}} template and write it to a file."""
     if template is None:
         return {"success": False, "error": "template cannot be None"}
     if not isinstance(variables, dict):
@@ -2618,7 +2419,7 @@ _ALL_OPERATIONS: frozenset[str] = frozenset(
         "delete_line",
         "replace_lines",
         "search",
-        "file_search",  # Add this alias
+        "file_search",
         "copy",
         "move",
         "delete",
@@ -2645,35 +2446,10 @@ _ALL_OPERATIONS: frozenset[str] = frozenset(
     }
 )
 
-# Per-operation required-argument sets (checked in run() before dispatch)
-_NEEDS_CONTENT: frozenset[str] = frozenset(
-    {
-        "write",
-        "append",
-        "insert_line",
-        "replace_lines",
-    }
-)
-_NEEDS_TARGET: frozenset[str] = frozenset(
-    {
-        "copy",
-        "move",
-        "compare_files",
-        "extract",
-    }
-)
-# archive uses target_path as archive_path — handled separately in dispatcher
-_NEEDS_LINE: frozenset[str] = frozenset({"insert_line", "delete_line"})
-_NEEDS_RANGE: frozenset[str] = frozenset({"replace_lines", "read_lines"})
-_NEEDS_SEARCH: frozenset[str] = frozenset({"replace", "search", "grep_dir"})
-
 
 @_timed
 def batch(operations: list[dict[str, Any]]) -> dict[str, Any]:
-    """
-    Execute multiple file operations in sequence.
-    If any operation fails, the batch stops and returns the partial results.
-    """
+    """Execute multiple file operations in sequence."""
     if not operations or not isinstance(operations, list):
         return {"success": False, "error": "operations must be a non-empty list"}
 
@@ -2687,7 +2463,6 @@ def batch(operations: list[dict[str, Any]]) -> dict[str, Any]:
                 "completed": results,
             }
 
-        # Prevent recursive batching to avoid complexity/abuse
         if op_name == "batch":
             return {
                 "success": False,
@@ -2695,9 +2470,7 @@ def batch(operations: list[dict[str, Any]]) -> dict[str, Any]:
                 "completed": results,
             }
 
-        # Dispatch each operation through run()
         try:
-            # Instantiate EditOptions from the dictionary of operation data
             op_options = EditOptions(**op_data)
             res = _run(op_options)
         except Exception as e:
@@ -2731,20 +2504,7 @@ def batch_edit(
     continue_on_error: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """
-    Apply multiple sequential edits to a single file atomically.
-
-    Each edit in the list is a dict with:
-      - "operation": one of "replace", "insert_line", "delete_line",
-                     "replace_lines", "append"
-      - Plus the operation-specific parameters (search_text, replacement,
-        line_number, content, start_line, end_line, etc.)
-
-    All edits are applied to an in-memory copy of the file. A single backup
-    is created before any changes, and the final result is written atomically.
-    If continue_on_error is False (default), the batch stops on the first
-    failed edit and no changes are written to disk.
-    """
+    """Apply multiple sequential edits to a single file atomically."""
     if not edits or not isinstance(edits, list):
         return {"success": False, "error": "edits must be a non-empty list"}
 
@@ -2790,23 +2550,35 @@ def batch_edit(
 
                 if not search_text:
                     raise ValueError("search_text is required for replace")
-                    
-                if not use_regex:
-                    # Defang replacement string so literal backslashes aren't parsed by re.sub
-                    replacement = replacement.replace('\\', r'\\')
 
-                flags = 0 if case_sensitive else re.IGNORECASE
-                compiled = (
-                    re.compile(search_text, flags)
-                    if use_regex
-                    else re.compile(re.escape(search_text), flags)
-                )
-                if global_replace:
-                    content, count = compiled.subn(replacement, content)
+                if use_regex:
+                    flags = 0 if case_sensitive else re.IGNORECASE
+                    compiled = re.compile(search_text, flags)
+                    if global_replace:
+                        content, count = compiled.subn(replacement, content)
+                    else:
+                        new = compiled.sub(replacement, content, count=1)
+                        count = 1 if new != content else 0
+                        content = new
                 else:
-                    new = compiled.sub(replacement, content, count=1)
-                    count = 1 if new != content else 0
-                    content = new
+                    if case_sensitive:
+                        count = content.count(search_text)
+                        if count > 0:
+                            if global_replace:
+                                content = content.replace(search_text, replacement)
+                            else:
+                                content = content.replace(search_text, replacement, 1)
+                                count = 1
+                    else:
+                        def_replacement = replacement.replace('\\', r'\\')
+                        compiled = re.compile(re.escape(search_text), re.IGNORECASE)
+                        if global_replace:
+                            content, count = compiled.subn(def_replacement, content)
+                        else:
+                            new = compiled.sub(def_replacement, content, count=1)
+                            count = 1 if new != content else 0
+                            content = new
+
                 total_replacements += count
                 edit_results.append(
                     {"index": i, "operation": op, "success": True, "replacements": count}
@@ -2897,7 +2669,6 @@ def batch_edit(
                 }
             edit_results.append({"index": i, "operation": op, "success": False, "error": str(exc)})
 
-    # Only write if content actually changed
     if content == original_content:
         return {
             "success": True,
@@ -2908,7 +2679,6 @@ def batch_edit(
             "edits_failed": len([e for e in edit_results if not e.get("success")]),
         }
 
-    # Dry-run check for batch_edit
     if dry_run:
         original_bytes = len(original_content.encode(encoding, errors="surrogateescape"))
         new_bytes = len(content.encode(encoding, errors="surrogateescape"))
@@ -2958,22 +2728,14 @@ def batch_edit(
 
 def run(**kwargs: Any) -> dict[str, Any]:
     """Compatibility wrapper for the tool infrastructure."""
-    # Resolve 'path' alias to 'file_path' if present
-    if 'path' in kwargs and 'file_path' not in kwargs:
-        kwargs['file_path'] = kwargs.pop('path')
-    
     options = EditOptions(**kwargs)
     return _run(options)
 
+
 def _run(options: EditOptions) -> dict[str, Any]:
-    """
-    Execute any named file operation using EditOptions.
-    """
+    """Execute any named file operation using EditOptions."""
     file_path = options.file_path
-    
-    # ------------------------------------------------------------------
-    # Validate operation name
-    # ------------------------------------------------------------------
+
     if options.operation not in _ALL_OPERATIONS:
         return {
             "success": False,
@@ -3011,18 +2773,14 @@ def _run(options: EditOptions) -> dict[str, Any]:
     if not file_path:
         return {"success": False, "error": "file_path (or path) is required"}
 
-    # Unify search_text / pattern -> effective_search
     effective_search: str | None = options.search_text or options.pattern
 
-    # ------------------------------------------------------------------
-    # Dispatch table
-    # ------------------------------------------------------------------
     operation_dispatch: dict[str, Callable[[], dict[str, Any]]] = {
         "read": lambda: read(file_path, options.max_size, options.encoding, options.show_lines, options.start_line, options.end_line),
         "read_lines": lambda: read_lines(
             file_path,
-            int(options.start_line) if options.start_line is not None else None,
-            int(options.end_line) if options.end_line is not None else None,
+            options.start_line,  # type: ignore
+            options.end_line,    # type: ignore
             options.encoding,
         ),
         "write": lambda: write(options),
@@ -3049,14 +2807,23 @@ def _run(options: EditOptions) -> dict[str, Any]:
         ),
         "replace_lines": lambda: replace_lines(
             file_path,
-            int(options.start_line) if options.start_line is not None else 1, # type: ignore
-            int(options.end_line) if options.end_line is not None else 1, # type: ignore
-            options.content, # type: ignore
+            options.start_line, # type: ignore
+            options.end_line,   # type: ignore
+            options.content,    # type: ignore
             options.encoding,
             options.max_backups,
             options.dry_run,
         ),
         "search": lambda: file_search(
+            file_path,
+            effective_search, # type: ignore
+            options.use_regex,
+            options.case_sensitive,
+            options.line_context,
+            options.encoding,
+            options.max_matches,
+        ),
+        "file_search": lambda: file_search(
             file_path,
             effective_search, # type: ignore
             options.use_regex,
@@ -3259,7 +3026,7 @@ Examples:
     parser.add_argument("--backup-timestamp", dest="backup_timestamp", default=None)
     parser.add_argument("--recursive", action="store_true", default=False)
     parser.add_argument("--verbose", "-v", action="store_true")
-    # Extended operation options
+
     parser.add_argument(
         "--algorithm", default="sha256", choices=sorted(_HASH_ALGORITHMS)
     )
@@ -3304,7 +3071,6 @@ Examples:
     parser.add_argument(
         "--max-results", type=int, default=MAX_FIND_RESULTS, dest="max_results"
     )
-    # v2.9.1: batch_edit options
     parser.add_argument(
         "--edits", default=None,
         help="JSON array of edits for batch_edit mode",
@@ -3342,7 +3108,6 @@ if __name__ == "__main__":
     _parser = _build_parser()
     cli = _parser.parse_args()
 
-    # Verbose logging
     if cli.verbose:
         logging.basicConfig(
             level=logging.DEBUG,
@@ -3350,7 +3115,6 @@ if __name__ == "__main__":
             stream=sys.stderr,
         )
 
-    # stdin content ingestion
     content_value: str | None = cli.content
     if content_value == "-":
         try:
@@ -3372,14 +3136,12 @@ if __name__ == "__main__":
         except (ImportError, OSError):
             content_value = sys.stdin.read()
 
-    # Parse --var KEY=VALUE pairs
     try:
         variables = _parse_variables(getattr(cli, "variables", None))
     except ValueError as exc:
         print(json.dumps({"success": False, "error": str(exc)}))
         sys.exit(1)
 
-    # Termux greeting (only when running interactively in Termux)
     if (
         os.environ.get("TERMUX_VERSION")
         or "termux" in os.environ.get("SHELL", "").lower()
@@ -3392,8 +3154,6 @@ if __name__ == "__main__":
         )
         _cprint(f"   Sanctuary: {Path.home()}", Fore.BLUE)  # type: ignore[arg-type]
 
-    # Dispatch
-    # Handle batch operation JSON file loading
     ops_data = []
     if cli.operation == "batch" and cli.file_path:
         try:
@@ -3402,7 +3162,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(json.dumps({"success": False, "error": f"Failed to load batch JSON: {e}"}))
             sys.exit(1)
-            
+
     options = EditOptions(
         operation=cli.operation,
         file_path=cli.file_path,
@@ -3453,7 +3213,6 @@ if __name__ == "__main__":
     )
     result = _run(options)
 
-    # Human-readable status line
     if result.get("success"):
         _cprint(
             f"✓ Done  ({result.get('duration_ms', 0):.1f} ms)",
@@ -3463,18 +3222,5 @@ if __name__ == "__main__":
     else:
         _cprint(f"✗ {result.get('error', 'Unknown error')}", Fore.RED)  # type: ignore[arg-type]
 
-    # Machine-readable JSON output
     print(json.dumps(result, indent=2, ensure_ascii=False))
     sys.exit(0 if result.get("success") else 1)
-# ==============================================================================
-# v2.9.1 — Defanged literal string replacements; resilient batch execution;
-#          extended hash algorithm library; null/type guards on line hooks.
-# ==============================================================================
-
-# - Atomic writes for replace/append operations
-# - Dry-run preview support (no file modification)
-# - Version‑control backup hooks (timestamped .bak files)
-# - Enhanced regex handling with capture‑group substitution
-# - Batch‑edit mode for multi‑step transformations
-
-# ====================

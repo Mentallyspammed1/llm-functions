@@ -3809,7 +3809,9 @@
 │   ├── bbr.py
 │   ├── bbt
 │   ├── bbt.md
+│   ├── brave_search
 │   ├── breakevenhelp.md
+│   ├── bs
 │   ├── bybit-realm
 │   ├── bybit-realm-old.py
 │   ├── bybit-realm.py.fixes_backup
@@ -3824,7 +3826,7 @@
 │   ├── bybit_cancel_all_orders.py
 │   ├── bybit_cancel_order.py
 │   ├── bybit_closed_pnl.sh
-│   ├── bybit_core.py
+│   ├── bybit_core
 │   ├── bybit_dashboard.py
 │   ├── bybit_execute -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-tool.js
 │   ├── bybit_execution_list.sh
@@ -3870,7 +3872,7 @@
 │   ├── bybit_position_info.sh
 │   ├── bybit_position_liquidation.sh
 │   ├── bybit_position_list.sh
-│   ├── bybit_position_manager.py
+│   ├── bybit_position_manager
 │   ├── bybit_position_transactions.sh
 │   ├── bybit_positions.py
 │   ├── bybit_pro_suite
@@ -3907,15 +3909,18 @@
 │   ├── coder -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-agent.sh
 │   ├── connectivity_check
 │   ├── context_analyzer.py
+│   ├── cron_job_schedualer
 │   ├── crypto_price
 │   ├── custom_search.py
 │   ├── custom_search.sh
 │   ├── date_diff.py
+│   ├── ddg_search
 │   ├── demo_js.js
 │   ├── demo_py.py
 │   ├── demo_sh.sh
 │   ├── dependency_manager.sh
 │   ├── dns_query
+│   ├── download_image
 │   ├── e.ah
 │   ├── edit
 │   ├── edit.py.fixes_backup_v2
@@ -3927,10 +3932,14 @@
 │   ├── execute_js_code.js
 │   ├── execute_py_code
 │   ├── execute_sql_code.sh
-│   ├── fetch_url_via_curl
+│   ├── fetch_url_via_curl -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-tool.sh
+│   ├── fetch_url_via_jina
 │   ├── fetch_url_via_jina.sh
 │   ├── fetch_url_via_wget.sh
+│   ├── file_patch
+│   ├── file_review
 │   ├── file_summarizer
+│   ├── file_todo
 │   ├── filesystem_create_directory -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-mcp-tool.sh
 │   ├── filesystem_directory_tree -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-mcp-tool.sh
 │   ├── filesystem_edit_file -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-mcp-tool.sh
@@ -3992,17 +4001,19 @@
 │   ├── github_update_issue -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-mcp-tool.sh
 │   ├── github_update_pull_request_branch -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-mcp-tool.sh
 │   ├── google_response.html
-│   ├── google_search
 │   ├── grep_text
 │   ├── http_headers
+│   ├── image_intel
+│   ├── internet_speedtest
 │   ├── json_tool
 │   ├── local_ip
-│   ├── lux_download -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-tool.sh
+│   ├── lux_download
 │   ├── mapper_extractor
 │   ├── maps_tool
+│   ├── media_harmonizer
 │   ├── memory_analytics
 │   ├── memory_aware_tool -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-tool.sh
-│   ├── memory_manager -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-tool.sh
+│   ├── memory_manager
 │   ├── micro_profit
 │   ├── navigate_between
 │   ├── net_dns_lookup.sh
@@ -4013,16 +4024,20 @@
 │   ├── net_port_scan.sh
 │   ├── net_speedtest.sh
 │   ├── nsfw_search
+│   ├── optimizer
 │   ├── patch
+│   ├── pdf_intel
 │   ├── photo_tool
 │   ├── pin_location
-│   ├── proxy_utils.py
+│   ├── proxy_utils
+│   ├── pyrm_scalp_tool
 │   ├── pyrm_search
 │   ├── pyrm_term
 │   ├── realm_methods
 │   ├── requirements.txt
 │   ├── review_pins
 │   ├── scalper.py
+│   ├── scientific_calculator
 │   ├── search_arxiv.sh
 │   ├── search_wikipedia.sh
 │   ├── search_wolframalpha.sh
@@ -4031,12 +4046,14 @@
 │   ├── session_manager.sh
 │   ├── smart_selector.sh
 │   ├── speedtest -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-tool.py
+│   ├── str_replace_editor
 │   ├── sys_cpu_info.sh
 │   ├── sys_disk_info.sh
 │   ├── sys_mem_info.sh
 │   ├── sys_pkg_list.sh
 │   ├── sys_uptime.sh
 │   ├── system_info
+│   ├── task_manager
 │   ├── tcp_ping
 │   ├── temp_inspect.txt
 │   ├── test.txt
@@ -4065,6 +4082,7 @@
 │   ├── trading_config.json
 │   ├── unit_convert.py
 │   ├── url_metadata
+│   ├── vid_search
 │   ├── weather_forecast.sh
 │   ├── web -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-tool.py
 │   ├── web_crawler
@@ -4077,11 +4095,13 @@
 │   ├── web_search_perplexity.sh
 │   ├── web_search_search -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-mcp-tool.sh
 │   ├── web_search_tavily.sh
+│   ├── web_spider
 │   ├── web_tool -> /data/data/com.termux/files/home/.config/aichat/llm-functions/scripts/run-tool.py
 │   ├── webx
 │   ├── wget2x
 │   └── ydc_search
 ├── blueprint.md
+├── bs.py
 ├── btc_ob.json
 ├── bybit-mcp
 │   ├── DEV_PLAN.md
@@ -15681,6 +15701,8 @@
 │   │   └── tools.txt
 │   ├── bbr
 │   ├── bbt
+│   ├── brave_search
+│   ├── bs
 │   ├── bybit-realm
 │   │   └── instrument_cache.pkl
 │   ├── bybit-terminal
@@ -15712,6 +15734,7 @@
 │   ├── connectivity_check
 │   ├── crypto_price
 │   ├── custom_search
+│   ├── ddg_search
 │   ├── demo_py
 │   ├── dns_query
 │   ├── download_image
@@ -15723,11 +15746,15 @@
 │   │   └── instrument_cache.pkl
 │   ├── execute_py_code
 │   ├── fetch_url_via_curl
+│   ├── file_patch
+│   ├── file_review
 │   ├── file_summarizer
 │   ├── get_ip_info
 │   ├── get_my_location
 │   ├── google_search
+│   ├── grep_text
 │   ├── http_headers
+│   ├── image_intel
 │   ├── internet_speedtest
 │   ├── maps_tool
 │   ├── micro_profit
@@ -15735,22 +15762,30 @@
 │   ├── monitor_scalp
 │   ├── nsfw_search
 │   ├── patch
+│   ├── pdf_intel
 │   ├── photo_tool
 │   ├── pin_location
+│   ├── pyrm_scalp_tool
 │   ├── pyrm_search
 │   ├── pyrm_term
 │   ├── speedtest
+│   ├── str_replace_editor
 │   ├── system_info
+│   ├── task_manager
 │   ├── tcp_ping
 │   ├── trading_bot_eth_scalper
 │   ├── url_metadata
+│   ├── vid_search
 │   ├── web
+│   ├── web_crawler
 │   ├── web_fetcher
 │   ├── web_search
+│   ├── web_spider
 │   ├── webx
 │   ├── wf
 │   ├── wget2
 │   └── ydc_search
+├── cat.html
 ├── class_methods.txt
 ├── complex_test.txt
 ├── complex_test.txt.1778971880720935603.bak
@@ -15785,6 +15820,8 @@
 ├── full_dispatcher.py
 ├── functions.json
 ├── handled_actions.txt
+├── hello.py
+├── hello.py.1784651969271948617.bak
 ├── inspect_account.py
 ├── make_final.py
 ├── mcp
@@ -33257,6 +33294,7 @@
 │       └── postesm.ts
 ├── package-lock.json
 ├── package.json
+├── patch.md
 ├── patch2.py
 ├── patch_argparse.py
 ├── patch_dns.py
@@ -33268,8 +33306,13 @@
 ├── pnpm-workspace.yaml
 ├── positions.csv
 ├── referenced_methods.txt
+├── report.html
+├── report_gifs.html
+├── sample.txt
 ├── scalp_5_symbols.py
 ├── scripts
+│   ├── __pycache__
+│   │   └── run-tool.cpython-314.pyc
 │   ├── build-declarations.js
 │   ├── build-declarations.py
 │   ├── build-declarations.sh
@@ -33322,6 +33365,7 @@
 │   ├── run-tool.sh.1777886696153520440.bak
 │   ├── run-tool.sh.1777886705980650595.bak
 │   ├── run-tool.sh.1777886871240183527.bak
+│   ├── start-scalper-loop.sh
 │   ├── validate_tools.py
 │   └── validate_tools.sh
 ├── sessions
@@ -33329,6 +33373,8 @@
 ├── set_tp.py
 ├── set_tp_now.py
 ├── sol_ob.json
+├── tasks.json
+├── template.md
 ├── termux_location.sh
 ├── test.patch
 ├── test.txt
@@ -33372,9 +33418,13 @@
 │   ├── README.md
 │   ├── __pycache__
 │   │   ├── bbr.bak.cpython-313.pyc
+│   │   ├── bbr.bak.cpython-314.pyc
 │   │   ├── bbr.cpython-313.pyc
+│   │   ├── bbr.cpython-314.pyc
 │   │   ├── bbt.cpython-313.pyc
 │   │   ├── bbt.cpython-314.pyc
+│   │   ├── brave_search.cpython-314.pyc
+│   │   ├── bs.cpython-314.pyc
 │   │   ├── bybit-realm-old.cpython-313.pyc
 │   │   ├── bybit-realm.cpython-313.pyc
 │   │   ├── bybit_account.cpython-313.pyc
@@ -33402,6 +33452,7 @@
 │   │   ├── bybit_orderbook.cpython-313.pyc
 │   │   ├── bybit_place_order.cpython-313.pyc
 │   │   ├── bybit_position_manager.cpython-313.pyc
+│   │   ├── bybit_position_manager.cpython-314.pyc
 │   │   ├── bybit_positions.cpython-313.pyc
 │   │   ├── bybit_pro_suite.cpython-313.pyc
 │   │   ├── bybit_pro_suite.cpython-314.pyc
@@ -33437,6 +33488,7 @@
 │   │   ├── crypto_price.cpython-314.pyc
 │   │   ├── ctx_tool.cpython-313.pyc
 │   │   ├── date_diff.cpython-313.pyc
+│   │   ├── ddg_search.cpython-314.pyc
 │   │   ├── debug_sig_v2.cpython-313.pyc
 │   │   ├── demo_py.cpython-313.pyc
 │   │   ├── demo_py.cpython-314.pyc
@@ -33447,26 +33499,39 @@
 │   │   ├── edit.cpython-313.pyc
 │   │   ├── edit.cpython-314.pyc
 │   │   ├── edit2.cpython-313.pyc
+│   │   ├── edit2.cpython-314.pyc
 │   │   ├── edit_options.cpython-313.pyc
+│   │   ├── edit_options.cpython-314.pyc
 │   │   ├── editworking.cpython-313.pyc
 │   │   ├── execute_command.cpython-313.pyc
 │   │   ├── execute_command.cpython-314.pyc
 │   │   ├── execute_py_code.cpython-313.pyc
 │   │   ├── execute_py_code.cpython-314.pyc
 │   │   ├── fetch_url_via_curl.cpython-314.pyc
+│   │   ├── file_patch.cpython-314.pyc
+│   │   ├── file_review.cpython-314.pyc
 │   │   ├── file_summarizer.cpython-313.pyc
+│   │   ├── file_summarizer.cpython-314.pyc
+│   │   ├── gen_thumbs.cpython-314.pyc
 │   │   ├── get_ip_info.cpython-313.pyc
 │   │   ├── get_my_location.cpython-313.pyc
+│   │   ├── get_my_location.cpython-314.pyc
 │   │   ├── google_search.cpython-313.pyc
 │   │   ├── google_search.cpython-314.pyc
+│   │   ├── grep_text.cpython-314.pyc
 │   │   ├── http_headers.cpython-313.pyc
+│   │   ├── http_headers.cpython-314.pyc
+│   │   ├── image_intel.cpython-314.pyc
 │   │   ├── image_search.cpython-313.pyc
 │   │   ├── indicator_utils.cpython-313.pyc
+│   │   ├── indicator_utils.cpython-314.pyc
 │   │   ├── internet_speedtest.cpython-313.pyc
+│   │   ├── internet_speedtest.cpython-314.pyc
 │   │   ├── limit_pnl_utils.cpython-313.pyc
 │   │   ├── local_ip.cpython-313.pyc
 │   │   ├── mapper_extractor.cpython-313.pyc
 │   │   ├── maps_tool.cpython-313.pyc
+│   │   ├── maps_tool.cpython-314.pyc
 │   │   ├── memory_analytics.cpython-313.pyc
 │   │   ├── micro_profit.cpython-313.pyc
 │   │   ├── micro_profit.cpython-314.pyc
@@ -33474,24 +33539,32 @@
 │   │   ├── micro_scalp.cpython-314.pyc
 │   │   ├── monitor_scalp.cpython-313.pyc
 │   │   ├── monitor_scalp.cpython-314.pyc
+│   │   ├── multi_symbol_10c_scalper.cpython-314.pyc
 │   │   ├── navigate_between.cpython-313.pyc
 │   │   ├── net_ip_info.cpython-313.pyc
 │   │   ├── nsfw_search.cpython-313.pyc
 │   │   ├── nsfw_search.cpython-314.pyc
 │   │   ├── patch.cpython-314.pyc
+│   │   ├── pdf_intel.cpython-314.pyc
 │   │   ├── photo_tool.cpython-313.pyc
+│   │   ├── photo_tool.cpython-314.pyc
 │   │   ├── pin_location.cpython-313.pyc
 │   │   ├── pin_location.cpython-314.pyc
 │   │   ├── proxy_utils.cpython-313.pyc
 │   │   ├── proxy_utils.cpython-314.pyc
+│   │   ├── pyrm_scalp_tool.cpython-314.pyc
 │   │   ├── pyrm_search.cpython-313.pyc
+│   │   ├── pyrm_search.cpython-314.pyc
 │   │   ├── pyrm_term.cpython-313.pyc
 │   │   ├── realm_methods.cpython-313.pyc
 │   │   ├── review_pins.cpython-313.pyc
+│   │   ├── scientific_calculator.cpython-314.pyc
 │   │   ├── speedtest.cpython-313.pyc
+│   │   ├── str_replace_editor.cpython-314.pyc
 │   │   ├── system_info.cpython-313.pyc
 │   │   ├── target_analysis.cpython-313.pyc
 │   │   ├── target_analysis.cpython-314.pyc
+│   │   ├── task_manager.cpython-314.pyc
 │   │   ├── tcp_ping.cpython-313.pyc
 │   │   ├── temp_run.cpython-313.pyc
 │   │   ├── test_bybit_terminal.cpython-313.pyc
@@ -33506,11 +33579,14 @@
 │   │   ├── trading_bot_vwap.cpython-313.pyc
 │   │   ├── unit_convert.cpython-313.pyc
 │   │   ├── url_metadata.cpython-313.pyc
+│   │   ├── vid_search.cpython-314.pyc
 │   │   ├── web.cpython-313.pyc
 │   │   ├── web_crawler.cpython-313.pyc
+│   │   ├── web_crawler.cpython-314.pyc
 │   │   ├── web_fetcher.cpython-313.pyc
 │   │   ├── web_fetcher.cpython-314.pyc
 │   │   ├── web_search.cpython-313.pyc
+│   │   ├── web_spider.cpython-314.pyc
 │   │   ├── webx.cpython-313.pyc
 │   │   ├── webx.cpython-314.pyc
 │   │   ├── wf.cpython-313.pyc
@@ -33523,14 +33599,20 @@
 │   │   ├── execution.py
 │   │   ├── main.py
 │   │   └── strategy.py
+│   ├── batch.json
 │   ├── bbr.bak.py
 │   ├── bbr.py
 │   ├── bbt.md
 │   ├── bbt.py
+│   ├── bbtx.py
+│   ├── bbtx.py.20260725_174759.bak
 │   ├── bot_logs
 │   │   ├── observatory_BTCUSDT.log
 │   │   └── telemetry_BTCUSDT.jsonl
+│   ├── brave_search.js
+│   ├── brave_search.py
 │   ├── breakevenhelp.md
+│   ├── bs.py
 │   ├── bybit
 │   │   ├── __init__.py
 │   │   ├── __pycache__
@@ -33618,6 +33700,7 @@
 │   ├── bybit_set_leverage.py
 │   ├── bybit_set_trading_stop.py
 │   ├── bybit_smart_order.py
+│   ├── bybit_smart_order.py.bad
 │   ├── bybit_stop_loss.sh
 │   ├── bybit_symbol_info.sh
 │   ├── bybit_take_profit.sh
@@ -33655,6 +33738,7 @@
 │   ├── config.yaml
 │   ├── connectivity_check.py
 │   ├── context_analyzer.py
+│   ├── cron_job_schedualer.py
 │   ├── crypto-price.sh
 │   ├── crypto_price.py
 │   ├── ctx_tool.py
@@ -33662,6 +33746,7 @@
 │   ├── custom_search.py
 │   ├── custom_search.sh
 │   ├── date_diff.py
+│   ├── ddg_search.py
 │   ├── debug_sig_v2.py
 │   ├── demo.txt.1784575226302638723.bak
 │   ├── demo2.txt.1784575309449819036.bak
@@ -33687,6 +33772,9 @@
 │   ├── edit.py.pre_refactor_2.9.0
 │   ├── edit.sh
 │   ├── edit2.py
+│   ├── edit2.py.1784699164540006277.bak
+│   ├── edit_options.py
+│   ├── edit_options_helper.py
 │   ├── editworking.py
 │   ├── example_tool.sh
 │   ├── execute_command.py
@@ -33703,9 +33791,14 @@
 │   ├── execute_sql_code.sh
 │   ├── fetch_url_via_curl.py
 │   ├── fetch_url_via_curl.sh
+│   ├── fetch_url_via_jina.py
 │   ├── fetch_url_via_jina.sh
 │   ├── fetch_url_via_wget.sh
+│   ├── file_patch.py
+│   ├── file_review.py
 │   ├── file_summarizer.py
+│   ├── file_todo.py
+│   ├── file_workspace.py
 │   ├── find_port.sh
 │   ├── fix_methods.py
 │   ├── fprobe_media.py
@@ -33737,21 +33830,27 @@
 │   ├── google_response.html
 │   ├── google_search.py
 │   ├── grep_text.py
+│   ├── hello.py
 │   ├── http_headers.py
+│   ├── image_intel.py
 │   ├── image_search.py
 │   ├── indicator_utils.py
 │   ├── internet_speedtest.py
 │   ├── internet_speedtest.py.1782537294867866911.bak
 │   ├── internet_speedtest.py.1782537298550813142.bak
+│   ├── is.py
 │   ├── json_tool.py
 │   ├── limit_pnl_utils.py
 │   ├── local_ip.py
 │   ├── logs
 │   │   └── bot.log
+│   ├── lux_download.py
 │   ├── lux_download.sh
 │   ├── mapper_extractor.py
 │   ├── maps_tool.py
+│   ├── media_harmonizer.py
 │   ├── memory_analytics.py
+│   ├── memory_manager.py
 │   ├── memory_manager.sh
 │   ├── methods_to_move.py
 │   ├── micro_profit.py
@@ -33788,16 +33887,19 @@
 │   ├── notify.sh
 │   ├── nsfw_search.log
 │   ├── nsfw_search.py
+│   ├── optimizer.py
 │   ├── out.json
 │   ├── patch.diff
-│   ├── patch.py
 │   ├── patch_scalp.py
 │   ├── patch_test.txt
+│   ├── patch_tool.py
 │   ├── pboto.jpg
+│   ├── pdf_intel.py
 │   ├── photo_tool.py
 │   ├── pin_location.py
 │   ├── profit_macros.sh
 │   ├── proxy_utils.py
+│   ├── pyrm_scalp_tool.py
 │   ├── pyrm_search.py
 │   ├── pyrm_search.py.1782375444261974582.bak
 │   ├── pyrm_search.py.1782375449102972043.bak
@@ -33812,7 +33914,9 @@
 │   ├── review_pins.py
 │   ├── sample.txt
 │   ├── sample_original.txt
+│   ├── scalper.log
 │   ├── scalper.py
+│   ├── scientific_calculator.py
 │   ├── search_arxiv.sh
 │   ├── search_wikipedia.sh
 │   ├── search_wolframalpha.sh
@@ -33822,6 +33926,7 @@
 │   ├── send_twilio.sh
 │   ├── session_manager.sh
 │   ├── smart_selector.sh
+│   ├── str_replace_editor.py
 │   ├── sys_cpu_info.sh
 │   ├── sys_disk_info.sh
 │   ├── sys_mem_info.sh
@@ -33830,6 +33935,7 @@
 │   ├── sys_uptime.sh
 │   ├── system_info.py
 │   ├── target_analysis.py
+│   ├── task_manager.py
 │   ├── tcp_ping.py
 │   ├── temp_inspect.txt
 │   ├── temp_m.py
@@ -33837,10 +33943,10 @@
 │   ├── temp_methods_to_move.py
 │   ├── temp_run.py
 │   ├── test.txt
+│   ├── test.txt.1784732366631582085.bak
 │   ├── test2.txt
 │   ├── test_append.txt
 │   ├── test_batch.json
-│   ├── test_batch.txt
 │   ├── test_bybit.py
 │   ├── test_bybit_terminal.py
 │   ├── test_config.json
@@ -33850,6 +33956,7 @@
 │   ├── test_final.txt
 │   ├── test_line_numbers.txt
 │   ├── test_original.txt
+│   ├── test_patch
 │   ├── test_patch.txt
 │   ├── test_sort.txt
 │   ├── test_write.txt
@@ -33867,6 +33974,8 @@
 │   ├── todo_add.sh
 │   ├── tools
 │   │   ├── README.md
+│   │   ├── __pycache__
+│   │   │   └── bybit_smart_order.cpython-314.pyc
 │   │   ├── bybit_closed_pnl.sh
 │   │   ├── bybit_execution_list.sh
 │   │   ├── bybit_fee_rate.sh
@@ -33899,6 +34008,7 @@
 │   ├── tor_logs
 │   ├── torrc
 │   ├── trade_journal.json
+│   ├── trade_journal.jsonl
 │   ├── trading_bot.log
 │   ├── trading_bot_batch.py
 │   ├── trading_bot_color.py
@@ -33923,6 +34033,7 @@
 │   │   ├── patch.awk
 │   │   ├── tor_utils.py
 │   │   └── trading_engines.py
+│   ├── vid_search.py
 │   ├── weather_forecast.sh
 │   ├── web_crawler.py
 │   ├── web_fetcher.py
@@ -33934,6 +34045,7 @@
 │   ├── web_search_perplexity.sh
 │   ├── web_search_tavily.sh
 │   ├── web_search_you.sh
+│   ├── web_spider.py
 │   ├── webx.py
 │   ├── wf.py
 │   ├── wget2.sh
@@ -33954,6 +34066,7 @@
 ├── tree.md
 ├── update_metadata.py
 ├── utils
+│   ├── awk
 │   ├── error.sh
 │   ├── error.sh.1777561279881051595.bak
 │   ├── guard_operation.sh
@@ -33966,6 +34079,9 @@
 ├── web_web_full.txt
 ├── web_web_head.txt
 ├── web_web_tail.txt
-└── whalebot.working.py
+├── whalebot.working.py
+├── yandex.json
+├── yandex_ru.html
+└── yandex_ru.json
 
-4213 directories, 29756 files
+4230 directories, 29855 files

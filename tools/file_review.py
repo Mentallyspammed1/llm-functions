@@ -25,7 +25,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 __version__ = "1.2.0"
 
@@ -53,7 +53,7 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stdout is attached to an interactive terminal and NO_COLOR is not set."""
-    if os.environ.get("NO_COLOR"):
+    if "NO_COLOR" in os.environ:
         return False
     return sys.stdout.isatty()
 
@@ -111,10 +111,15 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
                 sev_color = NEON_CYAN
 
             rel_file = issue.get('file', '')
-            if len(rel_file) > 25:
-                rel_file = "..." + rel_file[-22:]
-                
-            _cprint(f"{NEON_PURPLE}│{RESET}   {sev_color}[{sev:<7}]{RESET} {rel_file}:{issue.get('line', 0)} — {issue.get('message')}")
+            try:
+                rel_path = str(Path(rel_file).relative_to(Path.cwd()))
+            except ValueError:
+                rel_path = rel_file
+
+            if len(rel_path) > 28:
+                rel_path = "..." + rel_path[-25:]
+
+            _cprint(f"{NEON_PURPLE}│{RESET}   {sev_color}[{sev:<7}]{RESET} {rel_path}:{issue.get('line', 0)} — {issue.get('message')}")
         if len(findings) > 10:
             _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(findings) - 10} more findings{RESET}")
 
@@ -129,30 +134,31 @@ SECRET_PATTERNS = [
     (re.compile(r"(?i)(api[_-]?key|secret[_-]?key|auth[_-]?token)\s*[:=]\s*['\"]([a-zA-Z0-9_\-]{16,})['\"]"), "Potential API Secret Key"),
     (re.compile(r"-----BEGIN (RSA|OPENSSH|PRIVATE) KEY-----"), "Private RSA/SSH Key"),
     (re.compile(r"AKIA[0-9A-Z]{16}"), "AWS Access Key ID"),
-    (re.compile(r"ghp_[a-zA-Z0-9]{36}"), "GitHub Personal Access Token"),
+    (re.compile(r"(ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})"), "GitHub Access Token"),
     (re.compile(r"https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+"), "Slack Webhook URL"),
-    (re.compile(r"sk-[a-zA-Z0-9]{32,}"), "OpenAI/Anthropic Secret Key"),
-    (re.compile(r"eyJ[a-zA-Z0-9_\-]*\.[a-zA-Z0-9_\-]*\.[a-zA-Z0-9_\-]*"), "JSON Web Token (JWT)")
+    (re.compile(r"(sk-[a-zA-Z0-9]{32,}|sk-ant-api03-[a-zA-Z0-9_\-]{80,})"), "OpenAI/Anthropic Secret Key"),
+    (re.compile(r"eyJ[a-zA-Z0-9_\-]{10,}\.eyJ[a-zA-Z0-9_\-]{10,}\.[a-zA-Z0-9_\-]{10,}"), "JSON Web Token (JWT)")
 ]
 
 # Pre-compiled Code Analysis Patterns
 RE_PYTHONIC_LEN = re.compile(r"\bif\s+len\([^)]+\)\s*(==\s*0|>=\s*1|>0)\b")
-RE_LEGACY_STR = re.compile(r"(['\"].*%[s|d|f|r].*['\"]\s*%\s*\(|\.format\()")
+RE_LEGACY_STR = re.compile(r"(['\"].*%[sdfr].*['\"]\s*%\s*\(|\.format\()")
 RE_JS_VAR = re.compile(r"\bvar\s+[a-zA-Z0-9_$]+\s*=")
 RE_TODO_TAG = re.compile(r"\b(TODO|FIXME|HACK|XXX)\b\s*[:|-]?\s*(.*)", re.IGNORECASE)
 
 
 class ASTUpgradeAnalyzer(ast.NodeVisitor):
     """AST Node Visitor for detecting Python code modernization & upgrade opportunities."""
-    
+
     def __init__(self, file_path: str):
         self.file_path = file_path
         self.findings: list[dict[str, Any]] = []
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         # 1. Mutable Default Arguments Check
-        for default in node.args.defaults + node.args.kw_defaults:
-            if default and isinstance(default, (ast.List, ast.Dict, ast.Set)):
+        all_defaults = list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]
+        for default in all_defaults:
+            if isinstance(default, (ast.List, ast.Dict, ast.Set)):
                 self.findings.append({
                     "file": self.file_path,
                     "line": node.lineno,
@@ -196,8 +202,8 @@ class ASTUpgradeAnalyzer(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Compare(self, node: ast.Compare) -> None:
-        # 5. type(x) == Y instead of isinstance(x, Y)
-        if len(node.ops) == 1 and isinstance(node.ops[0], ast.Eq):
+        # 5. type(x) == Y or type(x) is Y instead of isinstance(x, Y)
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.Eq, ast.Is)):
             if isinstance(node.left, ast.Call) and isinstance(node.left.func, ast.Name) and node.left.func.id == "type":
                 self.findings.append({
                     "file": self.file_path,
@@ -276,16 +282,14 @@ def _review_file(
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
-        content = "".join(lines)
-
         # ----------------------------------------------------------------------
         # Check 1: Syntax & AST Analysis
         # ----------------------------------------------------------------------
         if "syntax" in enabled_checks:
+            content = "".join(lines)
             if file_path.suffix == ".py":
                 try:
                     tree = ast.parse(content, filename=str(file_path))
-                    # Run Code Upgrade AST Visitor if enabled
                     if "upgrades" in enabled_checks:
                         analyzer = ASTUpgradeAnalyzer(str(file_path))
                         analyzer.visit(tree)
@@ -311,10 +315,21 @@ def _review_file(
                     })
 
         # ----------------------------------------------------------------------
-        # Check 2: Secrets Scanning
+        # Checks 2-5: Single-Pass Line Auditing
         # ----------------------------------------------------------------------
-        if "secrets" in enabled_checks:
-            for idx, line in enumerate(lines, 1):
+        check_secrets = "secrets" in enabled_checks
+        check_todos = "todos" in enabled_checks
+        check_upgrades = "upgrades" in enabled_checks
+        check_whitespace = "whitespace" in enabled_checks
+
+        is_py = file_path.suffix == ".py"
+        is_js_ts = file_path.suffix in (".js", ".ts", ".jsx", ".tsx")
+
+        modified = False
+        new_lines: list[str] = []
+
+        for idx, line in enumerate(lines, 1):
+            if check_secrets:
                 for regex, desc in SECRET_PATTERNS:
                     if regex.search(line):
                         issues.append({
@@ -325,11 +340,7 @@ def _review_file(
                             "message": desc
                         })
 
-        # ----------------------------------------------------------------------
-        # Check 3: TODO / FIXME Tags
-        # ----------------------------------------------------------------------
-        if "todos" in enabled_checks:
-            for idx, line in enumerate(lines, 1):
+            if check_todos:
                 match = RE_TODO_TAG.search(line)
                 if match:
                     issues.append({
@@ -340,12 +351,7 @@ def _review_file(
                         "message": f"{match.group(1).upper()}: {match.group(2).strip()[:40]}"
                     })
 
-        # ----------------------------------------------------------------------
-        # Check 4: Code Modernization & Upgrade Pattern Checks
-        # ----------------------------------------------------------------------
-        if "upgrades" in enabled_checks:
-            for idx, line in enumerate(lines, 1):
-                # Redundant len() checks: if len(x) == 0 or if len(x) > 0
+            if check_upgrades:
                 if RE_PYTHONIC_LEN.search(line):
                     issues.append({
                         "file": str(file_path),
@@ -355,37 +361,27 @@ def _review_file(
                         "message": "Simplify 'if len(x) == 0' to 'if not x' or 'if x'."
                     })
 
-                # Legacy String Formatting in Python
-                if file_path.suffix == ".py":
-                    if RE_LEGACY_STR.search(line):
-                        issues.append({
-                            "file": str(file_path),
-                            "line": idx,
-                            "type": "LEGACY_STRING_FORMATTING",
-                            "severity": "UPGRADE",
-                            "message": "Upgrade legacy % or .format() to modern Python f-strings."
-                        })
+                if is_py and RE_LEGACY_STR.search(line):
+                    issues.append({
+                        "file": str(file_path),
+                        "line": idx,
+                        "type": "LEGACY_STRING_FORMATTING",
+                        "severity": "UPGRADE",
+                        "message": "Upgrade legacy % or .format() to modern Python f-strings."
+                    })
 
-                # Legacy JS/TS 'var' keyword check
-                if file_path.suffix in (".js", ".ts", ".jsx", ".tsx"):
-                    if RE_JS_VAR.search(line):
-                        issues.append({
-                            "file": str(file_path),
-                            "line": idx,
-                            "type": "JS_VAR_TO_LET_CONST",
-                            "severity": "UPGRADE",
-                            "message": "Upgrade legacy 'var' declaration to 'let' or 'const'."
-                        })
+                if is_js_ts and RE_JS_VAR.search(line):
+                    issues.append({
+                        "file": str(file_path),
+                        "line": idx,
+                        "type": "JS_VAR_TO_LET_CONST",
+                        "severity": "UPGRADE",
+                        "message": "Upgrade legacy 'var' declaration to 'let' or 'const'."
+                    })
 
-        # ----------------------------------------------------------------------
-        # Check 5: Whitespace Formatting & Auto-fix (Atomic File Save)
-        # ----------------------------------------------------------------------
-        if "whitespace" in enabled_checks:
-            modified = False
-            new_lines = []
-            for idx, line in enumerate(lines, 1):
-                stripped_line = line.rstrip("\r\n")
-                if len(stripped_line) < len(line) - 1 and line.endswith((" \n", "\t\n")):
+            if check_whitespace:
+                stripped_eol = line.rstrip("\r\n")
+                if stripped_eol and stripped_eol[-1:] in (" ", "\t"):
                     issues.append({
                         "file": str(file_path),
                         "line": idx,
@@ -394,16 +390,31 @@ def _review_file(
                         "message": "Trailing whitespace detected"
                     })
                     if auto_fix:
-                        new_lines.append(stripped_line + "\n")
+                        eol = line[len(stripped_eol):]
+                        new_lines.append(stripped_eol.rstrip(" \t") + eol)
                         modified = True
+                    else:
+                        new_lines.append(line)
                 else:
                     new_lines.append(line)
+            else:
+                new_lines.append(line)
 
-            if auto_fix and modified:
-                tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+        # ----------------------------------------------------------------------
+        # Whitespace Auto-Fix Atomic File Save
+        # ----------------------------------------------------------------------
+        if auto_fix and modified and check_whitespace:
+            tmp_path = file_path.with_name(f".{file_path.name}.tmp")
+            try:
                 with open(tmp_path, "w", encoding="utf-8") as f:
                     f.writelines(new_lines)
                 os.replace(tmp_path, file_path)
+            finally:
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
 
     except Exception as err:
         issues.append({
@@ -419,8 +430,8 @@ def _review_file(
 
 def execute_tool(
     target: str,
-    checks: Optional[str] = "all",
-    max_file_size: Optional[int] = 1048576,
+    checks: str | None = "all",
+    max_file_size: int | str | None = 1048576,
     fix: bool = False,
     no_color: bool = False,
     verbose: bool = False,
@@ -439,15 +450,19 @@ def execute_tool(
         }
 
     all_checks = {"syntax", "secrets", "todos", "whitespace", "size", "upgrades"}
-    if checks and checks.lower() != "all":
-        enabled_checks = {c.strip().lower() for c in checks.split(",")}
+    checks_str = str(checks) if checks is not None else "all"
+    if checks_str and checks_str.lower() != "all":
+        enabled_checks = {c.strip().lower() for c in checks_str.split(",")}
     else:
         enabled_checks = all_checks
 
-    max_size = max_file_size if max_file_size is not None else 1048576
+    try:
+        max_size = int(max_file_size) if max_file_size is not None else 1048576
+    except (ValueError, TypeError):
+        max_size = 1048576
+
     files_to_review: list[Path] = []
-    
-    ignored_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv", ".mypy_cache"}
+    ignored_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv", ".mypy_cache", ".pytest_cache"}
 
     if target_path.is_file():
         files_to_review.append(target_path)
@@ -455,7 +470,8 @@ def execute_tool(
         for root, dirs, files in os.walk(target_path):
             dirs[:] = [d for d in dirs if d not in ignored_dirs and not d.startswith(".")]
             for f in files:
-                files_to_review.append(Path(root) / f)
+                if not f.startswith(".") or f in (".env", ".env.local", ".env.production"):
+                    files_to_review.append(Path(root) / f)
 
     if verbose:
         sys.stderr.write(f"[DEBUG] Found {len(files_to_review)} candidate file(s) to review.\n")
@@ -493,8 +509,16 @@ def write_llm_output(data: dict[str, Any]) -> None:
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
-        sys.stdout.write(json_payload)
-        sys.stdout.flush()
+        try:
+            if hasattr(sys.stdout, "buffer"):
+                sys.stdout.buffer.write(json_payload.encode("utf-8"))
+                sys.stdout.buffer.flush()
+            else:
+                sys.stdout.write(json_payload)
+                sys.stdout.flush()
+        except UnicodeEncodeError:
+            sys.stdout.write(json.dumps(data, indent=2, ensure_ascii=True) + "\n")
+            sys.stdout.flush()
     else:
         try:
             Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -512,8 +536,8 @@ def write_llm_output(data: dict[str, Any]) -> None:
 
 def run(
     target: str,
-    checks: Optional[str] = "all",
-    max_file_size: Optional[int] = 1048576,
+    checks: str | None = "all",
+    max_file_size: int | str | None = 1048576,
     fix: bool = False,
     no_color: bool = False,
     verbose: bool = False,
@@ -530,7 +554,7 @@ def run(
         no_color=no_color,
         verbose=verbose,
     )
-    
+
     print_human_readable_ui(result, no_color=no_color)
     write_llm_output(result)
 
@@ -594,7 +618,7 @@ if __name__ == "__main__":
         no_color=args.no_color,
         verbose=args.verbose,
     )
-    
+
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)
     sys.exit(res.get("exit_code", 0))

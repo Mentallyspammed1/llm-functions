@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# bbt.py — Pyrmethus AIChat Bybit Realm Master Trading Engine v5.1.0-ASCENDED
+# bbt.py — Pyrmethus AIChat Bybit Realm Master Trading Engine v5.2.0-ASCENDED
 # argc/aichat compatible · Full Bybit V5 REST & WS Integration · TA & Order Engine
 #
 # @describe Unified Bybit V5 Trading, Analysis, Indicator Observatory & Execution Suite
@@ -27,7 +27,7 @@
 
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║           BYBIT REALM v5.1.0 — Advanced Trading & Analysis Suite             ║
+║           BYBIT REALM v5.2.0 — Advanced Trading & Analysis Suite             ║
 ║                                                                              ║
 ║  Modules Integrated:                                                         ║
 ║  • bybit_core         : Low-Level Thread-Safe Engine & Failover Routing      ║
@@ -50,7 +50,6 @@ import json
 import logging
 import math
 import os
-import random
 import re
 import signal
 import statistics
@@ -110,7 +109,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("BybitRealm")
 
-__version__ = "5.1.0-ASCENDED"
+__version__ = "5.2.0-ASCENDED"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 1: DECIMAL, PRECISION & JSON SERIALIZER HELPERS
@@ -262,11 +261,41 @@ def write_llm_output(data: dict[str, Any]) -> None:
             sys.stdout.flush()
 
 
+def print_human_readable_ui(action: str, data: dict[str, Any], no_color: bool = False) -> None:
+    """Render a human-friendly colorized status box for interactive terminal runs."""
+    if not _is_tty() or no_color:
+        return
+
+    status = data.get("status", "ok") if isinstance(data, dict) else "ok"
+    is_success = status != "error"
+    status_color = NEON_GREEN if is_success else NEON_RED
+    status_symbol = "✓" if is_success else "✗"
+    status_text = "SUCCESS" if is_success else "FAILED"
+
+    box_w = 64
+    border = "─" * box_w
+
+    _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
+    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [BYBIT REALM v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
+    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}   {action}")
+
+    if isinstance(data, dict):
+        if "symbol" in data:
+            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Symbol:{RESET}   {data['symbol']}")
+        if "msg" in data:
+            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Message:{RESET}  {data['msg']}")
+        if "net_pnl" in data:
+            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Net PnL:{RESET}  {NEON_YELLOW}${data['net_pnl']}{RESET}")
+
+    _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 3: LONG VS SHORT LOGIC HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def calculate_pnl(side: str, entry_price: float, mark_price: float, qty: float) -> Tuple[float, float]:
+def calculate_pnl(side: str, entry_price: float, mark_price: float, qty: float) -> tuple[float, float]:
     """Calculate unrealized PnL ($) and PnL (%) for Long vs Short positions."""
     side_clean = side.capitalize()
     if side_clean == "Buy":
@@ -332,27 +361,31 @@ def validate_tp_sl(side: str, entry_price: float, tp: Optional[float] = None, sl
 # ══════════════════════════════════════════════════════════════════════════════
 
 class RateLimiter:
+    """Thread-safe Token Bucket Rate Limiter using monotonic time."""
+
     def __init__(self, capacity: int = 20, refill_per_ms: float = 0.02):
         self.capacity = capacity
-        self.tokens = capacity
+        self.tokens = float(capacity)
         self.refill_per_ms = refill_per_ms
-        self.last_check = time.time() * 1000
+        self.last_check = time.monotonic() * 1000
         self.lock = threading.Lock()
 
     def acquire(self):
         with self.lock:
-            now = time.time() * 1000
+            now = time.monotonic() * 1000
             delta = now - self.last_check
-            self.tokens = min(self.capacity, self.tokens + delta * self.refill_per_ms)
+            self.tokens = min(float(self.capacity), self.tokens + delta * self.refill_per_ms)
             self.last_check = now
-            if self.tokens < 1:
-                sleep_time = (1 - self.tokens) / self.refill_per_ms
-                time.sleep(sleep_time / 1000)
-                self.tokens = 0
-            self.tokens -= 1
+            if self.tokens < 1.0:
+                sleep_time = (1.0 - self.tokens) / self.refill_per_ms
+                time.sleep(sleep_time / 1000.0)
+                self.tokens = 1.0
+            self.tokens -= 1.0
 
 
 class TradeJournal:
+    """Persistent JSON trade journal with thread-safe recording."""
+
     def __init__(self, path: str = "bybit_journal.json"):
         self._path = Path(path)
         self._lock = threading.Lock()
@@ -361,15 +394,19 @@ class TradeJournal:
     def _load(self) -> List[dict]:
         if self._path.exists():
             try:
-                return json.loads(self._path.read_text(encoding="utf-8"))
+                data = json.loads(self._path.read_text(encoding="utf-8"))
+                return data if isinstance(data, list) else []
             except Exception:
                 return []
         return []
 
     def _save(self):
-        self._path.write_text(json.dumps(self._entries, indent=2, ensure_ascii=False), encoding="utf-8")
+        try:
+            self._path.write_text(json.dumps(self._entries, indent=2, ensure_ascii=False, cls=ToolJSONEncoder), encoding="utf-8")
+        except OSError as err:
+            logger.warning(f"Failed to write trade journal: {err}")
 
-    def record(self, action: str, payload: dict, result: dict, symbol: Optional[str] = None):
+    def record(self, action: str, payload: dict, result: dict, symbol: Optional[str] = None) -> str:
         entry = {
             "id": str(uuid.uuid4()),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -385,10 +422,11 @@ class TradeJournal:
         return entry["id"]
 
     def get_entries(self, symbol: Optional[str] = None, limit: int = 50) -> List[dict]:
-        entries = self._entries
-        if symbol:
-            entries = [e for e in entries if e.get("symbol", "").upper() == symbol.upper()]
-        return entries[-limit:]
+        with self._lock:
+            entries = self._entries
+            if symbol:
+                entries = [e for e in entries if e.get("symbol", "").upper() == symbol.upper()]
+            return entries[-limit:]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -396,6 +434,8 @@ class TradeJournal:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class BybitRealm:
+    """Master Bybit V5 Trading, Market Observatory & Analysis Engine."""
+
     def __init__(self, config: Optional[TradingConfig] = None):
         self.config = config or TradingConfig()
         self.session = requests.Session()
@@ -474,7 +514,7 @@ class BybitRealm:
                 return self._instr_cache[cache_key]
 
         res = self._request("GET", "/v5/market/instruments-info", params={"category": category, "symbol": symbol.upper()}, signed=False)
-        item = res.get("list", [{}])[0]
+        item = res.get("list", [{}])[0] if isinstance(res, dict) else {}
         lot = item.get("lotSizeFilter", {})
         pft = item.get("priceFilter", {})
 
@@ -798,7 +838,7 @@ class BybitRealm:
 
     def get_market_regime(self, symbol: str, interval: str = "60", lookback: int = 100, category: str = "linear") -> dict:
         klines_data = self.get_klines(symbol=symbol, interval=interval, limit=lookback, category=category)
-        klines = klines_data.get("list", [])
+        klines = klines_data.get("list", []) if isinstance(klines_data, dict) else []
         if len(klines) < 20:
             return {"status": "error", "msg": "Insufficient kline data"}
 
@@ -807,7 +847,7 @@ class BybitRealm:
         lows   = [float(k[3]) for k in reversed(klines)]
 
         returns = [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))]
-        volatility = statistics.stdev(returns) * 100
+        volatility = statistics.stdev(returns) * 100 if len(returns) > 1 else 0.0
 
         def _ema(data: List[float], period: int) -> float:
             k = 2 / (period + 1)
@@ -821,7 +861,7 @@ class BybitRealm:
 
         trs: List[float] = [max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])) for i in range(1, len(closes))]
         avg_tr = statistics.mean(trs[-14:]) if trs else 0
-        tr_ratio = avg_tr / closes[-1] * 100
+        tr_ratio = (avg_tr / closes[-1] * 100) if closes[-1] > 0 else 0.0
 
         trending_up   = ema_short > ema_long * 1.001 and tr_ratio > 0.4
         trending_down = ema_short < ema_long * 0.999 and tr_ratio > 0.4
@@ -844,7 +884,7 @@ class BybitRealm:
             "metrics": {
                 "ema_short": round(ema_short, 6),
                 "ema_long": round(ema_long, 6),
-                "ema_cross_pct": round((ema_short - ema_long) / ema_long * 100, 4),
+                "ema_cross_pct": round((ema_short - ema_long) / ema_long * 100, 4) if ema_long else 0.0,
                 "volatility_pct": round(volatility, 4),
                 "atr_pct": round(tr_ratio, 4),
                 "last_close": closes[-1],
@@ -929,8 +969,8 @@ class BybitRealm:
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
 
-        swing_highs = [highs[i] for i in range(1, len(highs) - 1) if highs[i] > highs[i - 1] and highs[i] > highs[i + 1]]
-        swing_lows = [lows[i] for i in range(1, len(lows) - 1) if lows[i] < lows[i - 1] and lows[i] < lows[i + 1]]
+        swing_highs = [highs[i] for i in range(1, len(highs) - 1) if highs[i] > highs[i - 1] and highs[i] > highs[i + 1]] if len(highs) > 2 else []
+        swing_lows = [lows[i] for i in range(1, len(lows) - 1) if lows[i] < lows[i - 1] and lows[i] < lows[i + 1]] if len(lows) > 2 else []
 
         pivot_data = self.calculate_pivot_points(symbol=symbol, interval=interval)
         pivot = pivot_data.get("pivot", 0.0)
@@ -1226,7 +1266,7 @@ class BybitRealm:
             return {"status": "error", "msg": "Insufficient data"}
 
         sma = sum(closes) / period
-        std_dev = statistics.stdev(closes)
+        std_dev = statistics.stdev(closes) if len(closes) > 1 else 0.0
         return {
             "status": "ok",
             "symbol": symbol.upper(),
@@ -1255,7 +1295,7 @@ class BybitRealm:
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             tr_list.append(tr)
 
-        atr = sum(tr_list[-period:]) / period
+        atr = sum(tr_list[-period:]) / period if tr_list else 0.0
         return {"status": "ok", "symbol": symbol.upper(), "atr": round(atr, 4)}
 
     def calculate_stochastic(self, symbol: str, interval: str = "15", period: int = 14, smooth_k: int = 3, smooth_d: int = 3) -> dict:
@@ -1318,8 +1358,8 @@ class BybitRealm:
         lows = [float(k[3]) for k in reversed(klines)]
         closes = [float(k[4]) for k in reversed(klines)]
         tp = [(h + l + c) / 3 for h, l, c in zip(highs[-period:], lows[-period:], closes[-period:])]
-        sma = sum(tp) / period
-        md = sum(abs(x - sma) for x in tp) / period
+        sma = sum(tp) / period if tp else 0
+        md = sum(abs(x - sma) for x in tp) / period if tp else 0
         cci = (tp[-1] - sma) / (0.015 * md) if md != 0 else 0
         return {"status": "ok", "symbol": symbol.upper(), "cci": round(cci, 2)}
 
@@ -1328,7 +1368,7 @@ class BybitRealm:
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         def get_midpoint(h, l, p):
-            return (max(h[-p:]) + min(l[-p:])) / 2
+            return (max(h[-p:]) + min(l[-p:])) / 2 if len(h) >= p else 0.0
         t = get_midpoint(highs, lows, tenkan)
         k = get_midpoint(highs, lows, kijun)
         return {
@@ -1344,8 +1384,8 @@ class BybitRealm:
         klines = self.get_klines(symbol=symbol, interval=interval, limit=10).get("list", [])
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
-        bullish = (lows[-3] < lows[-4] and lows[-3] < lows[-5] and lows[-3] < lows[-2] and lows[-3] < lows[-1])
-        bearish = (highs[-3] > highs[-4] and highs[-3] > highs[-5] and highs[-3] > highs[-2] and highs[-3] > highs[-1])
+        bullish = (lows[-3] < lows[-4] and lows[-3] < lows[-5] and lows[-3] < lows[-2] and lows[-3] < lows[-1]) if len(lows) >= 5 else False
+        bearish = (highs[-3] > highs[-4] and highs[-3] > highs[-5] and highs[-3] > highs[-2] and highs[-3] > highs[-1]) if len(highs) >= 5 else False
         return {"status": "ok", "symbol": symbol.upper(), "bullish_fractal": bullish, "bearish_fractal": bearish}
 
     def calculate_pivot_points(self, symbol: str, interval: str = "D") -> dict:
@@ -1380,6 +1420,8 @@ class BybitRealm:
             vf.append(volumes[i] * abs(2 * clv - 1) * trend[i] * 100)
 
         def _get_ema_series(data, p):
+            if not data:
+                return [0.0]
             k = 2 / (p + 1)
             ema = [data[0]]
             for val in data[1:]:
@@ -1406,8 +1448,7 @@ class BybitRealm:
         return {"status": "ok", "symbol": symbol.upper(), "cmf": round(cmf, 4)}
 
     def calculate_adx_with_di(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
-        adx_res = self.calculate_adx(symbol=symbol, interval=interval, period=period)
-        return adx_res
+        return self.calculate_adx(symbol=symbol, interval=interval, period=period)
 
     def calculate_elder_ray_index(self, symbol: str, interval: str = "60", period: int = 13) -> dict:
         klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 50).get("list", [])
@@ -1880,12 +1921,14 @@ def run(
         else:
             res = {"status": "error", "msg": f"Action '{action}' is not supported."}
 
+        print_human_readable_ui(action, res, no_color=no_color)
         write_llm_output(res)
         return res
 
     except Exception as exc:
         logger.error(f"Execution error on action '{action}': {exc}", exc_info=True)
         err_res = {"status": "error", "action": action, "msg": str(exc)}
+        print_human_readable_ui(action, err_res, no_color=no_color)
         write_llm_output(err_res)
         return err_res
 
@@ -1910,6 +1953,28 @@ def _coerce_type(val: str) -> Any:
     return val
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="bbt.py",
+        description=f"Bybit Realm Master Trading Engine v{__version__}",
+    )
+    parser.add_argument("--action", required=True, help="Action to perform")
+    parser.add_argument("--symbol", help="Trading pair (e.g. BTCUSDT)")
+    parser.add_argument("--side", choices=["Buy", "Sell"], help="Order side")
+    parser.add_argument("--qty", type=float, help="Order quantity")
+    parser.add_argument("--price", type=float, help="Order price")
+    parser.add_argument("--category", default="linear", choices=["linear", "spot", "inverse"])
+    parser.add_argument("--stop-loss", type=float, dest="stop_loss", help="Stop loss price")
+    parser.add_argument("--take-profit", type=float, dest="take_profit", help="Take profit price")
+    parser.add_argument("--leverage", type=int, help="Leverage value")
+    parser.add_argument("--interval", default="60", help="Kline interval")
+    parser.add_argument("--limit", type=int, default=50, help="Result limit")
+    parser.add_argument("--json", action="store_true", help="Output raw JSON format")
+    parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
+    parser.add_argument("--verbose", action="store_true", help="Enable detailed debug logging")
+    return parser
+
+
 if __name__ == "__main__":
     # Argc environment variable parsing fast path
     if any(k.startswith("argc_") for k in os.environ):
@@ -1921,10 +1986,14 @@ if __name__ == "__main__":
         stop_loss = float(os.environ["argc_stop_loss"]) if "argc_stop_loss" in os.environ and os.environ["argc_stop_loss"] else None
         take_profit = float(os.environ["argc_take_profit"]) if "argc_take_profit" in os.environ and os.environ["argc_take_profit"] else None
         category = os.environ.get("argc_category", "linear")
+        no_color = os.environ.get("argc_no_color") == "true"
 
         kwargs = {}
         for k, v in os.environ.items():
-            if k.startswith("argc_") and k not in ("argc_action", "argc_symbol", "argc_side", "argc_qty", "argc_price", "argc_stop_loss", "argc_take_profit", "argc_category"):
+            if k.startswith("argc_") and k not in (
+                "argc_action", "argc_symbol", "argc_side", "argc_qty", "argc_price",
+                "argc_stop_loss", "argc_take_profit", "argc_category", "argc_no_color"
+            ):
                 kwargs[k[5:].replace("-", "_")] = _coerce_type(v)
 
         result = run(
@@ -1936,33 +2005,20 @@ if __name__ == "__main__":
             stop_loss=stop_loss,
             take_profit=take_profit,
             category=category,
+            no_color=no_color,
             **kwargs,
         )
-        sys.exit(0 if isinstance(result, dict) and result.get("status") != "error" and result.get("success") != False else 1)
+        sys.exit(0 if result.get("status") != "error" else 1)
 
-    # Standard CLI mode
-    parser = argparse.ArgumentParser(description="Bybit Realm v5.1 Master CLI Engine")
-    parser.add_argument("--action", required=True, help="Action to execute")
-    parser.add_argument("--symbol", help="Trading pair symbol")
-    parser.add_argument("--side", choices=["Buy", "Sell"], help="Order side")
-    parser.add_argument("--qty", type=float, help="Order quantity")
-    parser.add_argument("--price", type=float, help="Order price")
-    parser.add_argument("--stop-loss", type=float, dest="stop_loss", help="Stop loss price")
-    parser.add_argument("--take-profit", type=float, dest="take_profit", help="Take profit price")
-    parser.add_argument("--category", default="linear", help="Category: linear, spot, inverse")
-    parser.add_argument("--interval", default="60", help="Kline interval")
-    parser.add_argument("--limit", type=int, default=50, help="Result limit")
-    parser.add_argument("--json", action="store_true", help="Output raw JSON format")
-    parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
-
+    # Standard CLI fallback path
+    parser = _build_parser()
     args, unknown = parser.parse_known_args()
 
     extra_kwargs = {}
     for i in range(0, len(unknown), 2):
-        if unknown[i].startswith("--"):
-            key = unknown[i][2:].replace("-", "_")
-            val = unknown[i + 1] if i + 1 < len(unknown) else True
-            extra_kwargs[key] = _coerce_type(str(val))
+        if unknown[i].startswith("--") and i + 1 < len(unknown):
+            key = unknown[i].lstrip("-").replace("-", "_")
+            extra_kwargs[key] = _coerce_type(unknown[i + 1])
 
     res = run(
         action=args.action,
@@ -1972,6 +2028,7 @@ if __name__ == "__main__":
         price=args.price,
         stop_loss=args.stop_loss,
         take_profit=args.take_profit,
+        leverage=args.leverage,
         category=args.category,
         interval=args.interval,
         limit=args.limit,
@@ -1979,4 +2036,4 @@ if __name__ == "__main__":
         **extra_kwargs,
     )
 
-    sys.exit(0 if isinstance(res, dict) and res.get("status") != "error" and res.get("success") != False else 1)
+    sys.exit(0 if res.get("status") != "error" else 1)

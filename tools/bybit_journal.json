@@ -141,5 +141,25 @@
       "msg": "Side invalid"
     },
     "status": "failed"
+  },
+  {
+    "id": "e978f625-546c-4602-809d-c2f839520c4b",
+    "timestamp": "2026-07-28T14:00:06.302477+00:00",
+    "action": "place_order",
+    "symbol": "NEARUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "NEARUSDT",
+      "side": "Buy",
+      "orderType": "Market",
+      "qty": "3",
+      "timeInForce": "GTC",
+      "reduceOnly": false
+    },
+    "result": {
+      "orderId": "869ea820-5173-4881-82a0-30173e7720b4",
+      "orderLinkId": ""
+    },
+    "status": "success"
   }
 ]

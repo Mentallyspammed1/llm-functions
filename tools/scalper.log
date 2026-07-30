@@ -16428,3 +16428,510 @@ We can't connect to the server for this app or website at this time. There might
 2026-07-25 23:26:35,006 [INFO] multi_scalper: [WIFUSDT] skip: neutral book (52.7%)
 2026-07-25 23:26:35,711 [INFO] multi_scalper: [SUIUSDT] skip: neutral book (47.8%)
 2026-07-25 23:26:36,539 [INFO] multi_scalper: [ETHUSDT] skip: margin $1.87 > 70% equity $0.97
+2026-07-25 23:42:15,175 [INFO] multi_scalper: Wallet USDT equity: $1.39
+2026-07-25 23:42:16,113 [INFO] multi_scalper: [Position Manager] 1 open position(s)
+2026-07-25 23:42:16,115 [INFO] multi_scalper: [NEARUSDT] Sell size=2.8000 entry=1.795500 netPnL=$+0.0043 fees=$0.0038
+2026-07-25 23:42:17,682 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0043 total=$+0.0043 open=1 ['NEARUSDT']
+2026-07-25 23:42:17,683 [INFO] multi_scalper: Margin budget $0.47 (equity $1.39 − open≈$0.50) | target PnL $0.1000 | lev 10x | notional $1.00 | symbols 9
+2026-07-25 23:42:17,687 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-07-25 23:42:17,713 [INFO] multi_scalper: [BTCUSDT] analysing…
+2026-07-25 23:42:17,730 [INFO] multi_scalper: [ETHUSDT] analysing…
+2026-07-25 23:42:17,780 [INFO] multi_scalper: [OPUSDT] analysing…
+2026-07-25 23:42:17,800 [INFO] multi_scalper: [SUIUSDT] analysing…
+2026-07-25 23:42:17,894 [INFO] multi_scalper: [PEPEUSDT] analysing…
+2026-07-25 23:42:17,923 [INFO] multi_scalper: [SATSUSDT] analysing…
+2026-07-25 23:42:17,977 [INFO] multi_scalper: [WIFUSDT] analysing…
+2026-07-25 23:42:19,117 [WARNING] multi_scalper: [ETHUSDT] set leverage 10x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-25 23:42:19,117 [INFO] multi_scalper: [ETHUSDT] skip: leverage config failed
+2026-07-25 23:42:19,531 [WARNING] multi_scalper: [OPUSDT] set leverage 10x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-25 23:42:19,531 [INFO] multi_scalper: [OPUSDT] skip: leverage config failed
+2026-07-25 23:42:19,540 [WARNING] multi_scalper: [SUIUSDT] set leverage 10x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-25 23:42:19,541 [INFO] multi_scalper: [SUIUSDT] skip: leverage config failed
+2026-07-25 23:42:19,589 [WARNING] multi_scalper: [PEPEUSDT] set leverage 10x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-25 23:42:19,590 [INFO] multi_scalper: [PEPEUSDT] skip: leverage config failed
+2026-07-25 23:42:19,702 [WARNING] multi_scalper: [SATSUSDT] set leverage 10x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-25 23:42:19,703 [INFO] multi_scalper: [SATSUSDT] skip: leverage config failed
+2026-07-25 23:42:20,006 [WARNING] multi_scalper: [BTCUSDT] set leverage 10x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-25 23:42:20,007 [INFO] multi_scalper: [BTCUSDT] skip: leverage config failed
+2026-07-25 23:42:20,357 [WARNING] multi_scalper: [WIFUSDT] set leverage 10x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-25 23:42:20,358 [INFO] multi_scalper: [WIFUSDT] skip: leverage config failed
+2026-07-25 23:49:46,206 [INFO] multi_scalper: [SOLUSDT] skip: neutral book (47.4%)
+2026-07-26 01:05:34,239 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-07-26 01:05:34,243 [INFO] multi_scalper: notional capped → $5.05
+2026-07-26 01:05:34,244 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 15
+2026-07-26 01:05:34,246 [INFO] multi_scalper: [DRY-RUN XRPUSDT] analysing…
+2026-07-26 01:05:34,254 [INFO] multi_scalper: [DRY-RUN ADAUSDT] analysing…
+2026-07-26 01:05:34,276 [INFO] multi_scalper: [DRY-RUN DOGEUSDT] analysing…
+2026-07-26 01:05:34,285 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,287 [INFO] multi_scalper: [DRY-RUN TRXUSDT] analysing…
+2026-07-26 01:05:34,293 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,295 [INFO] multi_scalper: [DRY-RUN GALAUSDT] analysing…
+2026-07-26 01:05:34,298 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,317 [INFO] multi_scalper: [DRY-RUN SOLUSDT] analysing…
+2026-07-26 01:05:34,322 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,323 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,336 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,340 [INFO] multi_scalper: [DRY-RUN POLUSDT] analysing…
+2026-07-26 01:05:34,353 [INFO] multi_scalper: [DRY-RUN SUIUSDT] analysing…
+2026-07-26 01:05:34,355 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,373 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,383 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,444 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,446 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,451 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,519 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,735 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,736 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,756 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,811 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,886 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:34,890 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:35,127 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:35,190 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:35,199 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:35,272 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:35,378 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:35,514 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:35,641 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:35,818 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:35,930 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:36,038 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:36,054 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:36,951 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:36,953 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:37,127 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:37,449 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:37,587 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:37,590 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:38,672 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:39,390 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:39,391 [INFO] multi_scalper: [TRXUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=TRXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:39,393 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-07-26 01:05:39,406 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:39,650 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:39,673 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:39,736 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:39,849 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:40,072 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:40,073 [INFO] multi_scalper: [POLUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=POLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:40,074 [INFO] multi_scalper: [DRY-RUN AVAXUSDT] analysing…
+2026-07-26 01:05:40,087 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:40,371 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:40,610 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:40,776 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:41,048 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,081 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,082 [INFO] multi_scalper: [GALAUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=GALAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,083 [INFO] multi_scalper: [DRY-RUN DOTUSDT] analysing…
+2026-07-26 01:05:42,098 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,269 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,472 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,474 [INFO] multi_scalper: [SOLUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SOLUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,475 [INFO] multi_scalper: [DRY-RUN CHZUSDT] analysing…
+2026-07-26 01:05:42,501 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,506 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,611 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,849 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:42,886 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,140 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,252 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,253 [INFO] multi_scalper: [SUIUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=SUIUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,254 [INFO] multi_scalper: [DRY-RUN VETUSDT] analysing…
+2026-07-26 01:05:43,274 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,300 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,339 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,344 [INFO] multi_scalper: [XRPUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=XRPUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,345 [INFO] multi_scalper: [DRY-RUN ATOMUSDT] analysing…
+2026-07-26 01:05:43,362 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,541 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:43,672 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:44,130 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:44,220 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:44,338 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:44,579 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:44,755 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:44,756 [INFO] multi_scalper: [DOGEUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOGEUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:44,757 [INFO] multi_scalper: [DRY-RUN NEARUSDT] analysing…
+2026-07-26 01:05:44,777 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:44,982 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (attempt 2/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:45,033 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:45,258 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:45,259 [INFO] multi_scalper: [ADAUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ADAUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:45,545 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:45,864 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (attempt 3/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:45,930 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:46,468 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:46,506 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:46,509 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (attempt 4/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:47,228 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:47,587 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:47,588 [INFO] multi_scalper: [DOTUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=DOTUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:48,715 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:48,716 [INFO] multi_scalper: [ATOMUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=ATOMUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:50,002 [WARNING] bybit.core: Network error on GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (attempt 5/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:50,029 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:50,030 [INFO] multi_scalper: [LINKUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:50,323 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:50,324 [INFO] multi_scalper: [AVAXUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=AVAXUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:50,642 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:50,643 [INFO] multi_scalper: [CHZUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=CHZUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:52,528 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:52,529 [INFO] multi_scalper: [VETUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=VETUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:53,368 [WARNING] bybit.core: Network error on GET https://api.bytick.com/v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 01:05:53,370 [INFO] multi_scalper: [NEARUSDT] skip: orderbook error: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/market/orderbook?category=linear&limit=25&symbol=NEARUSDT (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-07-26 03:25:06,298 [INFO] multi_scalper: Wallet USDT equity: $2.00
+2026-07-26 03:25:07,377 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-07-26 03:25:07,378 [INFO] multi_scalper: notional capped → $5.05
+2026-07-26 03:25:07,378 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 15
+2026-07-26 03:25:07,380 [INFO] multi_scalper: [XRPUSDT] analysing…
+2026-07-26 03:25:07,383 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-07-26 03:25:07,396 [INFO] multi_scalper: [DOGEUSDT] analysing…
+2026-07-26 03:25:07,404 [INFO] multi_scalper: [TRXUSDT] analysing…
+2026-07-26 03:25:07,420 [INFO] multi_scalper: [GALAUSDT] analysing…
+2026-07-26 03:25:07,424 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-07-26 03:25:07,427 [INFO] multi_scalper: [POLUSDT] analysing…
+2026-07-26 03:25:07,444 [INFO] multi_scalper: [SUIUSDT] analysing…
+2026-07-26 03:25:07,802 [WARNING] multi_scalper: [XRPUSDT] set leverage 50x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-26 03:25:07,803 [INFO] multi_scalper: [XRPUSDT] skip: leverage config failed
+2026-07-26 03:25:07,804 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-07-26 03:25:08,091 [WARNING] multi_scalper: [LINKUSDT] set leverage 50x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-26 03:25:08,092 [INFO] multi_scalper: [LINKUSDT] skip: leverage config failed
+2026-07-26 03:25:08,093 [INFO] multi_scalper: [AVAXUSDT] analysing…
+2026-07-26 03:25:08,364 [WARNING] multi_scalper: [AVAXUSDT] set leverage 50x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-26 03:25:08,365 [INFO] multi_scalper: [AVAXUSDT] skip: leverage config failed
+2026-07-26 03:25:08,366 [INFO] multi_scalper: [DOTUSDT] analysing…
+2026-07-26 03:25:08,716 [WARNING] multi_scalper: [SOLUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036310576],server_timestamp[1785036308784],recv_window[20000]
+2026-07-26 03:25:08,720 [INFO] multi_scalper: [SOLUSDT] skip: leverage config failed
+2026-07-26 03:25:08,721 [INFO] multi_scalper: [CHZUSDT] analysing…
+2026-07-26 03:25:08,719 [WARNING] multi_scalper: [DOGEUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036310539],server_timestamp[1785036308784],recv_window[20000]
+2026-07-26 03:25:08,726 [INFO] multi_scalper: [DOGEUSDT] skip: leverage config failed
+2026-07-26 03:25:08,726 [INFO] multi_scalper: [VETUSDT] analysing…
+2026-07-26 03:25:08,734 [WARNING] multi_scalper: [DOTUSDT] set leverage 50x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-26 03:25:08,734 [INFO] multi_scalper: [DOTUSDT] skip: leverage config failed
+2026-07-26 03:25:08,735 [INFO] multi_scalper: [ATOMUSDT] analysing…
+2026-07-26 03:25:08,748 [WARNING] multi_scalper: [ADAUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036310527],server_timestamp[1785036308796],recv_window[20000]
+2026-07-26 03:25:08,749 [INFO] multi_scalper: [ADAUSDT] skip: leverage config failed
+2026-07-26 03:25:08,749 [INFO] multi_scalper: [NEARUSDT] analysing…
+2026-07-26 03:25:08,859 [WARNING] multi_scalper: [TRXUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036310548],server_timestamp[1785036308866],recv_window[20000]
+2026-07-26 03:25:08,859 [INFO] multi_scalper: [TRXUSDT] skip: leverage config failed
+2026-07-26 03:25:08,919 [WARNING] multi_scalper: [POLUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036310581],server_timestamp[1785036308890],recv_window[20000]
+2026-07-26 03:25:08,919 [INFO] multi_scalper: [POLUSDT] skip: leverage config failed
+2026-07-26 03:25:08,937 [WARNING] multi_scalper: [SUIUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036310590],server_timestamp[1785036308995],recv_window[20000]
+2026-07-26 03:25:08,938 [INFO] multi_scalper: [SUIUSDT] skip: leverage config failed
+2026-07-26 03:25:09,095 [WARNING] multi_scalper: [ATOMUSDT] set leverage 50x failed: HTTP 403: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<TITLE>ERROR: The request could not be satisfied</TITLE>
+</HEAD><BODY>
+<H1>403 ERROR</H1>
+<H2>The request could not be satisfied.</H2>
+<HR noshade size="1px">
+Request blocked.
+We can't connect to the server for this app or website at this time. There might be too much traffic or a configuration error. Try again later, or c
+2026-07-26 03:25:09,097 [INFO] multi_scalper: [ATOMUSDT] skip: leverage config failed
+2026-07-26 03:25:09,111 [WARNING] multi_scalper: [GALAUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036310568],server_timestamp[1785036309228],recv_window[20000]
+2026-07-26 03:25:09,112 [INFO] multi_scalper: [GALAUSDT] skip: leverage config failed
+2026-07-26 03:25:09,269 [WARNING] multi_scalper: [VETUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036311869],server_timestamp[1785036309330],recv_window[20000]
+2026-07-26 03:25:09,269 [INFO] multi_scalper: [VETUSDT] skip: leverage config failed
+2026-07-26 03:25:09,330 [WARNING] multi_scalper: [CHZUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036311864],server_timestamp[1785036309377],recv_window[20000]
+2026-07-26 03:25:09,331 [INFO] multi_scalper: [CHZUSDT] skip: leverage config failed
+2026-07-26 03:25:09,420 [WARNING] multi_scalper: [NEARUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785036311892],server_timestamp[1785036309471],recv_window[20000]
+2026-07-26 03:25:09,421 [INFO] multi_scalper: [NEARUSDT] skip: leverage config failed
+2026-07-26 03:59:27,493 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-07-26 03:59:27,497 [INFO] multi_scalper: notional capped → $5.05
+2026-07-26 03:59:27,499 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 5
+2026-07-26 03:59:27,502 [INFO] multi_scalper: [DRY-RUN BTCUSDT] analysing…
+2026-07-26 03:59:27,506 [INFO] multi_scalper: [DRY-RUN ETHUSDT] analysing…
+2026-07-26 03:59:27,511 [INFO] multi_scalper: [DRY-RUN SOLUSDT] analysing…
+2026-07-26 03:59:27,519 [INFO] multi_scalper: [DRY-RUN BNBUSDT] analysing…
+2026-07-26 03:59:27,522 [INFO] multi_scalper: [DRY-RUN XRPUSDT] analysing…
+2026-07-26 03:59:46,730 [INFO] multi_scalper: [XRPUSDT] skip: neutral book (47.4%)
+2026-07-26 03:59:48,645 [INFO] multi_scalper: [BNBUSDT] skip: neutral book (47.4%)
+2026-07-26 03:59:48,719 [INFO] multi_scalper: [ETHUSDT] skip: neutral book (54.8%)
+2026-07-26 03:59:48,769 [INFO] multi_scalper: [SOLUSDT] skip: neutral book (47.9%)
+2026-07-26 03:59:48,802 [INFO] multi_scalper: [BTCUSDT] skip: Buy conflict trend=LONG mom=-0.695
+2026-07-26 04:00:29,278 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-07-26 04:00:29,280 [INFO] multi_scalper: notional capped → $5.05
+2026-07-26 04:00:29,281 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 10
+2026-07-26 04:00:29,284 [INFO] multi_scalper: [DRY-RUN PEPEUSDT] analysing…
+2026-07-26 04:00:29,292 [INFO] multi_scalper: [DRY-RUN DOGEUSDT] analysing…
+2026-07-26 04:00:29,297 [INFO] multi_scalper: [DRY-RUN SUIUSDT] analysing…
+2026-07-26 04:00:29,301 [INFO] multi_scalper: [DRY-RUN APTUSDT] analysing…
+2026-07-26 04:00:29,336 [INFO] multi_scalper: [DRY-RUN SATSUSDT] analysing…
+2026-07-26 04:00:29,383 [INFO] multi_scalper: [DRY-RUN WIFUSDT] analysing…
+2026-07-26 04:00:29,409 [INFO] multi_scalper: [DRY-RUN SUIUSDT] analysing…
+2026-07-26 04:00:29,445 [INFO] multi_scalper: [DRY-RUN FETUSDT] analysing…
+2026-07-26 04:00:31,115 [INFO] multi_scalper: [SATSUSDT] skip: orderbook error: params error: symbol invalid
+2026-07-26 04:00:31,116 [INFO] multi_scalper: [DRY-RUN NEARUSDT] analysing…
+2026-07-26 04:00:31,191 [INFO] multi_scalper: [FETUSDT] skip: empty book
+2026-07-26 04:00:31,192 [INFO] multi_scalper: [DRY-RUN SUIUSDT] analysing…
+2026-07-26 04:00:31,259 [INFO] multi_scalper: [PEPEUSDT] skip: orderbook error: params error: symbol invalid
+2026-07-26 04:00:52,243 [INFO] multi_scalper: [DOGEUSDT] skip: Sell conflict trend=LONG mom=+0.408
+2026-07-26 04:00:53,414 [INFO] multi_scalper: [DRY-RUN SUIUSDT] Sell qty=10.0 ($7.17) TP=0.7163 SL=0.7184
+2026-07-26 04:00:53,415 [INFO] multi_scalper: [DRY-RUN SUIUSDT] submitting smart order…
+2026-07-26 04:00:53,977 [INFO] multi_scalper: [DRY-RUN SUIUSDT] Sell qty=10.0 ($7.17) TP=0.7163 SL=0.7184
+2026-07-26 04:00:53,977 [INFO] multi_scalper: [DRY-RUN SUIUSDT] submitting smart order…
+2026-07-26 04:00:54,826 [INFO] multi_scalper: [WIFUSDT] skip: Buy conflict trend=LONG mom=-1.000
+2026-07-26 04:00:55,113 [INFO] multi_scalper: [APTUSDT] skip: neutral book (50.3%)
+2026-07-26 04:00:55,385 [INFO] multi_scalper: [NEARUSDT] skip: neutral book (48.5%)
+2026-07-26 04:00:55,390 [INFO] multi_scalper: [DRY-RUN SUIUSDT] Sell qty=10.0 ($7.17) TP=0.7150 SL=0.7182
+2026-07-26 04:00:55,395 [INFO] multi_scalper: [DRY-RUN SUIUSDT] submitting smart order…
+2026-07-26 04:00:56,560 [INFO] multi_scalper: [DRY-RUN SUIUSDT] result: {"success": true, "dry_run": true, "symbol": "SUIUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 10.0, "entry_price": 0.7169, "risk_entry_price": 0.71654155, "stop_loss": 0.7184, "take_profit": 0.7163, "expected_profit_usdt": 0.006, "expected_loss_usdt": 0.015, "expected_profit_net_usdt": 0.0006, "expected_loss_net_usdt": 0.0265, "risk_amount_usdt": 0.0138, "rr_ratio": 2.0, "rr_realized": 0.024, "notional_usdt": 7.169, "balance": 1.3826, "leverage": 50, "atr": 0.00332208, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SUIUSDT", "side": "Sell", "orderType": "Market", "qty": "10.0", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.7184", "takeProfit": "0.7163"}, "warnings": [], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-07-26 04:00:56,968 [INFO] multi_scalper: [DRY-RUN SUIUSDT] result: {"success": true, "dry_run": true, "symbol": "SUIUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 10.0, "entry_price": 0.7169, "risk_entry_price": 0.71654155, "stop_loss": 0.7184, "take_profit": 0.7163, "expected_profit_usdt": 0.006, "expected_loss_usdt": 0.015, "expected_profit_net_usdt": 0.0006, "expected_loss_net_usdt": 0.0265, "risk_amount_usdt": 0.0138, "rr_ratio": 2.0, "rr_realized": 0.024, "notional_usdt": 7.169, "balance": 1.3826, "leverage": 50, "atr": 0.00332208, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SUIUSDT", "side": "Sell", "orderType": "Market", "qty": "10.0", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.7184", "takeProfit": "0.7163"}, "warnings": [], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-07-26 04:00:57,347 [INFO] multi_scalper: [DRY-RUN SUIUSDT] result: {"success": true, "dry_run": true, "symbol": "SUIUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 10.0, "entry_price": 0.7169, "risk_entry_price": 0.71654155, "stop_loss": 0.7182, "take_profit": 0.715, "expected_profit_usdt": 0.019, "expected_loss_usdt": 0.013, "expected_profit_net_usdt": 0.0136, "expected_loss_net_usdt": 0.0245, "risk_amount_usdt": 0.0138, "rr_ratio": 2.0, "rr_realized": 0.557, "notional_usdt": 7.169, "balance": 1.3828, "leverage": 50, "atr": 0.00332208, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SUIUSDT", "side": "Sell", "orderType": "Market", "qty": "10.0", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.7182", "takeProfit": "0.7150"}, "warnings": [], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-07-26 04:01:33,669 [INFO] multi_scalper: Wallet USDT equity: $1.38
+2026-07-26 04:01:34,209 [INFO] multi_scalper: [Position Manager] 1 open position(s)
+2026-07-26 04:01:34,210 [INFO] multi_scalper: [NEARUSDT] Sell size=2.8000 entry=1.795500 netPnL=$-0.0046 fees=$0.0038
+2026-07-26 04:01:35,244 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$-0.0046 total=$-0.0046 open=1 ['NEARUSDT']
+2026-07-26 04:01:35,245 [INFO] multi_scalper: notional capped → $5.05
+2026-07-26 04:01:35,246 [INFO] multi_scalper: Margin budget $0.87 (equity $1.38 − open≈$0.10) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 5
+2026-07-26 04:01:35,251 [INFO] multi_scalper: [SUIUSDT] analysing…
+2026-07-26 04:01:35,267 [INFO] multi_scalper: [DOGEUSDT] analysing…
+2026-07-26 04:01:35,290 [INFO] multi_scalper: [WIFUSDT] analysing…
+2026-07-26 04:01:35,304 [INFO] multi_scalper: [APTUSDT] analysing…
+2026-07-26 04:01:48,652 [INFO] multi_scalper: [SUIUSDT] skip: neutral book (45.5%)
+2026-07-26 04:01:52,655 [INFO] multi_scalper: [APTUSDT] skip: neutral book (51.1%)
+2026-07-26 04:01:52,775 [INFO] multi_scalper: [WIFUSDT] skip: neutral book (49.9%)
+2026-07-26 04:01:52,967 [INFO] multi_scalper: [DOGEUSDT] Sell qty=69.4 ($5.05) TP=0.07257 SL=0.07291
+2026-07-26 04:01:52,968 [INFO] multi_scalper: [DOGEUSDT] submitting smart order…
+2026-07-26 04:01:56,286 [INFO] multi_scalper: [DOGEUSDT] result: {"success": false, "error": "Qty invalid (Invalid parameter \u2014 check qty/price/tick size.)", "retCode": 10001, "order_params": {"category": "linear", "symbol": "DOGEUSDT", "side": "Sell", "orderType": "Market", "qty": "69.4", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.07291", "takeProfit": "0.07257"}, "warnings": [], "symbol": "DOGEUSDT", "side": "Sell", "qty": 69.4, "entry_price": 0.07272, "stop_loss": 0.07291, "take_profit": 0.07257, "notional_usdt": 5.0468, "version": "2.3.0-ASCENDED"}
+2026-07-26 05:23:48,104 [INFO] multi_scalper: Wallet USDT equity: $2.00
+2026-07-26 05:23:49,177 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-07-26 05:23:49,177 [INFO] multi_scalper: notional capped → $5.05
+2026-07-26 05:23:49,178 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 10x | notional $5.05 | symbols 15
+2026-07-26 05:23:49,180 [INFO] multi_scalper: [XRPUSDT] analysing…
+2026-07-26 05:23:49,182 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-07-26 05:23:49,189 [INFO] multi_scalper: [DOGEUSDT] analysing…
+2026-07-26 05:23:49,205 [INFO] multi_scalper: [TRXUSDT] analysing…
+2026-07-26 05:23:49,211 [INFO] multi_scalper: [GALAUSDT] analysing…
+2026-07-26 05:23:49,221 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-07-26 05:23:49,226 [INFO] multi_scalper: [POLUSDT] analysing…
+2026-07-26 05:23:49,233 [INFO] multi_scalper: [SUIUSDT] analysing…
+2026-07-26 05:24:04,250 [INFO] multi_scalper: [XRPUSDT] skip: Buy conflict trend=SHORT mom=-0.527
+2026-07-26 05:24:04,250 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-07-26 05:24:04,958 [WARNING] multi_scalper: [LINKUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785043445976],server_timestamp[1785043444932],recv_window[20000]
+2026-07-26 05:24:04,959 [INFO] multi_scalper: [LINKUSDT] skip: leverage config failed
+2026-07-26 05:24:04,959 [INFO] multi_scalper: [AVAXUSDT] analysing…
+2026-07-26 05:24:05,720 [WARNING] multi_scalper: [AVAXUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785043446684],server_timestamp[1785043445621],recv_window[20000]
+2026-07-26 05:24:05,720 [INFO] multi_scalper: [AVAXUSDT] skip: leverage config failed
+2026-07-26 05:24:05,721 [INFO] multi_scalper: [DOTUSDT] analysing…
+2026-07-26 05:24:09,171 [INFO] multi_scalper: [TRXUSDT] skip: neutral book (45.5%)
+2026-07-26 05:24:09,189 [INFO] multi_scalper: [CHZUSDT] analysing…
+2026-07-26 05:24:09,555 [INFO] multi_scalper: [GALAUSDT] skip: neutral book (49.4%)
+2026-07-26 05:24:09,566 [INFO] multi_scalper: [VETUSDT] analysing…
+2026-07-26 05:24:09,700 [WARNING] multi_scalper: [CHZUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785043450913],server_timestamp[1785043449760],recv_window[20000]
+2026-07-26 05:24:09,709 [INFO] multi_scalper: [CHZUSDT] skip: leverage config failed
+2026-07-26 05:24:09,712 [INFO] multi_scalper: [ATOMUSDT] analysing…
+2026-07-26 05:24:10,059 [INFO] multi_scalper: [SUIUSDT] skip: neutral book (48.1%)
+2026-07-26 05:24:10,060 [INFO] multi_scalper: [NEARUSDT] analysing…
+2026-07-26 05:24:10,097 [WARNING] multi_scalper: [VETUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785043451291],server_timestamp[1785043450184],recv_window[20000]
+2026-07-26 05:24:10,098 [INFO] multi_scalper: [VETUSDT] skip: leverage config failed
+2026-07-26 05:24:10,206 [INFO] multi_scalper: [POLUSDT] skip: Buy conflict trend=SHORT mom=-0.530
+2026-07-26 05:24:10,255 [WARNING] multi_scalper: [ATOMUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785043451437],server_timestamp[1785043450376],recv_window[20000]
+2026-07-26 05:24:10,256 [INFO] multi_scalper: [ATOMUSDT] skip: leverage config failed
+2026-07-26 05:24:10,295 [INFO] multi_scalper: [DOGEUSDT] skip: neutral book (49.5%)
+2026-07-26 05:24:10,393 [INFO] multi_scalper: [SOLUSDT] skip: Buy conflict trend=HOLD mom=-0.148
+2026-07-26 05:24:10,654 [INFO] multi_scalper: [ADAUSDT] skip: neutral book (50.5%)
+2026-07-26 05:24:10,783 [WARNING] multi_scalper: [NEARUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785043451785],server_timestamp[1785043450713],recv_window[20000]
+2026-07-26 05:24:10,784 [INFO] multi_scalper: [NEARUSDT] skip: leverage config failed
+2026-07-26 05:24:16,543 [INFO] multi_scalper: [DOTUSDT] skip: neutral book (49.6%)
+2026-07-26 05:25:52,024 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-07-26 05:25:52,027 [INFO] multi_scalper: notional capped → $5.05
+2026-07-26 05:25:52,028 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 10x | notional $5.05 | symbols 15
+2026-07-26 05:25:52,032 [INFO] multi_scalper: [DRY-RUN XRPUSDT] analysing…
+2026-07-26 05:25:52,042 [INFO] multi_scalper: [DRY-RUN ADAUSDT] analysing…
+2026-07-26 05:25:52,048 [INFO] multi_scalper: [DRY-RUN DOGEUSDT] analysing…
+2026-07-26 05:25:52,056 [INFO] multi_scalper: [DRY-RUN TRXUSDT] analysing…
+2026-07-26 05:25:52,073 [INFO] multi_scalper: [DRY-RUN GALAUSDT] analysing…
+2026-07-26 05:25:52,076 [INFO] multi_scalper: [DRY-RUN SOLUSDT] analysing…
+2026-07-26 05:25:52,086 [INFO] multi_scalper: [DRY-RUN POLUSDT] analysing…
+2026-07-26 05:25:52,090 [INFO] multi_scalper: [DRY-RUN SUIUSDT] analysing…
+2026-07-26 05:26:09,836 [INFO] multi_scalper: [XRPUSDT] skip: neutral book (47.8%)
+2026-07-26 05:26:09,837 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-07-26 05:26:09,970 [INFO] multi_scalper: [TRXUSDT] skip: Buy conflict trend=SHORT mom=-0.481
+2026-07-26 05:26:09,973 [INFO] multi_scalper: [DRY-RUN AVAXUSDT] analysing…
+2026-07-26 05:26:10,481 [INFO] multi_scalper: [SOLUSDT] skip: neutral book (54.8%)
+2026-07-26 05:26:10,484 [INFO] multi_scalper: [DRY-RUN DOTUSDT] analysing…
+2026-07-26 05:26:11,499 [INFO] multi_scalper: [SUIUSDT] skip: neutral book (48.0%)
+2026-07-26 05:26:11,500 [INFO] multi_scalper: [DRY-RUN CHZUSDT] analysing…
+2026-07-26 05:26:11,527 [INFO] multi_scalper: [GALAUSDT] skip: neutral book (48.8%)
+2026-07-26 05:26:11,528 [INFO] multi_scalper: [DRY-RUN VETUSDT] analysing…
+2026-07-26 05:26:11,548 [INFO] multi_scalper: [DOGEUSDT] skip: neutral book (49.1%)
+2026-07-26 05:26:11,549 [INFO] multi_scalper: [DRY-RUN ATOMUSDT] analysing…
+2026-07-26 05:26:12,170 [INFO] multi_scalper: [DRY-RUN ADAUSDT] Buy qty=30.5 ($5.05) TP=0.1663 SL=0.1644
+2026-07-26 05:26:12,170 [INFO] multi_scalper: [DRY-RUN ADAUSDT] submitting smart order…
+2026-07-26 05:26:12,404 [INFO] multi_scalper: [DRY-RUN POLUSDT] Buy qty=65.9 ($5.05) TP=0.07675 SL=0.07637
+2026-07-26 05:26:12,404 [INFO] multi_scalper: [DRY-RUN POLUSDT] submitting smart order…
+2026-07-26 05:26:15,532 [INFO] multi_scalper: [DRY-RUN ADAUSDT] result: {"success": true, "dry_run": true, "symbol": "ADAUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 30.5, "entry_price": 0.1655, "risk_entry_price": 0.16558275, "stop_loss": 0.1644, "take_profit": 0.1663, "expected_profit_usdt": 0.0244, "expected_loss_usdt": 0.0336, "expected_profit_net_usdt": 0.0206, "expected_loss_net_usdt": 0.0416, "risk_amount_usdt": 0.0136, "rr_ratio": 2.0, "rr_realized": 0.495, "notional_usdt": 5.0478, "balance": 1.3641, "leverage": 10, "atr": 0.00096283, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "ADAUSDT", "side": "Buy", "orderType": "Market", "qty": "30.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.1644", "takeProfit": "0.1663"}, "warnings": [], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-07-26 05:26:15,534 [INFO] multi_scalper: [DRY-RUN NEARUSDT] analysing…
+2026-07-26 05:26:15,535 [INFO] multi_scalper: [DRY-RUN POLUSDT] result: {"success": true, "dry_run": true, "symbol": "POLUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 65.9, "entry_price": 0.07658, "risk_entry_price": 0.07661828999999999, "stop_loss": 0.07637, "take_profit": 0.07675, "expected_profit_usdt": 0.0112, "expected_loss_usdt": 0.0138, "expected_profit_net_usdt": 0.0074, "expected_loss_net_usdt": 0.0219, "risk_amount_usdt": 0.0136, "rr_ratio": 2.0, "rr_realized": 0.339, "notional_usdt": 5.0466, "balance": 1.3641, "leverage": 10, "atr": 0.00036053, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "POLUSDT", "side": "Buy", "orderType": "Market", "qty": "65.9", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.07637", "takeProfit": "0.07675"}, "warnings": [], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-07-26 05:26:23,048 [INFO] multi_scalper: [AVAXUSDT] skip: neutral book (47.9%)
+2026-07-26 05:26:23,165 [INFO] multi_scalper: [LINKUSDT] skip: margin budget exhausted (need $0.51, left $0.39)
+2026-07-26 05:26:24,312 [INFO] multi_scalper: [DOTUSDT] skip: neutral book (51.5%)
+2026-07-26 05:26:24,805 [INFO] multi_scalper: [CHZUSDT] skip: neutral book (47.8%)
+2026-07-26 05:26:25,139 [INFO] multi_scalper: [VETUSDT] skip: neutral book (54.6%)
+2026-07-26 05:26:25,264 [INFO] multi_scalper: [ATOMUSDT] skip: margin budget exhausted (need $0.50, left $0.39)
+2026-07-26 05:26:26,677 [INFO] multi_scalper: [NEARUSDT] skip: Buy conflict trend=SHORT mom=-0.252
+2026-07-26 16:26:37,742 [INFO] multi_scalper: Wallet USDT equity: $2.00
+2026-07-26 16:26:39,044 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-07-26 16:26:39,045 [INFO] multi_scalper: notional capped → $5.05
+2026-07-26 16:26:39,046 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 10x | notional $5.05 | symbols 15
+2026-07-26 16:26:39,048 [INFO] multi_scalper: [XRPUSDT] analysing…
+2026-07-26 16:26:39,061 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-07-26 16:26:39,071 [INFO] multi_scalper: [DOGEUSDT] analysing…
+2026-07-26 16:26:39,085 [INFO] multi_scalper: [TRXUSDT] analysing…
+2026-07-26 16:26:39,098 [INFO] multi_scalper: [GALAUSDT] analysing…
+2026-07-26 16:26:39,100 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-07-26 16:26:39,113 [INFO] multi_scalper: [POLUSDT] analysing…
+2026-07-26 16:26:39,152 [INFO] multi_scalper: [SUIUSDT] analysing…
+2026-07-26 16:26:39,727 [WARNING] multi_scalper: [XRPUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785083200982],server_timestamp[1785083199798],recv_window[20000]
+2026-07-26 16:26:39,731 [INFO] multi_scalper: [XRPUSDT] skip: leverage config failed
+2026-07-26 16:26:39,738 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-07-26 16:26:40,252 [WARNING] multi_scalper: [LINKUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785083201674],server_timestamp[1785083200279],recv_window[20000]
+2026-07-26 16:26:40,253 [INFO] multi_scalper: [LINKUSDT] skip: leverage config failed
+2026-07-26 16:26:40,254 [INFO] multi_scalper: [AVAXUSDT] analysing…
+2026-07-26 16:26:40,825 [WARNING] multi_scalper: [AVAXUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785083202187],server_timestamp[1785083200856],recv_window[20000]
+2026-07-26 16:26:40,826 [INFO] multi_scalper: [AVAXUSDT] skip: leverage config failed
+2026-07-26 16:26:40,828 [INFO] multi_scalper: [DOTUSDT] analysing…
+2026-07-26 16:26:41,271 [WARNING] multi_scalper: [DOTUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785083202765],server_timestamp[1785083201346],recv_window[20000]
+2026-07-26 16:26:41,272 [INFO] multi_scalper: [DOTUSDT] skip: leverage config failed
+2026-07-26 16:26:41,273 [INFO] multi_scalper: [CHZUSDT] analysing…
+2026-07-26 16:26:42,025 [WARNING] multi_scalper: [CHZUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785083203205],server_timestamp[1785083202150],recv_window[20000]
+2026-07-26 16:26:42,032 [INFO] multi_scalper: [CHZUSDT] skip: leverage config failed
+2026-07-26 16:26:42,033 [INFO] multi_scalper: [VETUSDT] analysing…
+2026-07-26 16:26:42,554 [WARNING] multi_scalper: [VETUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785083203995],server_timestamp[1785083202624],recv_window[20000]
+2026-07-26 16:26:42,576 [INFO] multi_scalper: [VETUSDT] skip: leverage config failed
+2026-07-26 16:26:42,577 [INFO] multi_scalper: [ATOMUSDT] analysing…
+2026-07-26 16:27:07,431 [INFO] multi_scalper: [SUIUSDT] skip: neutral book (49.8%)
+2026-07-26 16:27:07,432 [INFO] multi_scalper: [NEARUSDT] analysing…
+2026-07-26 16:27:07,490 [INFO] multi_scalper: [ADAUSDT] skip: neutral book (51.1%)
+2026-07-26 16:27:07,941 [WARNING] multi_scalper: [NEARUSDT] set leverage 10x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785083229366],server_timestamp[1785083228095],recv_window[20000]
+2026-07-26 16:27:07,941 [INFO] multi_scalper: [NEARUSDT] skip: leverage config failed
+2026-07-26 16:27:08,579 [INFO] multi_scalper: [DOGEUSDT] skip: neutral book (53.5%)
+2026-07-26 16:27:08,875 [INFO] multi_scalper: [TRXUSDT] skip: Buy conflict trend=HOLD mom=-0.693
+2026-07-26 16:27:09,055 [INFO] multi_scalper: [GALAUSDT] skip: neutral book (51.5%)
+2026-07-26 16:27:09,101 [INFO] multi_scalper: [POLUSDT] skip: neutral book (48.0%)
+2026-07-26 16:27:09,386 [INFO] multi_scalper: [SOLUSDT] skip: Sell conflict trend=LONG mom=+0.476
+2026-07-26 16:27:11,213 [INFO] multi_scalper: [ATOMUSDT] Sell qty=3.6 ($5.01) TP=1.3915 SL=1.3962
+2026-07-26 16:27:11,216 [INFO] multi_scalper: [ATOMUSDT] submitting smart order…
+2026-07-26 16:27:16,611 [INFO] multi_scalper: [ATOMUSDT] result: {"success": false, "error": "ab not enough for new order (Insufficient available balance.)", "retCode": 110007, "order_params": {"category": "linear", "symbol": "ATOMUSDT", "side": "Sell", "orderType": "Market", "qty": "3.6", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "1.3962", "takeProfit": "1.3915"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math.", "set-leverage: invalid request, please check your server timestamp or recv_window param: req_timestamp[1785083235624],server_timestamp[1785083234535],recv_window[20000] (Auth/timestamp issue \u2014 check API keys & clock sync.)"], "symbol": "ATOMUSDT", "side": "Sell", "qty": 3.6, "entry_price": 1.3933, "stop_loss": 1.3962, "take_profit": 1.3915, "notional_usdt": 5.0159, "version": "2.3.0-ASCENDED"}
+2026-07-26 16:33:53,597 [INFO] multi_scalper: Wallet USDT equity: $1.32
+2026-07-26 16:33:54,224 [INFO] multi_scalper: [Position Manager] 2 open position(s)
+2026-07-26 16:33:54,227 [INFO] multi_scalper: [SUIUSDT] Sell size=10.0000 entry=0.716200 netPnL=$-0.0514 fees=$0.0054
+2026-07-26 16:33:54,228 [INFO] multi_scalper: [NEARUSDT] Sell size=2.8000 entry=1.795500 netPnL=$-0.0234 fees=$0.0038
+2026-07-26 16:33:55,494 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$-0.0747 total=$-0.0747 open=2 ['NEARUSDT', 'SUIUSDT']
+2026-07-26 16:33:55,495 [INFO] multi_scalper: notional capped → $5.05
+2026-07-26 16:33:55,495 [INFO] multi_scalper: Margin budget $0.00 (equity $1.32 − open≈$1.22) | target PnL $0.0200 | lev 10x | notional $5.05 | symbols 15
+2026-07-26 16:33:55,498 [INFO] multi_scalper: [XRPUSDT] analysing…
+2026-07-26 16:33:55,503 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-07-26 16:33:55,515 [INFO] multi_scalper: [DOGEUSDT] analysing…
+2026-07-26 16:33:55,561 [INFO] multi_scalper: [TRXUSDT] analysing…
+2026-07-26 16:33:55,564 [INFO] multi_scalper: [GALAUSDT] analysing…
+2026-07-26 16:33:55,587 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-07-26 16:33:55,609 [INFO] multi_scalper: [POLUSDT] analysing…
+2026-07-26 16:33:55,618 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-07-26 16:34:17,611 [INFO] multi_scalper: [XRPUSDT] skip: neutral book (53.8%)
+2026-07-26 16:34:17,635 [INFO] multi_scalper: [AVAXUSDT] analysing…
+2026-07-26 16:34:20,171 [INFO] multi_scalper: [TRXUSDT] skip: neutral book (53.9%)
+2026-07-26 16:34:20,172 [INFO] multi_scalper: [DOTUSDT] analysing…
+2026-07-26 16:34:22,175 [INFO] multi_scalper: [ADAUSDT] skip: neutral book (53.7%)
+2026-07-26 16:34:22,177 [INFO] multi_scalper: [CHZUSDT] analysing…
+2026-07-26 16:34:23,037 [INFO] multi_scalper: [DOGEUSDT] skip: neutral book (53.0%)
+2026-07-26 16:34:23,039 [INFO] multi_scalper: [VETUSDT] analysing…
+2026-07-26 16:34:23,140 [INFO] multi_scalper: [POLUSDT] skip: Buy conflict trend=LONG mom=-2.000
+2026-07-26 16:34:23,143 [INFO] multi_scalper: [ATOMUSDT] analysing…
+2026-07-26 16:34:23,293 [INFO] multi_scalper: [LINKUSDT] skip: neutral book (51.8%)
+2026-07-26 16:34:23,709 [INFO] multi_scalper: [SOLUSDT] skip: neutral book (49.4%)
+2026-07-26 16:34:24,147 [INFO] multi_scalper: [GALAUSDT] skip: neutral book (49.4%)
+2026-07-26 16:34:35,891 [INFO] multi_scalper: [AVAXUSDT] skip: cannot reach min notional $5.00 with qty_step=0.1
+2026-07-26 16:34:37,391 [INFO] multi_scalper: [DOTUSDT] skip: Buy conflict trend=LONG mom=-0.249
+2026-07-26 16:34:40,398 [INFO] multi_scalper: [CHZUSDT] skip: neutral book (47.0%)
+2026-07-26 16:34:41,496 [INFO] multi_scalper: [ATOMUSDT] skip: Buy conflict trend=LONG mom=-1.168
+2026-07-26 16:34:41,566 [INFO] multi_scalper: [VETUSDT] skip: Buy conflict trend=LONG mom=-2.000

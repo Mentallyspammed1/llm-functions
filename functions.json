@@ -712,33 +712,49 @@
   },
   {
     "name": "fetch_url_via_jina",
-    "description": "Extract content from a URL using Jina AI Reader.",
+    "description": "Extract content from a URL using Jina AI Reader API.",
     "parameters": {
       "type": "object",
       "properties": {
         "url": {
           "type": "string",
-          "description": "The target URL to scrape."
+          "description": "Target URL to scrape (required)"
         },
-        "selector": {
-          "type": "string",
-          "description": "CSS selector to extract specific elements."
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout in seconds (default: 30)"
         },
-        "engine": {
+        "format": {
           "type": "string",
-          "description": "Parser/Browser engine (e.g. readerlm-v2)."
+          "description": "Output format: text, json, markdown (default: text)"
+        },
+        "target_selector": {
+          "type": "string",
+          "description": "CSS selector to target specific element"
+        },
+        "remove_selector": {
+          "type": "string",
+          "description": "CSS selector to exclude/remove element"
+        },
+        "wait_for_selector": {
+          "type": "string",
+          "description": "CSS selector to wait for before returning"
         },
         "no_cache": {
           "type": "boolean",
-          "description": "Bypass Jina AI cache and fetch fresh content."
+          "description": "Bypass Jina AI cache"
         },
-        "with_links": {
+        "use_cache": {
           "type": "boolean",
-          "description": "Append summary section of links/buttons."
+          "description": "Enable local result caching"
         },
-        "with_images": {
+        "no_color": {
           "type": "boolean",
-          "description": "Append summary section of image descriptions."
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
         }
       },
       "required": [
@@ -1132,6 +1148,272 @@
       "required": [
         "start_url"
       ]
+    }
+  },
+  {
+    "name": "network_tools",
+    "description": "Termux-optimized network engineering, Wi-Fi 802.11 analysis, LTE modems, and security tool.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Interface (wlan0, eth0), Host/IP/CIDR (192.168.1.1/24), Domain, or PCAP path (required)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode (use --list-modes to inspect all 20 modes) (default: dns-lookup)"
+        },
+        "ports": {
+          "type": "string",
+          "description": "Port list or range (e.g., 22,80,443 or 1-1024)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum items, packets, or hosts to process (default: 50)"
+        },
+        "filter": {
+          "type": "string",
+          "description": "Protocol or keyword filter (e.g., tcp, udp, icmp, dns, eapol, deauth)"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Timeout in seconds for operations (default: 10)"
+        },
+        "output_pcap": {
+          "type": "string",
+          "description": "Path to export captured raw packets to .pcap format"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "<KEY=VALUE>          Custom environment variable (repeatable)"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Override broad CIDR protection (e.g., /8 or /12 networks)"
+        },
+        "json_only": {
+          "type": "boolean",
+          "description": "Suppress CLI box UI and output raw JSON payload only"
+        },
+        "list_modes": {
+          "type": "boolean",
+          "description": "Print a formatted table of all modes and exit"
+        },
+        "root_check": {
+          "type": "boolean",
+          "description": "Validate elevated root privileges before execution"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for static scanning queries"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "cloudish_tools",
+    "description": "Inspect, manage, and synchronize files using Syncthing REST API and Rclone cloud remote engine.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Syncthing URL (http://127.0.0.1:8384) or Rclone remote name (e.g. gdrive:)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Mode: status/folders/devices/folder-status/pause-folder/resume-folder/connections/rescan/conflicts/events/errors/needed/config/rclone-remotes/rclone-about/rclone-ls/rclone-sync/rclone-rc/check-deps (default: status)"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "Syncthing API Key (auto-discovered if omitted)"
+        },
+        "rc_url": {
+          "type": "string",
+          "description": "Rclone RC API endpoint URL (default: http://127.0.0.1:5572)"
+        },
+        "folder_id": {
+          "type": "string",
+          "description": "Target folder ID for Syncthing operations"
+        },
+        "remote_path": {
+          "type": "string",
+          "description": "Path inside Rclone remote for listing or syncing"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum items/events/files to return (default: 50)"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Timeout in seconds for API and CLI calls (default: 15)"
+        },
+        "insecure": {
+          "type": "boolean",
+          "description": "Disable TLS SSL certificate verification for self-signed endpoints"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Run Rclone sync operations in simulation mode"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "<KEY=VALUE>          Custom environment variable (repeatable)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for static status queries"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "nsfw_search",
+    "description": "Unified OSINT, Media Intelligence, and Video Search Platform (Pyrmethus Edition)",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "description": "headers | search | vsearch | pipeline (default: search)"
+        },
+        "url": {
+          "type": "string",
+          "description": "Target URL"
+        },
+        "method": {
+          "type": "string",
+          "description": "HEAD | GET | OPTIONS (default: HEAD)"
+        },
+        "follow_redirects": {
+          "type": "string",
+          "description": "Follow HTTP redirects (default: true)"
+        },
+        "output": {
+          "type": "string",
+          "description": "json | pretty (default: json)"
+        },
+        "query": {
+          "type": "string",
+          "description": "Search query"
+        },
+        "engine": {
+          "type": "string",
+          "description": "Video search engine (default: pexels)"
+        },
+        "backend": {
+          "type": "string",
+          "description": "yandex|bing|bing_dl|e621|rule34|danbooru (default: yandex)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum results (default: 15)"
+        },
+        "page": {
+          "type": "integer",
+          "description": "Starting page number (default: 1)"
+        },
+        "platform": {
+          "type": "string",
+          "description": "Restrict to domain"
+        },
+        "tags": {
+          "type": "string",
+          "description": "Extra tag (repeatable)"
+        },
+        "save": {
+          "type": "string",
+          "description": "Save JSON results"
+        },
+        "html": {
+          "type": "string",
+          "description": "Save HTML gallery"
+        },
+        "csv": {
+          "type": "string",
+          "description": "Save CSV report"
+        },
+        "download": {
+          "type": "boolean",
+          "description": "Download found media/images"
+        },
+        "download_thumbs": {
+          "type": "boolean",
+          "description": "Download thumbnail images locally"
+        },
+        "media_dir": {
+          "type": "string",
+          "description": "Download directory (default: ~/osint_media/)"
+        },
+        "verify_headers": {
+          "type": "boolean",
+          "description": "Verify each URL's headers before downloading"
+        },
+        "mime_check": {
+          "type": "boolean",
+          "description": "Reject downloads whose Content-Type isn't image/media"
+        },
+        "deep": {
+          "type": "boolean",
+          "description": "Multi-page deep search"
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent header"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Request timeout in seconds (default: 10)"
+        },
+        "ignore_ssl": {
+          "type": "boolean",
+          "description": "Bypass SSL verification"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "On-disk HTTP cache dir (default: ~/.osint_cache/)"
+        },
+        "cache_ttl": {
+          "type": "string",
+          "description": "Cache TTL in seconds (default: 3600)"
+        },
+        "workers": {
+          "type": "integer",
+          "description": "Parallel workers (default: 4)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        }
+      }
     }
   },
   {
@@ -2705,6 +2987,129 @@
     }
   },
   {
+    "name": "bbt_quick_trade",
+    "description": "One-click profit-locker, breakeven mover & DCA entry laddering manager for Bybit V5.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Trading pair (e.g. BTCUSDT)"
+        },
+        "action": {
+          "type": "string",
+          "description": "move_breakeven, lock_profit, partial_close, dca_ladder"
+        },
+        "percent": {
+          "type": "integer",
+          "description": "Percentage of position to close (default: 50.0)"
+        },
+        "dca_steps": {
+          "type": "integer",
+          "description": "Number of DCA limit orders (default: 3)"
+        },
+        "dca_range_pct": {
+          "type": "integer",
+          "description": "Price depth % range for DCA ladder (default: 1.5)"
+        },
+        "total_qty": {
+          "type": "integer",
+          "description": "Total quantity for DCA ladder"
+        },
+        "side": {
+          "type": "string",
+          "description": "Buy, Sell (for DCA ladder)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "symbol",
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "bbt_scanner",
+    "description": "Fast multi-pair market scanner & technical confluence signal generator for Bybit V5 linear perpetuals.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "symbols": {
+          "type": "string",
+          "description": "Comma-separated symbol list (default: top volume pairs)"
+        },
+        "interval": {
+          "type": "string",
+          "description": "Kline timeframe: 1, 5, 15, 60, 240, D (default: 15)"
+        },
+        "min_volume": {
+          "type": "integer",
+          "description": "Minimum 24h USDT turnover filter (default: 10000000)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Number of top ranked signals to report (default: 5)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for market data"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "bbt_risk",
+    "description": "Portfolio heat manager, liquidation risk monitor & maximum safe lot sizing calculator for Bybit V5.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "portfolio_health, max_order_calc, liquidation_guard (default: portfolio_health)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Target pair for max_order_calc (e.g. BTCUSDT)"
+        },
+        "risk_pct": {
+          "type": "integer",
+          "description": "Target trade risk % of equity (default: 1.0)"
+        },
+        "sl_dist_pct": {
+          "type": "integer",
+          "description": "Assumed Stop Loss distance % for order sizing (default: 2.0)"
+        },
+        "no_color": {
+          "type": "string",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "string",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
     "name": "pyrm_term",
     "description": "Bybit Trading Tool – Execute any supported trading operation.",
     "parameters": {
@@ -3240,6 +3645,10 @@
           "type": "integer",
           "description": "Ending line for view"
         },
+        "encoding": {
+          "type": "string",
+          "description": "Specify file encoding (default: utf-8)"
+        },
         "backup": {
           "type": "boolean",
           "description": "Create timestamped .bak before modifying"
@@ -3271,10 +3680,6 @@
         "dotall": {
           "type": "boolean",
           "description": "Treat . in regex as matching newlines (re.DOTALL)"
-        },
-        "encoding": {
-          "type": "boolean",
-          "description": "Specify file encoding (default: utf-8)"
         }
       },
       "required": [
@@ -4554,7 +4959,7 @@
   },
   {
     "name": "system_info",
-    "description": "Get basic system info.",
+    "description": "Get expanded system + Termux-API + live memory & virtual-swap dynamics with luminous Termux-optimized clarity.",
     "parameters": {
       "type": "object",
       "properties": {}
@@ -4780,13 +5185,13 @@
   },
   {
     "name": "nsfw_search",
-    "description": "Unified OSINT / Media Intelligence Platform (Pyrmethus Edition)",
+    "description": "Unified OSINT, Media Intelligence, and Video Search Platform (Pyrmethus Edition)",
     "parameters": {
       "type": "object",
       "properties": {
         "mode": {
           "type": "string",
-          "description": "headers | search | pipeline  (default: search)"
+          "description": "headers | search | vsearch | pipeline (default: search)"
         },
         "url": {
           "type": "string",
@@ -4794,23 +5199,35 @@
         },
         "method": {
           "type": "string",
-          "description": "HEAD | GET | OPTIONS  (default: HEAD)"
+          "description": "HEAD | GET | OPTIONS (default: HEAD)"
         },
         "follow_redirects": {
           "type": "string",
-          "description": "Follow HTTP redirects  (default: true)"
+          "description": "Follow HTTP redirects (default: true)"
         },
         "output": {
           "type": "string",
-          "description": "json | pretty          (default: json)"
+          "description": "json | pretty (default: json)"
         },
         "query": {
           "type": "string",
           "description": "Search query"
         },
+        "engine": {
+          "type": "string",
+          "description": "Video search engine (default: pexels)"
+        },
+        "backend": {
+          "type": "string",
+          "description": "yandex|bing|bing_dl|e621|rule34|danbooru (default: yandex)"
+        },
         "limit": {
           "type": "integer",
-          "description": "Maximum results        (default: 15)"
+          "description": "Maximum results (default: 15)"
+        },
+        "page": {
+          "type": "integer",
+          "description": "Starting page number (default: 1)"
         },
         "platform": {
           "type": "string",
@@ -4820,10 +5237,6 @@
           "type": "string",
           "description": "Extra tag (repeatable)"
         },
-        "backend": {
-          "type": "string",
-          "description": "yandex|bing|bing_dl|e621|rule34|danbooru"
-        },
         "save": {
           "type": "string",
           "description": "Save JSON results"
@@ -4832,13 +5245,21 @@
           "type": "string",
           "description": "Save HTML gallery"
         },
+        "csv": {
+          "type": "string",
+          "description": "Save CSV report"
+        },
         "download": {
           "type": "boolean",
-          "description": "Download found images"
+          "description": "Download found media/images"
+        },
+        "download_thumbs": {
+          "type": "boolean",
+          "description": "Download thumbnail images locally"
         },
         "media_dir": {
           "type": "string",
-          "description": "Download directory     (default: ~/osint_media/)"
+          "description": "Download directory (default: ~/osint_media/)"
         },
         "verify_headers": {
           "type": "boolean",
@@ -4846,7 +5267,7 @@
         },
         "mime_check": {
           "type": "boolean",
-          "description": "Reject downloads whose Content-Type isn't image/*"
+          "description": "Reject downloads whose Content-Type isn't image/media"
         },
         "deep": {
           "type": "boolean",
@@ -4854,11 +5275,11 @@
         },
         "user_agent": {
           "type": "string",
-          "description": "Custom User-Agent"
+          "description": "Custom User-Agent header"
         },
         "timeout": {
           "type": "string",
-          "description": "Request timeout        (default: 10)"
+          "description": "Request timeout in seconds (default: 10)"
         },
         "ignore_ssl": {
           "type": "boolean",
@@ -4868,9 +5289,25 @@
           "type": "string",
           "description": "On-disk HTTP cache dir (default: ~/.osint_cache/)"
         },
+        "cache_ttl": {
+          "type": "string",
+          "description": "Cache TTL in seconds (default: 3600)"
+        },
         "workers": {
           "type": "integer",
-          "description": "Parallel download workers (default: 4)"
+          "description": "Parallel workers (default: 4)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
         }
       }
     }

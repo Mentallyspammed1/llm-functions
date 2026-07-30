@@ -1,2 +1,1 @@
-Hello, this is a test file created using fs_write function.
-Testing the file system write operation.
+Brave New World\nThis is a test file.\nWelcome to the str replace editor test.
