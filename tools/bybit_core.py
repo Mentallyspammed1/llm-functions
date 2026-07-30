@@ -1027,6 +1027,51 @@ def _c(text: str, no_color: bool = False) -> str:
     return text
 
 
+def run(action: str = "health_check", no_color: bool = False, verbose: bool = False) -> str:
+    """Run Bybit Core API test checks.
+    
+    Args:
+        action: Test action: health_check, server_time, config (default: health_check)
+        no_color: Disable ANSI color output
+        verbose: Enable detailed debug log output
+    """
+    if verbose:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            stream=sys.stderr,
+        )
+    
+    if action == "health_check":
+        healthy = health_check()
+        status  = "online" if healthy else "offline"
+        return json.dumps({"success": healthy, "status": status}, indent=2)
+    elif action == "server_time":
+        st     = server_time()
+        offset = sync_server_time_offset()
+        utc_dt = (
+            datetime.fromtimestamp(st / 1000, tz=timezone.utc).isoformat()
+            if st is not None
+            else None
+        )
+        return json.dumps(
+            {
+                "server_time_ms": st,
+                "server_time_utc": utc_dt,
+                "offset_ms": offset,
+            },
+            indent=2,
+        )
+    elif action == "config":
+        cfg = dict(get_config())
+        cfg["api_key"]    = f"{cfg['api_key'][:4]}***" if cfg["api_key"] else "NOT_SET"
+        cfg["api_secret"] = "***REDACTED***" if cfg["api_secret"] else "NOT_SET"
+        return json.dumps(cfg, indent=2)
+    return json.dumps({"error": f"Invalid action: {action}"})
+
+
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="bybit_core.py",

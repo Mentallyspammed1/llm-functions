@@ -57,3 +57,30 @@ def calculate_ema(symbol: str, interval: str = "60", period: int = 20, klines: O
     for p in closes[1:]:
         ema = p * k + ema * (1 - k)
     return {"status": "ok", "ema": round(ema, 2)}
+
+
+def run(indicator: str = "rsi", symbol: str = "BTCUSDT", interval: str = "60", period: int = 14):
+    """Calculate a technical indicator.
+
+    Args:
+        indicator: One of 'rsi', 'macd', 'ema'
+        symbol: Trading symbol
+        interval: Kline interval
+        period: Calculation period
+    """
+    import json
+    funcs = {
+        "rsi": lambda: calculate_rsi(symbol, interval, period),
+        "macd": lambda: calculate_macd(symbol, interval),
+        "ema": lambda: calculate_ema(symbol, interval, period),
+    }
+    fn = funcs.get(indicator)
+    if fn is None:
+        print(json.dumps({"status": "error", "msg": f"Unknown indicator: {indicator}. Choose from: {list(funcs.keys())}"}))
+    else:
+        print(json.dumps(fn(), indent=2))
+
+
+if __name__ == "__main__":
+    import sys
+    run(*sys.argv[1:])

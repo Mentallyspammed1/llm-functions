@@ -52,14 +52,12 @@ def run_tool(
     # Format Human-Readable Output
     summary_lines = []
     if orders:
-        summary_lines.append("
---- Open Orders ---")
+        summary_lines.append("\n--- Open Orders ---")
         for o in orders:
             price = o.get('price') if o.get('orderType') == 'Limit' else 'Market'
             summary_lines.append(f"{o['symbol']} | Side: {o['side']} | Type: {o['orderType']} | Price: {price} | Qty: {o['qty']} | Status: {o['orderStatus']}")
     else:
-        summary_lines.append("
-No open orders found.")
+        summary_lines.append("\nNo open orders found.")
 
     results = {
         "category": category,
@@ -67,14 +65,18 @@ No open orders found.")
         "open_orders": orders,
     }
 
-    connection_info = f"
-🔒 Connection: Tor (Exit IP: {exit_ip})" if exit_ip else "
-🔓 Connection: Direct"
+    connection_info = f"\n🔒 Connection: Tor (Exit IP: {exit_ip})" if exit_ip else "\n🔓 Connection: Direct"
     return f"""✅ Open Orders Retrieved Successfully!{connection_info}
 {"".join(summary_lines)}
 
 JSON Data:
 {json.dumps(results, indent=2)}"""
+
+
+
+def run(**kwargs):
+    """Entry point for the tool runner."""
+    return run_tool(**kwargs)
 
 
 if __name__ == "__main__":

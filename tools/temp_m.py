@@ -1,3 +1,14 @@
+"""Temporary methods staging file — not a standalone tool.
+
+These are class methods intended to be merged into the main Bybit trading class.
+"""
+import time
+from typing import List, Optional
+
+
+class _StagedMethods:
+    """Placeholder class for methods awaiting integration."""
+
     def micro_scalp(self, symbol: str, qty: float, fee_rate: float, target_profit: float, category: str = "linear") -> dict:
         """Executes a phased Maker-only Buy -> Sell trade."""
         
@@ -78,3 +89,12 @@
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+def run():
+    """Staging file — not meant to be called directly."""
+    print('{"status": "info", "msg": "temp_m.py is a staging file, not a standalone tool"}')
+
+
+if __name__ == "__main__":
+    run()

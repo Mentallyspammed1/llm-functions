@@ -70,7 +70,7 @@ clipboard.sh
 system_info.py
 url_metadata.py
 find_port.sh
-git_summary.sh
+git_summary.py
 get_my_location.py
 http_headers.py
 dns_query.py
@@ -83,3 +83,4 @@ file_patch.py
 image_intel.py
 pdf_intel.py
 cron_job_schedualer.py
+git_tool.py

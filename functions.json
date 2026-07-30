@@ -3297,7 +3297,7 @@
   },
   {
     "name": "execute_command",
-    "description": "Execute arbitrary shell command and return full output.",
+    "description": "Execute arbitrary shell command and return full output with complete runtime metadata.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -3328,6 +3328,10 @@
         "shell": {
           "type": "string",
           "description": "Shell to use: bash/sh/zsh (default: bash)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for identical command operations"
         },
         "no_color": {
           "type": "boolean",
@@ -4998,11 +5002,31 @@
   },
   {
     "name": "git_summary",
-    "description": "Git status summary.",
+    "description": "Detailed Git status summary including branch tracking, commit metadata, staged/unstaged files, and stash counts.",
     "parameters": {
       "type": "object",
-      "properties": {},
-      "required": []
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target directory path (default: current working directory)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for static status checks"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
     }
   },
   {
@@ -5557,6 +5581,63 @@
       "required": [
         "target"
       ]
+    }
+  },
+  {
+    "name": "git_tool",
+    "description": "Complete GitHub operations tool for Termux (repos, issues, PRs, gists, search, clone, workflows).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Operation: repo-info/repo-list/repo-clone/issue-list/issue-create/pr-list/gist-list/gist-create/search/user-info/workflow-list (default: user-info)"
+        },
+        "repo": {
+          "type": "string",
+          "description": "<OWNER/REPO>           Target repository (e.g. octocat/Hello-World)"
+        },
+        "query": {
+          "type": "string",
+          "description": "Search query or title for issue/gist"
+        },
+        "body": {
+          "type": "string",
+          "description": "Body text for issue/PR/gist creation"
+        },
+        "state": {
+          "type": "string",
+          "description": "Filter state: open/closed/all (default: open)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum results to fetch (default: 30)"
+        },
+        "token": {
+          "type": "string",
+          "description": "GitHub Personal Access Token (or set GITHUB_TOKEN env)"
+        },
+        "target": {
+          "type": "string",
+          "description": "Local target directory path for git clone"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for GitHub API requests"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
     }
   }
 ]

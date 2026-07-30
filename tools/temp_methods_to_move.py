@@ -1,3 +1,15 @@
+"""Temporary methods staging file — not a standalone tool.
+
+These are class method fragments intended to be merged into the main BybitRealm class.
+"""
+import time
+from typing import List, Optional
+
+
+class _StagedMethodsToMove:
+    """Placeholder class wrapping orphaned method fragments."""
+
+    def _micro_scalp_body(self, symbol, qty, fee_rate, target_profit, category="linear"):
         ob = self.get_orderbook(symbol=symbol, limit=1, category=category).get("result", {})
         bids = ob.get("b", [])
         if not bids: return {"status": "error", "msg": "No bid data"}
@@ -33,7 +45,6 @@
 
     def calculate_all_indicators(self, symbol: str, interval: str = "60") -> dict:
         """Aggregates all available indicators for a symbol."""
-        # Using a list of methods to call dynamically
         indicator_map = {
             "rsi": lambda: self.calculate_rsi(symbol, interval),
             "macd": lambda: self.calculate_macd(symbol, interval),
@@ -74,9 +85,20 @@
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MAIN CLIENT
+# MAIN CLIENT (stub — actual BybitRealm lives in bybit-realm.py)
 # ══════════════════════════════════════════════════════════════════════════════
 class BybitRealm:
     """
     Full-featured Bybit V5 API client.
+    (This is a placeholder stub in the staging file.)
+    """
+    pass
 
+
+def run():
+    """Staging file — not meant to be called directly."""
+    print('{"status": "info", "msg": "temp_methods_to_move.py is a staging file, not a standalone tool"}')
+
+
+if __name__ == "__main__":
+    run()

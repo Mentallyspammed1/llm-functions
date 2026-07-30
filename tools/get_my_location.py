@@ -371,5 +371,53 @@ def _cli() -> int:
         return 0 if report.get("success") else 1
 
 
+def run(
+    provider: str = "gps",
+    fallbacks: str = "network",
+    unit: str = "celsius",
+    speed_unit: str = "ms",
+    alt_unit: str = "meters",
+    precision: int = 6,
+    user_agent: Optional[str] = None,
+    timeout: int = 15,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    dry_run: bool = False,
+    json_mode: bool = True,
+) -> str:
+    """Query coordinates and weather metrics.
+    
+    Args:
+        provider: Location provider: gps, network, cell (default: gps)
+        fallbacks: Comma-separated fallback providers (default: network)
+        unit: Temperature unit (celsius/fahrenheit)
+        speed_unit: Speed unit (ms/kmh/mph)
+        alt_unit: Altitude unit (meters/feet)
+        precision: Decimal places to round coords
+        user_agent: HTTP User-Agent header
+        timeout: Subprocess and connection timeout
+        lat: Latitude override
+        lon: Longitude override
+        dry_run: Simulate calls with dummy coordinates
+        json_mode: Return JSON string formatted report
+    """
+    report = query_location_report(
+        provider=provider,
+        fallbacks=fallbacks,
+        unit=unit,
+        speed_unit=speed_unit,
+        alt_unit=alt_unit,
+        precision=precision,
+        user_agent=user_agent,
+        timeout=timeout,
+        lat_override=lat,
+        lon_override=lon,
+        dry_run=dry_run
+    )
+    if json_mode:
+        return json.dumps(report, indent=2)
+    return _format_text_report(report)
+
+
 if __name__ == "__main__":
     sys.exit(_cli())

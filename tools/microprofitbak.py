@@ -141,7 +141,10 @@ if __name__ == "__main__":
     parser.add_argument("--verbose", action="store_true")
     
     args = parser.parse_args()
-    print(json.dumps(calculate_micro_profit(**vars(args)), indent=2))def parse_order_book(
+    print(json.dumps(calculate_micro_profit(**vars(args)), indent=2))
+
+
+def parse_order_book(
     bids_str: str,
     asks_str: str,
 ) -> Dict[str, List[OrderBookLevel]]:

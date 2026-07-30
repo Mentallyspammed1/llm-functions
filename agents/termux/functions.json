@@ -1,0 +1,121 @@
+[
+  {
+    "name": "sys_notify",
+    "description": "Send system status notification via Telegram",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "get_my_location",
+    "description": "Query location coordinates, reverse address lookup, weather, and altitude.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Location provider: gps, network, cell (default: gps)"
+        },
+        "fallbacks": {
+          "type": "string",
+          "description": "Comma-separated fallback providers in order of execution (default: network)"
+        },
+        "unit": {
+          "type": "string",
+          "description": "Temperature unit: celsius, fahrenheit (default: celsius)"
+        },
+        "speed_unit": {
+          "type": "string",
+          "description": "Speed representation unit: ms, kmh, mph (default: ms)"
+        },
+        "alt_unit": {
+          "type": "string",
+          "description": "Altitude representation unit: meters, feet (default: meters)"
+        },
+        "precision": {
+          "type": "string",
+          "description": "Decimal places to round coordinates (default: 6)"
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "HTTP User-Agent header for API requests"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Subprocess and connection timeouts in seconds (default: 15)"
+        },
+        "output": {
+          "type": "string",
+          "description": "Write output report directly to this file"
+        },
+        "lat": {
+          "type": "string",
+          "description": "Coordinate latitude override (mocks GPS location query)"
+        },
+        "lon": {
+          "type": "string",
+          "description": "Coordinate longitude override (mocks GPS location query)"
+        },
+        "loop_delay": {
+          "type": "string",
+          "description": "Seconds to wait between queries in continuous monitoring mode"
+        },
+        "json": {
+          "type": "boolean",
+          "description": "Output result formatted as a raw JSON payload"
+        },
+        "open": {
+          "type": "boolean",
+          "description": "Automatically open the Google Maps link in browser"
+        },
+        "share": {
+          "type": "boolean",
+          "description": "Share output report text via termux-share command"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose logging outputs to stderr"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate geocoding/weather calls with dummy coordinates"
+        }
+      }
+    }
+  },
+  {
+    "name": "find_port",
+    "description": "Find process on port.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "port"
+      ]
+    }
+  },
+  {
+    "name": "clipboard",
+    "description": "Get or set system clipboard.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "get": {
+          "type": "string",
+          "description": "Get clipboard"
+        },
+        "set": {
+          "type": "string",
+          "description": "Set clipboard"
+        }
+      },
+      "required": []
+    }
+  }
+]
