@@ -329,9 +329,15 @@ _UNIT_MULTIPLIERS: dict[str, float] = {
 }
 
 
-def duration_to_seconds(raw: str) -> float:
-    """Convert duration string (e.g. '30s', '100ms', '1m', '2h') to seconds float."""
-    raw = (raw or "0").strip()
+def duration_to_seconds(raw: Union[str, int, float, None]) -> float:
+    """Convert duration string (e.g. '30s', '100ms', '1m', '2h') or number (seconds) to seconds float."""
+    if raw is None:
+        return 0.0
+    # Handle numeric input (already in seconds)
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    # Handle string input
+    raw = str(raw).strip()
     m = _DURATION_RE.match(raw)
     if not m:
         try:

@@ -112,13 +112,27 @@ def _parse_time_to_seconds(s: str, duration: float = 0.0) -> float:
             pass
         raise ValueError(f"invalid percentage: {s}")
     
-    # Relative time (e.g., "+5s", "-10s", "+1:30")
+    # Relative time (e.g., "+5s", "-10s", "+1:30", "+5", "-10")
     if s.startswith(("+", "-")):
         sign = 1 if s[0] == "+" else -1
-        rel = _parse_time_to_seconds(s[1:], duration)
-        if duration > 0:
-            return max(0.0, min(duration, duration + sign * rel))
-        return max(0.0, sign * rel)
+        rel_str = s[1:]
+        # Handle "5s" format (seconds with 's' suffix)
+        if rel_str.endswith("s") and rel_str[:-1].replace(".", "").isdigit():
+            rel = float(rel_str[:-1])
+        else:
+            rel = _parse_time_to_seconds(rel_str, duration)
+        if sign > 0:
+            # Positive relative: from start (0)
+            return max(0.0, min(duration, rel))
+        else:
+            # Negative relative: from end (duration)
+            if duration > 0:
+                return max(0.0, min(duration, duration - rel))
+            return max(0.0, -rel)
+    
+    # Plain seconds with optional 's' suffix (e.g., "5s", "10.5s")
+    if s.endswith("s") and s[:-1].replace(".", "").isdigit():
+        return float(s[:-1])
     
     # Plain seconds
     if re.fullmatch(r"\d+(?:\.\d+)?", s):
@@ -227,6 +241,15 @@ def _compute_timestamps(
         times = _parse_timestamp_list(timestamps, duration)
         # Filter to valid range
         times = [t for t in times if 0 <= t <= duration]
+        if manifest_data is not None:
+            for t in times[:max_frames]:
+                manifest_data.append({
+                    "timestamp": round(t, 3),
+                    "timestamp_formatted": _format_timestamp(t),
+                    "frame_type": "requested",
+                    "scene_score": None,
+                    "method": "timestamp"
+                })
         return times[:max_frames]
 
     # If percentages provided, convert to absolute times
@@ -235,6 +258,15 @@ def _compute_timestamps(
         times = [p * duration for p in pcts]
         # Filter to valid range
         times = [t for t in times if 0 <= t <= duration]
+        if manifest_data is not None:
+            for t in times[:max_frames]:
+                manifest_data.append({
+                    "timestamp": round(t, 3),
+                    "timestamp_formatted": _format_timestamp(t),
+                    "frame_type": "requested",
+                    "scene_score": None,
+                    "method": "percentage"
+                })
         return times[:max_frames]
 
     # If keyframes or scene detection requested, use ffmpeg to find them
@@ -268,6 +300,15 @@ def _compute_timestamps(
         t += interval
     if not times:
         times.append(start)
+    if manifest_data is not None:
+        for t in times[:max_frames]:
+            manifest_data.append({
+                "timestamp": round(t, 3),
+                "timestamp_formatted": _format_timestamp(t),
+                "frame_type": "interval",
+                "scene_score": None,
+                "method": "interval"
+            })
     return times[:max_frames]
 
 
@@ -340,6 +381,17 @@ def _detect_keyframes_or_scenes(
         
         # Deduplicate and sort
         times = sorted(set(times))
+        
+        # Populate manifest data if provided
+        if manifest_data is not None:
+            for t in times:
+                manifest_data.append({
+                    "timestamp": t,
+                    "formatted": _format_timestamp(t),
+                    "frame_type": "I" if keyframes else "scene",
+                    "scene_score": scene_threshold if scene_threshold > 0 else None,
+                })
+        
         return times[:max_frames]
     except Exception as e:
         _warn(f"Keyframe/scene detection failed: {e}")
@@ -415,6 +467,79 @@ def _extract_frame(
             "1",
             "-vf",
             vf,
+            *extra,
+            "-y",
+            str(out_path),
+        ]
+    )
+
+
+def _extract_frame_precise(
+    ffmpeg: str,
+    src: str,
+    t: float,
+    out_path: Path,
+    width: int,
+    fmt: str,
+    add_timestamp: bool,
+    font: Optional[str] = None,
+    font_size: int = 14,
+    font_color: str = "white",
+    box_color: str = "black",
+    box_opacity: float = 0.5,
+    position: str = "bl",
+    quality: int = 80,
+    strip_metadata: bool = False,
+) -> None:
+    """Extract frame with forced keyframe at exact timestamp by re-encoding a small segment."""
+    vf_parts = [f"scale={width}:-2"]
+    if add_timestamp:
+        ts = _format_timestamp(t).replace(":", r"\:")
+        if position == "tl":
+            x, y = "10", "10"
+        elif position == "tr":
+            x, y = "w-tw-10", "10"
+        elif position == "br":
+            x, y = "w-tw-10", "h-th-10"
+        else:
+            x, y = "10", "h-th-10"
+
+        drawtext = (
+            f"drawtext=text='{ts}':fontsize={font_size}:fontcolor={font_color}:"
+            f"box=1:boxcolor={box_color}@{box_opacity}:x={x}:y={y}"
+        )
+        if font:
+            drawtext += f":fontfile='{font}'"
+        vf_parts.append(drawtext)
+
+    vf = ",".join(vf_parts)
+    ext = fmt.lower()
+    extra: List[str] = []
+    if ext in ("jpg", "jpeg"):
+        q_val = max(2, min(31, int(31 - (quality * 29 / 100))))
+        extra.extend(["-q:v", str(q_val)])
+    elif ext == "webp":
+        extra.extend(["-quality", str(quality)])
+    elif ext == "png":
+        png_comp = max(1, min(9, int(quality / 10)))
+        extra.extend(["-compression_level", str(png_comp)])
+
+    if strip_metadata:
+        extra.extend(["-map_metadata", "-1"])
+
+    # Seek slightly before target, force keyframe at exact position using output option
+    seek_before = max(0.0, t - 0.5)
+    _run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel", "error",
+            "-ss", str(seek_before),
+            "-i", src,
+            "-t", "1.0",  # 1 second segment
+            "-vf", vf,
+            "-force_key_frames", str(t - seek_before),
+            "-frames:v", "1",
             *extra,
             "-y",
             str(out_path),
@@ -552,28 +677,74 @@ def _process_one(
 
         paths: List[Path] = []
         lines: List[str] = []
-        for i, t in enumerate(times):
+        
+        # Progress bar for frame extraction
+        if progress and len(times) > 1:
+            try:
+                from tqdm import tqdm
+                time_iter = tqdm(enumerate(times), total=len(times), desc=f"Extracting {stem}", unit="frame")
+            except ImportError:
+                time_iter = enumerate(times)
+                if progress:
+                    _info(f"Progress bar requested but tqdm not installed. Install with: pip install tqdm")
+        else:
+            time_iter = enumerate(times)
+        
+        for i, t in time_iter:
             out_path = per_dir / f"{stem}_{i:04d}_{int(t)}s.{fmt}"
-            _extract_frame(
-                ffmpeg=ffmpeg,
-                src=local_file,
-                t=t,
-                out_path=out_path,
-                width=width,
-                fmt=fmt,
-                add_timestamp=add_timestamps,
-                font=font,
-                font_size=font_size,
-                font_color=font_color,
-                box_color=box_color,
-                box_opacity=box_opacity,
-                position=position,
-                quality=quality,
-                strip_metadata=strip_metadata,
-            )
+            
+            # Use force_keyframes for precise seeking if requested
+            if force_keyframes:
+                _extract_frame_precise(
+                    ffmpeg=ffmpeg,
+                    src=local_file,
+                    t=t,
+                    out_path=out_path,
+                    width=width,
+                    fmt=fmt,
+                    add_timestamp=add_timestamps,
+                    font=font,
+                    font_size=font_size,
+                    font_color=font_color,
+                    box_color=box_color,
+                    box_opacity=box_opacity,
+                    position=position,
+                    quality=quality,
+                    strip_metadata=strip_metadata,
+                )
+            else:
+                _extract_frame(
+                    ffmpeg=ffmpeg,
+                    src=local_file,
+                    t=t,
+                    out_path=out_path,
+                    width=width,
+                    fmt=fmt,
+                    add_timestamp=add_timestamps,
+                    font=font,
+                    font_size=font_size,
+                    font_color=font_color,
+                    box_color=box_color,
+                    box_opacity=box_opacity,
+                    position=position,
+                    quality=quality,
+                    strip_metadata=strip_metadata,
+                )
             paths.append(out_path)
             if not only_montage:
                 lines.append(str(out_path))
+            
+            # Populate manifest data for each extracted frame
+            if manifest_data is not None:
+                manifest_data.append({
+                    "input": inp,
+                    "output": str(out_path),
+                    "timestamp": round(t, 3),
+                    "timestamp_formatted": _format_timestamp(t),
+                    "frame_index": i,
+                    "width": width,
+                    "format": fmt,
+                })
 
         grid = _parse_montage(montage)
         if grid:
@@ -604,7 +775,7 @@ def run(
     output_dir: str = "thumbnails",
     interval: float = 10,
     width: int = 320,
-    image_format: str = "png",
+    format: str = "png",
     start: str = "00:00:00",
     end: str = "00:00:00",
     max_frames: int = 10,
@@ -645,11 +816,11 @@ def run(
     if scene_threshold and not (0.1 <= scene_threshold <= 1.0):
         return "ERROR: scene_threshold must be between 0.1 and 1.0"
 
-    fmt = image_format.lower().strip()
+    fmt = format.lower().strip()
     if fmt == "jpeg":
         fmt = "jpg"
     if fmt not in ("png", "jpg", "webp"):
-        return "ERROR: image_format must be png, jpg, or webp"
+        return "ERROR: format must be png, jpg, or webp"
 
     try:
         ffmpeg = _which_or_die("ffmpeg")
@@ -766,7 +937,7 @@ def _cli() -> int:
         output_dir=args.output_dir,
         interval=args.interval,
         width=args.width,
-        image_format=args.format,
+        format=args.format,
         start=args.start,
         end=args.end,
         max_frames=args.max_frames,

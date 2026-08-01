@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# str_replace_editor.py — Pyrmethus AIChat Tool v2.0.1-ASCENDED
+# str_replace_editor.py — Pyrmethus AIChat Tool v2.0.2-ASCENDED
 # argc/aichat compatible · Enhanced Human-Readable Colorized Outputs & Robustness
 #
 # @describe A robust file editor tool supporting view, literal/regex search,
@@ -248,15 +248,34 @@ def _parse_edits(edits_input: Any) -> list[dict[str, Any]]:
 
 
 def _is_safe_path(path: Path, base: Optional[Path] = None) -> bool:
-    """IMPROVEMENT 4: Check if path is safe (no traversal outside base directory)."""
+    """IMPROVEMENT 4: Check if path is safe (no traversal outside base directory).
+
+    When no base is provided, allows any path within the user's home directory
+    or system temp directory, rather than restricting to cwd only.
+    """
     try:
         resolved = path.resolve()
-        if base is None:
-            base = Path.cwd().resolve()
-        base_resolved = base.resolve()
-        # Check if resolved path is within base directory
-        resolved.relative_to(base_resolved)
-        return True
+        if base is not None:
+            # If a specific base is provided, enforce it strictly
+            base_resolved = base.resolve()
+            resolved.relative_to(base_resolved)
+            return True
+        # No base provided: allow paths under home or temp directories
+        home_dir = Path.home().resolve()
+        try:
+            resolved.relative_to(home_dir)
+            return True
+        except ValueError:
+            pass
+        # Also allow temp directories
+        import tempfile
+        for temp_candidate in [Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve()]:
+            try:
+                resolved.relative_to(temp_candidate)
+                return True
+            except (ValueError, OSError):
+                pass
+        return False
     except (ValueError, OSError):
         return False
 
@@ -674,9 +693,14 @@ def execute_tool(
             }
 
         # IMPROVEMENT 9: Use robust encoding detection
-        file_content, encoding_used = _detect_encoding(target_path, encoding)
+        # For write action on new files, skip reading (file doesn't exist yet)
+        if action_lower == "write" and not target_path.exists():
+            file_content = ""
+            encoding_used = encoding or "utf-8"
+        else:
+            file_content, encoding_used = _detect_encoding(target_path, encoding)
 
-        file_size = len(file_content.encode(encoding_used, errors="replace"))
+        file_size = len(file_content.encode(encoding_used, errors="replace")) if file_content else 0
 
         # Safety Check: Binary File Detection
         if _is_binary(file_content) and action_lower in {"replace", "batch"}:

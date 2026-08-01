@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# edit_file.py — Pyrmethus File Weaver v2.9.2
+# edit_file.py — Pyrmethus File Weaver v2.9.3
 # argc/aichat compatible · Termux · Full 33-operation suite
 # Inserted by assistant
 #
@@ -205,7 +205,7 @@ __all__ = [
     "batch_edit",
 ]
 
-__version__ = "2.9.2"
+__version__ = "2.9.3"
 
 # ==============================================================================
 # SECTION 1: Logger & Color Support
@@ -266,7 +266,6 @@ PSEUDO_FS_PREFIXES: tuple[str, ...] = (
     "/dev",
     "/system",
     "/vendor",
-    "/data/data/com.termux",
 )
 
 _SORT_KEYS: dict[str, Callable[[dict[str, Any]], Any]] = {
@@ -467,17 +466,14 @@ class FileEditor:
     def _atomic_write(
         self, path: Path, content: str, encoding: str = DEFAULT_ENCODING
     ) -> None:
-        """Write content to path atomically."""
+        """Write content to path atomically.
+
+        Line-ending style is controlled by the caller.  If the caller
+        normalises to LF (as most operations do), the file will be LF.
+        Use ``normalize_line_endings`` to explicitly convert to CRLF.
+        """
         if not isinstance(content, str):
             content = str(content)
-
-        if path.exists():
-            try:
-                with open(path, "rb") as f:
-                    if b"\r\n" in f.read(8192):
-                        content = content.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
-            except Exception:
-                pass
 
         dir_ = path.parent
         _O_TMPFILE = getattr(os, "O_TMPFILE", None)

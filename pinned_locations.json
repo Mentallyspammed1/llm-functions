@@ -63,5 +63,18 @@
     "provider": "gps",
     "label": "mikes house",
     "timestamp": "2026-07-17T03:43:06.290088"
+  },
+  {
+    "latitude": 38.93961,
+    "longitude": -90.92887166666667,
+    "altitude": 134.0,
+    "accuracy": 6.5,
+    "vertical_accuracy": 56.599998474121094,
+    "bearing": 302.7900085449219,
+    "speed": 5.043763160705566,
+    "elapsedMs": 164,
+    "provider": "gps",
+    "label": "test_location",
+    "timestamp": "2026-07-30T21:17:30.208963"
   }
 ]

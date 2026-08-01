@@ -226,7 +226,7 @@
   },
   {
     "name": "brave_search",
-    "description": "Performs Brave Search queries, parses multi-tier results, and downloads pages concurrently.",
+    "description": "Performs Brave Search queries via official API or HTML fallback, parses multi-tier results, and downloads pages concurrently.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -262,13 +262,21 @@
           "type": "integer",
           "description": "Maximum concurrent download threads (default: 3)"
         },
+        "rate_limit": {
+          "type": "integer",
+          "description": "Max requests per second (0 = unlimited, default: 0)"
+        },
         "download": {
           "type": "boolean",
           "description": "Download HTML of each search result"
         },
         "include_raw": {
           "type": "boolean",
-          "description": "Include raw search HTML payload"
+          "description": "Include raw search HTML/JSON payload"
+        },
+        "force_html": {
+          "type": "boolean",
+          "description": "Force HTML scraping even if API key available"
         },
         "no_color": {
           "type": "boolean",
@@ -466,15 +474,15 @@
       "properties": {
         "url": {
           "type": "string",
-          "description": "The URL to download"
+          "description": "The URL to download (required)"
         },
         "output_file": {
           "type": "string",
-          "description": "-O File to save the output"
+          "description": "-O              File to save the output"
         },
         "user_agent": {
           "type": "string",
-          "description": "Custom User-Agent header"
+          "description": "Custom User-Agent header string"
         },
         "limit_rate": {
           "type": "string",
@@ -482,7 +490,7 @@
         },
         "tries": {
           "type": "string",
-          "description": "-t Number of retries (default: 20)"
+          "description": "-t                    Number of retries (default: 20)"
         },
         "waitretry": {
           "type": "string",
@@ -490,19 +498,27 @@
         },
         "quiet": {
           "type": "boolean",
-          "description": "-q Quiet mode"
+          "description": "-q                    Quiet mode (suppress non-error output)"
         },
         "verbose": {
           "type": "boolean",
-          "description": "-v Verbose mode"
+          "description": "-v                  Verbose mode (detailed download log)"
         },
         "mirror": {
           "type": "boolean",
-          "description": "-m Mirror a website (recursive)"
+          "description": "-m                   Mirror a website recursively"
         },
         "no_check_certificate": {
           "type": "boolean",
-          "description": "Don't validate the server's certificate"
+          "description": "Don't validate the server's TLS certificate"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for download metadata"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
         }
       },
       "required": [
@@ -1414,6 +1430,22 @@
           "description": "Enable detailed debug logging"
         }
       }
+    }
+  },
+  {
+    "name": "text_extract_urls",
+    "description": "Extract all URLs from text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text to search."
+        }
+      },
+      "required": [
+        "text"
+      ]
     }
   },
   {
@@ -3919,9 +3951,33 @@
           "type": "string",
           "description": "Maximum number of thumbnails per input (default: 10)."
         },
-        "montage": {
+        "timestamps": {
           "type": "string",
-          "description": "Optional montage grid, e.g. 2x3 (requires ImageMagick or GraphicsMagick)."
+          "description": "Comma-separated specific timestamps (HH:MM:SS or seconds) to capture."
+        },
+        "percentages": {
+          "type": "string",
+          "description": "Comma-separated percentages (0-100) of video duration to capture."
+        },
+        "keyframes": {
+          "type": "string",
+          "description": "Capture at keyframes only (I-frames) within time range."
+        },
+        "scene_threshold": {
+          "type": "string",
+          "description": "Scene change detection threshold (0.1-1.0, requires ffmpeg scene filter)."
+        },
+        "force_keyframes": {
+          "type": "string",
+          "description": "Force keyframes at exact timestamps (re-encodes for precise seeking)."
+        },
+        "manifest": {
+          "type": "string",
+          "description": "Output JSON manifest with capture details."
+        },
+        "progress": {
+          "type": "string",
+          "description": "Show progress bar for long operations."
         },
         "montage_bg": {
           "type": "string",
@@ -3969,7 +4025,7 @@
         },
         "only_montage": {
           "type": "boolean",
-          "description": "If set, clean up individual frames and only keep the montage grid."
+          "description": "If set, clean up intermediate frames and only keep the montage grid."
         },
         "verbose": {
           "type": "boolean",
@@ -5638,6 +5694,322 @@
           "description": "Enable detailed debug log output"
         }
       }
+    }
+  },
+  {
+    "name": "apk_tool",
+    "description": "Complete Android APK tool for Termux (decompile, build/compile, sign, inspect/info, and create templates).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Operation: decompile/build/sign/info/create (default: info)"
+        },
+        "target": {
+          "type": "string",
+          "description": "Target APK file or project directory (required)"
+        },
+        "output": {
+          "type": "string",
+          "description": "Output APK file or destination directory"
+        },
+        "keystore": {
+          "type": "string",
+          "description": "Custom keystore path for signing"
+        },
+        "ks_pass": {
+          "type": "string",
+          "description": "Keystore password (default: android)"
+        },
+        "package_name": {
+          "type": "string",
+          "description": "Package name for 'create' action (default: com.example.myapp)"
+        },
+        "app_name": {
+          "type": "string",
+          "description": "App name for 'create' action (default: MyApp)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)"
+        },
+        "align": {
+          "type": "boolean",
+          "description": "Run zipalign prior to signing"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for static APK inspections"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "repo_search",
+    "description": "GitHub Repository Search tool for AIChat using GitHub REST API.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "GitHub search query (e.g., \"aichat\", \"topic:rag\") (required)"
+        },
+        "language": {
+          "type": "string",
+          "description": "Filter by primary programming language (e.g. python, rust, go)"
+        },
+        "topic": {
+          "type": "string",
+          "description": "Filter by repository topic tag"
+        },
+        "min_stars": {
+          "type": "integer",
+          "description": "Minimum stargazers count filter"
+        },
+        "user": {
+          "type": "string",
+          "description": "Filter by specific GitHub user or organization"
+        },
+        "sort": {
+          "type": "string",
+          "description": "Sort field: stars, forks, help-wanted-issues, updated (default: stars)"
+        },
+        "order": {
+          "type": "string",
+          "description": "Sort order: desc, asc (default: desc)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum items to process (default: 10, max: 100)"
+        },
+        "token": {
+          "type": "string",
+          "description": "GitHub access token (defaults to GITHUB_TOKEN environment variable)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)"
+        },
+        "ttl": {
+          "type": "string",
+          "description": "Cache TTL in seconds (default: 3600)"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Network HTTP request timeout in seconds (default: 15)"
+        },
+        "include_forks": {
+          "type": "boolean",
+          "description": "Include repository forks in search results"
+        },
+        "include_archived": {
+          "type": "boolean",
+          "description": "Include archived repositories in search results"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for API operations"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "gif_tool",
+    "description": "Manipulate, optimize, merge, explode, and inspect GIF images using Gifsicle",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "input_files": {
+          "type": "string",
+          "description": "Input GIF file paths or frames (space or comma-separated)"
+        },
+        "output_file": {
+          "type": "string",
+          "description": "-o              Write output GIF to specified FILE"
+        },
+        "mode": {
+          "type": "string",
+          "description": "-m                     Execution mode: merge/batch/explode/info (default: merge)"
+        },
+        "optimize": {
+          "type": "string",
+          "description": "-O                 Optimization level (1, 2, or 3)"
+        },
+        "lossy": {
+          "type": "string",
+          "description": "Lossiness level to shrink size (e.g. 20, 80, 200)"
+        },
+        "delay": {
+          "type": "string",
+          "description": "-d                    Set frame delay in 1/100ths of a second"
+        },
+        "loopcount": {
+          "type": "string",
+          "description": "-l                Set loop extension (0 or forever, or N)"
+        },
+        "colors": {
+          "type": "string",
+          "description": "-k                   Reduce number of colors (1-256)"
+        },
+        "resize": {
+          "type": "string",
+          "description": "Resize output GIF to WxH (e.g. 320x240)"
+        },
+        "resize_width": {
+          "type": "string",
+          "description": "Resize output GIF to width W (proportional height)"
+        },
+        "resize_height": {
+          "type": "string",
+          "description": "Resize output GIF to height H (proportional width)"
+        },
+        "resize_fit": {
+          "type": "string",
+          "description": "Shrink output GIF to fit WxH, preserving aspect ratio"
+        },
+        "scale": {
+          "type": "string",
+          "description": "Scale output GIF by XFACTOR[xYFACTOR]"
+        },
+        "crop": {
+          "type": "string",
+          "description": "Crop image (e.g. X,Y+WxH or X,Y-X2,Y2)"
+        },
+        "rotate": {
+          "type": "string",
+          "description": "Rotate GIF (rotate-90, rotate-180, rotate-270)"
+        },
+        "transparent": {
+          "type": "string",
+          "description": "-t              Make specified color transparent (e.g. #FFFFFF)"
+        },
+        "disposal": {
+          "type": "string",
+          "description": "-D                 Set frame disposal method (none, asis, background, previous)"
+        },
+        "crop_transparency": {
+          "type": "boolean",
+          "description": "Crop transparent borders off the image"
+        },
+        "flip_horizontal": {
+          "type": "boolean",
+          "description": "Flip image horizontally"
+        },
+        "flip_vertical": {
+          "type": "boolean",
+          "description": "Flip image vertically"
+        },
+        "unoptimize": {
+          "type": "boolean",
+          "description": "-U               Unoptimize input GIFs"
+        },
+        "careful": {
+          "type": "boolean",
+          "description": "Write larger GIFs that avoid bugs in other programs"
+        },
+        "quiet": {
+          "type": "boolean",
+          "description": "-w                    Suppress warning messages"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "-V                  Enable verbose progress reporting"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for identical operations"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        }
+      },
+      "required": [
+        "input_files"
+      ]
+    }
+  },
+  {
+    "name": "code_snapshot",
+    "description": "Generates high-resolution code snapshot images with neon dark themes, window frames, and syntax highlighting.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Path to code file OR inline code text string (required)"
+        },
+        "output": {
+          "type": "string",
+          "description": "Destination image path (default: snapshot.png)"
+        },
+        "theme": {
+          "type": "string",
+          "description": "Neon theme: cyberpunk/matrix/synthwave/tokyo-night (default: cyberpunk)"
+        },
+        "language": {
+          "type": "string",
+          "description": "Programming language (e.g., python, js, rust, auto) (default: auto)"
+        },
+        "title": {
+          "type": "string",
+          "description": "Custom title bar text (defaults to filename or language)"
+        },
+        "font_size": {
+          "type": "integer",
+          "description": "Font size in pixels (default: 18)"
+        },
+        "line_numbers": {
+          "type": "boolean",
+          "description": "Display line numbers in snapshot"
+        },
+        "window_frame": {
+          "type": "boolean",
+          "description": "Draw macOS-style window frame with control buttons"
+        },
+        "glow_effect": {
+          "type": "boolean",
+          "description": "Add outer neon glow border effect"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for identical renders"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color terminal output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
     }
   }
 ]

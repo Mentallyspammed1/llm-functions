@@ -20,6 +20,7 @@ web_crawler.py
 network_tools.py
 cloudish_tools.py
 nsfw_search.py
+text_extract_urls.py
 # bybit
 bybit_realm.py
 bybit_wbta.py
@@ -84,3 +85,7 @@ image_intel.py
 pdf_intel.py
 cron_job_schedualer.py
 git_tool.py
+apk_tool.py
+repo_search.py
+gif_tool.py
+code_snapshot.py
