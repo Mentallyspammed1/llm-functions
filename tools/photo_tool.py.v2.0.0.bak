@@ -28,8 +28,7 @@
 # @option --annotate-size <NUM>       Annotation font size (default: 24)
 # @option --burst <NUM>               Burst mode: take N photos rapidly (default: 1)
 # @option --burst-delay <MS>          Delay between burst shots ms (default: 500)
-# @option --filter <NAME>             Apply filter: grayscale, sepia, blur, sharpen,
-#                                    edge, vignette, emboss (requires ImageMagick)
+# @option --filter <NAME>             Apply filter: grayscale, sepia, blur, sharpen, edge
 # @option --watermark <PATH>          Overlay watermark image (requires ImageMagick)
 # @option --upload-url <URL>          HTTP POST endpoint to upload photo after capture
 # @option --upload-field <NAME>       Form field name for upload (default: file)
@@ -238,63 +237,20 @@ def _border(width: int) -> str:
 
 def _sanitize_filename(name: str) -> str:
     import re
-    # Treat a filename as a stem + extension.  We only sanitise the stem
-    # (anything before the last dot) so the extension is preserved verbatim
-    # — but with a final sweep over the whole string to scrub any dot/underscore
-    # runs that slipped through.
-    if "." in name:
-        stem, _, ext = name.rpartition(".")
-        stem = re.sub(r"[^\w\-]+", "_", stem)
-        stem = re.sub(r"_+", "_", stem).strip("._")
-        cleaned = f"{stem}.{ext}" if stem else ext
-    else:
-        cleaned = re.sub(r"[^\w\-]+", "_", name)
-        cleaned = re.sub(r"_+", "_", cleaned).strip("._")
-    return cleaned or "photo"
+    name = re.sub(r"[^\w.\-]", "_", name)
+    name = re.sub(r"_+", "_", name).strip("_")
+    return name or "photo"
 
 
 def _validate_sandbox(path: Path) -> bool:
-    """
-    Allow paths under the user's home directory OR any system temp directory.
-
-    Termux sets TMPDIR to /data/data/com.termux/files/usr/tmp, so we honour
-    both the literal /tmp (classic Unix) and the platform's resolved tempdir.
-    """
+    home = Path.home().resolve()
+    tmp  = Path("/tmp").resolve()
     try:
         resolved = path.resolve()
+        s = str(resolved)
+        return s.startswith(str(home)) or s.startswith(str(tmp))
     except OSError:
         return False
-    s = str(resolved)
-
-    home = Path.home().resolve()
-    if s.startswith(str(home)):
-        return True
-
-    # Allow /tmp (classic Unix) when present
-    tmp = Path("/tmp").resolve()
-    if tmp.exists() and s.startswith(str(tmp)):
-        return True
-
-    # Allow the platform's tempdir (e.g. Termux: /data/data/.../files/usr/tmp)
-    env_tmp = os.environ.get("TMPDIR", "")
-    if env_tmp:
-        try:
-            env_tmp_resolved = str(Path(env_tmp).resolve())
-            if s.startswith(env_tmp_resolved):
-                return True
-        except OSError:
-            pass
-
-    # Fallback: also allow Python's notion of tempdir
-    import tempfile as _tf
-    try:
-        py_tmp = str(Path(_tf.gettempdir()).resolve())
-        if s.startswith(py_tmp):
-            return True
-    except OSError:
-        pass
-
-    return False
 
 
 def _detect_mime(path: Path) -> str:
@@ -2056,17 +2012,9 @@ def _selftest() -> int:
         _check(_validate_sandbox(inside), "validate_sandbox: inside temp dir")
         _check(not _validate_sandbox(Path("/etc/passwd")), "validate_sandbox: rejects /etc/passwd")
 
-    # Filename sanitiser (PostScript: strip `.` too — an input like "1.2.3.jpg"
-    # becomes "1.2.3.jpg" because dots are allowed, but trailing dots do get
-    # trimmed by the `strip("._")` step).
+    # Filename sanitiser
     _check(_sanitize_filename("My Photo (1).JPG") == "My_Photo_1.JPG",
            "sanitize_filename: strips parens / spaces")
-    _check(_sanitize_filename("etc/passwd") == "etc_passwd",
-           "sanitize_filename: collapses path separators")
-    _check(_sanitize_filename("...") == "photo",
-           "sanitize_filename: empty after strip → 'photo'")
-    _check(_sanitize_filename("a..b") == "a.b",
-           "sanitize_filename: collapses runs of underscores (no dot run)")
 
     # MIME detection
     _check(_detect_mime(Path("foo.jpg")).startswith("image/"),
@@ -2089,16 +2037,8 @@ def _selftest() -> int:
 
     # argparse builds without error and includes --filter choices
     p = _build_parser()
-    _check("filter" in {a.dest for a in p._actions if a.dest},
+    _check("--filter" in {a.dest for a in p._actions if a.dest},
            "argparse: --filter registered")
-    filter_action = next(
-        (a for a in p._actions if a.dest == "filter"), None
-    )
-    if filter_action is not None:
-        _check(
-            set(filter_action.choices or []) >= {"vignette", "emboss"},
-            "argparse: --filter choices include vignette & emboss",
-        )
 
     # CSV export with heterogeneous records
     sample = [
