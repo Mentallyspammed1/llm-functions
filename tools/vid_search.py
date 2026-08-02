@@ -73,13 +73,7 @@ except ImportError:
     print("Error: 'beautifulsoup4' module is required. Install with: pip install beautifulsoup4", file=sys.stderr)
     sys.exit(1)
 
-try:
-    import aiohttp
-    ASYNC_AVAILABLE = True
-except ImportError:
-    ASYNC_AVAILABLE = False
-
-__version__ = "3.3.1"
+__version__ = "3.3.2"
 __all__ = [
     "run",
     "execute_tool",
@@ -114,10 +108,22 @@ _ANSI_RE = re.compile(
 )
 
 REALISTIC_USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    # Chrome (Windows/Mac/Linux)
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    # Firefox
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:131.0) Gecko/20100101 Firefox/131.0",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0",
+    # Safari
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+    # Edge
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0",
+    # Mobile
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36",
 ]
 
 
@@ -243,7 +249,6 @@ class GracefulShutdown:
 def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> None:
     if not _is_tty() or no_color:
         return
-
     success = data.get("success", False)
     status_color = NEON_GREEN if success else NEON_RED
     status_symbol = "✓" if success else "✗"
@@ -506,6 +511,97 @@ ENGINE_MAP: dict[str, dict[str, Any]] = {
 }
 
 
+# Per-engine rate limiter (sliding window, simple & thread-safe)
+_ENGINE_LAST_REQUEST: dict[str, float] = {}
+_ENGINE_LOCK = __import__("threading").Lock()
+
+# Per-engine minimum delay (seconds) — heavier/anti-bot sites get longer waits
+ENGINE_RATE_LIMITS: dict[str, float] = {
+    "pexels": 0.5,
+    "yahoo_video": 1.0,
+    "dailymotion": 1.0,
+    "bing": 1.0,
+    "xnxx": 2.0,
+    "xvideos": 2.0,
+    "pornhub": 2.5,
+    "pornhub_gifs": 2.5,
+    "xhamster": 2.0,
+    "spankbang": 2.0,
+    "redtube": 2.0,
+    "thumbzilla": 2.0,
+    "eporner": 2.0,
+    "beeg": 2.5,
+    "youjizz": 2.5,
+    "motherless": 2.5,
+    "hqporner": 2.5,
+    "txxx": 2.0,
+    "zebra_girls": 2.5,
+}
+
+DEFAULT_RATE_LIMIT = 1.5  # seconds for unknown engines
+
+
+def _engine_rate_wait(engine: str) -> None:
+    """Sleep if needed to respect per-engine rate limit."""
+    delay = ENGINE_RATE_LIMITS.get(engine, DEFAULT_RATE_LIMIT)
+    if delay <= 0:
+        return
+    with _ENGINE_LOCK:
+        last = _ENGINE_LAST_REQUEST.get(engine, 0.0)
+        now = time.monotonic()
+        wait = delay - (now - last)
+        if wait > 0:
+            time.sleep(wait)
+        _ENGINE_LAST_REQUEST[engine] = time.monotonic()
+
+
+def _retry_request(session, method: str, url: str, *, max_retries: int = 3,
+                   backoff_factor: float = 1.0, timeout: int = 15,
+                   verify: bool = True, **kwargs) -> "requests.Response":
+    """HTTP request with exponential backoff and retry-aware 429/5xx handling."""
+    last_exc: Optional[Exception] = None
+    last_resp: Optional["requests.Response"] = None
+
+    for attempt in range(max_retries):
+        try:
+            resp = session.request(method, url, timeout=timeout, verify=verify, **kwargs)
+            last_resp = resp
+
+            # Respect Retry-After header on 429/503
+            if resp.status_code in (429, 503):
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        wait_s = float(retry_after)
+                    except ValueError:
+                        wait_s = backoff_factor * (2 ** attempt)
+                else:
+                    wait_s = backoff_factor * (2 ** attempt)
+                if attempt < max_retries - 1:
+                    time.sleep(min(wait_s, 30))
+                    continue
+
+            if resp.status_code >= 500 and attempt < max_retries - 1:
+                time.sleep(backoff_factor * (2 ** attempt))
+                continue
+
+            return resp
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                requests.exceptions.ChunkedEncodingError) as e:
+            last_exc = e
+            if attempt < max_retries - 1:
+                time.sleep(backoff_factor * (2 ** attempt))
+                continue
+            raise
+
+    if last_resp is not None:
+        return last_resp
+    if last_exc is not None:
+        raise last_exc
+    raise ToolError("Request failed after retries with no response or exception captured.")
+
+
 def slugify(text: str) -> str:
     text = html.unescape(text or "")
     text = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", text)
@@ -640,8 +736,15 @@ def execute_scrape(
 
     session.headers.update(get_headers(custom_ua))
 
+    # Apply per-engine rate limiting
+    _engine_rate_wait(engine)
+
     try:
-        resp = session.get(url, timeout=timeout, verify=not no_verify)
+        resp = _retry_request(
+            session, "GET", url,
+            max_retries=3, backoff_factor=1.0,
+            timeout=timeout, verify=not no_verify,
+        )
         resp.raise_for_status()
     except Exception as e:
         raise ToolError(f"HTTP request failed for {engine}: {e}", exit_code=EXIT_ERROR)
@@ -694,7 +797,11 @@ def download_thumbnails(
                 if proxy:
                     session.proxies = {"http": proxy, "https": proxy}
                 session.headers.update(get_headers(custom_ua))
-                resp = session.get(url, timeout=timeout, verify=not no_verify)
+                resp = _retry_request(
+                    session, "GET", url,
+                    max_retries=2, backoff_factor=0.5,
+                    timeout=timeout, verify=not no_verify,
+                )
                 if resp.status_code == 200:
                     fpath.write_bytes(resp.content)
             if fpath.exists():
@@ -813,6 +920,7 @@ def execute_tool(
     cache_ttl: int = 3600,
     exclude_words: Optional[str] = None,
     require_words: Optional[str] = None,
+    output_dir: Optional[str] = None,
 ) -> dict[str, Any]:
     start_time = time.monotonic()
 
@@ -866,7 +974,15 @@ def execute_tool(
             for item in results:
                 item["img_url"] = ""
 
-        report_dir = Path.home() / "vsearch_results"
+        if output_dir:
+            report_dir = Path(output_dir).expanduser().resolve()
+        else:
+            report_dir = Path.home() / "vsearch_results"
+
+        if not _validate_sandbox(report_dir):
+            # Fall back to default sandbox-safe location if user-provided path is unsafe
+            report_dir = Path.home() / "vsearch_results"
+
         downloaded_count = 0
 
         if download_thumbs and not no_thumbs:
@@ -986,6 +1102,7 @@ def run(
     require_words: Optional[str] = None,
     open: bool = False,
     share: bool = False,
+    output_dir: Optional[str] = None,
 ) -> None:
     """Execute video search scraper across supported platforms."""
     result = execute_tool(
@@ -1007,6 +1124,7 @@ def run(
         cache_ttl=cache_ttl,
         exclude_words=exclude_words,
         require_words=require_words,
+        output_dir=output_dir,
     )
 
     print_human_readable_ui(result, no_color=no_color)
@@ -1139,6 +1257,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--output-dir",
+        dest="output_dir",
+        help="Directory for HTML/CSV reports and thumbnails (default: ~/vsearch_results)",
+    )
     return parser
 
 
@@ -1163,6 +1286,7 @@ if __name__ == "__main__":
         cache_ttl=args.cache_ttl,
         exclude_words=args.exclude_words,
         require_words=args.require_words,
+        output_dir=args.output_dir,
     )
 
     print_human_readable_ui(res, no_color=args.no_color)

@@ -63,8 +63,7 @@ navigate_between.py
 review_pins.py
 execute_py_code.py
 crypto_price.py
-memory_manager.py
-memory_analytics.py
+memory_tool.py
 mapper_extractor.py
 file_summarizer.py
 clipboard.sh
@@ -89,3 +88,4 @@ apk_tool.py
 repo_search.py
 gif_tool.py
 code_snapshot.py
+vid2gif.py

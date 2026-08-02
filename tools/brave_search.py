@@ -208,9 +208,11 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7; rv:131.0) Gecko/20100101 Firefox/131.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
 ]
 
 
@@ -306,11 +308,12 @@ class BraveSearchEngine:
 
     def _rate_limit_wait(self) -> None:
         """Enforce rate limiting between requests."""
-        if self.rate_limit > 0:
-            min_interval = 1.0 / self.rate_limit
-            elapsed = time.monotonic() - self._last_request_time
-            if elapsed < min_interval:
-                time.sleep(min_interval - elapsed)
+        if self.rate_limit <= 0:
+            return  # Skip rate limiting for unlimited or zero rate
+        min_interval = 1.0 / self.rate_limit
+        elapsed = time.monotonic() - self._last_request_time
+        if elapsed < min_interval:
+            time.sleep(min_interval - elapsed)
         self._last_request_time = time.monotonic()
 
     def fetch_search_page(
@@ -409,11 +412,19 @@ class BraveSearchEngine:
         self._log(f"Fetching HTML endpoint: {url} with query='{query}'")
 
         last_err: Optional[Exception] = None
-        for attempt in range(1, 4):
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
             try:
                 resp = self.session.get(
                     url, params=params, timeout=(5.0, float(self.timeout))
                 )
+                if resp.status_code == 429:
+                    retry_after = int(resp.headers.get("Retry-After", "60"))
+                    self._log(f"Rate limited (429). Retry-After: {retry_after}s")
+                    if attempt < max_retries:
+                        time.sleep(min(retry_after, 30))
+                        continue
+                    raise RuntimeError(f"Rate limited after retries. Retry-After: {retry_after}s")
                 resp.raise_for_status()
 
                 if not resp.encoding or resp.encoding.lower() == "iso-8859-1":
@@ -424,9 +435,12 @@ class BraveSearchEngine:
             except requests.RequestException as exc:
                 last_err = exc
                 self._log(f"HTML attempt {attempt} failed: {exc}")
-                time.sleep(0.5 * attempt)
+                if attempt < max_retries:
+                    backoff = 2 ** attempt
+                    self._log(f"Retrying in {backoff}s...")
+                    time.sleep(backoff)
 
-        raise RuntimeError(f"HTML request failed after retries: {last_err}")
+        raise RuntimeError(f"HTML request failed after {max_retries} retries: {last_err}")
 
     def parse_results(self, raw_response: str, mode: str, max_results: int) -> List[Dict[str, Any]]:
         """Parse search results from API JSON or HTML."""

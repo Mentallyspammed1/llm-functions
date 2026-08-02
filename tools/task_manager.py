@@ -844,6 +844,6 @@ if __name__ == "__main__":
         no_color=args.no_color,
         verbose=args.verbose,
     )
-    print_ui(res, no_color=no_color)
+    print_ui(res, no_color=args.no_color)
     write_llm_output(res)
     sys.exit(res.get("exit_code", EXIT_SUCCESS))

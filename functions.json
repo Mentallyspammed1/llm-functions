@@ -4881,38 +4881,66 @@
     }
   },
   {
-    "name": "memory_manager",
-    "description": "Manage persistent memory for AIChat conversations and context (store, retrieve, search, clear, export, import, cleanup).",
+    "name": "memory_tool",
+    "description": "Advanced multi-tiered persistent memory toolkit with hybrid scoring, recall tracking, core/archival memory hierarchies, upserts, consolidation, and telemetry.",
     "parameters": {
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "description": "Action to perform: store, retrieve, search, clear, export, import, cleanup (required)"
+          "description": "Action: store, retrieve, update, delete, search, list, clear, export, import, cleanup, consolidate, analytics (required)"
         },
         "key": {
           "type": "string",
-          "description": "Memory key or identifier"
+          "description": "Memory key or unique identifier"
         },
         "value": {
           "type": "string",
-          "description": "Value to store, query string, or import file path"
+          "description": "Value to store, search query, or import file path"
         },
         "type": {
           "type": "string",
-          "description": "Memory type: conversation, preference, context, knowledge (default: context)"
+          "description": "Memory type: core, working, conversation, preference, context, knowledge, archival, all (default: context)"
         },
         "session": {
           "type": "string",
-          "description": "Session identifier (default: default)"
+          "description": "Session identifier"
         },
         "tags": {
           "type": "string",
           "description": "Comma-separated tags for categorization"
         },
+        "importance": {
+          "type": "integer",
+          "description": "Importance/priority rating 1-10 (default: 5)"
+        },
+        "ttl": {
+          "type": "string",
+          "description": "Time-to-live in seconds for auto-expiration"
+        },
+        "metadata": {
+          "type": "string",
+          "description": "JSON string of extra metadata attributes"
+        },
+        "analytics_type": {
+          "type": "string",
+          "description": "Analytics mode: summary, patterns, trends, recommendations, health (default: summary)"
+        },
         "days": {
           "type": "string",
-          "description": "Retention period in days for cleanup (default: 30)"
+          "description": "Days window for analytics or cleanup retention (default: 30)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum items to process/return (default: 100)"
+        },
+        "upsert": {
+          "type": "boolean",
+          "description": "Update existing entry if key exists on store (default: True)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for search/analytics"
         },
         "no_color": {
           "type": "boolean",
@@ -4926,31 +4954,6 @@
       "required": [
         "action"
       ]
-    }
-  },
-  {
-    "name": "memory_analytics",
-    "description": "Generates usage analytics, access patterns, growth trends, and optimization recommendations for persistent memory stores.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "analytics_type": {
-          "type": "string",
-          "description": "Type of analysis: summary, patterns, trends, recommendations (default: summary)"
-        },
-        "days": {
-          "type": "string",
-          "description": "Number of past days to include in analysis (default: 7)"
-        },
-        "no_color": {
-          "type": "boolean",
-          "description": "Disable ANSI color output"
-        },
-        "verbose": {
-          "type": "boolean",
-          "description": "Enable detailed debug log output"
-        }
-      }
     }
   },
   {
@@ -6009,6 +6012,98 @@
       },
       "required": [
         "target"
+      ]
+    }
+  },
+  {
+    "name": "vid2gif",
+    "description": "Orchestrate video-to-GIF conversion via lux → ffmpeg → gifsicle pipeline.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Source video URL (HTTP/HTTPS, supported by lux)."
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "Directory where the GIF and intermediate frames are written (default: ~/vid2gif)."
+        },
+        "gif_name": {
+          "type": "string",
+          "description": "Output GIF filename (default: derived from URL)."
+        },
+        "max_frames": {
+          "type": "string",
+          "description": "Maximum frames to extract from the video (default: 30)."
+        },
+        "interval": {
+          "type": "string",
+          "description": "Seconds between captured frames (default: 1.0)."
+        },
+        "width": {
+          "type": "string",
+          "description": "Frame width in pixels (default: 480)."
+        },
+        "format": {
+          "type": "string",
+          "description": "Intermediate frame format: png, jpg, webp (default: png)."
+        },
+        "delay": {
+          "type": "string",
+          "description": "Frame delay in 1/100ths of a second (default: 8)."
+        },
+        "loopcount": {
+          "type": "string",
+          "description": "GIF loop count (0 = forever, default: 0)."
+        },
+        "optimize": {
+          "type": "string",
+          "description": "<1-3>              Gifsicle optimization level (1-3; optional)."
+        },
+        "lossy": {
+          "type": "string",
+          "description": "Gifsicle lossiness (1-200; optional)."
+        },
+        "colors": {
+          "type": "string",
+          "description": "Reduce palette to N colors (2-256; optional)."
+        },
+        "start": {
+          "type": "string",
+          "description": "<HH:MM:SS|SEC>        Start time for frame extraction (default: 00:00:00)."
+        },
+        "end": {
+          "type": "string",
+          "description": "<HH:MM:SS|SEC>          End time for frame extraction (default: full video)."
+        },
+        "keep_frames": {
+          "type": "string",
+          "description": "Keep intermediate frames after GIF creation (default: delete)."
+        },
+        "audio_only": {
+          "type": "boolean",
+          "description": "Download audio-only track (passed to lux)."
+        },
+        "use_aria2": {
+          "type": "boolean",
+          "description": "Use aria2 for faster downloads (passed to lux)."
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output."
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Print all planned steps but do not execute."
+        }
+      },
+      "required": [
+        "url"
       ]
     }
   }
