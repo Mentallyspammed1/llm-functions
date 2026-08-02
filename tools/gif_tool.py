@@ -42,7 +42,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import logging
 import os
 import pickle
 import re
@@ -51,21 +50,21 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 # ==============================================================================
@@ -127,19 +126,17 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
 
 def _strip_ansi(text: str) -> str:
@@ -149,10 +146,15 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive, non-dumb terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text, stripping colors if stream is not a TTY or --no-color is set."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -186,14 +188,28 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [GIFSICLE TOOL v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [GIFSICLE TOOL v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode:{RESET}        {data.get('mode', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Inputs:{RESET}      {NEON_YELLOW}{len(data.get('input_files', []))} item(s){RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Output File:{RESET} {NEON_YELLOW}{data.get('output_file') or 'Stdout/In-Place'}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Output Size:{RESET} {NEON_GREEN}{_format_bytes(data.get('file_size_bytes'))}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}      {NEON_YELLOW}{data.get('cached', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode:{RESET}        {data.get('mode', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Inputs:{RESET}      {NEON_YELLOW}{len(data.get('input_files', []))} item(s){RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Output File:{RESET} {NEON_YELLOW}{data.get('output_file') or 'Stdout/In-Place'}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Output Size:{RESET} {NEON_GREEN}{_format_bytes(data.get('file_size_bytes'))}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}      {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -207,7 +223,9 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         for line in lines[:8]:
             _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}{line}{RESET}")
         if len(lines) > 8:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(lines) - 8} more lines{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(lines) - 8} more lines{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -215,6 +233,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
@@ -238,7 +257,8 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
@@ -266,6 +286,7 @@ def _parse_input_files(inputs: Union[str, list[str]]) -> list[str]:
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     """Caching utility with TTL support for expensive operations."""
@@ -332,6 +353,7 @@ class GracefulShutdown:
 # ==============================================================================
 # SECTION 5: Core Execution Engine
 # ==============================================================================
+
 
 def execute_tool(
     input_files: Union[str, list[str]],
@@ -494,7 +516,11 @@ def execute_tool(
             }
 
         if proc.returncode != 0:
-            err_msg = proc.stderr.strip() or proc.stdout.strip() or f"Process exited with code {proc.returncode}"
+            err_msg = (
+                proc.stderr.strip()
+                or proc.stdout.strip()
+                or f"Process exited with code {proc.returncode}"
+            )
             return {
                 "success": False,
                 "mode": exec_mode,
@@ -519,7 +545,9 @@ def execute_tool(
             "input_files": file_list,
             "output_file": output_file,
             "file_size_bytes": output_size,
-            "info_output": proc.stdout if exec_mode == "info" or not output_file else None,
+            "info_output": proc.stdout
+            if exec_mode == "info" or not output_file
+            else None,
             "cached": False,
             "context": get_execution_context(),
             "duration_ms": duration_ms,
@@ -555,10 +583,13 @@ def execute_tool(
 # SECTION 6: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination safely."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -578,6 +609,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 7: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     input_files: Union[str, list[str]],
@@ -674,20 +706,23 @@ def run(
 # SECTION 8: CLI Argument Parser & Entry Dispatcher
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gifsicle.py",
         description=f"AIChat Gifsicle Tool Wrapper v{__version__}",
     )
     parser.add_argument(
-        "--input-files", "-i",
+        "--input-files",
+        "-i",
         required=True,
         nargs="+",
         help="Input GIF file paths or frame ranges (required)",
     )
     parser.add_argument("--output-file", "-o", help="Write output to FILE")
     parser.add_argument(
-        "--mode", "-m",
+        "--mode",
+        "-m",
         choices=["merge", "batch", "explode", "info"],
         default="merge",
         help="Execution mode (default: merge)",
@@ -700,27 +735,51 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resize", help="Resize output GIF to WxH")
     parser.add_argument("--resize-width", help="Resize output GIF to width W")
     parser.add_argument("--resize-height", help="Resize output GIF to height H")
-    parser.add_argument("--resize-fit", help="Shrink GIF to fit WxH preserving aspect ratio")
+    parser.add_argument(
+        "--resize-fit", help="Shrink GIF to fit WxH preserving aspect ratio"
+    )
     parser.add_argument("--scale", help="Scale output GIF by XFACTOR[xYFACTOR]")
     parser.add_argument("--crop", help="Crop image (X,Y+WxH or X,Y-X2,Y2)")
-    parser.add_argument("--rotate", help="Rotate image (rotate-90, rotate-180, rotate-270)")
+    parser.add_argument(
+        "--rotate", help="Rotate image (rotate-90, rotate-180, rotate-270)"
+    )
     parser.add_argument("--transparent", "-t", help="Make specified color transparent")
     parser.add_argument("--disposal", "-D", help="Set frame disposal method")
-    parser.add_argument("--crop-transparency", action="store_true", help="Crop transparent borders")
-    parser.add_argument("--flip-horizontal", action="store_true", help="Flip image horizontally")
-    parser.add_argument("--flip-vertical", action="store_true", help="Flip image vertically")
-    parser.add_argument("--unoptimize", "-U", action="store_true", help="Unoptimize input GIFs")
-    parser.add_argument("--careful", action="store_true", help="Avoid bugs in other GIF software")
-    parser.add_argument("--quiet", "-w", action="store_true", help="Suppress warning messages")
-    parser.add_argument("--verbose", "-V", action="store_true", help="Verbose progress logging")
-    parser.add_argument("--use-cache", action="store_true", help="Enable result caching")
-    parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
+    parser.add_argument(
+        "--crop-transparency", action="store_true", help="Crop transparent borders"
+    )
+    parser.add_argument(
+        "--flip-horizontal", action="store_true", help="Flip image horizontally"
+    )
+    parser.add_argument(
+        "--flip-vertical", action="store_true", help="Flip image vertically"
+    )
+    parser.add_argument(
+        "--unoptimize", "-U", action="store_true", help="Unoptimize input GIFs"
+    )
+    parser.add_argument(
+        "--careful", action="store_true", help="Avoid bugs in other GIF software"
+    )
+    parser.add_argument(
+        "--quiet", "-w", action="store_true", help="Suppress warning messages"
+    )
+    parser.add_argument(
+        "--verbose", "-V", action="store_true", help="Verbose progress logging"
+    )
+    parser.add_argument(
+        "--use-cache", action="store_true", help="Enable result caching"
+    )
+    parser.add_argument(
+        "--no-color", action="store_true", help="Disable ANSI color output"
+    )
     return parser
 
 
 if __name__ == "__main__":
     # Support for single JSON string parameter passed by AIChat tool callers
-    if len(sys.argv) == 2 and (sys.argv[1].startswith("{") or sys.argv[1].startswith("[")):
+    if len(sys.argv) == 2 and (
+        sys.argv[1].startswith("{") or sys.argv[1].startswith("[")
+    ):
         try:
             raw_data = json.loads(sys.argv[1])
             normalized = {}

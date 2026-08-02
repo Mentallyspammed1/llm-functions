@@ -47,17 +47,16 @@ import enum
 import json
 import logging
 import os
-import pathlib
 import re
 import signal
 import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
 
 __version__ = "1.4.0-ENTERPRISE"
-__all__ = ["run", "execute_tool", "ToolJSONEncoder", "__version__"]
+__all__ = ["ToolJSONEncoder", "__version__", "execute_tool", "run"]
 
 # ==============================================================================
 # SECTION 1: Exit Codes & JSON Encoder
@@ -91,31 +90,36 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
+
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
+
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
+
 
 def _cprint(text: str, file: Any = None, no_color: bool = False) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
     print(text, file=target, flush=True)
+
 
 def print_ui(data: dict[str, Any], no_color: bool = False) -> None:
     if not _is_tty() or no_color:
@@ -124,67 +128,114 @@ def print_ui(data: dict[str, Any], no_color: bool = False) -> None:
     success = data.get("success", False)
     status_color = NEON_GREEN if success else NEON_RED
     status_symbol = "✓" if success else "✗"
-    
+
     border = "─" * 68
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}", no_color=no_color)
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [TASK MANAGER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {data.get('message', 'Complete')}{RESET}", no_color=no_color)
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [TASK MANAGER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {data.get('message', 'Complete')}{RESET}",
+        no_color=no_color,
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
 
     action = data.get("action")
     if action in {"list", "schedule", "timers"} and success:
         tasks = data.get("tasks", [])
         if not tasks:
-            _cprint(f"{NEON_PURPLE}│{RESET} {DIM}No tasks found.{RESET}", no_color=no_color)
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {DIM}No tasks found.{RESET}", no_color=no_color
+            )
         else:
-            labels = {"schedule": "Scheduled Tasks", "timers": "Active LLM Wakeup Timers", "list": f"Current Tasks ({len(tasks)})"}
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}{labels.get(action, 'Tasks')}:{RESET}", no_color=no_color)
+            labels = {
+                "schedule": "Scheduled Tasks",
+                "timers": "Active LLM Wakeup Timers",
+                "list": f"Current Tasks ({len(tasks)})",
+            }
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}{labels.get(action, 'Tasks')}:{RESET}",
+                no_color=no_color,
+            )
             for t in tasks:
                 status_icon = "☑" if t.get("completed") else "☐"
                 pri = t.get("priority", "medium")
-                pri_color = NEON_RED if pri == "high" else (NEON_YELLOW if pri == "medium" else NEON_GREEN)
-                timer_info = f" [⏱️ PID: {t.get('timer_pid')}]" if t.get("timer_active") else ""
-                sched_info = f" (Sched: {t.get('schedule_expr')})" if t.get("schedule_expr") else ""
-                _cprint(f"{NEON_PURPLE}│{RESET} {status_icon} [{t['id'][:6]}] {pri_color}{pri.upper()}{RESET} - {t['title']}{sched_info}{timer_info}", no_color=no_color)
+                pri_color = (
+                    NEON_RED
+                    if pri == "high"
+                    else (NEON_YELLOW if pri == "medium" else NEON_GREEN)
+                )
+                timer_info = (
+                    f" [⏱️ PID: {t.get('timer_pid')}]" if t.get("timer_active") else ""
+                )
+                sched_info = (
+                    f" (Sched: {t.get('schedule_expr')})"
+                    if t.get("schedule_expr")
+                    else ""
+                )
+                _cprint(
+                    f"{NEON_PURPLE}│{RESET} {status_icon} [{t['id'][:6]}] {pri_color}{pri.upper()}{RESET} - {t['title']}{sched_info}{timer_info}",
+                    no_color=no_color,
+                )
                 if t.get("desc"):
-                    _cprint(f"{NEON_PURPLE}│{RESET}     {DIM}{t['desc']}{RESET}", no_color=no_color)
-    else:
-        if "task" in data and data["task"]:
-            t = data["task"]
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Task ID:{RESET} {t['id']}", no_color=no_color)
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Title:{RESET}   {t['title']}", no_color=no_color)
+                    _cprint(
+                        f"{NEON_PURPLE}│{RESET}     {DIM}{t['desc']}{RESET}",
+                        no_color=no_color,
+                    )
+    elif data.get("task"):
+        t = data["task"]
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Task ID:{RESET} {t['id']}",
+            no_color=no_color,
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Title:{RESET}   {t['title']}",
+            no_color=no_color,
+        )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}   {data['error']}", no_color=no_color)
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}   {data['error']}",
+            no_color=no_color,
+        )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}", no_color=no_color)
+
 
 # ==============================================================================
 # SECTION 3: Schedule Parser & Core Logic
 # ==============================================================================
+
 
 def parse_schedule(schedule_str: str) -> int:
     """Parse advanced schedule strings (absolute datetime or complex relative durations like 2h30m, 1d) into minutes."""
     if not schedule_str:
         return 0
     schedule_str = schedule_str.strip().lower()
-    
+
     # Check compound relative duration (e.g. 2h30m, 1d12h)
     total_mins = 0
     matches = re.findall(r"(\d+)([smhd])", schedule_str)
     if matches:
         for val_str, unit in matches:
             val = int(val_str)
-            if unit == 's': total_mins += max(1, val // 60)
-            elif unit == 'm': total_mins += val
-            elif unit == 'h': total_mins += val * 60
-            elif unit == 'd': total_mins += val * 1440
+            if unit == "s":
+                total_mins += max(1, val // 60)
+            elif unit == "m":
+                total_mins += val
+            elif unit == "h":
+                total_mins += val * 60
+            elif unit == "d":
+                total_mins += val * 1440
         return total_mins
 
     # Try absolute datetime parsing
     try:
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d",
+        ):
             try:
                 dt = datetime.strptime(schedule_str, fmt)
                 delta_mins = (dt - datetime.now()).total_seconds() / 60.0
@@ -198,6 +249,7 @@ def parse_schedule(schedule_str: str) -> int:
         pass
     return 0
 
+
 def is_pid_running(pid: Optional[int]) -> bool:
     """Check if a background timer process PID is currently active."""
     if not pid:
@@ -208,7 +260,10 @@ def is_pid_running(pid: Optional[int]) -> bool:
         return False
     return True
 
-def resolve_task_by_prefix(tasks: list[dict[str, Any]], prefix: str) -> Optional[dict[str, Any]]:
+
+def resolve_task_by_prefix(
+    tasks: list[dict[str, Any]], prefix: str
+) -> Optional[dict[str, Any]]:
     """Safely resolve a task by ID prefix, returning the task or raising ValueError if ambiguous."""
     if not prefix:
         return None
@@ -218,6 +273,7 @@ def resolve_task_by_prefix(tasks: list[dict[str, Any]], prefix: str) -> Optional
     elif len(matches) > 1:
         raise ValueError(f"Ambiguous task ID prefix '{prefix}' matches multiple tasks.")
     return None
+
 
 def load_tasks(file_path: Path) -> list[dict[str, Any]]:
     if not file_path.exists():
@@ -236,11 +292,14 @@ def load_tasks(file_path: Path) -> list[dict[str, Any]]:
     except Exception:
         return []
 
+
 def save_tasks(file_path: Path, tasks: list[dict[str, Any]]) -> None:
     file_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = file_path.with_name(f".{file_path.name}.tmp_{os.getpid()}")
     try:
-        temp_path.write_text(json.dumps(tasks, indent=2, cls=ToolJSONEncoder), encoding="utf-8")
+        temp_path.write_text(
+            json.dumps(tasks, indent=2, cls=ToolJSONEncoder), encoding="utf-8"
+        )
         temp_path.replace(file_path)
     finally:
         if temp_path.exists():
@@ -248,6 +307,7 @@ def save_tasks(file_path: Path, tasks: list[dict[str, Any]]) -> None:
                 temp_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
 
 class GracefulShutdown:
     """Signal handler for graceful cancellation."""
@@ -305,7 +365,7 @@ def execute_tool(
     no_color: bool = False,
     verbose: bool = False,
 ) -> dict[str, Any]:
-    
+
     if verbose:
         logging.basicConfig(level=logging.DEBUG, format="[DEBUG] %(message)s")
         logging.debug(f"Executing task action: {action}")
@@ -324,8 +384,13 @@ def execute_tool(
     try:
         if action == "add":
             if not title:
-                return {"success": False, "action": action, "error": "--title is required for add.", "exit_code": EXIT_INVALID_INPUT}
-            
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": "--title is required for add.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
+
             new_task = {
                 "id": str(uuid.uuid4()),
                 "title": title,
@@ -357,42 +422,43 @@ def execute_tool(
                 "tags": [t.strip() for t in tags.split(",")] if tags else [],
                 "priority_boost_mins": priority_boost if priority_boost > 0 else None,
                 "subtasks": [],
-                "timer_pid": None
+                "timer_pid": None,
             }
-            
+
             msg = "Task added successfully."
             if effective_wakeup > 0:
                 import subprocess
+
                 wakeup_seconds = effective_wakeup * 60
                 sleeper_script = f"""
 import time, json, os, sys, subprocess, urllib.request, random, re
 from datetime import datetime
 
-task_id = "{new_task['id']}"
-task_title = {repr(new_task['title'])}
+task_id = "{new_task["id"]}"
+task_title = {new_task["title"]!r}
 recurring = {recurring}
-depends_on = {repr(depends_on)}
-webhook = {repr(webhook)}
+depends_on = {depends_on!r}
+webhook = {webhook!r}
 retry_count = {retry_count}
 timeout_sec = {timeout if timeout > 0 else 300}
-context_file = {repr(context_file)}
-assignee = {repr(assignee)}
+context_file = {context_file!r}
+assignee = {assignee!r}
 auto_resolve = {auto_resolve}
-condition_cmd = {repr(condition_cmd)}
+condition_cmd = {condition_cmd!r}
 max_runs = {max_runs}
 jitter = {jitter}
-escalate_on_fail = {repr(escalate_on_fail)}
+escalate_on_fail = {escalate_on_fail!r}
 require_approval = {require_approval}
 notify_on_start = {notify_on_start}
-output_file = {repr(output_file)}
+output_file = {output_file!r}
 silent_success = {silent_success}
-env_vars_str = {repr(env_vars)}
+env_vars_str = {env_vars!r}
 auto_subtasks = {auto_subtasks}
 priority_boost_mins = {priority_boost if priority_boost > 0 else 0}
 created_time = datetime.now()
 
 def write_llm(data):
-    out_path = "{os.environ.get('LLM_OUTPUT', '/dev/stdout')}"
+    out_path = "{os.environ.get("LLM_OUTPUT", "/dev/stdout")}"
     if out_path not in {{"/dev/stdout", "/dev/fd/1", "-"}}:
         try:
             with open(out_path, "a", encoding="utf-8") as f:
@@ -436,7 +502,7 @@ def run_agent(current_assignee):
     # If the assignee is a python script, we don't want to pass the raw prompt 
     # as a single string if it contains CLI arguments. We split it if it looks like CLI arguments.
     # Otherwise we pass it as a single argument.
-    prompt_str = {repr(agent_prompt)}
+    prompt_str = {agent_prompt!r}
     if cmd.endswith(".py") and prompt_str.startswith("-"):
         import shlex
         prompt_args.extend(shlex.split(prompt_str))
@@ -512,7 +578,7 @@ while True:
     
     agent_response = None
     agent_success = False
-    if {repr(agent_prompt)}:
+    if {agent_prompt!r}:
         agent_success, agent_response = run_agent(assignee)
         if not agent_success and escalate_on_fail:
             write_llm({{"success": False, "action": "escalate", "message": f"⚠️ Escalating to {{escalate_on_fail}}", "task_id": task_id}})
@@ -561,13 +627,24 @@ while True:
             pass
         break
 """
-                proc = subprocess.Popen([sys.executable, "-c", sleeper_script], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                proc = subprocess.Popen(
+                    [sys.executable, "-c", sleeper_script],
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
                 new_task["timer_pid"] = proc.pid
                 msg += f" Wakeup timer process spawned (PID: {proc.pid})."
 
             tasks.append(new_task)
             save_tasks(file_path, tasks)
-            return {"success": True, "action": action, "message": msg, "task": new_task, "exit_code": EXIT_SUCCESS}
+            return {
+                "success": True,
+                "action": action,
+                "message": msg,
+                "task": new_task,
+                "exit_code": EXIT_SUCCESS,
+            }
 
         elif action == "list":
             pri_map = {"high": 0, "medium": 1, "low": 2}
@@ -575,9 +652,19 @@ while True:
                 t["timer_active"] = is_pid_running(t.get("timer_pid"))
             sorted_tasks = sorted(
                 tasks,
-                key=lambda t: (t.get("completed", False), pri_map.get(t.get("priority", "medium"), 1), t.get("created_at", ""))
+                key=lambda t: (
+                    t.get("completed", False),
+                    pri_map.get(t.get("priority", "medium"), 1),
+                    t.get("created_at", ""),
+                ),
             )
-            return {"success": True, "action": action, "message": "Tasks retrieved.", "tasks": sorted_tasks, "exit_code": EXIT_SUCCESS}
+            return {
+                "success": True,
+                "action": action,
+                "message": "Tasks retrieved.",
+                "tasks": sorted_tasks,
+                "exit_code": EXIT_SUCCESS,
+            }
 
         elif action == "schedule":
             scheduled_tasks = []
@@ -585,7 +672,13 @@ while True:
                 if t.get("wakeup_mins") or t.get("schedule_expr"):
                     t["timer_active"] = is_pid_running(t.get("timer_pid"))
                     scheduled_tasks.append(t)
-            return {"success": True, "action": action, "message": "Scheduled tasks retrieved.", "tasks": scheduled_tasks, "exit_code": EXIT_SUCCESS}
+            return {
+                "success": True,
+                "action": action,
+                "message": "Scheduled tasks retrieved.",
+                "tasks": scheduled_tasks,
+                "exit_code": EXIT_SUCCESS,
+            }
 
         elif action == "timers":
             active_timers = []
@@ -598,19 +691,40 @@ while True:
                     t["timer_pid"] = None
                     t["timer_active"] = False
             save_tasks(file_path, tasks)
-            return {"success": True, "action": action, "message": "Active wakeup timers retrieved.", "tasks": active_timers, "exit_code": EXIT_SUCCESS}
+            return {
+                "success": True,
+                "action": action,
+                "message": "Active wakeup timers retrieved.",
+                "tasks": active_timers,
+                "exit_code": EXIT_SUCCESS,
+            }
 
         elif action == "cancel-timer":
             if not task_id:
-                return {"success": False, "action": action, "error": "--task-id is required to cancel a timer.", "exit_code": EXIT_INVALID_INPUT}
-            
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": "--task-id is required to cancel a timer.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
+
             try:
                 target = resolve_task_by_prefix(tasks, task_id)
             except ValueError as err:
-                return {"success": False, "action": action, "error": str(err), "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": str(err),
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             if not target:
-                return {"success": False, "action": action, "error": f"Task {task_id} not found.", "exit_code": EXIT_ERROR}
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": f"Task {task_id} not found.",
+                    "exit_code": EXIT_ERROR,
+                }
 
             pid = target.get("timer_pid")
             if is_pid_running(pid):
@@ -622,19 +736,40 @@ while True:
             target["wakeup_mins"] = None
             target["schedule_expr"] = None
             save_tasks(file_path, tasks)
-            return {"success": True, "action": action, "message": f"Wakeup timer cancelled for task {target['title']}.", "task": target, "exit_code": EXIT_SUCCESS}
+            return {
+                "success": True,
+                "action": action,
+                "message": f"Wakeup timer cancelled for task {target['title']}.",
+                "task": target,
+                "exit_code": EXIT_SUCCESS,
+            }
 
         elif action == "complete":
             if not task_id:
-                return {"success": False, "action": action, "error": "--task-id is required to complete.", "exit_code": EXIT_INVALID_INPUT}
-            
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": "--task-id is required to complete.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
+
             try:
                 target = resolve_task_by_prefix(tasks, task_id)
             except ValueError as err:
-                return {"success": False, "action": action, "error": str(err), "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": str(err),
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             if not target:
-                return {"success": False, "action": action, "error": f"Task {task_id} not found.", "exit_code": EXIT_ERROR}
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": f"Task {task_id} not found.",
+                    "exit_code": EXIT_ERROR,
+                }
 
             target["completed"] = True
             pid = target.get("timer_pid")
@@ -645,20 +780,41 @@ while True:
                     pass
             target["timer_pid"] = None
             save_tasks(file_path, tasks)
-            return {"success": True, "action": action, "message": "Task marked as completed.", "task": target, "exit_code": EXIT_SUCCESS}
+            return {
+                "success": True,
+                "action": action,
+                "message": "Task marked as completed.",
+                "task": target,
+                "exit_code": EXIT_SUCCESS,
+            }
 
         elif action == "delete":
             if not task_id:
-                return {"success": False, "action": action, "error": "--task-id is required to delete.", "exit_code": EXIT_INVALID_INPUT}
-            
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": "--task-id is required to delete.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
+
             try:
                 target = resolve_task_by_prefix(tasks, task_id)
             except ValueError as err:
-                return {"success": False, "action": action, "error": str(err), "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": str(err),
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             if not target:
-                return {"success": False, "action": action, "error": f"Task {task_id} not found.", "exit_code": EXIT_ERROR}
-            
+                return {
+                    "success": False,
+                    "action": action,
+                    "error": f"Task {task_id} not found.",
+                    "exit_code": EXIT_ERROR,
+                }
+
             pid = target.get("timer_pid")
             if is_pid_running(pid):
                 try:
@@ -668,8 +824,13 @@ while True:
 
             filtered = [t for t in tasks if t["id"] != target["id"]]
             save_tasks(file_path, filtered)
-            return {"success": True, "action": action, "message": "Task deleted successfully.", "exit_code": EXIT_SUCCESS}
-            
+            return {
+                "success": True,
+                "action": action,
+                "message": "Task deleted successfully.",
+                "exit_code": EXIT_SUCCESS,
+            }
+
         elif action == "clear":
             for t in tasks:
                 pid = t.get("timer_pid")
@@ -679,19 +840,37 @@ while True:
                     except OSError:
                         pass
             save_tasks(file_path, [])
-            return {"success": True, "action": action, "message": "All tasks and active timers cleared.", "exit_code": EXIT_SUCCESS}
+            return {
+                "success": True,
+                "action": action,
+                "message": "All tasks and active timers cleared.",
+                "exit_code": EXIT_SUCCESS,
+            }
 
         else:
-            return {"success": False, "action": action, "error": f"Unknown action: {action}", "exit_code": EXIT_INVALID_INPUT}
+            return {
+                "success": False,
+                "action": action,
+                "error": f"Unknown action: {action}",
+                "exit_code": EXIT_INVALID_INPUT,
+            }
 
     except Exception as exc:
-        return {"success": False, "action": action, "error": f"Execution failure: {exc}", "exit_code": EXIT_ERROR}
+        return {
+            "success": False,
+            "action": action,
+            "error": f"Execution failure: {exc}",
+            "exit_code": EXIT_ERROR,
+        }
     finally:
         shutdown.restore()
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
@@ -704,6 +883,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
         except OSError:
             sys.stdout.write(json_payload)
             sys.stdout.flush()
+
 
 def run(
     action: str,
@@ -774,40 +954,165 @@ def run(
     print_ui(result, no_color=no_color)
     write_llm_output(result)
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="AIChat Task Management Tool")
-    parser.add_argument("--action", required=True, choices=["add", "list", "complete", "delete", "clear", "schedule", "timers", "cancel-timer"])
+    parser.add_argument(
+        "--action",
+        required=True,
+        choices=[
+            "add",
+            "list",
+            "complete",
+            "delete",
+            "clear",
+            "schedule",
+            "timers",
+            "cancel-timer",
+        ],
+    )
     parser.add_argument("--title", default="")
     parser.add_argument("--desc", default="")
-    parser.add_argument("--priority", choices=["high", "medium", "low"], default="medium")
+    parser.add_argument(
+        "--priority", choices=["high", "medium", "low"], default="medium"
+    )
     parser.add_argument("--task-id", dest="task_id", default="")
     parser.add_argument("--file", default="tasks.json")
     parser.add_argument("--wakeup", type=int, default=0, help="Wakeup timer in minutes")
-    parser.add_argument("--schedule", default="", help="Schedule task at absolute time or relative duration")
-    parser.add_argument("--agent-prompt", dest="agent_prompt", default="", help="Agent prompt to auto-execute via aichat upon wakeup")
-    parser.add_argument("--recurring", type=int, default=0, help="Make the wakeup timer recurring every N minutes")
-    parser.add_argument("--depends-on", dest="depends_on", default="", help="Task ID this task depends on")
-    parser.add_argument("--webhook", default="", help="Webhook URL to POST when agent finishes")
-    parser.add_argument("--retry-count", dest="retry_count", type=int, default=0, help="Number of times to retry agent prompt on failure")
-    parser.add_argument("--timeout", type=int, default=0, help="Timeout in seconds for agent execution")
-    parser.add_argument("--auto-subtasks", dest="auto_subtasks", action="store_true", default=False, help="Parse agent output to auto-create subtasks")
-    parser.add_argument("--context-file", dest="context_file", default="", help="File path to include as context for the agent")
-    parser.add_argument("--assignee", default="aichat", help="CLI tool/agent to use (default: aichat)")
-    parser.add_argument("--auto-resolve", dest="auto_resolve", action="store_true", default=False, help="Automatically mark task completed when agent succeeds")
-    parser.add_argument("--condition-cmd", dest="condition_cmd", default="", help="Only trigger agent if this shell command exits with 0")
-    parser.add_argument("--max-runs", dest="max_runs", type=int, default=0, help="Terminate recurring task after N successful runs")
-    parser.add_argument("--jitter", type=int, default=0, help="Add random jitter to the wakeup timer")
-    parser.add_argument("--escalate-on-fail", dest="escalate_on_fail", default="", help="Fallback agent if all retries fail")
-    parser.add_argument("--require-approval", dest="require_approval", action="store_true", default=False, help="Pause and wait for user approval before agent runs")
-    parser.add_argument("--notify-on-start", dest="notify_on_start", action="store_true", default=False, help="Send a notification when the agent begins execution")
-    parser.add_argument("--output-file", dest="output_file", default="", help="Save agent stdout to a specific file")
-    parser.add_argument("--silent-success", dest="silent_success", action="store_true", default=False, help="Only notify LLM_OUTPUT if the agent fails")
-    parser.add_argument("--env-vars", dest="env_vars", default="", help="Custom environment variables for agent (JSON)")
-    parser.add_argument("--tags", default="", help="Comma-separated tags (e.g., trading,urgent)")
-    parser.add_argument("--priority-boost", dest="priority_boost", type=int, default=0, help="Boost task to HIGH priority after N minutes")
+    parser.add_argument(
+        "--schedule",
+        default="",
+        help="Schedule task at absolute time or relative duration",
+    )
+    parser.add_argument(
+        "--agent-prompt",
+        dest="agent_prompt",
+        default="",
+        help="Agent prompt to auto-execute via aichat upon wakeup",
+    )
+    parser.add_argument(
+        "--recurring",
+        type=int,
+        default=0,
+        help="Make the wakeup timer recurring every N minutes",
+    )
+    parser.add_argument(
+        "--depends-on",
+        dest="depends_on",
+        default="",
+        help="Task ID this task depends on",
+    )
+    parser.add_argument(
+        "--webhook", default="", help="Webhook URL to POST when agent finishes"
+    )
+    parser.add_argument(
+        "--retry-count",
+        dest="retry_count",
+        type=int,
+        default=0,
+        help="Number of times to retry agent prompt on failure",
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=0, help="Timeout in seconds for agent execution"
+    )
+    parser.add_argument(
+        "--auto-subtasks",
+        dest="auto_subtasks",
+        action="store_true",
+        default=False,
+        help="Parse agent output to auto-create subtasks",
+    )
+    parser.add_argument(
+        "--context-file",
+        dest="context_file",
+        default="",
+        help="File path to include as context for the agent",
+    )
+    parser.add_argument(
+        "--assignee", default="aichat", help="CLI tool/agent to use (default: aichat)"
+    )
+    parser.add_argument(
+        "--auto-resolve",
+        dest="auto_resolve",
+        action="store_true",
+        default=False,
+        help="Automatically mark task completed when agent succeeds",
+    )
+    parser.add_argument(
+        "--condition-cmd",
+        dest="condition_cmd",
+        default="",
+        help="Only trigger agent if this shell command exits with 0",
+    )
+    parser.add_argument(
+        "--max-runs",
+        dest="max_runs",
+        type=int,
+        default=0,
+        help="Terminate recurring task after N successful runs",
+    )
+    parser.add_argument(
+        "--jitter", type=int, default=0, help="Add random jitter to the wakeup timer"
+    )
+    parser.add_argument(
+        "--escalate-on-fail",
+        dest="escalate_on_fail",
+        default="",
+        help="Fallback agent if all retries fail",
+    )
+    parser.add_argument(
+        "--require-approval",
+        dest="require_approval",
+        action="store_true",
+        default=False,
+        help="Pause and wait for user approval before agent runs",
+    )
+    parser.add_argument(
+        "--notify-on-start",
+        dest="notify_on_start",
+        action="store_true",
+        default=False,
+        help="Send a notification when the agent begins execution",
+    )
+    parser.add_argument(
+        "--output-file",
+        dest="output_file",
+        default="",
+        help="Save agent stdout to a specific file",
+    )
+    parser.add_argument(
+        "--silent-success",
+        dest="silent_success",
+        action="store_true",
+        default=False,
+        help="Only notify LLM_OUTPUT if the agent fails",
+    )
+    parser.add_argument(
+        "--env-vars",
+        dest="env_vars",
+        default="",
+        help="Custom environment variables for agent (JSON)",
+    )
+    parser.add_argument(
+        "--tags", default="", help="Comma-separated tags (e.g., trading,urgent)"
+    )
+    parser.add_argument(
+        "--priority-boost",
+        dest="priority_boost",
+        type=int,
+        default=0,
+        help="Boost task to HIGH priority after N minutes",
+    )
     parser.add_argument("--no-color", action="store_true", default=False)
-    parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Enable detailed debug logging")
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        default=False,
+        help="Enable detailed debug logging",
+    )
     return parser
+
 
 if __name__ == "__main__":
     args = _build_parser().parse_args()

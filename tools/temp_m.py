@@ -2,6 +2,7 @@
 
 These are class methods intended to be merged into the main Bybit trading class.
 """
+
 import time
 from typing import List, Optional
 
@@ -9,40 +10,70 @@ from typing import List, Optional
 class _StagedMethods:
     """Placeholder class for methods awaiting integration."""
 
-    def micro_scalp(self, symbol: str, qty: float, fee_rate: float, target_profit: float, category: str = "linear") -> dict:
+    def micro_scalp(
+        self,
+        symbol: str,
+        qty: float,
+        fee_rate: float,
+        target_profit: float,
+        category: str = "linear",
+    ) -> dict:
         """Executes a phased Maker-only Buy -> Sell trade."""
-        
+
         # 1. Get Best Bid
-        ob = self.get_orderbook(symbol=symbol, limit=1, category=category).get("result", {})
+        ob = self.get_orderbook(symbol=symbol, limit=1, category=category).get(
+            "result", {}
+        )
         bids = ob.get("b", [])
-        if not bids: return {"status": "error", "msg": "No bid data"}
+        if not bids:
+            return {"status": "error", "msg": "No bid data"}
         buy_price = float(bids[0][0])
-        
+
         # 2. Phase A: Maker Buy
         self.alert(f"Phase A: Placing Maker Buy for {symbol} @ {buy_price}", "INFO")
-        buy_order = self.place_order(symbol=symbol, side="Buy", qty=qty, price=buy_price, order_type="Limit", time_in_force="PostOnly", category=category)
-        if buy_order.get("status") == "error": return buy_order
-        
+        buy_order = self.place_order(
+            symbol=symbol,
+            side="Buy",
+            qty=qty,
+            price=buy_price,
+            order_type="Limit",
+            time_in_force="PostOnly",
+            category=category,
+        )
+        if buy_order.get("status") == "error":
+            return buy_order
+
         # 3. Wait for Fill (Looping REST check)
         order_id = buy_order.get("orderId")
         filled = False
-        for _ in range(10): # 10s wait
+        for _ in range(10):  # 10s wait
             time.sleep(1)
-            orders = self.get_open_orders(symbol=symbol, category=category).get("list", [])
+            orders = self.get_open_orders(symbol=symbol, category=category).get(
+                "list", []
+            )
             if not any(o["orderId"] == order_id for o in orders):
                 filled = True
                 break
-        
+
         if not filled:
             self.cancel_order(symbol=symbol, order_id=order_id, category=category)
             return {"status": "error", "msg": "Buy order timed out"}
-        
+
         # 4. Phase B: Maker Sell
         # P_sell = ( (Q * P_buy) + Profit ) / (Q * (1-F)^2)
-        sell_price = ((qty * buy_price) + target_profit) / (qty * (1 - fee_rate)**2)
+        sell_price = ((qty * buy_price) + target_profit) / (qty * (1 - fee_rate) ** 2)
         self.alert(f"Phase B: Placing Maker Sell @ {round(sell_price, 4)}", "INFO")
-        
-        return self.place_order(symbol=symbol, side="Sell", qty=qty, price=round(sell_price, 4), order_type="Limit", time_in_force="PostOnly", reduce_only=True, category=category)
+
+        return self.place_order(
+            symbol=symbol,
+            side="Sell",
+            qty=qty,
+            price=round(sell_price, 4),
+            order_type="Limit",
+            time_in_force="PostOnly",
+            reduce_only=True,
+            category=category,
+        )
 
     # ... (existing methods)
 
@@ -61,7 +92,7 @@ class _StagedMethods:
             "vwap": lambda: self.calculate_vwap(symbol, interval),
             "atr": lambda: self.calculate_atr(symbol, interval),
             "stoch": lambda: self.calculate_stochastic(symbol, interval),
-            "hma": lambda: self.calculate_hma(symbol, interval)
+            "hma": lambda: self.calculate_hma(symbol, interval),
         }
         results = {name: func() for name, func in indicator_map.items()}
         return {"status": "ok", "symbol": symbol, "indicators": results}
@@ -76,8 +107,7 @@ class _StagedMethods:
             entries = [
                 e
                 for e in entries
-                if e.get("payload", {}).get("symbol", "").upper()
-                == symbol.upper()
+                if e.get("payload", {}).get("symbol", "").upper() == symbol.upper()
             ]
         return entries[-limit:]
 
@@ -93,7 +123,9 @@ class _StagedMethods:
 
 def run():
     """Staging file — not meant to be called directly."""
-    print('{"status": "info", "msg": "temp_m.py is a staging file, not a standalone tool"}')
+    print(
+        '{"status": "info", "msg": "temp_m.py is a staging file, not a standalone tool"}'
+    )
 
 
 if __name__ == "__main__":

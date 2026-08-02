@@ -36,15 +36,15 @@ __version__ = "1.1.0"
 # SECTION 1: Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[mGKHF]")
 
@@ -84,13 +84,25 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [PERSISTENT MEMORY MANAGER]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [PERSISTENT MEMORY MANAGER]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}       {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Type:{RESET}         {data.get('type', 'context')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Session:{RESET}      {data.get('session', 'default')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}        {NEON_GREEN}{data.get('count', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}       {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Type:{RESET}         {data.get('type', 'context')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Session:{RESET}      {data.get('session', 'default')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}        {NEON_GREEN}{data.get('count', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -103,7 +115,11 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         for item in results[:5]:
             k = item.get("key", "N/A")
             v = str(item.get("value", ""))[:45]
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {BOLD}{k}{RESET}: {DIM}{v}...{RESET}" if len(str(item.get("value", ""))) > 45 else f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {BOLD}{k}{RESET}: {v}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {BOLD}{k}{RESET}: {DIM}{v}...{RESET}"
+                if len(str(item.get("value", ""))) > 45
+                else f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {BOLD}{k}{RESET}: {v}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -111,6 +127,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 2: Core Logic Implementation
 # ==============================================================================
+
 
 def execute_tool(
     action: str,
@@ -128,7 +145,7 @@ def execute_tool(
     """
     start_time = time.perf_counter()
     action_clean = action.lower().strip()
-    
+
     root_dir = Path(os.environ.get("LLM_ROOT_DIR", os.getcwd())).resolve()
     memory_dir = root_dir / "memory"
     memory_dir.mkdir(parents=True, exist_ok=True)
@@ -147,9 +164,17 @@ def execute_tool(
         # ----------------------------------------------------------------------
         if action_clean == "store":
             if not key:
-                return {"success": False, "error": "Missing required argument: --key", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": "Missing required argument: --key",
+                    "exit_code": 1,
+                }
             if not value:
-                return {"success": False, "error": "Missing required argument: --value", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": "Missing required argument: --value",
+                    "exit_code": 1,
+                }
 
             entry = {
                 "key": key.strip(),
@@ -157,7 +182,7 @@ def execute_tool(
                 "type": type_clean,
                 "session": session_clean,
                 "tags": tag_list,
-                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
 
             with open(memory_file, "a", encoding="utf-8") as f:
@@ -170,13 +195,22 @@ def execute_tool(
         # ----------------------------------------------------------------------
         elif action_clean == "retrieve":
             if not key:
-                return {"success": False, "error": "Missing required argument: --key", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": "Missing required argument: --key",
+                    "exit_code": 1,
+                }
             if not memory_file.exists():
-                return {"success": False, "error": f"No memory store found for type '{type_clean}'", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": f"No memory store found for type '{type_clean}'",
+                    "exit_code": 1,
+                }
 
-            with open(memory_file, "r", encoding="utf-8") as f:
+            with open(memory_file, encoding="utf-8") as f:
                 for line in f:
-                    if not line.strip(): continue
+                    if not line.strip():
+                        continue
                     item = json.loads(line)
                     if item.get("key") == key.strip():
                         results.append(item)
@@ -187,19 +221,32 @@ def execute_tool(
         elif action_clean == "search":
             query = (value or key or "").lower().strip()
             if not query:
-                return {"success": False, "error": "Search query required in --value or --key", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": "Search query required in --value or --key",
+                    "exit_code": 1,
+                }
             if not memory_file.exists():
-                return {"success": False, "error": f"No memory store found for type '{type_clean}'", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": f"No memory store found for type '{type_clean}'",
+                    "exit_code": 1,
+                }
 
-            with open(memory_file, "r", encoding="utf-8") as f:
+            with open(memory_file, encoding="utf-8") as f:
                 for line in f:
-                    if not line.strip(): continue
+                    if not line.strip():
+                        continue
                     item = json.loads(line)
                     item_val = str(item.get("value", "")).lower()
                     item_key = str(item.get("key", "")).lower()
                     item_tags = [str(t).lower() for t in item.get("tags", [])]
 
-                    if query in item_val or query in item_key or any(query in t for t in item_tags):
+                    if (
+                        query in item_val
+                        or query in item_key
+                        or any(query in t for t in item_tags)
+                    ):
                         results.append(item)
 
         # ----------------------------------------------------------------------
@@ -214,29 +261,47 @@ def execute_tool(
         # ----------------------------------------------------------------------
         elif action_clean == "export":
             if not memory_file.exists():
-                return {"success": False, "error": f"No memory store found for type '{type_clean}'", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": f"No memory store found for type '{type_clean}'",
+                    "exit_code": 1,
+                }
 
             entries = []
-            with open(memory_file, "r", encoding="utf-8") as f:
+            with open(memory_file, encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         entries.append(json.loads(line))
 
-            export_filename = f"{type_clean}_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            export_filename = (
+                f"{type_clean}_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            )
             export_path = memory_dir / export_filename
-            export_path.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
-            results.append({"export_path": str(export_path), "exported_count": len(entries)})
+            export_path.write_text(
+                json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            results.append(
+                {"export_path": str(export_path), "exported_count": len(entries)}
+            )
 
         # ----------------------------------------------------------------------
         # ACTION 6: IMPORT
         # ----------------------------------------------------------------------
         elif action_clean == "import":
             if not value:
-                return {"success": False, "error": "Missing import file path in --value", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": "Missing import file path in --value",
+                    "exit_code": 1,
+                }
 
             import_path = Path(value).expanduser().resolve()
             if not import_path.exists():
-                return {"success": False, "error": f"Import file not found: {import_path}", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": f"Import file not found: {import_path}",
+                    "exit_code": 1,
+                }
 
             raw_text = import_path.read_text(encoding="utf-8")
             imported_entries = []
@@ -269,14 +334,17 @@ def execute_tool(
 
             for jsonl_file in memory_dir.glob("*.jsonl"):
                 retained_local = []
-                with open(jsonl_file, "r", encoding="utf-8") as f:
+                with open(jsonl_file, encoding="utf-8") as f:
                     for line in f:
-                        if not line.strip(): continue
+                        if not line.strip():
+                            continue
                         item = json.loads(line)
                         ts_str = item.get("timestamp")
                         if ts_str:
                             try:
-                                item_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                item_dt = datetime.fromisoformat(
+                                    ts_str.replace("Z", "+00:00")
+                                )
                                 if item_dt >= cutoff:
                                     retained_local.append(item)
                             except ValueError:
@@ -287,13 +355,17 @@ def execute_tool(
                 with open(jsonl_file, "w", encoding="utf-8") as f:
                     for item in retained_local:
                         f.write(json.dumps(item, ensure_ascii=False) + "\n")
-                
+
                 retained_entries.extend(retained_local)
 
             results = retained_entries
 
         else:
-            return {"success": False, "error": f"Unknown action: '{action}'", "exit_code": 1}
+            return {
+                "success": False,
+                "error": f"Unknown action: '{action}'",
+                "exit_code": 1,
+            }
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
@@ -305,20 +377,21 @@ def execute_tool(
             "count": len(results),
             "results": results,
             "duration_ms": duration_ms,
-            "exit_code": 0
+            "exit_code": 0,
         }
 
     except Exception as exc:
         return {
             "success": False,
             "error": f"Memory management failed: {exc}",
-            "exit_code": 1
+            "exit_code": 1,
         }
 
 
 # ==============================================================================
 # SECTION 3: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
+
 
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination."""
@@ -343,6 +416,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 4: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     action: str,
@@ -370,7 +444,7 @@ def run(
         no_color=no_color,
         verbose=verbose,
     )
-    
+
     print_human_readable_ui(result, no_color=no_color)
     write_llm_output(result)
 
@@ -379,37 +453,43 @@ def run(
 # SECTION 5: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="memory_manager.py",
         description=f"AIChat Persistent Memory Manager v{__version__}",
     )
     parser.add_argument(
-        "--action", "-a",
+        "--action",
+        "-a",
         required=True,
         choices=["store", "retrieve", "search", "clear", "export", "import", "cleanup"],
         help="Action to perform (required)",
     )
     parser.add_argument(
-        "--key", "-k",
+        "--key",
+        "-k",
         type=str,
         default=None,
         help="Memory key or identifier",
     )
     parser.add_argument(
-        "--value", "-v",
+        "--value",
+        "-v",
         type=str,
         default=None,
         help="Value to store, query string, or import file path",
     )
     parser.add_argument(
-        "--type", "-t",
+        "--type",
+        "-t",
         default="context",
         choices=["conversation", "preference", "context", "knowledge"],
         help="Memory type (default: context)",
     )
     parser.add_argument(
-        "--session", "-s",
+        "--session",
+        "-s",
         default="default",
         help="Session identifier (default: default)",
     )
@@ -454,7 +534,7 @@ if __name__ == "__main__":
         no_color=args.no_color,
         verbose=args.verbose,
     )
-    
+
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)
     sys.exit(res.get("exit_code", 0))

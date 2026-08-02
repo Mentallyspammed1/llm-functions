@@ -1,7 +1,6 @@
 import json
 import socket
 import subprocess
-import os
 
 
 def get_public_ip() -> str:
@@ -55,7 +54,8 @@ def get_network_interfaces() -> dict:
                     ipv4_addrs = [
                         {"address": a.get("local"), "netmask": a.get("prefixlen")}
                         for a in addrs
-                        if a.get("family") == "inet" and not a.get("local", "").startswith("127.")
+                        if a.get("family") == "inet"
+                        and not a.get("local", "").startswith("127.")
                     ]
                     if ipv4_addrs:
                         interfaces[name] = ipv4_addrs

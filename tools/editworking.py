@@ -245,9 +245,7 @@ class FileEditor:
     # Path validation
     # -------------------------------------------------------------------------
 
-    def _validate_path(
-        self, file_path: str, allow_write: bool = True
-    ) -> Path | None:
+    def _validate_path(self, file_path: str, allow_write: bool = True) -> Path | None:
         """
         Return a resolved, sandbox-confined Path or None on any violation.
 
@@ -634,7 +632,7 @@ def read_lines(
     except (ValueError, TypeError):
         return {
             "success": False,
-            "error": "start_line and end_line must be integers or convertible to integers"
+            "error": "start_line and end_line must be integers or convertible to integers",
         }
 
     if start_line < 1 or end_line < start_line:
@@ -1038,6 +1036,7 @@ def file_search(
         def match_fn(line: str) -> bool:
             return bool(comp.search(line))
     elif case_sensitive:
+
         def match_fn(line: str) -> bool:
             return pattern in line if isinstance(line, str) else False
     else:
@@ -1655,6 +1654,7 @@ def grep_dir(
         def match_fn(line: str) -> bool:
             return bool(comp.search(line))
     elif case_sensitive:
+
         def match_fn(line: str) -> bool:
             return pattern in line if isinstance(line, str) else False
     else:
@@ -2506,17 +2506,17 @@ def run(
         if start_line is None and end_line is None:
             return {
                 "success": False,
-                "error": f"'start_line' and 'end_line' are required for '{operation}'"
+                "error": f"'start_line' and 'end_line' are required for '{operation}'",
             }
         elif start_line is None:
             return {
                 "success": False,
-                "error": f"'start_line' is required for '{operation}'"
+                "error": f"'start_line' is required for '{operation}'",
             }
         elif end_line is None:
             return {
                 "success": False,
-                "error": f"'end_line' is required for '{operation}'"
+                "error": f"'end_line' is required for '{operation}'",
             }
 
         # FIX: Validate numeric types
@@ -2526,7 +2526,7 @@ def run(
         except (ValueError, TypeError):
             return {
                 "success": False,
-                "error": f"'start_line' and 'end_line' must be valid integers for '{operation}'"
+                "error": f"'start_line' and 'end_line' must be valid integers for '{operation}'",
             }
     if operation in _NEEDS_SEARCH and not effective_search:
         return {
@@ -2568,8 +2568,10 @@ def run(
         "read": lambda: read(fp, max_size, encoding, show_lines, start_line, end_line),
         "read_lines": lambda: read_lines(
             fp,
-            int(start_line) if start_line is not None else None,  # FIX: Ensure integer type
-            int(end_line) if end_line is not None else None,      # FIX: Ensure integer type
+            int(start_line)
+            if start_line is not None
+            else None,  # FIX: Ensure integer type
+            int(end_line) if end_line is not None else None,  # FIX: Ensure integer type
             encoding,
         ),
         "write": lambda: write(

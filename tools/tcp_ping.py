@@ -2,7 +2,10 @@
 # @describe Measure TCP latency.
 # @option --host! <HOSTNAME>
 # @option --port! <PORT>
-import socket, time, os
+import os
+import socket
+import time
+
 
 def run(host: str, port: int) -> str:
     try:
@@ -12,6 +15,7 @@ def run(host: str, port: int) -> str:
         return f"{latency:.2f} ms"
     except Exception as e:
         return f"Failed: {e}"
+
 
 if __name__ == "__main__":
     kwargs = {k[5:]: v for k, v in os.environ.items() if k.startswith("argc_")}

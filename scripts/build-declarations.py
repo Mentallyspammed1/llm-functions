@@ -9,12 +9,12 @@
 # Example: ./build-declarations.py tools/fs_ls.py
 
 import ast
-import os
 import json
+import os
 import re
 import sys
 from collections import OrderedDict
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Tuple
 
 # The expected entry function name for tool scripts (e.g., 'run' in Python tools).
 TOOL_ENTRY_FUNC = "run"
@@ -37,7 +37,7 @@ def main():
 
     try:
         # Read the script file content safely, handling potential file errors.
-        with open(scriptfile, "r", encoding="utf-8") as f:
+        with open(scriptfile, encoding="utf-8") as f:
             contents = f.read()
     except FileNotFoundError:
         print(f"Error: File not found '{scriptfile}'", file=sys.stderr)
@@ -296,9 +296,8 @@ def parse_docstring(docstring: str) -> Tuple[str, Dict[str, Tuple[str, str]]]:
             # Accumulate lines for the main description.
             if stripped_line:
                 description += f"\n{stripped_line}"
-        else:  # Default state: parse lines as part of the description until a section is found.
-            if stripped_line:
-                description += f"\n{stripped_line}"
+        elif stripped_line:
+            description += f"\n{stripped_line}"
 
     params = {}
     # Parse each collected raw parameter description into structured data.

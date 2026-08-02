@@ -1,5 +1,6 @@
 """Target analysis utilities for USDT‑based profit‑target calculations."""
 
+
 class USDTTargetCalculator:
     """
     Calculate USDT‑based profit targets for both long and short positions.
@@ -47,9 +48,7 @@ class USDTTargetCalculator:
         self.account_balance = account_balance
 
         # Derived values
-        self.usdt_per_contract = (
-            self.entry_price * self.position_size / self.leverage
-        )
+        self.usdt_per_contract = self.entry_price * self.position_size / self.leverage
 
     def _calc_fee(self, side: str, price: float) -> float:
         """

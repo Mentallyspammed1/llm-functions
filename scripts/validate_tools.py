@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-import os
-import sys
-import subprocess
 import json
-from typing import Dict, Any
+import os
+import subprocess
+import sys
+from typing import Any, Dict
 
 
 def has_valid_description(tool_path: str) -> bool:
     """Check if the tool has a valid description comment or docstring."""
     try:
-        with open(tool_path, "r", encoding="utf-8") as f:
+        with open(tool_path, encoding="utf-8") as f:
             content = f.read()
             if "@describe" in content:
                 return True
@@ -27,14 +27,22 @@ def has_valid_description(tool_path: str) -> bool:
 def has_main_function(tool_path: str) -> bool:
     """Check if the tool has a main or run function."""
     try:
-        with open(tool_path, "r", encoding="utf-8") as f:
+        with open(tool_path, encoding="utf-8") as f:
             content = f.read()
             if tool_path.endswith(".sh"):
-                return "main()" in content or "main ()" in content or "function main" in content
+                return (
+                    "main()" in content
+                    or "main ()" in content
+                    or "function main" in content
+                )
             elif tool_path.endswith(".py"):
                 return "def run(" in content or "def main(" in content
             elif tool_path.endswith(".js"):
-                return "exports.run =" in content or "exports.run=" in content or "function main(" in content
+                return (
+                    "exports.run =" in content
+                    or "exports.run=" in content
+                    or "function main(" in content
+                )
             return False
     except Exception:
         return False
@@ -49,7 +57,9 @@ def validate_tool(tool_path: str) -> Dict[str, Any]:
 
     # Check required elements
     if not has_valid_description(tool_path):
-        errors.append("Missing description (needs @describe comment, Python docstring, or JSDoc block)")
+        errors.append(
+            "Missing description (needs @describe comment, Python docstring, or JSDoc block)"
+        )
 
     if not has_main_function(tool_path):
         errors.append("Missing main/run function")

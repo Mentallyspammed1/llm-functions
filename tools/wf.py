@@ -29,30 +29,29 @@
 # @option --output-file <TEXT> Destination file for batch results (instead of stdout).
 # ---------------------------------------------------------------------------
 
+import base64
+import csv
+import gzip
+import hashlib
+import io
+import json
+import logging
 import os
 import re
-import sys
-import csv
-import json
-import gzip
-import time
-import zlib
 import socket
-import base64
-import hashlib
-import logging
+import ssl
+import sys
 import tempfile
-import urllib.request
+import threading
+import time
 import urllib.error
 import urllib.parse
-import ssl
-import io
-import threading
-from dataclasses import dataclass, field, asdict
+import urllib.request
+import zlib
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from http.client import HTTPResponse
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -112,6 +111,7 @@ RETRYABLE_STATUS_CODES: Tuple[int, ...] = (429, 500, 502, 503, 504)
 # In-process response cache (thread-safe)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _CacheEntry:
     body: bytes
@@ -165,6 +165,7 @@ _cache = ResponseCache()
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class RequestStats:
@@ -269,6 +270,7 @@ class ResponseWrapper:
 # Encoding helpers
 # ---------------------------------------------------------------------------
 
+
 def detect_charset(content_type: Optional[str]) -> Optional[str]:
     """Extract charset from a Content-Type header."""
     if not content_type:
@@ -312,9 +314,12 @@ def decompress_body(raw: bytes, encoding: Optional[str]) -> bytes:
         if enc == "br":
             try:
                 import brotli  # type: ignore
+
                 return brotli.decompress(raw)
             except ImportError:
-                logger.warning("brotli package not installed; returning compressed body.")
+                logger.warning(
+                    "brotli package not installed; returning compressed body."
+                )
     except Exception as exc:
         logger.warning("Decompression failed (%s): %s", enc, exc)
     return raw
@@ -323,6 +328,7 @@ def decompress_body(raw: bytes, encoding: Optional[str]) -> bytes:
 # ---------------------------------------------------------------------------
 # URL utilities
 # ---------------------------------------------------------------------------
+
 
 def validate_and_normalise_url(url: str) -> Tuple[bool, str]:
     """Validate and normalise a URL."""
@@ -359,6 +365,7 @@ def build_url_with_params(url: str, params: Dict[str, str]) -> str:
 # Header helpers
 # ---------------------------------------------------------------------------
 
+
 def parse_headers(raw: str) -> Tuple[Dict[str, str], Optional[str]]:
     """Parse a comma-separated ``Key: Value`` header string."""
     headers: Dict[str, str] = {}
@@ -391,6 +398,7 @@ def build_auth_header(auth_str: str) -> Tuple[Optional[str], Optional[str]]:
 # JSON extraction
 # ---------------------------------------------------------------------------
 
+
 def extract_json_path(data: Any, path: str) -> Any:
     """Extract a value from a nested structure using a simple dotted path."""
     if not path:
@@ -400,7 +408,7 @@ def extract_json_path(data: Any, path: str) -> Any:
     for token in tokens:
         if current is None:
             return None
-        m = re.fullmatch(r'\[(\d+|\*)\]', token)
+        m = re.fullmatch(r"\[(\d+|\*)\]", token)
         if m:
             idx = m.group(1)
             if not isinstance(current, list):
@@ -424,6 +432,7 @@ def extract_json_path(data: Any, path: str) -> Any:
 # Redirect handlers
 # ---------------------------------------------------------------------------
 
+
 class LimitedRedirectHandler(urllib.request.HTTPRedirectHandler):
     def __init__(self, max_redirects: int = 5) -> None:
         super().__init__()
@@ -439,6 +448,7 @@ class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 # ---------------------------------------------------------------------------
 # Rate limiter
 # ---------------------------------------------------------------------------
+
 
 class RateLimiter:
     """Token-bucket rate limiter (requests per second)."""
@@ -462,12 +472,13 @@ class RateLimiter:
 # SSL helpers
 # ---------------------------------------------------------------------------
 
+
 def build_ssl_context(verify: bool) -> Optional[ssl.SSLContext]:
     """Return an SSLContext appropriate for *verify* setting."""
     if verify:
         return None  # urllib default = verified
     try:
-        ctx = ssl._create_unverified_context()  # noqa: SLF001
+        ctx = ssl._create_unverified_context()
         return ctx
     except Exception as exc:
         raise RuntimeError(f"Could not create unverified SSL context: {exc}") from exc
@@ -504,6 +515,7 @@ def get_ssl_info(url: str, timeout: int = 10) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Core HTTP request engine
 # ---------------------------------------------------------------------------
+
 
 def make_request(
     url: str,
@@ -600,9 +612,7 @@ def make_request(
                 request_headers["Content-Type"] = CONTENT_TYPE_FORM
                 try:
                     pairs = dict(
-                        item.split("=", 1)
-                        for item in data.split("&")
-                        if "=" in item
+                        item.split("=", 1) for item in data.split("&") if "=" in item
                     )
                     request_body = urllib.parse.urlencode(pairs).encode("utf-8")
                 except (ValueError, AttributeError):
@@ -628,9 +638,7 @@ def make_request(
         ok_p, proxy_or_err = validate_and_normalise_url(proxy)
         if not ok_p:
             return None, f"Error: Invalid proxy URL – {proxy_or_err}"
-        handlers.append(
-            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
-        )
+        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
 
     if follow_redirects:
         handlers.append(LimitedRedirectHandler(max_redirects=max_redirects))
@@ -652,9 +660,7 @@ def make_request(
         stats.retry_count = attempt
         if attempt > 0:
             wait = retry_delay * (2 ** (attempt - 1))  # exponential back-off
-            logger.debug(
-                "Retry %d/%d – waiting %.1fs", attempt, retry, wait
-            )
+            logger.debug("Retry %d/%d – waiting %.1fs", attempt, retry, wait)
             time.sleep(wait)
 
         try:
@@ -679,9 +685,7 @@ def make_request(
                     )
 
                 # Decompress if needed
-                raw = decompress_body(
-                    raw, resp.headers.get("Content-Encoding")
-                )
+                raw = decompress_body(raw, resp.headers.get("Content-Encoding"))
                 stats.response_size = len(raw)
                 logger.debug(
                     "← %d  %.3fs  %d bytes",
@@ -721,9 +725,7 @@ def make_request(
             stats.stop()
             if exc.code not in RETRYABLE_STATUS_CODES:
                 try:
-                    err_body = safe_decode(
-                        exc.read(), exc.headers.get("Content-Type")
-                    )
+                    err_body = safe_decode(exc.read(), exc.headers.get("Content-Type"))
                 except Exception:
                     err_body = "(could not read error body)"
                 return None, f"Error: HTTP {exc.code} {exc.reason}\n{err_body}"
@@ -754,6 +756,7 @@ def make_request(
 # ---------------------------------------------------------------------------
 # Output formatters
 # ---------------------------------------------------------------------------
+
 
 def _format_text(resp: ResponseWrapper, verbose: bool) -> str:
     """Render a ResponseWrapper as human‑readable text."""
@@ -788,9 +791,7 @@ def _format_json(resp: ResponseWrapper, verbose: bool) -> str:
     return json.dumps(d, indent=2, ensure_ascii=False)
 
 
-def _format_csv(
-    responses: List[ResponseWrapper], delimiter: str = ","
-) -> str:
+def _format_csv(responses: List[ResponseWrapper], delimiter: str = ",") -> str:
     """Render a list of ResponseWrappers as CSV (one row per response)."""
     buf = io.StringIO()
     # Fields we always want – extra columns are ignored
@@ -858,6 +859,7 @@ def format_response(
 # Action: fetch
 # ---------------------------------------------------------------------------
 
+
 def action_fetch(
     url: str,
     *,
@@ -915,6 +917,7 @@ def action_fetch(
 # Action: head
 # ---------------------------------------------------------------------------
 
+
 def action_head(
     url: str,
     *,
@@ -953,6 +956,7 @@ def action_head(
 # Action: headers  (returns headers only as JSON)
 # ---------------------------------------------------------------------------
 
+
 def action_headers(
     url: str,
     *,
@@ -981,7 +985,10 @@ def action_headers(
 # Action: download
 # ---------------------------------------------------------------------------
 
-def _download_with_progress(resp: ResponseWrapper, output_path: str, enable_progress: bool) -> None:
+
+def _download_with_progress(
+    resp: ResponseWrapper, output_path: str, enable_progress: bool
+) -> None:
     """Write *resp.body* to *output_path* optionally showing a tqdm‑style progress bar."""
     # Simple textual progress bar – no external dependency
     total = len(resp.body)
@@ -1050,9 +1057,9 @@ def action_download(
     # ------------------------------------------------------------------ #
     if not output:
         cd = resp.get_header("Content-Disposition", "")
-        m = re.search(r'filename\*?=([^;]+)', cd or "")
+        m = re.search(r"filename\*?=([^;]+)", cd or "")
         if m:
-            output = urllib.parse.unquote(m.group(1)).strip('\'"')
+            output = urllib.parse.unquote(m.group(1)).strip("'\"")
         else:
             path_part = urllib.parse.urlparse(url).path
             output = os.path.basename(path_part) or "downloaded_file"
@@ -1070,7 +1077,7 @@ def action_download(
         except Exception:
             os.unlink(tmp_path)
             raise
-    except IOError as exc:
+    except OSError as exc:
         return f"Error: Could not write '{output}': {exc}"
 
     # ------------------------------------------------------------------ #
@@ -1095,6 +1102,7 @@ def action_download(
 # Action: ping
 # ---------------------------------------------------------------------------
 
+
 def action_ping(
     url: str,
     *,
@@ -1118,7 +1126,11 @@ def action_ping(
         )
         if err:
             results.append(
-                {"attempt": i + 1, "reachable": False, "error": err.replace("Error: ", "")}
+                {
+                    "attempt": i + 1,
+                    "reachable": False,
+                    "error": err.replace("Error: ", ""),
+                }
             )
         else:
             assert resp is not None
@@ -1155,6 +1167,7 @@ def action_ping(
 # ---------------------------------------------------------------------------
 # Action: trace  (request tracing / SSL inspection)
 # ---------------------------------------------------------------------------
+
 
 def action_trace(
     url: str,
@@ -1238,6 +1251,7 @@ def action_trace(
 # Action: batch
 # ---------------------------------------------------------------------------
 
+
 def action_batch(
     batch_file: str,
     *,
@@ -1268,7 +1282,7 @@ def action_batch(
             return "Error: Batch file must contain a JSON array of request objects."
     except json.JSONDecodeError as exc:
         return f"Error: Could not parse batch file as JSON: {exc}"
-    except IOError as exc:
+    except OSError as exc:
         return f"Error: Could not read batch file: {exc}"
 
     limiter = RateLimiter(rate_limit)
@@ -1328,9 +1342,7 @@ def action_batch(
         if parse_json or extract:
             try:
                 jdata = resp.json()
-                entry["body"] = (
-                    extract_json_path(jdata, extract) if extract else jdata
-                )
+                entry["body"] = extract_json_path(jdata, extract) if extract else jdata
             except json.JSONDecodeError:
                 entry["body"] = resp.text()[:500]
         else:
@@ -1377,6 +1389,7 @@ def action_batch(
 # Dispatcher
 # ---------------------------------------------------------------------------
 
+
 def run(
     action: str,
     url: Optional[str] = None,
@@ -1404,10 +1417,7 @@ def run(
     delimiter: Optional[str] = None,
 ) -> str:
     if not action:
-        return (
-            f"Error: No action specified. "
-            f"Supported: {', '.join(SUPPORTED_ACTIONS)}"
-        )
+        return f"Error: No action specified. Supported: {', '.join(SUPPORTED_ACTIONS)}"
     if action not in SUPPORTED_ACTIONS:
         return (
             f"Error: Unknown action '{action}'. "
@@ -1482,9 +1492,7 @@ def run(
             output_format=output_format,
         )
     if action == "headers":
-        return action_headers(
-            url, headers_str=headers, auth=auth
-        )
+        return action_headers(url, headers_str=headers, auth=auth)
     if action == "download":
         return action_download(
             url,
@@ -1514,14 +1522,13 @@ def run(
 # Env helpers
 # ---------------------------------------------------------------------------
 
+
 def _bool_env(key: str, default: bool) -> bool:
     raw = os.environ.get(key, "").strip().lower()
     return raw in {"1", "true", "yes", "on"} if raw else default
 
 
-def _int_env(
-    key: str, default: int, *, lo: int = 0, hi: Optional[int] = None
-) -> int:
+def _int_env(key: str, default: int, *, lo: int = 0, hi: Optional[int] = None) -> int:
     raw = os.environ.get(key, "").strip()
     try:
         val = int(raw)
@@ -1537,6 +1544,7 @@ def _int_env(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     if _bool_env("WEBFETCHER_DEBUG", False):

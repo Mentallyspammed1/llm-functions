@@ -9,17 +9,18 @@
 ydc_search.py - Web Search Tool using You.com (YDC) API
 """
 
-import os
-import json
-import sys
 import argparse
-import logging
-import requests
-import urllib.parse
 import html
+import json
+import logging
+import os
 import re
+import sys
+import urllib.parse
 from html.parser import HTMLParser
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+import requests
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -40,13 +41,13 @@ def load_env() -> None:
     dirs_to_check = [
         base_dir,
         os.path.dirname(base_dir),
-        os.path.dirname(os.path.dirname(base_dir))
+        os.path.dirname(os.path.dirname(base_dir)),
     ]
     for d in dirs_to_check:
         env_path = os.path.join(d, ".env")
         if os.path.exists(env_path):
             try:
-                with open(env_path, "r", encoding="utf-8") as f:
+                with open(env_path, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if line and not line.startswith("#") and "=" in line:
@@ -158,6 +159,7 @@ def filter_by_domains(
 
 class DDGHTMLParser(HTMLParser):
     """Robust HTML parser for DuckDuckGo's static HTML results layout with nested element depth tracking."""
+
     def __init__(self):
         super().__init__()
         self.results: List[Dict[str, Any]] = []
@@ -172,7 +174,13 @@ class DDGHTMLParser(HTMLParser):
         if tag == "div" and ("result__body" in cls or "links_main" in cls):
             if self.current:
                 self.results.append(self.current)
-            self.current = {"title": "", "url": "", "snippet": "", "type": "web", "age": None}
+            self.current = {
+                "title": "",
+                "url": "",
+                "snippet": "",
+                "type": "web",
+                "age": None,
+            }
             self.active_tag = None
             self.active_tag_depth = 0
             return
@@ -214,9 +222,9 @@ class DDGHTMLParser(HTMLParser):
         if not self.current or not self.active_tag:
             return
         if self.active_tag == "title":
-            self.current["title"] = (self.current["title"] + data)
+            self.current["title"] = self.current["title"] + data
         elif self.active_tag == "snippet":
-            self.current["snippet"] = (self.current["snippet"] + data)
+            self.current["snippet"] = self.current["snippet"] + data
 
     def _clean_url(self, url: str) -> str:
         if url.startswith("//"):
@@ -257,7 +265,9 @@ def search_ddg(query: str, count: int = 10) -> List[Dict[str, Any]]:
 
         # 2. Resilient Regex Fallback
         if not results:
-            logging.debug("HTMLParser did not find results; attempting fallback regex...")
+            logging.debug(
+                "HTMLParser did not find results; attempting fallback regex..."
+            )
             matches = re.findall(
                 r'<a[^>]+class="(?:result__url|result__a)"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?(?:<a[^>]+class="result__snippet"[^>]*>(.*?)</a>)',
                 response.text,
@@ -276,13 +286,15 @@ def search_ddg(query: str, count: int = 10) -> List[Dict[str, Any]]:
                     except Exception:
                         pass
 
-                results.append({
-                    "type": "web",
-                    "title": title_clean,
-                    "url": link,
-                    "snippet": snippet_clean,
-                    "age": None
-                })
+                results.append(
+                    {
+                        "type": "web",
+                        "title": title_clean,
+                        "url": link,
+                        "snippet": snippet_clean,
+                        "age": None,
+                    }
+                )
 
         # Sanitization, Normalization, and Internal Link Filtering
         cleaned_results = []
@@ -293,15 +305,17 @@ def search_ddg(query: str, count: int = 10) -> List[Dict[str, Any]]:
                 continue
             if "duckduckgo.com" in url_val and "/l/?" not in url_val:
                 continue
-            
+
             seen_urls.add(url_val)
-            cleaned_results.append({
-                "type": r.get("type", "web"),
-                "title": _clean_html(r.get("title", "")),
-                "url": url_val,
-                "snippet": _clean_html(r.get("snippet", "")),
-                "age": r.get("age")
-            })
+            cleaned_results.append(
+                {
+                    "type": r.get("type", "web"),
+                    "title": _clean_html(r.get("title", "")),
+                    "url": url_val,
+                    "snippet": _clean_html(r.get("snippet", "")),
+                    "age": r.get("age"),
+                }
+            )
 
         return cleaned_results[:count]
     except Exception as e:
@@ -344,10 +358,12 @@ def search_ydc(
                 for item in data.get("results", {}).get(section, []):
                     title = _clean_html(item.get("title", ""))
                     url_val = (item.get("url") or "").strip()
-                    
-                    raw_snippet = " ".join(item.get("snippets", [])) or item.get("description", "")
+
+                    raw_snippet = " ".join(item.get("snippets", [])) or item.get(
+                        "description", ""
+                    )
                     snippet = _clean_html(raw_snippet)
-                    
+
                     results.append(
                         {
                             "type": section,
@@ -392,11 +408,13 @@ def run(
 
 if __name__ == "__main__":
     # 1. Parse JSON input if passed by aichat's tool dispatcher
-    if len(sys.argv) > 1 and (sys.argv[1].startswith("{") or sys.argv[1].startswith("[")):
+    if len(sys.argv) > 1 and (
+        sys.argv[1].startswith("{") or sys.argv[1].startswith("[")
+    ):
         try:
             kwargs = json.loads(sys.argv[1])
             query_val = kwargs.get("query")
-            
+
             count_val = kwargs.get("count")
             if count_val is not None:
                 try:
@@ -413,7 +431,18 @@ if __name__ == "__main__":
             if not query_val:
                 print(json.dumps([{"error": "Query is required"}]))
                 sys.exit(1)
-            print(json.dumps(run(query_val, count=count_val, include_domains=inc, exclude_domains=exc, verbose=verb), indent=2))
+            print(
+                json.dumps(
+                    run(
+                        query_val,
+                        count=count_val,
+                        include_domains=inc,
+                        exclude_domains=exc,
+                        verbose=verb,
+                    ),
+                    indent=2,
+                )
+            )
             sys.exit(0)
         except Exception as err:
             print(json.dumps([{"error": f"JSON argument parse error: {err}"}]))
@@ -445,5 +474,9 @@ if __name__ == "__main__":
         )
         print(json.dumps(results_output, indent=2))
     except Exception as general_err:
-        print(json.dumps([{"error": f"Internal execution failure: {general_err}"}], indent=2))
+        print(
+            json.dumps(
+                [{"error": f"Internal execution failure: {general_err}"}], indent=2
+            )
+        )
         sys.exit(1)

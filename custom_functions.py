@@ -22,7 +22,9 @@ def calculate_tp_pnl(
     entry_notional = entry_price * quantity * position_size_multiplier
     tp_notional = take_profit_price * quantity * position_size_multiplier
     is_long = side.upper() == "BUY"
-    raw_pnl = (tp_notional - entry_notional) if is_long else (entry_notional - tp_notional)
+    raw_pnl = (
+        (tp_notional - entry_notional) if is_long else (entry_notional - tp_notional)
+    )
     total_fees = (entry_notional + tp_notional) * fee_rate
     net_pnl = raw_pnl - total_fees
     leveraged_net_pnl = net_pnl * leverage
@@ -64,7 +66,9 @@ def get_market_depth_analysis(symbol: str, depth: int = 20) -> dict:
 
     bid_vol = sum(x[1] for x in bids)
     ask_vol = sum(x[1] for x in asks)
-    imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol) if (bid_vol + ask_vol) > 0 else 0
+    imbalance = (
+        (bid_vol - ask_vol) / (bid_vol + ask_vol) if (bid_vol + ask_vol) > 0 else 0
+    )
     spread = (asks[0][0] - bids[0][0]) if asks and bids else 0
     bid_avg = bid_vol / len(bids) if bids else 0
     ask_avg = ask_vol / len(asks) if asks else 0
@@ -94,7 +98,9 @@ def analyze_trade_signal(symbol: str) -> dict:
     imbalance = depth["metrics"]["imbalance_score"]
     recommendation = "LONG" if imbalance > 0.05 else "SHORT"
     conf_score = 0
-    if (recommendation == "LONG" and imbalance > 0.1) or (recommendation == "SHORT" and imbalance < -0.1):
+    if (recommendation == "LONG" and imbalance > 0.1) or (
+        recommendation == "SHORT" and imbalance < -0.1
+    ):
         conf_score += 1
     if len(depth["support_levels"]) > 0:
         conf_score += 1
@@ -105,7 +111,10 @@ def analyze_trade_signal(symbol: str) -> dict:
         "signal": recommendation,
         "confidence": "HIGH" if conf_score >= 2 else "LOW",
         "depth_metrics": depth["metrics"],
-        "key_levels": {"support": depth["support_levels"], "resistance": depth["resistance_levels"]},
+        "key_levels": {
+            "support": depth["support_levels"],
+            "resistance": depth["resistance_levels"],
+        },
     }
 
 

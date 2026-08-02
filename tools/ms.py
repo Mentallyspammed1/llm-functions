@@ -28,22 +28,23 @@
 # @option --ws-fallback-rest        On WS failure, use REST for that cycle (flag).
 # ==============================================================================
 
-import sys
-import math
-from statistics import stdev
-from collections import deque
-import time
-import signal
-import hmac
 import hashlib
+import hmac
 import json
-import threading
-import requests
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
 import logging
+import math
 import os
+import signal
+import sys
+import threading
+import time
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
+from statistics import stdev
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import requests
 
 # Safe WebSocket Import
 try:
@@ -54,8 +55,9 @@ except ImportError:
 # Load environment variables from .env if present
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
-    env_path = Path(__file__).with_name('.env')
+    env_path = Path(__file__).with_name(".env")
     if env_path.is_file():
         load_dotenv(dotenv_path=env_path)
 except Exception:
@@ -74,6 +76,7 @@ DEFAULT_TAKER_FEE = 0.00055
 
 MICRO_PROFIT_TIERS = [0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20]
 
+
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
@@ -85,8 +88,10 @@ def get_proxies() -> Optional[Dict[str, str]]:
         return {"http": proxy, "https": proxy}
     return None
 
+
 def get_ws_run_options() -> Dict[str, Any]:
     from urllib.parse import urlparse
+
     proxy = os.getenv("BYBIT_TOR_PROXY")
     if not proxy and os.getenv("TOR_ENABLED") == "true":
         proxy = f"socks5://127.0.0.1:{os.getenv('TOR_SOCKS_PORT', '9050')}"
@@ -107,12 +112,18 @@ def get_ws_run_options() -> Dict[str, Any]:
         logger.warning(f"Failed to parse proxy URL {proxy}: {e}")
         return {}
 
+
 def emit(data: Dict[str, Any]) -> None:
     """Output structured JSON directly to stdout for downstream processes."""
     print(json.dumps(data, separators=(",", ":")), flush=True)
 
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[logging.StreamHandler(sys.stderr)])
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[logging.StreamHandler(sys.stderr)],
+)
 logger.setLevel(logging.INFO)
 
 REQUEST_TIMEOUT = 10
@@ -124,8 +135,10 @@ RECV_WINDOW = 30000
 # ---------------------------------------------------------------------------
 _SHUTDOWN = threading.Event()
 
+
 def _handle_signal(_signum, _frame):
     _SHUTDOWN.set()
+
 
 # ---------------------------------------------------------------------------
 # URL helpers
@@ -143,7 +156,9 @@ def base_urls(testnet: bool) -> Dict[str, str]:
         "ws_private": "wss://stream.bybit.com/v5/private",
     }
 
+
 DEFAULT_LEVERAGE = 1.0
+
 
 # ---------------------------------------------------------------------------
 # Argument parsing – Argcfile‑compatible
@@ -186,11 +201,13 @@ def parse_argv(argv: List[str]) -> Dict[str, Any]:
             i += 1
     return args
 
+
 # ---------------------------------------------------------------------------
 # Server‑time synchronisation
 # ---------------------------------------------------------------------------
 _SERVER_TIME_OFFSET_MS: Optional[int] = None
 _SERVER_TIME_LOCK = threading.Lock()
+
 
 def server_time_ms(base_url: str) -> int:
     """Local clock adjusted by last known Bybit server offset."""
@@ -200,6 +217,7 @@ def server_time_ms(base_url: str) -> int:
     with _SERVER_TIME_LOCK:
         offset = _SERVER_TIME_OFFSET_MS or 0
     return int(time.time() * 1000) + offset
+
 
 def sync_server_time(base_url: str) -> None:
     """Update the local offset based on the Bybit server time endpoint."""
@@ -226,6 +244,7 @@ def sync_server_time(base_url: str) -> None:
             if _SERVER_TIME_OFFSET_MS is None:
                 _SERVER_TIME_OFFSET_MS = 0
 
+
 def parse_trailing_stop(val: Any) -> Optional[float]:
     """
     Parse the --trailing-stop argument.
@@ -246,6 +265,7 @@ def parse_trailing_stop(val: Any) -> Optional[float]:
     except ValueError:
         return None
 
+
 # ---------------------------------------------------------------------------
 # Signed request helpers
 # ---------------------------------------------------------------------------
@@ -259,10 +279,9 @@ def generate_signature(
     """Generate the HMAC SHA256 signature required for Bybit API V5."""
     param_str = str(timestamp) + api_key + str(recv_window) + payload
     return hmac.new(
-        api_secret.encode("utf-8"),
-        param_str.encode("utf-8"),
-        hashlib.sha256
+        api_secret.encode("utf-8"), param_str.encode("utf-8"), hashlib.sha256
     ).hexdigest()
+
 
 def send_signed_post(
     base_url: str,
@@ -274,7 +293,9 @@ def send_signed_post(
 ) -> Dict[str, Any]:
     timestamp = server_time_ms(base_url) if use_server_time else int(time.time() * 1000)
     payload_json = json.dumps(payload_dict, separators=(",", ":"))
-    signature = generate_signature(api_secret, timestamp, api_key, RECV_WINDOW, payload_json)
+    signature = generate_signature(
+        api_secret, timestamp, api_key, RECV_WINDOW, payload_json
+    )
     headers = {
         "X-BAPI-API-KEY": api_key,
         "X-BAPI-SIGN": signature,
@@ -291,6 +312,7 @@ def send_signed_post(
     )
     r.raise_for_status()
     return r.json()
+
 
 def send_signed_get(
     base_url: str,
@@ -319,6 +341,7 @@ def send_signed_get(
     r.raise_for_status()
     return r.json()
 
+
 def ws_auth_message(api_key: str, api_secret: str) -> str:
     expires = int((time.time() + 10) * 1000)
     sign = hmac.new(
@@ -327,6 +350,7 @@ def ws_auth_message(api_key: str, api_secret: str) -> str:
         hashlib.sha256,
     ).hexdigest()
     return json.dumps({"op": "auth", "args": [api_key, expires, sign]})
+
 
 # ---------------------------------------------------------------------------
 # Market‑data helpers
@@ -346,10 +370,12 @@ def http_get_json(url: str, session: requests.Session) -> Dict[str, Any]:
             time.sleep(0.25 * (attempt + 1))
     raise RuntimeError(f"GET failed: {last_err}")
 
+
 def parse_orderbook_side(side: List[List[str]]) -> Tuple[float, float]:
     if not side:
         return 0.0, 0.0
     return float(side[0][0]), sum(float(level[1]) for level in side)
+
 
 def kline_close(row: Any) -> float:
     if isinstance(row, (list, tuple)):
@@ -358,13 +384,14 @@ def kline_close(row: Any) -> float:
         return float(row["close"])
     raise TypeError(f"Unexpected kline row: {type(row)}")
 
+
 def fetch_tick_size(base_url: str, symbol: str, tick_cache: Dict[str, float]) -> float:
     if symbol in tick_cache:
         return tick_cache[symbol]
-    api_key = os.getenv('BYBIT_API_KEY')
-    api_secret = os.getenv('BYBIT_API_SECRET')
+    api_key = os.getenv("BYBIT_API_KEY")
+    api_secret = os.getenv("BYBIT_API_SECRET")
     if not api_key or not api_secret:
-        raise RuntimeError('API credentials missing for signed market data request')
+        raise RuntimeError("API credentials missing for signed market data request")
     try:
         resp = send_signed_get(
             base_url,
@@ -383,6 +410,7 @@ def fetch_tick_size(base_url: str, symbol: str, tick_cache: Dict[str, float]) ->
     logging.warning(f"Using default tick size 0.01 for {symbol}")
     tick_cache[symbol] = 0.01
     return 0.01
+
 
 def build_market_snapshot(
     best_bid: float,
@@ -415,7 +443,10 @@ def build_market_snapshot(
         "closes": list(closes),
     }
 
-def get_market_data_rest(base_url: str, symbol: str, tick_cache: Dict[str, float]) -> Dict[str, Any]:
+
+def get_market_data_rest(
+    base_url: str, symbol: str, tick_cache: Dict[str, float]
+) -> Dict[str, Any]:
     """Fetch orderbook and kline details via Bybit V5 REST API."""
     session = requests.Session()
     ob_url = f"{base_url}/v5/market/orderbook?category=linear&symbol={symbol}&limit=25"
@@ -423,20 +454,23 @@ def get_market_data_rest(base_url: str, symbol: str, tick_cache: Dict[str, float
     result = ob_data.get("result", {})
     bids = result.get("b", [])
     asks = result.get("a", [])
-    
+
     if not bids or not asks:
         raise RuntimeError("Empty orderbook returned from REST")
-        
+
     best_bid, bid_vol = parse_orderbook_side(bids)
     best_ask, ask_vol = parse_orderbook_side(asks)
-    
+
     kl_url = f"{base_url}/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=30"
     kl_data = http_get_json(kl_url, session)
     kl_list = kl_data.get("result", {}).get("list", [])
     closes = [kline_close(k) for k in reversed(kl_list)]
-    
+
     tick_size = fetch_tick_size(base_url, symbol, tick_cache)
-    return build_market_snapshot(best_bid, best_ask, bid_vol, ask_vol, closes, tick_size, "rest")
+    return build_market_snapshot(
+        best_bid, best_ask, bid_vol, ask_vol, closes, tick_size, "rest"
+    )
+
 
 def get_market_data_ws_oneshot(
     ws_url: str,
@@ -449,10 +483,10 @@ def get_market_data_ws_oneshot(
     if websocket is None:
         logger.debug("websocket-client not installed, falling back to REST")
         return get_market_data_rest(base_url, symbol, tick_cache)
-        
+
     snapshot_data = {"best_bid": 0.0, "best_ask": 0.0, "bid_vol": 0.0, "ask_vol": 0.0}
     event = threading.Event()
-    
+
     def on_message(ws, message):
         try:
             data = json.loads(message)
@@ -484,14 +518,16 @@ def get_market_data_ws_oneshot(
     ws_client.on_open = lambda ws: ws.send(
         json.dumps({"op": "subscribe", "args": [f"orderbook.1.{symbol}"]})
     )
-    
-    ws_thread = threading.Thread(target=ws_client.run_forever, kwargs=get_ws_run_options())
+
+    ws_thread = threading.Thread(
+        target=ws_client.run_forever, kwargs=get_ws_run_options()
+    )
     ws_thread.daemon = True
     ws_thread.start()
-    
+
     completed = event.wait(timeout=timeout)
     ws_client.close()
-    
+
     if completed and snapshot_data["best_bid"] > 0:
         try:
             rest_data = get_market_data_rest(base_url, symbol, tick_cache)
@@ -512,6 +548,7 @@ def get_market_data_ws_oneshot(
         logger.debug("WS oneshot timed out or failed, falling back to REST")
         return get_market_data_rest(base_url, symbol, tick_cache)
 
+
 # ---------------------------------------------------------------------------
 # Data Structures
 # ---------------------------------------------------------------------------
@@ -521,6 +558,7 @@ class FillProbabilityEstimate:
     confidence: float
     factors: Dict[str, float]
     suggested_reprice_ticks: int
+
 
 # ---------------------------------------------------------------------------
 # Analyzers
@@ -566,6 +604,7 @@ class MultiTimeframeAnalyzer:
         if avg_score < -0.005:
             return min(1.0, abs(avg_score) * 100), "bearish"
         return 0.0, "neutral"
+
 
 class MicroPatternAnalyzer:
     def __init__(self, window_size: int = 10):
@@ -621,12 +660,16 @@ class MicroPatternAnalyzer:
             else "neutral",
         }
 
+
 # ---------------------------------------------------------------------------
 # Persistent Public WS Linear Feed
 # ---------------------------------------------------------------------------
 class PersistentPublicLinearFeed:
     """A thread-safe persistent WebSocket feed for public market data."""
-    def __init__(self, ws_url: str, symbol: str, seed_closes: Optional[List[float]] = None):
+
+    def __init__(
+        self, ws_url: str, symbol: str, seed_closes: Optional[List[float]] = None
+    ):
         self.ws_url = ws_url
         self.symbol = symbol
         self.closes = deque(seed_closes or [], maxlen=30)
@@ -642,7 +685,9 @@ class PersistentPublicLinearFeed:
 
     def start(self):
         if websocket is None:
-            logger.warning("websocket-client not installed; PersistentPublicLinearFeed cannot start")
+            logger.warning(
+                "websocket-client not installed; PersistentPublicLinearFeed cannot start"
+            )
             return
         self.active = True
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -665,7 +710,14 @@ class PersistentPublicLinearFeed:
 
     def _on_open(self, ws):
         logger.info("PersistentPublicLinearFeed connected")
-        ws.send(json.dumps({"op": "subscribe", "args": [f"orderbook.1.{self.symbol}", f"kline.1.{self.symbol}"]}))
+        ws.send(
+            json.dumps(
+                {
+                    "op": "subscribe",
+                    "args": [f"orderbook.1.{self.symbol}", f"kline.1.{self.symbol}"],
+                }
+            )
+        )
 
     def _on_message(self, ws, message):
         try:
@@ -688,7 +740,9 @@ class PersistentPublicLinearFeed:
                 d_list = data.get("data", [])
                 if d_list:
                     k = d_list[0]
-                    close_price = float(k.get("close", k[4] if isinstance(k, list) else 0.0))
+                    close_price = float(
+                        k.get("close", k[4] if isinstance(k, list) else 0.0)
+                    )
                     with self.lock:
                         if not self.closes or self.closes[-1] != close_price:
                             self.closes.append(close_price)
@@ -724,11 +778,13 @@ class PersistentPublicLinearFeed:
             except Exception:
                 pass
 
+
 # ---------------------------------------------------------------------------
 # Private WS Logger
 # ---------------------------------------------------------------------------
 class PrivateWsLogger:
     """A thread-safe WebSocket subscriber for Bybit private execution / position updates."""
+
     def __init__(self, ws_url: str, api_key: str, api_secret: str, symbol: str):
         self.ws_url = ws_url
         self.api_key = api_key
@@ -740,7 +796,9 @@ class PrivateWsLogger:
 
     def start(self):
         if websocket is None:
-            logger.warning("websocket-client not installed; PrivateWsLogger cannot start")
+            logger.warning(
+                "websocket-client not installed; PrivateWsLogger cannot start"
+            )
             return
         self.active = True
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -765,7 +823,9 @@ class PrivateWsLogger:
         logger.info("PrivateWsLogger connected, authenticating...")
         auth_msg = ws_auth_message(self.api_key, self.api_secret)
         ws.send(auth_msg)
-        ws.send(json.dumps({"op": "subscribe", "args": ["order", "execution", "position"]}))
+        ws.send(
+            json.dumps({"op": "subscribe", "args": ["order", "execution", "position"]})
+        )
 
     def _on_message(self, ws, message):
         try:
@@ -775,7 +835,9 @@ class PrivateWsLogger:
                 logger.info("Private WS Authentication successful")
             topic = data.get("topic", "")
             if topic in ("order", "execution", "position"):
-                logger.info(f"Private WS Log [{topic}]: {json.dumps(data.get('data', {}))}")
+                logger.info(
+                    f"Private WS Log [{topic}]: {json.dumps(data.get('data', {}))}"
+                )
         except Exception as e:
             logger.error(f"PrivateWsLogger error parsing message: {e}")
 
@@ -793,6 +855,7 @@ class PrivateWsLogger:
             except Exception:
                 pass
 
+
 # ---------------------------------------------------------------------------
 # Volatility & Risk Helpers
 # ---------------------------------------------------------------------------
@@ -802,6 +865,7 @@ def _realized_volatility(returns: List[float]) -> float:
     if len(returns) == 1:
         return abs(returns[0])
     return 0.001
+
 
 def calculate_optimal_qty(
     market: Dict[str, Any],
@@ -841,7 +905,9 @@ def calculate_optimal_qty(
 
     estimated_win_rate = 0.55
     avg_win_loss_ratio = 1.2
-    kelly_fraction = (estimated_win_rate * avg_win_loss_ratio - (1 - estimated_win_rate)) / avg_win_loss_ratio
+    kelly_fraction = (
+        estimated_win_rate * avg_win_loss_ratio - (1 - estimated_win_rate)
+    ) / avg_win_loss_ratio
     kelly_fraction = max(0.1, min(0.25, kelly_fraction))
 
     optimal_qty = base_qty * vol_multiplier * profit_multiplier * (1 + kelly_fraction)
@@ -853,13 +919,19 @@ def calculate_optimal_qty(
     optimal_qty = max(optimal_qty, base_qty)
     return round(optimal_qty, 8)
 
-def calculate_adaptive_momentum_thresholds(closes: List[float], lookback: int = 20) -> Tuple[float, float]:
+
+def calculate_adaptive_momentum_thresholds(
+    closes: List[float], lookback: int = 20
+) -> Tuple[float, float]:
     if len(closes) < lookback:
         return 0.00005, -0.00005
     changes = []
     for i in range(1, len(closes[-lookback:])):
         if closes[-lookback:][i - 1] != 0:
-            pct_change = abs((closes[-lookback:][i] - closes[-lookback:][i - 1]) / closes[-lookback:][i - 1])
+            pct_change = abs(
+                (closes[-lookback:][i] - closes[-lookback:][i - 1])
+                / closes[-lookback:][i - 1]
+            )
             changes.append(pct_change)
     if not changes:
         return 0.00005, -0.00005
@@ -868,6 +940,7 @@ def calculate_adaptive_momentum_thresholds(closes: List[float], lookback: int = 
     long_threshold = 0.00005 * volatility_multiplier
     short_threshold = -0.00005 * volatility_multiplier
     return long_threshold, short_threshold
+
 
 def calculate_adaptive_stop_loss(
     entry_price: float,
@@ -887,16 +960,20 @@ def calculate_adaptive_stop_loss(
     sl_price = round_to_tick(sl_price, tick_size)
     return sl_price, stop_distance
 
+
 # ---------------------------------------------------------------------------
 # TP / SL helpers
 # ---------------------------------------------------------------------------
-def net_profit_to_tp(entry_price: float, side: str, net_target: float, qty: float, maker_fee: float) -> float:
+def net_profit_to_tp(
+    entry_price: float, side: str, net_target: float, qty: float, maker_fee: float
+) -> float:
     if side == "Buy":
         denom = qty * (1.0 - maker_fee)
         return (net_target + entry_price * qty * (1.0 + maker_fee)) / denom
     else:
         denom = qty * (1.0 + maker_fee)
         return (entry_price * qty * (1.0 - maker_fee) - net_target) / denom
+
 
 def net_profit_to_tp_advanced(
     entry_price: float,
@@ -926,6 +1003,7 @@ def net_profit_to_tp_advanced(
         adjusted_tp = min(adjusted_tp, entry_price - min_distance)
     return adjusted_tp
 
+
 # ---------------------------------------------------------------------------
 # Order‑book snapshot builders
 # ---------------------------------------------------------------------------
@@ -933,6 +1011,7 @@ def round_to_tick(price: float, tick_size: float) -> float:
     if tick_size <= 0:
         return price
     return round(round(price / tick_size) * tick_size, 8)
+
 
 def round_trip_fees(
     entry: float,
@@ -942,6 +1021,7 @@ def round_trip_fees(
     exit_fee_rate: float,
 ) -> float:
     return entry * qty * entry_fee_rate + exit_p * qty * exit_fee_rate
+
 
 def estimate_net_profit_v2(
     side: str,
@@ -957,6 +1037,7 @@ def estimate_net_profit_v2(
     if side == "Buy":
         return (exit_p - entry) * qty - fees
     return (entry - exit_p) * qty - fees
+
 
 def expected_market_close_pnl(
     position_side: str,
@@ -974,11 +1055,23 @@ def expected_market_close_pnl(
         exit_px = best_ask
         side = "Sell"
     return estimate_net_profit_v2(
-        side, avg_entry, exit_px, close_qty, maker_fee, exit_is_taker=True, taker_fee=taker_fee
+        side,
+        avg_entry,
+        exit_px,
+        close_qty,
+        maker_fee,
+        exit_is_taker=True,
+        taker_fee=taker_fee,
     )
 
-def expected_net_profit(side: str, entry: float, exit_p: float, qty: float, maker_fee: float) -> float:
-    return estimate_net_profit_v2(side, entry, exit_p, qty, maker_fee, exit_is_taker=False)
+
+def expected_net_profit(
+    side: str, entry: float, exit_p: float, qty: float, maker_fee: float
+) -> float:
+    return estimate_net_profit_v2(
+        side, entry, exit_p, qty, maker_fee, exit_is_taker=False
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fill‑probability helpers
@@ -1005,6 +1098,7 @@ def classify_limit_placement(
             return "join"
         return "passive"
 
+
 def estimate_limit_fill_probability(
     *,
     order_side: str,
@@ -1025,7 +1119,9 @@ def estimate_limit_fill_probability(
     mid = (best_bid + best_ask) / 2.0
     denom = bid_vol + ask_vol
     imbalance = (bid_vol - ask_vol) / denom if denom > 0 else 0.0
-    placement = classify_limit_placement(order_side, limit_price, best_bid, best_ask, tick_size)
+    placement = classify_limit_placement(
+        order_side, limit_price, best_bid, best_ask, tick_size
+    )
     placement_score = {"cross": 0.95, "join": 0.55, "passive": 0.25}[placement]
     factors: Dict[str, float] = {"placement": placement_score}
     if order_side == "Sell":
@@ -1076,14 +1172,17 @@ def estimate_limit_fill_probability(
         suggested_reprice_ticks=suggested,
     )
 
+
 def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
+
 
 def _sigmoid(x: float) -> float:
     try:
         return 1.0 / (1.0 + math.exp(-x))
     except OverflowError:
         return 0.0 if x < 0 else 1.0
+
 
 # ---------------------------------------------------------------------------
 # Reduce‑exit payload builder
@@ -1120,8 +1219,11 @@ def build_reduce_exit_payload(
     )
     payload["orderType"] = "Limit"
     payload["price"] = str(px)
-    payload["timeInForce"] = exit_tif if exit_tif in ("PostOnly", "GTC", "IOC") else "PostOnly"
+    payload["timeInForce"] = (
+        exit_tif if exit_tif in ("PostOnly", "GTC", "IOC") else "PostOnly"
+    )
     return payload
+
 
 def expected_close_pnl(
     position_side: str,
@@ -1157,6 +1259,7 @@ def expected_close_pnl(
         net = (avg_entry - exit_px) * close_qty - fees
     return net, exit_px
 
+
 def place_reduce_exit_with_retry(
     base_url: str,
     symbol: str,
@@ -1172,6 +1275,7 @@ def place_reduce_exit_with_retry(
     exit_max_retries: int,
 ) -> Dict[str, Any]:
     import copy
+
     last_error: Any = None
     for attempt in range(exit_max_retries + 1):
         payload = copy.deepcopy(
@@ -1208,6 +1312,7 @@ def place_reduce_exit_with_retry(
             time.sleep(0.1 * (attempt + 1))
     return {"retCode": -1, "retMsg": f"All retries failed: {last_error}"}
 
+
 def set_position_take_profit(
     base_url: str,
     symbol: str,
@@ -1232,7 +1337,10 @@ def set_position_take_profit(
     }
     if not full and tp_size is not None:
         body["tpSize"] = str(tp_size)
-    return send_signed_post(base_url, "/v5/position/trading-stop", body, api_key, api_secret)
+    return send_signed_post(
+        base_url, "/v5/position/trading-stop", body, api_key, api_secret
+    )
+
 
 def verify_tp_net(
     side: str,
@@ -1250,6 +1358,7 @@ def verify_tp_net(
         return False
     net = estimate_net_profit_v2(side, entry, tp, qty, maker_fee, exit_is_taker=False)
     return net >= min_net - 1e-9
+
 
 def solve_tp_with_floor(
     entry: float,
@@ -1272,6 +1381,7 @@ def solve_tp_with_floor(
             return round_to_tick(tp, tick_size)
     return None
 
+
 # ---------------------------------------------------------------------------
 # Signal evaluation
 # ---------------------------------------------------------------------------
@@ -1291,13 +1401,17 @@ def evaluate_signal(
         side = "Buy"
         entry_price = best_bid
         entry_fee = entry_price * qty * maker_fee
-        raw_exit = (target_profit + entry_fee + entry_price * qty) / (qty * (1 - maker_fee))
+        raw_exit = (target_profit + entry_fee + entry_price * qty) / (
+            qty * (1 - maker_fee)
+        )
         exit_price = round_to_tick(raw_exit, tick_size)
     elif momentum < MOMENTUM_SHORT and imbalance < IMBALANCE_SHORT:
         side = "Sell"
         entry_price = best_ask
         entry_fee = entry_price * qty * maker_fee
-        raw_exit = ((entry_price * qty) - entry_fee - target_profit) / (qty * (1 + maker_fee))
+        raw_exit = ((entry_price * qty) - entry_fee - target_profit) / (
+            qty * (1 + maker_fee)
+        )
         exit_price = round_to_tick(raw_exit, tick_size)
 
     if not side:
@@ -1319,13 +1433,20 @@ def evaluate_signal(
         "confidence": confidence,
     }
 
+
 # ---------------------------------------------------------------------------
 # Balance & position helpers
 # ---------------------------------------------------------------------------
-def check_account_balance(base_url: str, api_key: str, api_secret: str, required_margin: float) -> bool:
+def check_account_balance(
+    base_url: str, api_key: str, api_secret: str, required_margin: float
+) -> bool:
     try:
         resp = send_signed_get(
-            base_url, "/v5/account/wallet-balance", {"accountType": "UNIFIED"}, api_key, api_secret
+            base_url,
+            "/v5/account/wallet-balance",
+            {"accountType": "UNIFIED"},
+            api_key,
+            api_secret,
         )
     except Exception as exc:
         emit({"status": "error", "message": f"Balance check request failed: {exc}"})
@@ -1361,7 +1482,10 @@ def check_account_balance(base_url: str, api_key: str, api_secret: str, required
         return False
     return True
 
-def has_open_position(base_url: str, api_key: str, api_secret: str, symbol: str) -> bool:
+
+def has_open_position(
+    base_url: str, api_key: str, api_secret: str, symbol: str
+) -> bool:
     try:
         resp = send_signed_get(
             base_url,
@@ -1379,6 +1503,7 @@ def has_open_position(base_url: str, api_key: str, api_secret: str, symbol: str)
             return True
     return False
 
+
 # ---------------------------------------------------------------------------
 # Reduce‑exit probability & order helpers
 # ---------------------------------------------------------------------------
@@ -1394,6 +1519,7 @@ def reduce_limit_price(
     else:
         px = best_ask + reprice_ticks * tick_size
     return round_to_tick(max(px, tick_size), tick_size)
+
 
 def choose_reduce_limit_with_fill_target(
     position_side: str,
@@ -1427,7 +1553,9 @@ def choose_reduce_limit_with_fill_target(
         )
         if est.probability >= min_fill_probability:
             return px, est
-    px = reduce_limit_price(position_side, best_bid, best_ask, tick_size, reprice_ticks=max_aggressive_ticks)
+    px = reduce_limit_price(
+        position_side, best_bid, best_ask, tick_size, reprice_ticks=max_aggressive_ticks
+    )
     est = estimate_limit_fill_probability(
         order_side=close_side,
         limit_price=px,
@@ -1444,6 +1572,7 @@ def choose_reduce_limit_with_fill_target(
     if est.probability < min_fill_probability * 0.75:
         return None, est
     return px, est
+
 
 def entry_postonly_viable(
     side: str,
@@ -1468,6 +1597,7 @@ def entry_postonly_viable(
         loop_interval=loop_interval,
     )
     return est.probability >= min_fill_probability, est
+
 
 # ---------------------------------------------------------------------------
 # Position‑guard handler
@@ -1507,6 +1637,7 @@ def enhanced_position_guard_check(
             return True
     return False
 
+
 # ---------------------------------------------------------------------------
 # Main Evaluation Cycle
 # ---------------------------------------------------------------------------
@@ -1536,6 +1667,7 @@ def fetch_market(
             urls["ws_public_linear"], base_url, symbol, args["ws_timeout"], tick_cache
         )
     return get_market_data_rest(base_url, symbol, tick_cache)
+
 
 def run_one_cycle(
     args: Dict[str, Any],
@@ -1608,7 +1740,11 @@ def run_one_cycle(
                 return
         else:
             emit_result(
-                {"status": "error", "iteration": iteration, "message": f"Market data fetch failed: {exc}"}
+                {
+                    "status": "error",
+                    "iteration": iteration,
+                    "message": f"Market data fetch failed: {exc}",
+                }
             )
             return
 
@@ -1616,7 +1752,11 @@ def run_one_cycle(
     if "account_balance" not in loop_state or iteration % 20 == 0 or iteration == 1:
         try:
             resp = send_signed_get(
-                base_url, "/v5/account/wallet-balance", {"accountType": "UNIFIED"}, api_key, api_secret
+                base_url,
+                "/v5/account/wallet-balance",
+                {"accountType": "UNIFIED"},
+                api_key,
+                api_secret,
             )
             if resp.get("retCode") == 0:
                 tot_avail = resp["result"]["list"][0].get("totalAvailableBalance")
@@ -1625,7 +1765,9 @@ def run_one_cycle(
         except Exception:
             pass
     account_balance = loop_state.get("account_balance", 1000.0)
-    qty = calculate_optimal_qty(market, base_qty, target_profit, account_balance=account_balance)
+    qty = calculate_optimal_qty(
+        market, base_qty, target_profit, account_balance=account_balance
+    )
     spread_bps = market["spread_bps"]
     if spread_bps > max_spread_bps:
         emit_result(
@@ -1643,7 +1785,10 @@ def run_one_cycle(
     mid_prices = loop_state.setdefault("mid_prices", deque(maxlen=10))
     denom = market["bid_vol"] + market["ask_vol"]
     current_mid = (
-        (market["best_bid"] * market["ask_vol"] + market["best_ask"] * market["bid_vol"])
+        (
+            market["best_bid"] * market["ask_vol"]
+            + market["best_ask"] * market["bid_vol"]
+        )
         / denom
         if denom > 0
         else (market["best_bid"] + market["best_ask"]) / 2.0
@@ -1730,7 +1875,9 @@ def run_one_cycle(
                     api_key,
                     api_secret,
                     full=(min(qty, pos_size) >= pos_size),
-                    tp_size=None if min(qty, pos_size) >= pos_size else min(qty, pos_size),
+                    tp_size=None
+                    if min(qty, pos_size) >= pos_size
+                    else min(qty, pos_size),
                 )
                 if ts_res.get("retCode") == 0:
                     emit_result(
@@ -1754,7 +1901,10 @@ def run_one_cycle(
     sig = evaluate_signal(market, qty, target_profit, maker_fee)
     if sig:
         pattern_signal = loop_state["micro_pattern_analyzer"].get_entry_signal()
-        if pattern_signal["signal_strength"] > 0.3 and pattern_signal["direction"] != "neutral":
+        if (
+            pattern_signal["signal_strength"] > 0.3
+            and pattern_signal["direction"] != "neutral"
+        ):
             sig["confidence"] = min(
                 1.0, sig["confidence"] * (1.0 + pattern_signal["signal_strength"])
             )
@@ -1814,7 +1964,9 @@ def run_one_cycle(
         )
         return
 
-    net_est = estimate_net_profit_v2(side, entry_price, exit_price, qty, maker_fee, exit_is_taker=False)
+    net_est = estimate_net_profit_v2(
+        side, entry_price, exit_price, qty, maker_fee, exit_is_taker=False
+    )
     if net_est < 0.02:
         emit_result(
             {
@@ -1862,11 +2014,12 @@ def run_one_cycle(
         if len(market.get("closes", [])) >= 5:
             recent_prices = market["closes"][-5:]
             price_changes = [
-                abs(recent_prices[i] - recent_prices[i - 1])
-                / recent_prices[i - 1]
+                abs(recent_prices[i] - recent_prices[i - 1]) / recent_prices[i - 1]
                 for i in range(1, len(recent_prices))
             ]
-            market_volatility = sum(price_changes) / len(price_changes) if price_changes else 0.002
+            market_volatility = (
+                sum(price_changes) / len(price_changes) if price_changes else 0.002
+            )
         else:
             market_volatility = 0.002
         stop_loss_price, _ = calculate_adaptive_stop_loss(
@@ -1997,7 +2150,7 @@ def run_one_cycle(
         return
 
     # Entry-order Preparation
-    required_margin = (entry_price * qty * (1 + maker_fee) / args.get("leverage", 1.0))
+    required_margin = entry_price * qty * (1 + maker_fee) / args.get("leverage", 1.0)
     if balance_check:
         if not check_account_balance(base_url, api_key, api_secret, required_margin):
             return
@@ -2040,7 +2193,9 @@ def run_one_cycle(
                     "entry_limit_price": entry_price,
                     "take_profit_price": exit_price,
                     "estimated_net_profit_usdt": round(net_est, 6),
-                    "tick_spread_required": round(abs(exit_price - entry_price) / tick_size, 1),
+                    "tick_spread_required": round(
+                        abs(exit_price - entry_price) / tick_size, 1
+                    ),
                     "payload": entry_payload,
                     "architecture": "Chained Native TP Order (Automated Risk Lifecycle)",
                 },
@@ -2094,6 +2249,7 @@ def run_one_cycle(
         }
     emit_result(result)
 
+
 def place_micro_order_with_retry(
     base_url: str,
     entry_payload: Dict[str, Any],
@@ -2103,6 +2259,7 @@ def place_micro_order_with_retry(
     max_retries: int = 2,
 ) -> Dict[str, Any]:
     import copy
+
     last_error: Any = None
     for attempt in range(max_retries + 1):
         payload = copy.deepcopy(entry_payload)
@@ -2128,6 +2285,7 @@ def place_micro_order_with_retry(
             time.sleep(0.1 * (attempt + 1))
     return {"retCode": -1, "retMsg": f"All retries failed: {last_error}"}
 
+
 # ---------------------------------------------------------------------------
 # Daemon entry point
 # ---------------------------------------------------------------------------
@@ -2142,7 +2300,12 @@ def run_daemon(args: Dict[str, Any]) -> None:
             klines_boot = send_signed_get(
                 urls["rest"],
                 "/v5/market/kline",
-                {"category": "linear", "symbol": args["symbol"], "interval": "1", "limit": 30},
+                {
+                    "category": "linear",
+                    "symbol": args["symbol"],
+                    "interval": "1",
+                    "limit": 30,
+                },
                 args["api_key"],
                 args["api_secret"],
             )["result"]["list"]
@@ -2150,15 +2313,27 @@ def run_daemon(args: Dict[str, Any]) -> None:
             logger.info(f"Seeded {len(seed_closes)} kline closes from REST")
         except Exception as e:
             logger.warning(f"Could not bootstrap klines from REST: {e}")
-        public_feed = PersistentPublicLinearFeed(urls["ws_public_linear"], args["symbol"], seed_closes=seed_closes)
+        public_feed = PersistentPublicLinearFeed(
+            urls["ws_public_linear"], args["symbol"], seed_closes=seed_closes
+        )
         public_feed.start()
         if not public_feed.wait_ready(args["ws_timeout"]):
-            emit({"status": "error", "message": "Persistent public WS failed to become ready"})
+            emit(
+                {
+                    "status": "error",
+                    "message": "Persistent public WS failed to become ready",
+                }
+            )
             public_feed.stop()
             if not args.get("ws_fallback_rest"):
                 return
             public_feed = None
-            emit({"status": "warning", "message": "Continuing daemon with REST fallback only"})
+            emit(
+                {
+                    "status": "warning",
+                    "message": "Continuing daemon with REST fallback only",
+                }
+            )
     private_logger: Optional[PrivateWsLogger] = None
     if args.get("private_ws"):
         private_logger = PrivateWsLogger(
@@ -2206,7 +2381,14 @@ def run_daemon(args: Dict[str, Any]) -> None:
             public_feed.stop()
         if private_logger:
             private_logger.stop()
-        emit({"status": "daemon_stopped", "reason": "shutdown", "iteration": loop_state.get("iteration", 0)})
+        emit(
+            {
+                "status": "daemon_stopped",
+                "reason": "shutdown",
+                "iteration": loop_state.get("iteration", 0),
+            }
+        )
+
 
 def main(args: Dict[str, Any]) -> None:
     api_key = args.get("api_key") or os.getenv("BYBIT_API_KEY")
@@ -2227,7 +2409,9 @@ def main(args: Dict[str, Any]) -> None:
     max_iterations = int(args.get("max_iterations", 0))
     private_ws = bool(args.get("private_ws", False))
     position_guard = bool(args.get("position_guard", False))
-    position_guard_profit_override = float(args.get("position_guard_profit_override", 0.02))
+    position_guard_profit_override = float(
+        args.get("position_guard_profit_override", 0.02)
+    )
     position_guard_aggressive = args.get("position_guard_aggressive", False)
     position_guard_aggressive = (
         position_guard_aggressive
@@ -2257,7 +2441,12 @@ def main(args: Dict[str, Any]) -> None:
         emit({"status": "error", "message": "api-key and api-secret are required"})
         return
     if not (0.02 <= target_profit <= 0.20):
-        emit({"status": "error", "message": "target_profit must be 0.02–0.20 USDT for micro mode"})
+        emit(
+            {
+                "status": "error",
+                "message": "target_profit must be 0.02–0.20 USDT for micro mode",
+            }
+        )
         return
     if qty <= 0:
         emit({"status": "error", "message": "qty must be positive"})
@@ -2321,6 +2510,7 @@ def main(args: Dict[str, Any]) -> None:
         emit,
     )
 
+
 if __name__ == "__main__":
     main(parse_argv(sys.argv[1:]))
 #!/usr/bin/env python3
@@ -2353,26 +2543,20 @@ if __name__ == "__main__":
 # @option --ws-fallback-rest        On WS failure, use REST for that cycle (flag).
 # ==============================================================================
 
-import sys
-import math
-from statistics import stdev
-from collections import deque
-import time
-import signal
-import hmac
-import hashlib
-import json
-import threading
-import requests
-from typing import Any, Callable, Dict, List, Optional, Tuple
 import logging
-import os
+import sys
+import threading
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import requests
+
 # Load environment variables from .env if present
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
-    env_path = Path(__file__).with_name('.env')
+    env_path = Path(__file__).with_name(".env")
     if env_path.is_file():
         load_dotenv(dotenv_path=env_path)
 except Exception:
@@ -2391,6 +2575,7 @@ def get_proxies() -> Optional[Dict[str, str]]:
 
 def get_ws_run_options() -> Dict[str, Any]:
     from urllib.parse import urlparse
+
     proxy = os.getenv("BYBIT_TOR_PROXY")
     if not proxy and os.getenv("TOR_ENABLED") == "true":
         proxy = f"socks5://127.0.0.1:{os.getenv('TOR_SOCKS_PORT', '9050')}"
@@ -2411,8 +2596,13 @@ def get_ws_run_options() -> Dict[str, Any]:
         logger.warning(f"Failed to parse proxy URL {proxy}: {e}")
         return {}
 
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[logging.StreamHandler(sys.stderr)])
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[logging.StreamHandler(sys.stderr)],
+)
 logger.setLevel(logging.INFO)
 REQUEST_TIMEOUT = 10
 MARKET_RETRIES = 3
@@ -2475,9 +2665,13 @@ def emit(obj: Dict[str, Any]) -> None:
     print(json.dumps(obj, indent=2), flush=True)
 
 
-def generate_signature(secret: str, timestamp: int, api_key: str, recv_window: int, payload: str) -> str:
+def generate_signature(
+    secret: str, timestamp: int, api_key: str, recv_window: int, payload: str
+) -> str:
     param_str = f"{timestamp}{api_key}{recv_window}{payload}"
-    return hmac.new(secret.encode("utf-8"), param_str.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.new(
+        secret.encode("utf-8"), param_str.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
 
 
 _SERVER_TIME_OFFSET_MS: Optional[int] = None
@@ -2531,7 +2725,9 @@ def send_signed_post(
 ) -> Dict[str, Any]:
     timestamp = server_time_ms(base_url) if use_server_time else int(time.time() * 1000)
     payload_json = json.dumps(payload_dict, separators=(",", ":"))
-    signature = generate_signature(api_secret, timestamp, api_key, RECV_WINDOW, payload_json)
+    signature = generate_signature(
+        api_secret, timestamp, api_key, RECV_WINDOW, payload_json
+    )
     headers = {
         "X-BAPI-API-KEY": api_key,
         "X-BAPI-SIGN": signature,
@@ -2624,10 +2820,10 @@ def kline_close(row: Any) -> float:
 def fetch_tick_size(base_url: str, symbol: str, tick_cache: Dict[str, float]) -> float:
     if symbol in tick_cache:
         return tick_cache[symbol]
-    api_key = os.getenv('BYBIT_API_KEY')
-    api_secret = os.getenv('BYBIT_API_SECRET')
+    api_key = os.getenv("BYBIT_API_KEY")
+    api_secret = os.getenv("BYBIT_API_SECRET")
     if not api_key or not api_secret:
-        raise RuntimeError('API credentials missing for signed market data request')
+        raise RuntimeError("API credentials missing for signed market data request")
     try:
         resp = send_signed_get(
             base_url,
@@ -2680,13 +2876,12 @@ def build_market_snapshot(
     }
 
 
-
 class MultiTimeframeAnalyzer:
     def __init__(self, max_frames: int = 3):
         self.timeframes = {
-            '1m': deque(maxlen=60),
-            '5m': deque(maxlen=12),
-            '15m': deque(maxlen=4),
+            "1m": deque(maxlen=60),
+            "5m": deque(maxlen=12),
+            "15m": deque(maxlen=4),
         }
 
     def update(self, close_price: float, timestamp: float):
@@ -2717,38 +2912,41 @@ class MultiTimeframeAnalyzer:
                 scores.append(tf_score)
 
         if not scores:
-            return 0.0, 'neutral'
+            return 0.0, "neutral"
 
         avg_score = sum(scores) / len(scores)
 
         if avg_score > 0.005:
-            return min(1.0, avg_score * 100), 'bullish'
+            return min(1.0, avg_score * 100), "bullish"
         elif avg_score < -0.005:
-            return min(1.0, abs(avg_score) * 100), 'bearish'
+            return min(1.0, abs(avg_score) * 100), "bearish"
         else:
-            return 0.0, 'neutral'
+            return 0.0, "neutral"
 
 
 class MicroPatternAnalyzer:
     """
     Analyzes micro-patterns in order book and price action for scalping.
     """
+
     def __init__(self, window_size: int = 10):
         self.bid_asks = deque(maxlen=window_size)
         self.price_movements = deque(maxlen=window_size)
 
     def update(self, best_bid: float, best_ask: float):
         """Update with current order book data."""
-        self.bid_asks.append({
-            'bid': best_bid,
-            'ask': best_ask,
-            'spread': best_ask - best_bid,
-            'mid': (best_bid + best_ask) / 2,
-            'timestamp': time.time()
-        })
+        self.bid_asks.append(
+            {
+                "bid": best_bid,
+                "ask": best_ask,
+                "spread": best_ask - best_bid,
+                "mid": (best_bid + best_ask) / 2,
+                "timestamp": time.time(),
+            }
+        )
 
         if len(self.bid_asks) >= 2:
-            movement = self.bid_asks[-1]['mid'] - self.bid_asks[-2]['mid']
+            movement = self.bid_asks[-1]["mid"] - self.bid_asks[-2]["mid"]
             self.price_movements.append(movement)
 
     def detect_acceleration(self) -> float:
@@ -2772,7 +2970,7 @@ class MicroPatternAnalyzer:
         if len(self.bid_asks) < 5:
             return False
 
-        spreads = [ba['spread'] for ba in list(self.bid_asks)[-5:]]
+        spreads = [ba["spread"] for ba in list(self.bid_asks)[-5:]]
         recent_avg = sum(spreads[-2:]) / 2
         older_avg = sum(spreads[:-2]) / 3 if len(spreads) > 2 else recent_avg
 
@@ -2794,10 +2992,14 @@ class MicroPatternAnalyzer:
             signal_strength += 0.3
 
         return {
-            'acceleration': acceleration,
-            'spread_compression': spread_compression,
-            'signal_strength': signal_strength,
-            'direction': 'buy' if acceleration > 0 else 'sell' if acceleration < 0 else 'neutral'
+            "acceleration": acceleration,
+            "spread_compression": spread_compression,
+            "signal_strength": signal_strength,
+            "direction": "buy"
+            if acceleration > 0
+            else "sell"
+            if acceleration < 0
+            else "neutral",
         }
 
 
@@ -2841,13 +3043,15 @@ def calculate_optimal_qty(
     - Risk management
     - Win rate optimization
     """
-    if len(market.get('closes', [])) < volatility_window:
+    if len(market.get("closes", [])) < volatility_window:
         return base_qty
 
-    closes = market['closes'][-volatility_window:]
-    returns = [(closes[i] - closes[i-1]) / closes[i-1]
-               for i in range(1, len(closes))
-               if closes[i-1] != 0]
+    closes = market["closes"][-volatility_window:]
+    returns = [
+        (closes[i] - closes[i - 1]) / closes[i - 1]
+        for i in range(1, len(closes))
+        if closes[i - 1] != 0
+    ]
 
     vol = _realized_volatility(returns)
 
@@ -2878,13 +3082,15 @@ def calculate_optimal_qty(
     avg_win_loss_ratio = 1.2  # Positive expectancy
 
     # Kelly fraction
-    kelly_fraction = (estimated_win_rate * avg_win_loss_ratio - (1 - estimated_win_rate)) / avg_win_loss_ratio
+    kelly_fraction = (
+        estimated_win_rate * avg_win_loss_ratio - (1 - estimated_win_rate)
+    ) / avg_win_loss_ratio
     kelly_fraction = max(0.1, min(0.25, kelly_fraction))  # Cap between 10-25%
 
     optimal_qty = base_qty * vol_multiplier * profit_multiplier * (1 + kelly_fraction)
 
     # Risk check: ensure position value doesn't exceed max risk
-    entry_price = (market['best_bid'] + market['best_ask']) / 2
+    entry_price = (market["best_bid"] + market["best_ask"]) / 2
     position_value = optimal_qty * entry_price
     max_allowed_value = account_balance * max_position_risk
 
@@ -2897,7 +3103,9 @@ def calculate_optimal_qty(
     return round(optimal_qty, 8)
 
 
-def calculate_adaptive_momentum_thresholds(closes: List[float], lookback: int = 20) -> Tuple[float, float]:
+def calculate_adaptive_momentum_thresholds(
+    closes: List[float], lookback: int = 20
+) -> Tuple[float, float]:
     """
     Calculate adaptive momentum thresholds based on recent price action.
     Returns (long_threshold, short_threshold)
@@ -2908,8 +3116,11 @@ def calculate_adaptive_momentum_thresholds(closes: List[float], lookback: int = 
     # Calculate average absolute percentage change
     changes = []
     for i in range(1, len(closes[-lookback:])):
-        if closes[-lookback:][i-1] != 0:
-            pct_change = abs((closes[-lookback:][i] - closes[-lookback:][i-1]) / closes[-lookback:][i-1])
+        if closes[-lookback:][i - 1] != 0:
+            pct_change = abs(
+                (closes[-lookback:][i] - closes[-lookback:][i - 1])
+                / closes[-lookback:][i - 1]
+            )
             changes.append(pct_change)
 
     if not changes:
@@ -2926,9 +3137,14 @@ def calculate_adaptive_momentum_thresholds(closes: List[float], lookback: int = 
     return long_threshold, short_threshold
 
 
-def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
-                       maker_fee: float, volume_profile: Optional[Dict] = None,
-                       position_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+def evaluate_signal_v2(
+    market: Dict[str, Any],
+    qty: float,
+    target_profit: float,
+    maker_fee: float,
+    volume_profile: Optional[Dict] = None,
+    position_info: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
     """
     Enhanced signal evaluation with adaptive thresholds and multi-factor confirmation.
     """
@@ -2945,8 +3161,8 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
     # Volume-adjusted thresholds
     volume_multiplier = 1.0
     if volume_profile:
-        avg_volume = volume_profile.get('avg_volume', 1)
-        current_volume = volume_profile.get('current_volume', 1)
+        avg_volume = volume_profile.get("avg_volume", 1)
+        current_volume = volume_profile.get("current_volume", 1)
         if current_volume > avg_volume * 1.2:
             volume_multiplier = 1.2  # Higher confidence with higher volume
         elif current_volume < avg_volume * 0.8:
@@ -2967,7 +3183,7 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
     # Signal strength calculation
     signal_strength = 0.0
 
-    spread_ok = market.get('spread_bps', 100) < 30
+    spread_ok = market.get("spread_bps", 100) < 30
 
     # Primary: momentum + imbalance agreement
     buy_conditions = [
@@ -2983,8 +3199,12 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
 
     # Fallback: extreme OBI alone (imbalance > 0.60 or < -0.60) with tight spread
     # Rationale: heavy one-sided book pressure is a reliable directional signal
-    buy_obi_only = spread_ok and imbalance > 0.60 and abs(momentum) < abs(momentum_long_adj) * 2
-    sell_obi_only = spread_ok and imbalance < -0.60 and abs(momentum) < abs(momentum_short_adj) * 2
+    buy_obi_only = (
+        spread_ok and imbalance > 0.60 and abs(momentum) < abs(momentum_long_adj) * 2
+    )
+    sell_obi_only = (
+        spread_ok and imbalance < -0.60 and abs(momentum) < abs(momentum_short_adj) * 2
+    )
 
     base_entry = entry_price
     if position_info and position_info.get("size", 0) > 0:
@@ -2998,7 +3218,10 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
 
     def _try_tp(entry, s):
         return solve_tp_with_floor(
-            entry, s, qty, maker_fee,
+            entry,
+            s,
+            qty,
+            maker_fee,
             min_net=max(0.02, target_profit * 0.95),
             market=market,
             tick_size=tick_size,
@@ -3011,8 +3234,11 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
         if tp is None:
             return None
         exit_price = tp
-        signal_strength = abs(momentum) / max(abs(momentum_long_adj), 1e-10) * 0.4 + \
-                         abs(imbalance) / max(abs(imbalance_long), 1e-10) * 0.4 + 0.2
+        signal_strength = (
+            abs(momentum) / max(abs(momentum_long_adj), 1e-10) * 0.4
+            + abs(imbalance) / max(abs(imbalance_long), 1e-10) * 0.4
+            + 0.2
+        )
 
     elif all(sell_conditions):
         side = "Sell"
@@ -3021,8 +3247,11 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
         if tp is None:
             return None
         exit_price = tp
-        signal_strength = abs(momentum) / max(abs(momentum_short_adj), 1e-10) * 0.4 + \
-                         abs(imbalance) / max(abs(imbalance_short), 1e-10) * 0.4 + 0.2
+        signal_strength = (
+            abs(momentum) / max(abs(momentum_short_adj), 1e-10) * 0.4
+            + abs(imbalance) / max(abs(imbalance_short), 1e-10) * 0.4
+            + 0.2
+        )
 
     elif buy_obi_only:
         side = "Buy"
@@ -3063,8 +3292,9 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
     }
 
 
-def net_profit_to_tp(entry_price: float, side: str, net_target: float,
-                     qty: float, maker_fee: float) -> float:
+def net_profit_to_tp(
+    entry_price: float, side: str, net_target: float, qty: float, maker_fee: float
+) -> float:
     """Solve exactly for the TP price that yields `net_target` USDT net of all fees.
 
     Round-trip fee formula (maker both sides):
@@ -3094,7 +3324,7 @@ def net_profit_to_tp_advanced(
     net_target: float,
     qty: float,
     maker_fee: float,
-    market_conditions: Dict[str, Any] = None
+    market_conditions: Dict[str, Any] = None,
 ) -> float:
     """
     Calculate take profit price with dynamic adjustment based on market conditions.
@@ -3105,15 +3335,15 @@ def net_profit_to_tp_advanced(
         return base_tp
 
     # Dynamic adjustment based on order book imbalance
-    imbalance = market_conditions.get('imbalance', 0)
-    spread_bps = market_conditions.get('spread_bps', 10)
+    imbalance = market_conditions.get("imbalance", 0)
+    spread_bps = market_conditions.get("spread_bps", 10)
 
     adjustment_factor = 1.0
 
     # If strong imbalance in our direction, we can be more aggressive with TP
-    if side == 'Buy' and imbalance > 0.1:
+    if side == "Buy" and imbalance > 0.1:
         adjustment_factor = 1.1  # 10% higher TP
-    elif side == 'Sell' and imbalance < -0.1:
+    elif side == "Sell" and imbalance < -0.1:
         adjustment_factor = 1.1
 
     # Adjust for spread (tighter spread = more confident)
@@ -3126,7 +3356,7 @@ def net_profit_to_tp_advanced(
     adjusted_tp = entry_price + (base_tp - entry_price) * adjustment_factor
 
     # Ensure TP is at least min_distance away
-    if side == 'Buy':
+    if side == "Buy":
         adjusted_tp = max(adjusted_tp, entry_price + min_distance)
     else:
         adjusted_tp = min(adjusted_tp, entry_price - min_distance)
@@ -3136,12 +3366,18 @@ def net_profit_to_tp_advanced(
 
 # Micro-profit tiers in USDT — smallest first for maximum trade frequency
 MICRO_PROFIT_TIERS = [0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20]
-MAX_TP_DISTANCE_PCT = 0.05   # never require > 5% price move for a TP
+MAX_TP_DISTANCE_PCT = 0.05  # never require > 5% price move for a TP
 
 
-def optimize_take_profit(market: Dict[str, Any], entry_price: float, side: str,
-                          target_profit: float, qty: float, maker_fee: float,
-                          position_info: Optional[Dict[str, Any]] = None) -> float:
+def optimize_take_profit(
+    market: Dict[str, Any],
+    entry_price: float,
+    side: str,
+    target_profit: float,
+    qty: float,
+    maker_fee: float,
+    position_info: Optional[Dict[str, Any]] = None,
+) -> float:
     """Return the tightest viable TP price within the $0.02-$0.20 net-profit band.
 
     If there is an active position, the entry cost base is adjusted to the new expected average
@@ -3153,7 +3389,7 @@ def optimize_take_profit(market: Dict[str, Any], entry_price: float, side: str,
         pos_size = position_info["size"]
         pos_entry = position_info["entry_price"]
         pos_side = position_info["side"]
-        
+
         if pos_side == side:
             # Same side (scale-in): calculate new expected average entry price
             base_entry = (pos_size * pos_entry + qty * entry_price) / (pos_size + qty)
@@ -3170,7 +3406,9 @@ def optimize_take_profit(market: Dict[str, Any], entry_price: float, side: str,
 
     for net_tgt in tiers:
         try:
-            tp = net_profit_to_tp_advanced(base_entry, side, net_tgt, qty, maker_fee, market)
+            tp = net_profit_to_tp_advanced(
+                base_entry, side, net_tgt, qty, maker_fee, market
+            )
         except Exception:
             continue
 
@@ -3189,15 +3427,22 @@ def optimize_take_profit(market: Dict[str, Any], entry_price: float, side: str,
 
     # Absolute fallback: solve for target_profit regardless of distance
     try:
-        return net_profit_to_tp_advanced(base_entry, side, target_profit, qty, maker_fee, market)
+        return net_profit_to_tp_advanced(
+            base_entry, side, target_profit, qty, maker_fee, market
+        )
     except Exception:
         if side == "Buy":
             return base_entry * (1.0 + target_profit / (base_entry * qty))
         return base_entry * (1.0 - target_profit / (base_entry * qty))
 
 
-def calculate_adaptive_stop_loss(entry_price: float, side: str, market_volatility: float,
-                                 tick_size: float, base_stop_distance: float = 0.002) -> Tuple[float, float]:
+def calculate_adaptive_stop_loss(
+    entry_price: float,
+    side: str,
+    market_volatility: float,
+    tick_size: float,
+    base_stop_distance: float = 0.002,
+) -> Tuple[float, float]:
     vol_multiplier = 1.0
     if market_volatility > 0.005:
         vol_multiplier = 1.5
@@ -3207,20 +3452,27 @@ def calculate_adaptive_stop_loss(entry_price: float, side: str, market_volatilit
     adjusted_distance = base_stop_distance * vol_multiplier
 
     if side == "Buy":
-        stop_loss_price = round_to_tick(entry_price * (1.0 - adjusted_distance), tick_size)
+        stop_loss_price = round_to_tick(
+            entry_price * (1.0 - adjusted_distance), tick_size
+        )
     else:
-        stop_loss_price = round_to_tick(entry_price * (1.0 + adjusted_distance), tick_size)
+        stop_loss_price = round_to_tick(
+            entry_price * (1.0 + adjusted_distance), tick_size
+        )
 
     return stop_loss_price, adjusted_distance
 
-def get_market_data_rest(base_url: str, symbol: str, tick_cache: Dict[str, float]) -> Dict[str, Any]:
+
+def get_market_data_rest(
+    base_url: str, symbol: str, tick_cache: Dict[str, float]
+) -> Dict[str, Any]:
     session = requests.Session()
     session.headers.update({"Cache-Control": "no-cache", "Pragma": "no-cache"})
     # Retrieve API credentials from environment (loaded from .env)
-    api_key = os.getenv('BYBIT_API_KEY')
-    api_secret = os.getenv('BYBIT_API_SECRET')
+    api_key = os.getenv("BYBIT_API_KEY")
+    api_secret = os.getenv("BYBIT_API_SECRET")
     if not api_key or not api_secret:
-        raise RuntimeError('API credentials missing for signed market data request')
+        raise RuntimeError("API credentials missing for signed market data request")
     url = f"{base_url}/v5/market/orderbook?category=linear&symbol={symbol}&limit=5"
     ob_resp = send_signed_get(
         base_url,
@@ -3244,11 +3496,17 @@ def get_market_data_rest(base_url: str, symbol: str, tick_cache: Dict[str, float
         raise RuntimeError("Insufficient kline data")
     closes = [kline_close(klines[1]), kline_close(klines[0])]
     tick_size = fetch_tick_size(base_url, symbol, tick_cache)
-    return build_market_snapshot(best_bid, best_ask, bid_vol, ask_vol, closes, tick_size, "rest")
+    return build_market_snapshot(
+        best_bid, best_ask, bid_vol, ask_vol, closes, tick_size, "rest"
+    )
 
 
 def get_market_data_ws_oneshot(
-    ws_url: str, base_url: str, symbol: str, timeout_sec: float, tick_cache: Dict[str, float]
+    ws_url: str,
+    base_url: str,
+    symbol: str,
+    timeout_sec: float,
+    tick_cache: Dict[str, float],
 ) -> Dict[str, Any]:
     try:
         import websocket
@@ -3293,7 +3551,11 @@ def get_market_data_ws_oneshot(
                 rows = data if isinstance(data, list) else [data]
                 for row in rows:
                     c = kline_close(row)
-                    start_time = row[0] if isinstance(row, (list, tuple)) else row.get("start", 0)
+                    start_time = (
+                        row[0]
+                        if isinstance(row, (list, tuple))
+                        else row.get("start", 0)
+                    )
                     if state.get("last_kline_start") == start_time:
                         state["closes"][-1] = c
                     else:
@@ -3308,7 +3570,10 @@ def get_market_data_ws_oneshot(
     def on_open(ws):
         ws.send(
             json.dumps(
-                {"op": "subscribe", "args": [f"orderbook.1.{symbol}", f"kline.1.{symbol}"]}
+                {
+                    "op": "subscribe",
+                    "args": [f"orderbook.1.{symbol}", f"kline.1.{symbol}"],
+                }
             )
         )
 
@@ -3328,7 +3593,9 @@ def get_market_data_ws_oneshot(
     if state["error"]:
         raise RuntimeError(state["error"])
     if not done["ok"]:
-        raise RuntimeError(f"WS market data timeout after {timeout_sec}s. State: {state}")
+        raise RuntimeError(
+            f"WS market data timeout after {timeout_sec}s. State: {state}"
+        )
 
     # Add retry mechanism for tick_size fetch
     max_retries = 3
@@ -3355,7 +3622,9 @@ def get_market_data_ws_oneshot(
 class PersistentPublicLinearFeed:
     """Daemon: one WS connection; thread-safe snapshot for each loop cycle."""
 
-    def __init__(self, ws_url: str, symbol: str, seed_closes: Optional[List[float]] = None):
+    def __init__(
+        self, ws_url: str, symbol: str, seed_closes: Optional[List[float]] = None
+    ):
         self.ws_url = ws_url
         self.symbol = symbol
         self._lock = threading.Lock()
@@ -3393,7 +3662,11 @@ class PersistentPublicLinearFeed:
                     rows = data if isinstance(data, list) else [data]
                     for row in rows:
                         c = kline_close(row)
-                        start_time = row[0] if isinstance(row, (list, tuple)) else row.get("start", 0)
+                        start_time = (
+                            row[0]
+                            if isinstance(row, (list, tuple))
+                            else row.get("start", 0)
+                        )
                         if getattr(self, "_last_kline_start", None) == start_time:
                             self._closes[-1] = c
                         else:
@@ -3410,7 +3683,10 @@ class PersistentPublicLinearFeed:
     def _on_open(self, ws):
         ws.send(
             json.dumps(
-                {"op": "subscribe", "args": [f"orderbook.1.{self.symbol}", f"kline.1.{self.symbol}"]}
+                {
+                    "op": "subscribe",
+                    "args": [f"orderbook.1.{self.symbol}", f"kline.1.{self.symbol}"],
+                }
             )
         )
 
@@ -3516,13 +3792,22 @@ def expected_market_close_pnl(
         exit_px = best_ask
         side = "Sell"
     return estimate_net_profit_v2(
-        side, avg_entry, exit_px, close_qty, maker_fee,
-        exit_is_taker=True, taker_fee=taker_fee,
+        side,
+        avg_entry,
+        exit_px,
+        close_qty,
+        maker_fee,
+        exit_is_taker=True,
+        taker_fee=taker_fee,
     )
 
 
-def estimate_net_profit(side: str, entry: float, exit_p: float, qty: float, maker_fee: float) -> float:
-    return estimate_net_profit_v2(side, entry, exit_p, qty, maker_fee, exit_is_taker=False)
+def estimate_net_profit(
+    side: str, entry: float, exit_p: float, qty: float, maker_fee: float
+) -> float:
+    return estimate_net_profit_v2(
+        side, entry, exit_p, qty, maker_fee, exit_is_taker=False
+    )
 
 
 OrderRole = str  # 'entry' | 'exit_reduce'
@@ -3530,7 +3815,13 @@ ExitStyle = str  # 'passive' | 'join' | 'cross'
 
 
 class FillProbabilityEstimate:
-    def __init__(self, probability: float, confidence: float, factors: Dict[str, float], suggested_reprice_ticks: int):
+    def __init__(
+        self,
+        probability: float,
+        confidence: float,
+        factors: Dict[str, float],
+        suggested_reprice_ticks: int,
+    ):
         self.probability = probability
         self.confidence = confidence
         self.factors = factors
@@ -3595,7 +3886,9 @@ def estimate_limit_fill_probability(
     denom = bid_vol + ask_vol
     imbalance = (bid_vol - ask_vol) / denom if denom > 0 else 0.0
 
-    placement = classify_limit_placement(order_side, limit_price, best_bid, best_ask, tick_size)
+    placement = classify_limit_placement(
+        order_side, limit_price, best_bid, best_ask, tick_size
+    )
     placement_score = {"cross": 0.95, "join": 0.55, "passive": 0.25}[placement]
     factors["placement"] = placement_score
 
@@ -3708,7 +4001,9 @@ def choose_reduce_limit_with_fill_target(
         if est.probability >= min_fill_probability:
             return px, est
 
-    px = reduce_limit_price(position_side, best_bid, best_ask, tick_size, reprice_ticks=max_aggressive_ticks)
+    px = reduce_limit_price(
+        position_side, best_bid, best_ask, tick_size, reprice_ticks=max_aggressive_ticks
+    )
     est = estimate_limit_fill_probability(
         order_side=close_side,
         limit_price=px,
@@ -3785,7 +4080,9 @@ def build_reduce_exit_payload(
     )
     payload["orderType"] = "Limit"
     payload["price"] = str(px)
-    payload["timeInForce"] = exit_tif if exit_tif in ("PostOnly", "GTC", "IOC") else "PostOnly"
+    payload["timeInForce"] = (
+        exit_tif if exit_tif in ("PostOnly", "GTC", "IOC") else "PostOnly"
+    )
     return payload
 
 
@@ -3807,7 +4104,11 @@ def expected_close_pnl(
         exit_fee = taker_fee
     else:
         exit_px = reduce_limit_price(
-            position_side, market["best_bid"], market["best_ask"], tick_size, reprice_ticks
+            position_side,
+            market["best_bid"],
+            market["best_ask"],
+            tick_size,
+            reprice_ticks,
         )
         exit_is_taker = False
         exit_fee = maker_fee
@@ -3847,7 +4148,9 @@ def place_reduce_exit_with_retry(
             reprice_ticks=attempt * exit_reprice_ticks,
         )
         try:
-            res = send_signed_post(base_url, "/v5/order/create", payload, api_key, api_secret)
+            res = send_signed_post(
+                base_url, "/v5/order/create", payload, api_key, api_secret
+            )
             if res.get("retCode") == 0:
                 res["_exit_payload"] = payload
                 return res
@@ -3949,13 +4252,17 @@ def evaluate_signal(
         side = "Buy"
         entry_price = best_bid
         entry_fee = entry_price * qty * maker_fee
-        raw_exit = (target_profit + entry_fee + entry_price * qty) / (qty * (1 - maker_fee))
+        raw_exit = (target_profit + entry_fee + entry_price * qty) / (
+            qty * (1 - maker_fee)
+        )
         exit_price = round_to_tick(raw_exit, tick_size)
     elif momentum < MOMENTUM_SHORT and imbalance < IMBALANCE_SHORT:
         side = "Sell"
         entry_price = best_ask
         entry_fee = entry_price * qty * maker_fee
-        raw_exit = ((entry_price * qty) - entry_fee - target_profit) / (qty * (1 + maker_fee))
+        raw_exit = ((entry_price * qty) - entry_fee - target_profit) / (
+            qty * (1 + maker_fee)
+        )
         exit_price = round_to_tick(raw_exit, tick_size)
 
     if not side:
@@ -3971,10 +4278,16 @@ def evaluate_signal(
     }
 
 
-def check_account_balance(base_url: str, api_key: str, api_secret: str, required_margin: float) -> bool:
+def check_account_balance(
+    base_url: str, api_key: str, api_secret: str, required_margin: float
+) -> bool:
     try:
         resp = send_signed_get(
-            base_url, "/v5/account/wallet-balance", {"accountType": "UNIFIED"}, api_key, api_secret
+            base_url,
+            "/v5/account/wallet-balance",
+            {"accountType": "UNIFIED"},
+            api_key,
+            api_secret,
         )
     except Exception as exc:
         emit({"status": "error", "message": f"Balance check request failed: {exc}"})
@@ -4016,7 +4329,9 @@ def check_account_balance(base_url: str, api_key: str, api_secret: str, required
     return True
 
 
-def has_open_position(base_url: str, api_key: str, api_secret: str, symbol: str) -> bool:
+def has_open_position(
+    base_url: str, api_key: str, api_secret: str, symbol: str
+) -> bool:
     try:
         resp = send_signed_get(
             base_url,
@@ -4045,6 +4360,7 @@ def place_micro_order_with_retry(
     tick_size: float = 0.01,
 ) -> Dict[str, Any]:
     import copy
+
     last_error: Any = None
 
     for attempt in range(max_retries + 1):
@@ -4084,7 +4400,12 @@ class DynamicPositionGuard:
         self.min_profit_to_override = min_profit_to_override
         self.aggressive = aggressive
 
-    def decide(self, entry_side: str, entry_signal_confidence: float, position_info: Dict[str, Any]) -> Tuple[bool, str]:
+    def decide(
+        self,
+        entry_side: str,
+        entry_signal_confidence: float,
+        position_info: Dict[str, Any],
+    ) -> Tuple[bool, str]:
         if not position_info or position_info.get("size", 0) <= 0:
             return False, "no_position"
 
@@ -4094,9 +4415,8 @@ class DynamicPositionGuard:
             if entry_side != position_info["side"]:
                 if self.aggressive or entry_signal_confidence > 0.6:
                     return False, "hedging_opportunity"
-            else:
-                if self.aggressive or entry_signal_confidence > 0.8:
-                    return False, "strong_signal_scaling"
+            elif self.aggressive or entry_signal_confidence > 0.8:
+                return False, "strong_signal_scaling"
 
         # Loss position - be more restrictive
         if pnl < -self.min_profit_to_override:
@@ -4114,7 +4434,7 @@ class DynamicPositionGuard:
         api_secret: str,
         symbol: str,
         entry_side: str,
-        entry_signal_confidence: float
+        entry_signal_confidence: float,
     ) -> Tuple[bool, str, Dict]:
         """
         Check position guard while considering existing position profitability.
@@ -4147,7 +4467,9 @@ class DynamicPositionGuard:
                     "unrealized_pnl_pct": float(pos.get("unrealisedPnlPct") or 0),
                     "mark_price": float(pos.get("markPrice") or 0),
                 }
-                should_skip, reason = self.decide(entry_side, entry_signal_confidence, position_info)
+                should_skip, reason = self.decide(
+                    entry_side, entry_signal_confidence, position_info
+                )
                 return should_skip, reason, position_info
 
         return False, "no_position", {}
@@ -4163,7 +4485,7 @@ def enhanced_position_guard_check(
     position_guard_enabled: bool,
     iteration: int,
     emit_result: Callable[[Dict[str, Any]], None],
-    position_info: Optional[Dict[str, Any]] = None
+    position_info: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Enhanced position guard check that considers profitability.
@@ -4174,10 +4496,14 @@ def enhanced_position_guard_check(
 
     min_profit_override = args.get("position_guard_profit_override", 0.02)
     aggressive = args.get("position_guard_aggressive", False)
-    guard = DynamicPositionGuard(min_profit_to_override=min_profit_override, aggressive=aggressive)
+    guard = DynamicPositionGuard(
+        min_profit_to_override=min_profit_override, aggressive=aggressive
+    )
 
     if position_info is not None:
-        should_skip, reason = guard.decide(sig["side"], sig.get("confidence", 0.5), position_info)
+        should_skip, reason = guard.decide(
+            sig["side"], sig.get("confidence", 0.5), position_info
+        )
     else:
         should_skip, reason, position_info = guard.check_position_guard_with_profit(
             base_url,
@@ -4185,31 +4511,35 @@ def enhanced_position_guard_check(
             api_secret,
             symbol,
             sig["side"],
-            sig.get("confidence", 0.5)
+            sig.get("confidence", 0.5),
         )
 
     if should_skip:
-        emit_result({
-            "status": "skipped",
-            "iteration": iteration,
-            "position_guard": True,
-            "reason": reason,
-            "existing_position": position_info,
-            "message": f"Position guard active: {reason}"
-        })
+        emit_result(
+            {
+                "status": "skipped",
+                "iteration": iteration,
+                "position_guard": True,
+                "reason": reason,
+                "existing_position": position_info,
+                "message": f"Position guard active: {reason}",
+            }
+        )
         return True
 
     # Allowed entry despite position guard
     if position_info:
-        emit_result({
-            "status": "info",
-            "iteration": iteration,
-            "position_guard": True,
-            "override": True,
-            "reason": reason,
-            "existing_position": position_info,
-            "message": f"Position guard overridden due to: {reason}"
-        })
+        emit_result(
+            {
+                "status": "info",
+                "iteration": iteration,
+                "position_guard": True,
+                "override": True,
+                "reason": reason,
+                "existing_position": position_info,
+                "message": f"Position guard overridden due to: {reason}",
+            }
+        )
 
     return False
 
@@ -4254,13 +4584,22 @@ class PrivateWsLogger:
     def _on_open(self, ws):
         ws.send(ws_auth_message(self.api_key, self.api_secret))
         time.sleep(0.3)
-        ws.send(json.dumps({"op": "subscribe", "args": ["order.linear", "execution.linear"]}))
+        ws.send(
+            json.dumps(
+                {"op": "subscribe", "args": ["order.linear", "execution.linear"]}
+            )
+        )
 
     def start(self):
         try:
             import websocket
         except ImportError:
-            emit({"status": "error", "message": "private-ws requires: pip install websocket-client"})
+            emit(
+                {
+                    "status": "error",
+                    "message": "private-ws requires: pip install websocket-client",
+                }
+            )
             return
         self._ws_app = websocket.WebSocketApp(
             self.ws_private_url, on_open=self._on_open, on_message=self._on_message
@@ -4367,36 +4706,48 @@ def run_one_cycle(
                     break
                 except Exception as exc2:
                     if retry == 2:  # Last attempt
-                        emit_result({
-                            "status": "error",
-                            "iteration": iteration,
-                            "message": f"Market data failed (ws+rest): {exc}; {exc2}",
-                        })
+                        emit_result(
+                            {
+                                "status": "error",
+                                "iteration": iteration,
+                                "message": f"Market data failed (ws+rest): {exc}; {exc2}",
+                            }
+                        )
                         return
                     time.sleep(0.5 * (retry + 1))
             if not rest_success:
                 return
         else:
             emit_result(
-                {"status": "error", "iteration": iteration, "message": f"Market data fetch failed: {exc}"}
+                {
+                    "status": "error",
+                    "iteration": iteration,
+                    "message": f"Market data fetch failed: {exc}",
+                }
             )
             return
 
     # Fetch/update account balance once every 20 iterations
-    if 'account_balance' not in loop_state or iteration % 20 == 0 or iteration == 1:
+    if "account_balance" not in loop_state or iteration % 20 == 0 or iteration == 1:
         try:
             resp = send_signed_get(
-                base_url, "/v5/account/wallet-balance", {"accountType": "UNIFIED"}, api_key, api_secret
+                base_url,
+                "/v5/account/wallet-balance",
+                {"accountType": "UNIFIED"},
+                api_key,
+                api_secret,
             )
             if resp.get("retCode") == 0:
                 tot_avail = resp["result"]["list"][0].get("totalAvailableBalance")
                 if tot_avail:
-                    loop_state['account_balance'] = float(tot_avail)
+                    loop_state["account_balance"] = float(tot_avail)
         except Exception:
             pass
 
-    account_balance = loop_state.get('account_balance', 1000.0)
-    qty = calculate_optimal_qty(market, base_qty, target_profit, account_balance=account_balance)
+    account_balance = loop_state.get("account_balance", 1000.0)
+    qty = calculate_optimal_qty(
+        market, base_qty, target_profit, account_balance=account_balance
+    )
     spread_bps = market["spread_bps"]
     if spread_bps > max_spread_bps:
         emit_result(
@@ -4415,8 +4766,13 @@ def run_one_cycle(
     mid_prices = loop_state.setdefault("mid_prices", deque(maxlen=10))
     denom = market["bid_vol"] + market["ask_vol"]
     current_mid = (
-        (market["best_bid"] * market["ask_vol"] + market["best_ask"] * market["bid_vol"]) / denom
-        if denom > 0 else (market["best_bid"] + market["best_ask"]) / 2.0
+        (
+            market["best_bid"] * market["ask_vol"]
+            + market["best_ask"] * market["bid_vol"]
+        )
+        / denom
+        if denom > 0
+        else (market["best_bid"] + market["best_ask"]) / 2.0
     )
     mid_prices.append(current_mid)
     if len(mid_prices) >= 2:
@@ -4427,7 +4783,9 @@ def run_one_cycle(
     # Secondary: OBI (order book imbalance) delta — captures pressure when price is flat
     obi_hist = loop_state.setdefault("obi_hist", deque(maxlen=5))
     obi_hist.append(market["imbalance"])
-    obi_delta = (obi_hist[-1] - obi_hist[0]) / 10.0 if len(obi_hist) >= 2 else 0.0  # scaled to price units
+    obi_delta = (
+        (obi_hist[-1] - obi_hist[0]) / 10.0 if len(obi_hist) >= 2 else 0.0
+    )  # scaled to price units
 
     # Blend: price momentum dominates when present, OBI delta supplements when flat
     if abs(price_momentum) > 0.000005:
@@ -4435,18 +4793,18 @@ def run_one_cycle(
     else:
         market["momentum"] = obi_delta
 
-    if 'multi_tf_analyzer' not in loop_state:
-        loop_state['multi_tf_analyzer'] = MultiTimeframeAnalyzer()
+    if "multi_tf_analyzer" not in loop_state:
+        loop_state["multi_tf_analyzer"] = MultiTimeframeAnalyzer()
 
-    if 'micro_pattern_analyzer' not in loop_state:
-        loop_state['micro_pattern_analyzer'] = MicroPatternAnalyzer()
+    if "micro_pattern_analyzer" not in loop_state:
+        loop_state["micro_pattern_analyzer"] = MicroPatternAnalyzer()
 
-    if market.get('closes'):
-        loop_state['multi_tf_analyzer'].update(market['closes'][-1], time.time())
+    if market.get("closes"):
+        loop_state["multi_tf_analyzer"].update(market["closes"][-1], time.time())
 
-    loop_state['micro_pattern_analyzer'].update(market['best_bid'], market['best_ask'])
+    loop_state["micro_pattern_analyzer"].update(market["best_bid"], market["best_ask"])
 
-    trend_score, trend_direction = loop_state['multi_tf_analyzer'].get_trend_signal()
+    trend_score, trend_direction = loop_state["multi_tf_analyzer"].get_trend_signal()
 
     vol_hist = loop_state.setdefault("vol_hist", deque(maxlen=60))
     cur_vol = float(market.get("bid_vol", 0.0) + market.get("ask_vol", 0.0))
@@ -4498,38 +4856,59 @@ def run_one_cycle(
         if tp is not None:
             try:
                 ts_res = set_position_take_profit(
-                    base_url, symbol, pos_side, pos_size, pos_entry, tp,
-                    api_key, api_secret,
+                    base_url,
+                    symbol,
+                    pos_side,
+                    pos_size,
+                    pos_entry,
+                    tp,
+                    api_key,
+                    api_secret,
                     full=(min(qty, pos_size) >= pos_size),
-                    tp_size=None if min(qty, pos_size) >= pos_size else min(qty, pos_size),
+                    tp_size=None
+                    if min(qty, pos_size) >= pos_size
+                    else min(qty, pos_size),
                 )
                 if ts_res.get("retCode") == 0:
-                    emit_result({
+                    emit_result(
+                        {
+                            "status": "info",
+                            "iteration": iteration,
+                            "message": "Position TP refreshed (limit, trading-stop)",
+                            "take_profit_price": tp,
+                        }
+                    )
+            except Exception as e:
+                emit_result(
+                    {
                         "status": "info",
                         "iteration": iteration,
-                        "message": "Position TP refreshed (limit, trading-stop)",
-                        "take_profit_price": tp,
-                    })
-            except Exception as e:
-                emit_result({
-                    "status": "info",
-                    "iteration": iteration,
-                    "message": f"Failed to refresh position TP due to network/proxy error: {e}",
-                })
+                        "message": f"Failed to refresh position TP due to network/proxy error: {e}",
+                    }
+                )
 
-    sig = evaluate_signal_v2(market, qty, target_profit, maker_fee, volume_profile, position_info)
+    sig = evaluate_signal_v2(
+        market, qty, target_profit, maker_fee, volume_profile, position_info
+    )
     if sig:
-        pattern_signal = loop_state['micro_pattern_analyzer'].get_entry_signal()
-        if pattern_signal['signal_strength'] > 0.3 and pattern_signal['direction'] != 'neutral':
+        pattern_signal = loop_state["micro_pattern_analyzer"].get_entry_signal()
+        if (
+            pattern_signal["signal_strength"] > 0.3
+            and pattern_signal["direction"] != "neutral"
+        ):
             # Boost confidence for pattern-based entries
-            sig['confidence'] = min(1.0, sig['confidence'] * (1.0 + pattern_signal['signal_strength']))
+            sig["confidence"] = min(
+                1.0, sig["confidence"] * (1.0 + pattern_signal["signal_strength"])
+            )
 
-        early_cycle = loop_state.get("iteration", 0) < 30  # MTF needs time to accumulate data
-        if trend_direction == 'bullish' and sig['side'] == 'Buy':
-            sig['confidence'] = min(1.0, sig['confidence'] * (1.0 + trend_score))
-        elif trend_direction == 'bearish' and sig['side'] == 'Sell':
-            sig['confidence'] = min(1.0, sig['confidence'] * (1.0 + trend_score))
-        elif trend_direction == 'neutral' or early_cycle:
+        early_cycle = (
+            loop_state.get("iteration", 0) < 30
+        )  # MTF needs time to accumulate data
+        if trend_direction == "bullish" and sig["side"] == "Buy":
+            sig["confidence"] = min(1.0, sig["confidence"] * (1.0 + trend_score))
+        elif trend_direction == "bearish" and sig["side"] == "Sell":
+            sig["confidence"] = min(1.0, sig["confidence"] * (1.0 + trend_score))
+        elif trend_direction == "neutral" or early_cycle:
             # Allow trades in neutral or early cycles (not enough history yet)
             pass
         else:
@@ -4585,43 +4964,57 @@ def run_one_cycle(
         )
         return
 
-    net_est = estimate_net_profit_v2(side, entry_price, exit_price, qty, maker_fee, exit_is_taker=False)
+    net_est = estimate_net_profit_v2(
+        side, entry_price, exit_price, qty, maker_fee, exit_is_taker=False
+    )
     if net_est < 0.02:
-        emit_result({
-            "status": "skipped",
-            "iteration": iteration,
-            "message": f"TP net {net_est:.6f} < floor 0.02 USDT; qty/target too small for fees.",
-            "entry": entry_price,
-            "tp": exit_price,
-        })
+        emit_result(
+            {
+                "status": "skipped",
+                "iteration": iteration,
+                "message": f"TP net {net_est:.6f} < floor 0.02 USDT; qty/target too small for fees.",
+                "entry": entry_price,
+                "tp": exit_price,
+            }
+        )
         return
 
     min_fill_p = float(args.get("min_fill_probability", 0.30))
-    is_reduce_check = (position_info and position_info.get("size", 0) > 0 and side != position_info["side"])
+    is_reduce_check = (
+        position_info
+        and position_info.get("size", 0) > 0
+        and side != position_info["side"]
+    )
     if not is_reduce_check:
         ok, fill_est = entry_postonly_viable(
             side, entry_price, market, tick_size, min_fill_p, args["loop_interval"]
         )
         if not ok:
-            emit_result({
-                "status": "skipped",
-                "iteration": iteration,
-                "reason": "low_entry_fill_probability",
-                "fill_probability": round(fill_est.probability, 4),
-                "min_fill_probability": min_fill_p,
-                "factors": fill_est.factors,
-                "message": "PostOnly entry unlikely to fill; skip cycle.",
-            })
+            emit_result(
+                {
+                    "status": "skipped",
+                    "iteration": iteration,
+                    "reason": "low_entry_fill_probability",
+                    "fill_probability": round(fill_est.probability, 4),
+                    "min_fill_probability": min_fill_p,
+                    "factors": fill_est.factors,
+                    "message": "PostOnly entry unlikely to fill; skip cycle.",
+                }
+            )
             return
 
     trailing_distance = parse_trailing_stop(trailing_stop)
     stop_loss_price: Optional[float] = None
     if trailing_distance is not None:
-        if len(market.get('closes', [])) >= 5:
-            recent_prices = market['closes'][-5:]
-            price_changes = [abs(recent_prices[i] - recent_prices[i-1]) / recent_prices[i-1]
-                            for i in range(1, len(recent_prices))]
-            market_volatility = sum(price_changes) / len(price_changes) if price_changes else 0.002
+        if len(market.get("closes", [])) >= 5:
+            recent_prices = market["closes"][-5:]
+            price_changes = [
+                abs(recent_prices[i] - recent_prices[i - 1]) / recent_prices[i - 1]
+                for i in range(1, len(recent_prices))
+            ]
+            market_volatility = (
+                sum(price_changes) / len(price_changes) if price_changes else 0.002
+            )
         else:
             market_volatility = 0.002
 
@@ -4640,7 +5033,7 @@ def run_one_cycle(
             position_guard,
             iteration,
             emit_result,
-            position_info=position_info
+            position_info=position_info,
         ):
             return
 
@@ -4663,14 +5056,16 @@ def run_one_cycle(
             loop_interval=args["loop_interval"],
         )
         if exit_px is None:
-            emit_result({
-                "status": "skipped",
-                "iteration": iteration,
-                "reason": "low_exit_fill_probability",
-                "fill_probability": round(fill_est.probability, 4),
-                "factors": fill_est.factors,
-                "message": "Limit reduce unlikely to fill; keep position / wait for TP.",
-            })
+            emit_result(
+                {
+                    "status": "skipped",
+                    "iteration": iteration,
+                    "reason": "low_exit_fill_probability",
+                    "fill_probability": round(fill_est.probability, 4),
+                    "factors": fill_est.factors,
+                    "message": "Limit reduce unlikely to fill; keep position / wait for TP.",
+                }
+            )
             return
 
         exp_pnl, _ = expected_close_pnl(
@@ -4685,32 +5080,42 @@ def run_one_cycle(
         )
         max_loss = float(args.get("max_loss_close_usdt", 0.0))
         if exp_pnl < -max_loss:
-            emit_result({
-                "status": "skipped",
-                "iteration": iteration,
-                "reason": "market_close_would_realize_loss",
-                "expected_close_pnl_usdt": round(exp_pnl, 6),
-                "unrealized_pnl": position_info.get("unrealized_pnl"),
-                "message": "Refusing limit reduce: wait for native SL/TP or profitable hedge.",
-            })
+            emit_result(
+                {
+                    "status": "skipped",
+                    "iteration": iteration,
+                    "reason": "market_close_would_realize_loss",
+                    "expected_close_pnl_usdt": round(exp_pnl, 6),
+                    "unrealized_pnl": position_info.get("unrealized_pnl"),
+                    "message": "Refusing limit reduce: wait for native SL/TP or profitable hedge.",
+                }
+            )
             return
 
         if dry_run:
-            emit_result({
-                "status": "dry_run",
-                "iteration": iteration,
-                "reduce_only": True,
-                "exit_order_type": exit_order_type,
-                "expected_close_pnl_usdt": round(exp_pnl, 6),
-                "exit_limit_price": exit_px,
-                "fill_probability": round(fill_est.probability, 4),
-                "fill_factors": fill_est.factors,
-            })
+            emit_result(
+                {
+                    "status": "dry_run",
+                    "iteration": iteration,
+                    "reduce_only": True,
+                    "exit_order_type": exit_order_type,
+                    "expected_close_pnl_usdt": round(exp_pnl, 6),
+                    "exit_limit_price": exit_px,
+                    "fill_probability": round(fill_est.probability, 4),
+                    "fill_factors": fill_est.factors,
+                }
+            )
             return
 
         entry_res = place_reduce_exit_with_retry(
-            base_url, symbol, position_info["side"], close_qty,
-            market, tick_size, api_key, api_secret,
+            base_url,
+            symbol,
+            position_info["side"],
+            close_qty,
+            market,
+            tick_size,
+            api_key,
+            api_secret,
             exit_order_type,
             args.get("exit_tif", "PostOnly"),
             int(args.get("exit_reprice_ticks", 1)),
@@ -4718,29 +5123,33 @@ def run_one_cycle(
         )
 
         if entry_res.get("retCode") != 0:
-            emit_result({
-                "status": "failed",
-                "iteration": iteration,
-                "stage": "reduce_execution",
-                "response": entry_res,
-                "message": "Reduce order rejected",
-            })
+            emit_result(
+                {
+                    "status": "failed",
+                    "iteration": iteration,
+                    "stage": "reduce_execution",
+                    "response": entry_res,
+                    "message": "Reduce order rejected",
+                }
+            )
         else:
             loop_state["last_order_ts"] = time.time()
-            emit_result({
-                "status": "success",
-                "iteration": iteration,
-                "reduce_only": True,
-                "exit_order_type": exit_order_type,
-                "expected_close_pnl_usdt": round(exp_pnl, 6),
-                "exit_limit_price": exit_px,
-                "fill_probability": round(fill_est.probability, 4),
-                "fill_factors": fill_est.factors,
-                "response": entry_res,
-            })
+            emit_result(
+                {
+                    "status": "success",
+                    "iteration": iteration,
+                    "reduce_only": True,
+                    "exit_order_type": exit_order_type,
+                    "expected_close_pnl_usdt": round(exp_pnl, 6),
+                    "exit_limit_price": exit_px,
+                    "fill_probability": round(fill_est.probability, 4),
+                    "fill_factors": fill_est.factors,
+                    "response": entry_res,
+                }
+            )
         return
 
-    required_margin = (entry_price * qty * (1 + maker_fee) / args.get("leverage", 1.0))
+    required_margin = entry_price * qty * (1 + maker_fee) / args.get("leverage", 1.0)
     if balance_check:
         if not check_account_balance(base_url, api_key, api_secret, required_margin):
             return
@@ -4785,7 +5194,9 @@ def run_one_cycle(
                     "entry_limit_price": entry_price,
                     "take_profit_price": exit_price,
                     "estimated_net_profit_usdt": round(net_est, 6),
-                    "tick_spread_required": round(abs(exit_price - entry_price) / tick_size, 1),
+                    "tick_spread_required": round(
+                        abs(exit_price - entry_price) / tick_size, 1
+                    ),
                     "payload": entry_payload,
                     "architecture": "Chained Native TP Order (Automated Risk Lifecycle)",
                 },
@@ -4794,7 +5205,9 @@ def run_one_cycle(
         return
 
     # Use enhanced order placement with retry logic
-    entry_res = place_micro_order_with_retry(base_url, entry_payload, api_key, api_secret, tick_size=tick_size)
+    entry_res = place_micro_order_with_retry(
+        base_url, entry_payload, api_key, api_secret, tick_size=tick_size
+    )
 
     if entry_res.get("retCode") != 0:
         hint = ""
@@ -4853,7 +5266,12 @@ def run_daemon(args: Dict[str, Any]) -> None:
             klines_boot = send_signed_get(
                 urls["rest"],
                 "/v5/market/kline",
-                {"category": "linear", "symbol": args["symbol"], "interval": "1", "limit": 30},
+                {
+                    "category": "linear",
+                    "symbol": args["symbol"],
+                    "interval": "1",
+                    "limit": 30,
+                },
                 args["api_key"],
                 args["api_secret"],
             )["result"]["list"]
@@ -4862,15 +5280,27 @@ def run_daemon(args: Dict[str, Any]) -> None:
         except Exception as e:
             logger.warning(f"Could not bootstrap klines from REST: {e}")
 
-        public_feed = PersistentPublicLinearFeed(urls["ws_public_linear"], args["symbol"], seed_closes=seed_closes)
+        public_feed = PersistentPublicLinearFeed(
+            urls["ws_public_linear"], args["symbol"], seed_closes=seed_closes
+        )
         public_feed.start()
         if not public_feed.wait_ready(args["ws_timeout"]):
-            emit({"status": "error", "message": "Persistent public WS failed to become ready"})
+            emit(
+                {
+                    "status": "error",
+                    "message": "Persistent public WS failed to become ready",
+                }
+            )
             public_feed.stop()
             if not args["ws_fallback_rest"]:
                 return
             public_feed = None
-            emit({"status": "warning", "message": "Continuing daemon with REST fallback only"})
+            emit(
+                {
+                    "status": "warning",
+                    "message": "Continuing daemon with REST fallback only",
+                }
+            )
 
     private_logger: Optional[PrivateWsLogger] = None
     if args.get("private_ws"):
@@ -4916,7 +5346,13 @@ def run_daemon(args: Dict[str, Any]) -> None:
             public_feed.stop()
         if private_logger:
             private_logger.stop()
-        emit({"status": "daemon_stopped", "reason": "shutdown", "iteration": loop_state.get("iteration", 0)})
+        emit(
+            {
+                "status": "daemon_stopped",
+                "reason": "shutdown",
+                "iteration": loop_state.get("iteration", 0),
+            }
+        )
 
 
 def main(args: Dict[str, Any]) -> None:
@@ -4926,29 +5362,35 @@ def main(args: Dict[str, Any]) -> None:
     qty = float(args.get("qty", 0.01))
     target_profit = float(args.get("target_profit", 0.05))
     maker_fee = float(args.get("maker_fee", 0.0002))
-    
+
     trailing_stop = parse_trailing_stop(args.get("trailing_stop"))
-        
+
     balance_check = bool(args.get("balance_check", False))
     dry_run = bool(args.get("dry_run", False))
     max_spread_bps = float(args.get("max_spread_bps", 50))
     mode = str(args.get("mode", "rest")).lower()
     ws_timeout = float(args.get("ws_timeout", 8))
     testnet = bool(args.get("testnet", False))
-    
+
     # Sync system clock offset with Bybit API time
     urls_base = base_urls(testnet)
     sync_server_time(urls_base["rest"])
-    
+
     loop = bool(args.get("loop", False))
     loop_interval = float(args.get("loop_interval", 2.0))
     cooldown = float(args.get("cooldown", 30))
     max_iterations = int(args.get("max_iterations", 0))
     private_ws = bool(args.get("private_ws", False))
     position_guard = bool(args.get("position_guard", False))
-    position_guard_profit_override = float(args.get("position_guard_profit_override", 0.02))
+    position_guard_profit_override = float(
+        args.get("position_guard_profit_override", 0.02)
+    )
     pos_guard_agg = args.get("position_guard_aggressive", False)
-    position_guard_aggressive = pos_guard_agg if isinstance(pos_guard_agg, bool) else str(pos_guard_agg).lower() in ("true", "1", "yes")
+    position_guard_aggressive = (
+        pos_guard_agg
+        if isinstance(pos_guard_agg, bool)
+        else str(pos_guard_agg).lower() in ("true", "1", "yes")
+    )
     ws_fallback_rest = bool(args.get("ws_fallback_rest", False))
     leverage = float(args.get("leverage", 1.0))
     verbose = bool(args.get("verbose", False))
@@ -4975,7 +5417,12 @@ def main(args: Dict[str, Any]) -> None:
         return
 
     if not (0.02 <= target_profit <= 0.20):
-        emit({"status": "error", "message": "target_profit must be 0.02–0.20 USDT for micro mode"})
+        emit(
+            {
+                "status": "error",
+                "message": "target_profit must be 0.02–0.20 USDT for micro mode",
+            }
+        )
         return
 
     if qty <= 0:
@@ -5032,7 +5479,9 @@ def main(args: Dict[str, Any]) -> None:
 
     urls = base_urls(testnet)
     tick_cache: Dict[str, float] = {}
-    run_one_cycle(normalized, urls, tick_cache, {"iteration": 0, "last_order_ts": 0.0}, None, emit)
+    run_one_cycle(
+        normalized, urls, tick_cache, {"iteration": 0, "last_order_ts": 0.0}, None, emit
+    )
 
 
 def run(args: Dict[str, Any]) -> None:
@@ -5041,7 +5490,7 @@ def run(args: Dict[str, Any]) -> None:
 
 
 if __name__ == "__main__":
-    main(parse_argv(sys.argv[1:]))#!/usr/bin/env python3
+    main(parse_argv(sys.argv[1:]))  #!/usr/bin/env python3
 # ==============================================================================
 # bybit_micro_scalper_v2.py — Bybit Micro‑Profit Scalper (v3.0)
 #
@@ -5070,26 +5519,20 @@ if __name__ == "__main__":
 # @option --ws-fallback-rest        On WS failure, use REST for that cycle (flag).
 # ==============================================================================
 
-import sys
-import math
-from statistics import stdev
-from collections import deque
-import time
-import signal
-import hmac
-import hashlib
-import json
-import threading
-import requests
-from typing import Any, Callable, Dict, List, Optional, Tuple
 import logging
-import os
+import sys
+import threading
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import requests
+
 # Load environment variables from .env if present
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
-    env_path = Path(__file__).with_name('.env')
+    env_path = Path(__file__).with_name(".env")
     if env_path.is_file():
         load_dotenv(dotenv_path=env_path)
 except Exception:
@@ -5108,6 +5551,7 @@ def get_proxies() -> Optional[Dict[str, str]]:
 
 def get_ws_run_options() -> Dict[str, Any]:
     from urllib.parse import urlparse
+
     proxy = os.getenv("BYBIT_TOR_PROXY")
     if not proxy and os.getenv("TOR_ENABLED") == "true":
         proxy = f"socks5://127.0.0.1:{os.getenv('TOR_SOCKS_PORT', '9050')}"
@@ -5128,8 +5572,13 @@ def get_ws_run_options() -> Dict[str, Any]:
         logger.warning(f"Failed to parse proxy URL {proxy}: {e}")
         return {}
 
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[logging.StreamHandler(sys.stderr)])
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[logging.StreamHandler(sys.stderr)],
+)
 logger.setLevel(logging.INFO)
 REQUEST_TIMEOUT = 10
 MARKET_RETRIES = 3
@@ -5192,9 +5641,13 @@ def emit(obj: Dict[str, Any]) -> None:
     print(json.dumps(obj, indent=2), flush=True)
 
 
-def generate_signature(secret: str, timestamp: int, api_key: str, recv_window: int, payload: str) -> str:
+def generate_signature(
+    secret: str, timestamp: int, api_key: str, recv_window: int, payload: str
+) -> str:
     param_str = f"{timestamp}{api_key}{recv_window}{payload}"
-    return hmac.new(secret.encode("utf-8"), param_str.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.new(
+        secret.encode("utf-8"), param_str.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
 
 
 _SERVER_TIME_OFFSET_MS: Optional[int] = None
@@ -5248,7 +5701,9 @@ def send_signed_post(
 ) -> Dict[str, Any]:
     timestamp = server_time_ms(base_url) if use_server_time else int(time.time() * 1000)
     payload_json = json.dumps(payload_dict, separators=(",", ":"))
-    signature = generate_signature(api_secret, timestamp, api_key, RECV_WINDOW, payload_json)
+    signature = generate_signature(
+        api_secret, timestamp, api_key, RECV_WINDOW, payload_json
+    )
     headers = {
         "X-BAPI-API-KEY": api_key,
         "X-BAPI-SIGN": signature,
@@ -5341,10 +5796,10 @@ def kline_close(row: Any) -> float:
 def fetch_tick_size(base_url: str, symbol: str, tick_cache: Dict[str, float]) -> float:
     if symbol in tick_cache:
         return tick_cache[symbol]
-    api_key = os.getenv('BYBIT_API_KEY')
-    api_secret = os.getenv('BYBIT_API_SECRET')
+    api_key = os.getenv("BYBIT_API_KEY")
+    api_secret = os.getenv("BYBIT_API_SECRET")
     if not api_key or not api_secret:
-        raise RuntimeError('API credentials missing for signed market data request')
+        raise RuntimeError("API credentials missing for signed market data request")
     try:
         resp = send_signed_get(
             base_url,
@@ -5397,13 +5852,12 @@ def build_market_snapshot(
     }
 
 
-
 class MultiTimeframeAnalyzer:
     def __init__(self, max_frames: int = 3):
         self.timeframes = {
-            '1m': deque(maxlen=60),
-            '5m': deque(maxlen=12),
-            '15m': deque(maxlen=4),
+            "1m": deque(maxlen=60),
+            "5m": deque(maxlen=12),
+            "15m": deque(maxlen=4),
         }
 
     def update(self, close_price: float, timestamp: float):
@@ -5434,38 +5888,41 @@ class MultiTimeframeAnalyzer:
                 scores.append(tf_score)
 
         if not scores:
-            return 0.0, 'neutral'
+            return 0.0, "neutral"
 
         avg_score = sum(scores) / len(scores)
 
         if avg_score > 0.005:
-            return min(1.0, avg_score * 100), 'bullish'
+            return min(1.0, avg_score * 100), "bullish"
         elif avg_score < -0.005:
-            return min(1.0, abs(avg_score) * 100), 'bearish'
+            return min(1.0, abs(avg_score) * 100), "bearish"
         else:
-            return 0.0, 'neutral'
+            return 0.0, "neutral"
 
 
 class MicroPatternAnalyzer:
     """
     Analyzes micro-patterns in order book and price action for scalping.
     """
+
     def __init__(self, window_size: int = 10):
         self.bid_asks = deque(maxlen=window_size)
         self.price_movements = deque(maxlen=window_size)
 
     def update(self, best_bid: float, best_ask: float):
         """Update with current order book data."""
-        self.bid_asks.append({
-            'bid': best_bid,
-            'ask': best_ask,
-            'spread': best_ask - best_bid,
-            'mid': (best_bid + best_ask) / 2,
-            'timestamp': time.time()
-        })
+        self.bid_asks.append(
+            {
+                "bid": best_bid,
+                "ask": best_ask,
+                "spread": best_ask - best_bid,
+                "mid": (best_bid + best_ask) / 2,
+                "timestamp": time.time(),
+            }
+        )
 
         if len(self.bid_asks) >= 2:
-            movement = self.bid_asks[-1]['mid'] - self.bid_asks[-2]['mid']
+            movement = self.bid_asks[-1]["mid"] - self.bid_asks[-2]["mid"]
             self.price_movements.append(movement)
 
     def detect_acceleration(self) -> float:
@@ -5489,7 +5946,7 @@ class MicroPatternAnalyzer:
         if len(self.bid_asks) < 5:
             return False
 
-        spreads = [ba['spread'] for ba in list(self.bid_asks)[-5:]]
+        spreads = [ba["spread"] for ba in list(self.bid_asks)[-5:]]
         recent_avg = sum(spreads[-2:]) / 2
         older_avg = sum(spreads[:-2]) / 3 if len(spreads) > 2 else recent_avg
 
@@ -5511,10 +5968,14 @@ class MicroPatternAnalyzer:
             signal_strength += 0.3
 
         return {
-            'acceleration': acceleration,
-            'spread_compression': spread_compression,
-            'signal_strength': signal_strength,
-            'direction': 'buy' if acceleration > 0 else 'sell' if acceleration < 0 else 'neutral'
+            "acceleration": acceleration,
+            "spread_compression": spread_compression,
+            "signal_strength": signal_strength,
+            "direction": "buy"
+            if acceleration > 0
+            else "sell"
+            if acceleration < 0
+            else "neutral",
         }
 
 
@@ -5558,13 +6019,15 @@ def calculate_optimal_qty(
     - Risk management
     - Win rate optimization
     """
-    if len(market.get('closes', [])) < volatility_window:
+    if len(market.get("closes", [])) < volatility_window:
         return base_qty
 
-    closes = market['closes'][-volatility_window:]
-    returns = [(closes[i] - closes[i-1]) / closes[i-1]
-               for i in range(1, len(closes))
-               if closes[i-1] != 0]
+    closes = market["closes"][-volatility_window:]
+    returns = [
+        (closes[i] - closes[i - 1]) / closes[i - 1]
+        for i in range(1, len(closes))
+        if closes[i - 1] != 0
+    ]
 
     vol = _realized_volatility(returns)
 
@@ -5595,13 +6058,15 @@ def calculate_optimal_qty(
     avg_win_loss_ratio = 1.2  # Positive expectancy
 
     # Kelly fraction
-    kelly_fraction = (estimated_win_rate * avg_win_loss_ratio - (1 - estimated_win_rate)) / avg_win_loss_ratio
+    kelly_fraction = (
+        estimated_win_rate * avg_win_loss_ratio - (1 - estimated_win_rate)
+    ) / avg_win_loss_ratio
     kelly_fraction = max(0.1, min(0.25, kelly_fraction))  # Cap between 10-25%
 
     optimal_qty = base_qty * vol_multiplier * profit_multiplier * (1 + kelly_fraction)
 
     # Risk check: ensure position value doesn't exceed max risk
-    entry_price = (market['best_bid'] + market['best_ask']) / 2
+    entry_price = (market["best_bid"] + market["best_ask"]) / 2
     position_value = optimal_qty * entry_price
     max_allowed_value = account_balance * max_position_risk
 
@@ -5614,7 +6079,9 @@ def calculate_optimal_qty(
     return round(optimal_qty, 8)
 
 
-def calculate_adaptive_momentum_thresholds(closes: List[float], lookback: int = 20) -> Tuple[float, float]:
+def calculate_adaptive_momentum_thresholds(
+    closes: List[float], lookback: int = 20
+) -> Tuple[float, float]:
     """
     Calculate adaptive momentum thresholds based on recent price action.
     Returns (long_threshold, short_threshold)
@@ -5625,8 +6092,11 @@ def calculate_adaptive_momentum_thresholds(closes: List[float], lookback: int = 
     # Calculate average absolute percentage change
     changes = []
     for i in range(1, len(closes[-lookback:])):
-        if closes[-lookback:][i-1] != 0:
-            pct_change = abs((closes[-lookback:][i] - closes[-lookback:][i-1]) / closes[-lookback:][i-1])
+        if closes[-lookback:][i - 1] != 0:
+            pct_change = abs(
+                (closes[-lookback:][i] - closes[-lookback:][i - 1])
+                / closes[-lookback:][i - 1]
+            )
             changes.append(pct_change)
 
     if not changes:
@@ -5643,9 +6113,14 @@ def calculate_adaptive_momentum_thresholds(closes: List[float], lookback: int = 
     return long_threshold, short_threshold
 
 
-def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
-                       maker_fee: float, volume_profile: Optional[Dict] = None,
-                       position_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+def evaluate_signal_v2(
+    market: Dict[str, Any],
+    qty: float,
+    target_profit: float,
+    maker_fee: float,
+    volume_profile: Optional[Dict] = None,
+    position_info: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
     """
     Enhanced signal evaluation with adaptive thresholds and multi-factor confirmation.
     """
@@ -5662,8 +6137,8 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
     # Volume-adjusted thresholds
     volume_multiplier = 1.0
     if volume_profile:
-        avg_volume = volume_profile.get('avg_volume', 1)
-        current_volume = volume_profile.get('current_volume', 1)
+        avg_volume = volume_profile.get("avg_volume", 1)
+        current_volume = volume_profile.get("current_volume", 1)
         if current_volume > avg_volume * 1.2:
             volume_multiplier = 1.2  # Higher confidence with higher volume
         elif current_volume < avg_volume * 0.8:
@@ -5684,7 +6159,7 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
     # Signal strength calculation
     signal_strength = 0.0
 
-    spread_ok = market.get('spread_bps', 100) < 30
+    spread_ok = market.get("spread_bps", 100) < 30
 
     # Primary: momentum + imbalance agreement
     buy_conditions = [
@@ -5700,8 +6175,12 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
 
     # Fallback: extreme OBI alone (imbalance > 0.60 or < -0.60) with tight spread
     # Rationale: heavy one-sided book pressure is a reliable directional signal
-    buy_obi_only = spread_ok and imbalance > 0.60 and abs(momentum) < abs(momentum_long_adj) * 2
-    sell_obi_only = spread_ok and imbalance < -0.60 and abs(momentum) < abs(momentum_short_adj) * 2
+    buy_obi_only = (
+        spread_ok and imbalance > 0.60 and abs(momentum) < abs(momentum_long_adj) * 2
+    )
+    sell_obi_only = (
+        spread_ok and imbalance < -0.60 and abs(momentum) < abs(momentum_short_adj) * 2
+    )
 
     base_entry = entry_price
     if position_info and position_info.get("size", 0) > 0:
@@ -5715,7 +6194,10 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
 
     def _try_tp(entry, s):
         return solve_tp_with_floor(
-            entry, s, qty, maker_fee,
+            entry,
+            s,
+            qty,
+            maker_fee,
             min_net=max(0.02, target_profit * 0.95),
             market=market,
             tick_size=tick_size,
@@ -5728,8 +6210,11 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
         if tp is None:
             return None
         exit_price = tp
-        signal_strength = abs(momentum) / max(abs(momentum_long_adj), 1e-10) * 0.4 + \
-                         abs(imbalance) / max(abs(imbalance_long), 1e-10) * 0.4 + 0.2
+        signal_strength = (
+            abs(momentum) / max(abs(momentum_long_adj), 1e-10) * 0.4
+            + abs(imbalance) / max(abs(imbalance_long), 1e-10) * 0.4
+            + 0.2
+        )
 
     elif all(sell_conditions):
         side = "Sell"
@@ -5738,8 +6223,11 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
         if tp is None:
             return None
         exit_price = tp
-        signal_strength = abs(momentum) / max(abs(momentum_short_adj), 1e-10) * 0.4 + \
-                         abs(imbalance) / max(abs(imbalance_short), 1e-10) * 0.4 + 0.2
+        signal_strength = (
+            abs(momentum) / max(abs(momentum_short_adj), 1e-10) * 0.4
+            + abs(imbalance) / max(abs(imbalance_short), 1e-10) * 0.4
+            + 0.2
+        )
 
     elif buy_obi_only:
         side = "Buy"
@@ -5780,8 +6268,9 @@ def evaluate_signal_v2(market: Dict[str, Any], qty: float, target_profit: float,
     }
 
 
-def net_profit_to_tp(entry_price: float, side: str, net_target: float,
-                     qty: float, maker_fee: float) -> float:
+def net_profit_to_tp(
+    entry_price: float, side: str, net_target: float, qty: float, maker_fee: float
+) -> float:
     """Solve exactly for the TP price that yields `net_target` USDT net of all fees.
 
     Round-trip fee formula (maker both sides):
@@ -5811,7 +6300,7 @@ def net_profit_to_tp_advanced(
     net_target: float,
     qty: float,
     maker_fee: float,
-    market_conditions: Dict[str, Any] = None
+    market_conditions: Dict[str, Any] = None,
 ) -> float:
     """
     Calculate take profit price with dynamic adjustment based on market conditions.
@@ -5822,15 +6311,15 @@ def net_profit_to_tp_advanced(
         return base_tp
 
     # Dynamic adjustment based on order book imbalance
-    imbalance = market_conditions.get('imbalance', 0)
-    spread_bps = market_conditions.get('spread_bps', 10)
+    imbalance = market_conditions.get("imbalance", 0)
+    spread_bps = market_conditions.get("spread_bps", 10)
 
     adjustment_factor = 1.0
 
     # If strong imbalance in our direction, we can be more aggressive with TP
-    if side == 'Buy' and imbalance > 0.1:
+    if side == "Buy" and imbalance > 0.1:
         adjustment_factor = 1.1  # 10% higher TP
-    elif side == 'Sell' and imbalance < -0.1:
+    elif side == "Sell" and imbalance < -0.1:
         adjustment_factor = 1.1
 
     # Adjust for spread (tighter spread = more confident)
@@ -5843,7 +6332,7 @@ def net_profit_to_tp_advanced(
     adjusted_tp = entry_price + (base_tp - entry_price) * adjustment_factor
 
     # Ensure TP is at least min_distance away
-    if side == 'Buy':
+    if side == "Buy":
         adjusted_tp = max(adjusted_tp, entry_price + min_distance)
     else:
         adjusted_tp = min(adjusted_tp, entry_price - min_distance)
@@ -5853,12 +6342,18 @@ def net_profit_to_tp_advanced(
 
 # Micro-profit tiers in USDT — smallest first for maximum trade frequency
 MICRO_PROFIT_TIERS = [0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20]
-MAX_TP_DISTANCE_PCT = 0.05   # never require > 5% price move for a TP
+MAX_TP_DISTANCE_PCT = 0.05  # never require > 5% price move for a TP
 
 
-def optimize_take_profit(market: Dict[str, Any], entry_price: float, side: str,
-                          target_profit: float, qty: float, maker_fee: float,
-                          position_info: Optional[Dict[str, Any]] = None) -> float:
+def optimize_take_profit(
+    market: Dict[str, Any],
+    entry_price: float,
+    side: str,
+    target_profit: float,
+    qty: float,
+    maker_fee: float,
+    position_info: Optional[Dict[str, Any]] = None,
+) -> float:
     """Return the tightest viable TP price within the $0.02-$0.20 net-profit band.
 
     If there is an active position, the entry cost base is adjusted to the new expected average
@@ -5870,7 +6365,7 @@ def optimize_take_profit(market: Dict[str, Any], entry_price: float, side: str,
         pos_size = position_info["size"]
         pos_entry = position_info["entry_price"]
         pos_side = position_info["side"]
-        
+
         if pos_side == side:
             # Same side (scale-in): calculate new expected average entry price
             base_entry = (pos_size * pos_entry + qty * entry_price) / (pos_size + qty)
@@ -5887,7 +6382,9 @@ def optimize_take_profit(market: Dict[str, Any], entry_price: float, side: str,
 
     for net_tgt in tiers:
         try:
-            tp = net_profit_to_tp_advanced(base_entry, side, net_tgt, qty, maker_fee, market)
+            tp = net_profit_to_tp_advanced(
+                base_entry, side, net_tgt, qty, maker_fee, market
+            )
         except Exception:
             continue
 
@@ -5906,15 +6403,22 @@ def optimize_take_profit(market: Dict[str, Any], entry_price: float, side: str,
 
     # Absolute fallback: solve for target_profit regardless of distance
     try:
-        return net_profit_to_tp_advanced(base_entry, side, target_profit, qty, maker_fee, market)
+        return net_profit_to_tp_advanced(
+            base_entry, side, target_profit, qty, maker_fee, market
+        )
     except Exception:
         if side == "Buy":
             return base_entry * (1.0 + target_profit / (base_entry * qty))
         return base_entry * (1.0 - target_profit / (base_entry * qty))
 
 
-def calculate_adaptive_stop_loss(entry_price: float, side: str, market_volatility: float,
-                                 tick_size: float, base_stop_distance: float = 0.002) -> Tuple[float, float]:
+def calculate_adaptive_stop_loss(
+    entry_price: float,
+    side: str,
+    market_volatility: float,
+    tick_size: float,
+    base_stop_distance: float = 0.002,
+) -> Tuple[float, float]:
     vol_multiplier = 1.0
     if market_volatility > 0.005:
         vol_multiplier = 1.5
@@ -5924,20 +6428,27 @@ def calculate_adaptive_stop_loss(entry_price: float, side: str, market_volatilit
     adjusted_distance = base_stop_distance * vol_multiplier
 
     if side == "Buy":
-        stop_loss_price = round_to_tick(entry_price * (1.0 - adjusted_distance), tick_size)
+        stop_loss_price = round_to_tick(
+            entry_price * (1.0 - adjusted_distance), tick_size
+        )
     else:
-        stop_loss_price = round_to_tick(entry_price * (1.0 + adjusted_distance), tick_size)
+        stop_loss_price = round_to_tick(
+            entry_price * (1.0 + adjusted_distance), tick_size
+        )
 
     return stop_loss_price, adjusted_distance
 
-def get_market_data_rest(base_url: str, symbol: str, tick_cache: Dict[str, float]) -> Dict[str, Any]:
+
+def get_market_data_rest(
+    base_url: str, symbol: str, tick_cache: Dict[str, float]
+) -> Dict[str, Any]:
     session = requests.Session()
     session.headers.update({"Cache-Control": "no-cache", "Pragma": "no-cache"})
     # Retrieve API credentials from environment (loaded from .env)
-    api_key = os.getenv('BYBIT_API_KEY')
-    api_secret = os.getenv('BYBIT_API_SECRET')
+    api_key = os.getenv("BYBIT_API_KEY")
+    api_secret = os.getenv("BYBIT_API_SECRET")
     if not api_key or not api_secret:
-        raise RuntimeError('API credentials missing for signed market data request')
+        raise RuntimeError("API credentials missing for signed market data request")
     url = f"{base_url}/v5/market/orderbook?category=linear&symbol={symbol}&limit=5"
     ob_resp = send_signed_get(
         base_url,
@@ -5961,11 +6472,17 @@ def get_market_data_rest(base_url: str, symbol: str, tick_cache: Dict[str, float
         raise RuntimeError("Insufficient kline data")
     closes = [kline_close(klines[1]), kline_close(klines[0])]
     tick_size = fetch_tick_size(base_url, symbol, tick_cache)
-    return build_market_snapshot(best_bid, best_ask, bid_vol, ask_vol, closes, tick_size, "rest")
+    return build_market_snapshot(
+        best_bid, best_ask, bid_vol, ask_vol, closes, tick_size, "rest"
+    )
 
 
 def get_market_data_ws_oneshot(
-    ws_url: str, base_url: str, symbol: str, timeout_sec: float, tick_cache: Dict[str, float]
+    ws_url: str,
+    base_url: str,
+    symbol: str,
+    timeout_sec: float,
+    tick_cache: Dict[str, float],
 ) -> Dict[str, Any]:
     try:
         import websocket
@@ -6010,7 +6527,11 @@ def get_market_data_ws_oneshot(
                 rows = data if isinstance(data, list) else [data]
                 for row in rows:
                     c = kline_close(row)
-                    start_time = row[0] if isinstance(row, (list, tuple)) else row.get("start", 0)
+                    start_time = (
+                        row[0]
+                        if isinstance(row, (list, tuple))
+                        else row.get("start", 0)
+                    )
                     if state.get("last_kline_start") == start_time:
                         state["closes"][-1] = c
                     else:
@@ -6025,7 +6546,10 @@ def get_market_data_ws_oneshot(
     def on_open(ws):
         ws.send(
             json.dumps(
-                {"op": "subscribe", "args": [f"orderbook.1.{symbol}", f"kline.1.{symbol}"]}
+                {
+                    "op": "subscribe",
+                    "args": [f"orderbook.1.{symbol}", f"kline.1.{symbol}"],
+                }
             )
         )
 
@@ -6045,7 +6569,9 @@ def get_market_data_ws_oneshot(
     if state["error"]:
         raise RuntimeError(state["error"])
     if not done["ok"]:
-        raise RuntimeError(f"WS market data timeout after {timeout_sec}s. State: {state}")
+        raise RuntimeError(
+            f"WS market data timeout after {timeout_sec}s. State: {state}"
+        )
 
     # Add retry mechanism for tick_size fetch
     max_retries = 3
@@ -6072,7 +6598,9 @@ def get_market_data_ws_oneshot(
 class PersistentPublicLinearFeed:
     """Daemon: one WS connection; thread-safe snapshot for each loop cycle."""
 
-    def __init__(self, ws_url: str, symbol: str, seed_closes: Optional[List[float]] = None):
+    def __init__(
+        self, ws_url: str, symbol: str, seed_closes: Optional[List[float]] = None
+    ):
         self.ws_url = ws_url
         self.symbol = symbol
         self._lock = threading.Lock()
@@ -6110,7 +6638,11 @@ class PersistentPublicLinearFeed:
                     rows = data if isinstance(data, list) else [data]
                     for row in rows:
                         c = kline_close(row)
-                        start_time = row[0] if isinstance(row, (list, tuple)) else row.get("start", 0)
+                        start_time = (
+                            row[0]
+                            if isinstance(row, (list, tuple))
+                            else row.get("start", 0)
+                        )
                         if getattr(self, "_last_kline_start", None) == start_time:
                             self._closes[-1] = c
                         else:
@@ -6127,7 +6659,10 @@ class PersistentPublicLinearFeed:
     def _on_open(self, ws):
         ws.send(
             json.dumps(
-                {"op": "subscribe", "args": [f"orderbook.1.{self.symbol}", f"kline.1.{self.symbol}"]}
+                {
+                    "op": "subscribe",
+                    "args": [f"orderbook.1.{self.symbol}", f"kline.1.{self.symbol}"],
+                }
             )
         )
 
@@ -6233,13 +6768,22 @@ def expected_market_close_pnl(
         exit_px = best_ask
         side = "Sell"
     return estimate_net_profit_v2(
-        side, avg_entry, exit_px, close_qty, maker_fee,
-        exit_is_taker=True, taker_fee=taker_fee,
+        side,
+        avg_entry,
+        exit_px,
+        close_qty,
+        maker_fee,
+        exit_is_taker=True,
+        taker_fee=taker_fee,
     )
 
 
-def estimate_net_profit(side: str, entry: float, exit_p: float, qty: float, maker_fee: float) -> float:
-    return estimate_net_profit_v2(side, entry, exit_p, qty, maker_fee, exit_is_taker=False)
+def estimate_net_profit(
+    side: str, entry: float, exit_p: float, qty: float, maker_fee: float
+) -> float:
+    return estimate_net_profit_v2(
+        side, entry, exit_p, qty, maker_fee, exit_is_taker=False
+    )
 
 
 OrderRole = str  # 'entry' | 'exit_reduce'
@@ -6247,7 +6791,13 @@ ExitStyle = str  # 'passive' | 'join' | 'cross'
 
 
 class FillProbabilityEstimate:
-    def __init__(self, probability: float, confidence: float, factors: Dict[str, float], suggested_reprice_ticks: int):
+    def __init__(
+        self,
+        probability: float,
+        confidence: float,
+        factors: Dict[str, float],
+        suggested_reprice_ticks: int,
+    ):
         self.probability = probability
         self.confidence = confidence
         self.factors = factors
@@ -6312,7 +6862,9 @@ def estimate_limit_fill_probability(
     denom = bid_vol + ask_vol
     imbalance = (bid_vol - ask_vol) / denom if denom > 0 else 0.0
 
-    placement = classify_limit_placement(order_side, limit_price, best_bid, best_ask, tick_size)
+    placement = classify_limit_placement(
+        order_side, limit_price, best_bid, best_ask, tick_size
+    )
     placement_score = {"cross": 0.95, "join": 0.55, "passive": 0.25}[placement]
     factors["placement"] = placement_score
 
@@ -6425,7 +6977,9 @@ def choose_reduce_limit_with_fill_target(
         if est.probability >= min_fill_probability:
             return px, est
 
-    px = reduce_limit_price(position_side, best_bid, best_ask, tick_size, reprice_ticks=max_aggressive_ticks)
+    px = reduce_limit_price(
+        position_side, best_bid, best_ask, tick_size, reprice_ticks=max_aggressive_ticks
+    )
     est = estimate_limit_fill_probability(
         order_side=close_side,
         limit_price=px,
@@ -6502,7 +7056,9 @@ def build_reduce_exit_payload(
     )
     payload["orderType"] = "Limit"
     payload["price"] = str(px)
-    payload["timeInForce"] = exit_tif if exit_tif in ("PostOnly", "GTC", "IOC") else "PostOnly"
+    payload["timeInForce"] = (
+        exit_tif if exit_tif in ("PostOnly", "GTC", "IOC") else "PostOnly"
+    )
     return payload
 
 
@@ -6524,7 +7080,11 @@ def expected_close_pnl(
         exit_fee = taker_fee
     else:
         exit_px = reduce_limit_price(
-            position_side, market["best_bid"], market["best_ask"], tick_size, reprice_ticks
+            position_side,
+            market["best_bid"],
+            market["best_ask"],
+            tick_size,
+            reprice_ticks,
         )
         exit_is_taker = False
         exit_fee = maker_fee
@@ -6564,7 +7124,9 @@ def place_reduce_exit_with_retry(
             reprice_ticks=attempt * exit_reprice_ticks,
         )
         try:
-            res = send_signed_post(base_url, "/v5/order/create", payload, api_key, api_secret)
+            res = send_signed_post(
+                base_url, "/v5/order/create", payload, api_key, api_secret
+            )
             if res.get("retCode") == 0:
                 res["_exit_payload"] = payload
                 return res
@@ -6666,13 +7228,17 @@ def evaluate_signal(
         side = "Buy"
         entry_price = best_bid
         entry_fee = entry_price * qty * maker_fee
-        raw_exit = (target_profit + entry_fee + entry_price * qty) / (qty * (1 - maker_fee))
+        raw_exit = (target_profit + entry_fee + entry_price * qty) / (
+            qty * (1 - maker_fee)
+        )
         exit_price = round_to_tick(raw_exit, tick_size)
     elif momentum < MOMENTUM_SHORT and imbalance < IMBALANCE_SHORT:
         side = "Sell"
         entry_price = best_ask
         entry_fee = entry_price * qty * maker_fee
-        raw_exit = ((entry_price * qty) - entry_fee - target_profit) / (qty * (1 + maker_fee))
+        raw_exit = ((entry_price * qty) - entry_fee - target_profit) / (
+            qty * (1 + maker_fee)
+        )
         exit_price = round_to_tick(raw_exit, tick_size)
 
     if not side:
@@ -6688,10 +7254,16 @@ def evaluate_signal(
     }
 
 
-def check_account_balance(base_url: str, api_key: str, api_secret: str, required_margin: float) -> bool:
+def check_account_balance(
+    base_url: str, api_key: str, api_secret: str, required_margin: float
+) -> bool:
     try:
         resp = send_signed_get(
-            base_url, "/v5/account/wallet-balance", {"accountType": "UNIFIED"}, api_key, api_secret
+            base_url,
+            "/v5/account/wallet-balance",
+            {"accountType": "UNIFIED"},
+            api_key,
+            api_secret,
         )
     except Exception as exc:
         emit({"status": "error", "message": f"Balance check request failed: {exc}"})
@@ -6733,7 +7305,9 @@ def check_account_balance(base_url: str, api_key: str, api_secret: str, required
     return True
 
 
-def has_open_position(base_url: str, api_key: str, api_secret: str, symbol: str) -> bool:
+def has_open_position(
+    base_url: str, api_key: str, api_secret: str, symbol: str
+) -> bool:
     try:
         resp = send_signed_get(
             base_url,
@@ -6762,6 +7336,7 @@ def place_micro_order_with_retry(
     tick_size: float = 0.01,
 ) -> Dict[str, Any]:
     import copy
+
     last_error: Any = None
 
     for attempt in range(max_retries + 1):
@@ -6801,7 +7376,12 @@ class DynamicPositionGuard:
         self.min_profit_to_override = min_profit_to_override
         self.aggressive = aggressive
 
-    def decide(self, entry_side: str, entry_signal_confidence: float, position_info: Dict[str, Any]) -> Tuple[bool, str]:
+    def decide(
+        self,
+        entry_side: str,
+        entry_signal_confidence: float,
+        position_info: Dict[str, Any],
+    ) -> Tuple[bool, str]:
         if not position_info or position_info.get("size", 0) <= 0:
             return False, "no_position"
 
@@ -6811,9 +7391,8 @@ class DynamicPositionGuard:
             if entry_side != position_info["side"]:
                 if self.aggressive or entry_signal_confidence > 0.6:
                     return False, "hedging_opportunity"
-            else:
-                if self.aggressive or entry_signal_confidence > 0.8:
-                    return False, "strong_signal_scaling"
+            elif self.aggressive or entry_signal_confidence > 0.8:
+                return False, "strong_signal_scaling"
 
         # Loss position - be more restrictive
         if pnl < -self.min_profit_to_override:
@@ -6831,7 +7410,7 @@ class DynamicPositionGuard:
         api_secret: str,
         symbol: str,
         entry_side: str,
-        entry_signal_confidence: float
+        entry_signal_confidence: float,
     ) -> Tuple[bool, str, Dict]:
         """
         Check position guard while considering existing position profitability.
@@ -6864,7 +7443,9 @@ class DynamicPositionGuard:
                     "unrealized_pnl_pct": float(pos.get("unrealisedPnlPct") or 0),
                     "mark_price": float(pos.get("markPrice") or 0),
                 }
-                should_skip, reason = self.decide(entry_side, entry_signal_confidence, position_info)
+                should_skip, reason = self.decide(
+                    entry_side, entry_signal_confidence, position_info
+                )
                 return should_skip, reason, position_info
 
         return False, "no_position", {}
@@ -6880,7 +7461,7 @@ def enhanced_position_guard_check(
     position_guard_enabled: bool,
     iteration: int,
     emit_result: Callable[[Dict[str, Any]], None],
-    position_info: Optional[Dict[str, Any]] = None
+    position_info: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Enhanced position guard check that considers profitability.
@@ -6891,10 +7472,14 @@ def enhanced_position_guard_check(
 
     min_profit_override = args.get("position_guard_profit_override", 0.02)
     aggressive = args.get("position_guard_aggressive", False)
-    guard = DynamicPositionGuard(min_profit_to_override=min_profit_override, aggressive=aggressive)
+    guard = DynamicPositionGuard(
+        min_profit_to_override=min_profit_override, aggressive=aggressive
+    )
 
     if position_info is not None:
-        should_skip, reason = guard.decide(sig["side"], sig.get("confidence", 0.5), position_info)
+        should_skip, reason = guard.decide(
+            sig["side"], sig.get("confidence", 0.5), position_info
+        )
     else:
         should_skip, reason, position_info = guard.check_position_guard_with_profit(
             base_url,
@@ -6902,31 +7487,35 @@ def enhanced_position_guard_check(
             api_secret,
             symbol,
             sig["side"],
-            sig.get("confidence", 0.5)
+            sig.get("confidence", 0.5),
         )
 
     if should_skip:
-        emit_result({
-            "status": "skipped",
-            "iteration": iteration,
-            "position_guard": True,
-            "reason": reason,
-            "existing_position": position_info,
-            "message": f"Position guard active: {reason}"
-        })
+        emit_result(
+            {
+                "status": "skipped",
+                "iteration": iteration,
+                "position_guard": True,
+                "reason": reason,
+                "existing_position": position_info,
+                "message": f"Position guard active: {reason}",
+            }
+        )
         return True
 
     # Allowed entry despite position guard
     if position_info:
-        emit_result({
-            "status": "info",
-            "iteration": iteration,
-            "position_guard": True,
-            "override": True,
-            "reason": reason,
-            "existing_position": position_info,
-            "message": f"Position guard overridden due to: {reason}"
-        })
+        emit_result(
+            {
+                "status": "info",
+                "iteration": iteration,
+                "position_guard": True,
+                "override": True,
+                "reason": reason,
+                "existing_position": position_info,
+                "message": f"Position guard overridden due to: {reason}",
+            }
+        )
 
     return False
 
@@ -6971,13 +7560,22 @@ class PrivateWsLogger:
     def _on_open(self, ws):
         ws.send(ws_auth_message(self.api_key, self.api_secret))
         time.sleep(0.3)
-        ws.send(json.dumps({"op": "subscribe", "args": ["order.linear", "execution.linear"]}))
+        ws.send(
+            json.dumps(
+                {"op": "subscribe", "args": ["order.linear", "execution.linear"]}
+            )
+        )
 
     def start(self):
         try:
             import websocket
         except ImportError:
-            emit({"status": "error", "message": "private-ws requires: pip install websocket-client"})
+            emit(
+                {
+                    "status": "error",
+                    "message": "private-ws requires: pip install websocket-client",
+                }
+            )
             return
         self._ws_app = websocket.WebSocketApp(
             self.ws_private_url, on_open=self._on_open, on_message=self._on_message
@@ -7084,36 +7682,48 @@ def run_one_cycle(
                     break
                 except Exception as exc2:
                     if retry == 2:  # Last attempt
-                        emit_result({
-                            "status": "error",
-                            "iteration": iteration,
-                            "message": f"Market data failed (ws+rest): {exc}; {exc2}",
-                        })
+                        emit_result(
+                            {
+                                "status": "error",
+                                "iteration": iteration,
+                                "message": f"Market data failed (ws+rest): {exc}; {exc2}",
+                            }
+                        )
                         return
                     time.sleep(0.5 * (retry + 1))
             if not rest_success:
                 return
         else:
             emit_result(
-                {"status": "error", "iteration": iteration, "message": f"Market data fetch failed: {exc}"}
+                {
+                    "status": "error",
+                    "iteration": iteration,
+                    "message": f"Market data fetch failed: {exc}",
+                }
             )
             return
 
     # Fetch/update account balance once every 20 iterations
-    if 'account_balance' not in loop_state or iteration % 20 == 0 or iteration == 1:
+    if "account_balance" not in loop_state or iteration % 20 == 0 or iteration == 1:
         try:
             resp = send_signed_get(
-                base_url, "/v5/account/wallet-balance", {"accountType": "UNIFIED"}, api_key, api_secret
+                base_url,
+                "/v5/account/wallet-balance",
+                {"accountType": "UNIFIED"},
+                api_key,
+                api_secret,
             )
             if resp.get("retCode") == 0:
                 tot_avail = resp["result"]["list"][0].get("totalAvailableBalance")
                 if tot_avail:
-                    loop_state['account_balance'] = float(tot_avail)
+                    loop_state["account_balance"] = float(tot_avail)
         except Exception:
             pass
 
-    account_balance = loop_state.get('account_balance', 1000.0)
-    qty = calculate_optimal_qty(market, base_qty, target_profit, account_balance=account_balance)
+    account_balance = loop_state.get("account_balance", 1000.0)
+    qty = calculate_optimal_qty(
+        market, base_qty, target_profit, account_balance=account_balance
+    )
     spread_bps = market["spread_bps"]
     if spread_bps > max_spread_bps:
         emit_result(
@@ -7132,8 +7742,13 @@ def run_one_cycle(
     mid_prices = loop_state.setdefault("mid_prices", deque(maxlen=10))
     denom = market["bid_vol"] + market["ask_vol"]
     current_mid = (
-        (market["best_bid"] * market["ask_vol"] + market["best_ask"] * market["bid_vol"]) / denom
-        if denom > 0 else (market["best_bid"] + market["best_ask"]) / 2.0
+        (
+            market["best_bid"] * market["ask_vol"]
+            + market["best_ask"] * market["bid_vol"]
+        )
+        / denom
+        if denom > 0
+        else (market["best_bid"] + market["best_ask"]) / 2.0
     )
     mid_prices.append(current_mid)
     if len(mid_prices) >= 2:
@@ -7144,7 +7759,9 @@ def run_one_cycle(
     # Secondary: OBI (order book imbalance) delta — captures pressure when price is flat
     obi_hist = loop_state.setdefault("obi_hist", deque(maxlen=5))
     obi_hist.append(market["imbalance"])
-    obi_delta = (obi_hist[-1] - obi_hist[0]) / 10.0 if len(obi_hist) >= 2 else 0.0  # scaled to price units
+    obi_delta = (
+        (obi_hist[-1] - obi_hist[0]) / 10.0 if len(obi_hist) >= 2 else 0.0
+    )  # scaled to price units
 
     # Blend: price momentum dominates when present, OBI delta supplements when flat
     if abs(price_momentum) > 0.000005:
@@ -7152,18 +7769,18 @@ def run_one_cycle(
     else:
         market["momentum"] = obi_delta
 
-    if 'multi_tf_analyzer' not in loop_state:
-        loop_state['multi_tf_analyzer'] = MultiTimeframeAnalyzer()
+    if "multi_tf_analyzer" not in loop_state:
+        loop_state["multi_tf_analyzer"] = MultiTimeframeAnalyzer()
 
-    if 'micro_pattern_analyzer' not in loop_state:
-        loop_state['micro_pattern_analyzer'] = MicroPatternAnalyzer()
+    if "micro_pattern_analyzer" not in loop_state:
+        loop_state["micro_pattern_analyzer"] = MicroPatternAnalyzer()
 
-    if market.get('closes'):
-        loop_state['multi_tf_analyzer'].update(market['closes'][-1], time.time())
+    if market.get("closes"):
+        loop_state["multi_tf_analyzer"].update(market["closes"][-1], time.time())
 
-    loop_state['micro_pattern_analyzer'].update(market['best_bid'], market['best_ask'])
+    loop_state["micro_pattern_analyzer"].update(market["best_bid"], market["best_ask"])
 
-    trend_score, trend_direction = loop_state['multi_tf_analyzer'].get_trend_signal()
+    trend_score, trend_direction = loop_state["multi_tf_analyzer"].get_trend_signal()
 
     vol_hist = loop_state.setdefault("vol_hist", deque(maxlen=60))
     cur_vol = float(market.get("bid_vol", 0.0) + market.get("ask_vol", 0.0))
@@ -7215,38 +7832,59 @@ def run_one_cycle(
         if tp is not None:
             try:
                 ts_res = set_position_take_profit(
-                    base_url, symbol, pos_side, pos_size, pos_entry, tp,
-                    api_key, api_secret,
+                    base_url,
+                    symbol,
+                    pos_side,
+                    pos_size,
+                    pos_entry,
+                    tp,
+                    api_key,
+                    api_secret,
                     full=(min(qty, pos_size) >= pos_size),
-                    tp_size=None if min(qty, pos_size) >= pos_size else min(qty, pos_size),
+                    tp_size=None
+                    if min(qty, pos_size) >= pos_size
+                    else min(qty, pos_size),
                 )
                 if ts_res.get("retCode") == 0:
-                    emit_result({
+                    emit_result(
+                        {
+                            "status": "info",
+                            "iteration": iteration,
+                            "message": "Position TP refreshed (limit, trading-stop)",
+                            "take_profit_price": tp,
+                        }
+                    )
+            except Exception as e:
+                emit_result(
+                    {
                         "status": "info",
                         "iteration": iteration,
-                        "message": "Position TP refreshed (limit, trading-stop)",
-                        "take_profit_price": tp,
-                    })
-            except Exception as e:
-                emit_result({
-                    "status": "info",
-                    "iteration": iteration,
-                    "message": f"Failed to refresh position TP due to network/proxy error: {e}",
-                })
+                        "message": f"Failed to refresh position TP due to network/proxy error: {e}",
+                    }
+                )
 
-    sig = evaluate_signal_v2(market, qty, target_profit, maker_fee, volume_profile, position_info)
+    sig = evaluate_signal_v2(
+        market, qty, target_profit, maker_fee, volume_profile, position_info
+    )
     if sig:
-        pattern_signal = loop_state['micro_pattern_analyzer'].get_entry_signal()
-        if pattern_signal['signal_strength'] > 0.3 and pattern_signal['direction'] != 'neutral':
+        pattern_signal = loop_state["micro_pattern_analyzer"].get_entry_signal()
+        if (
+            pattern_signal["signal_strength"] > 0.3
+            and pattern_signal["direction"] != "neutral"
+        ):
             # Boost confidence for pattern-based entries
-            sig['confidence'] = min(1.0, sig['confidence'] * (1.0 + pattern_signal['signal_strength']))
+            sig["confidence"] = min(
+                1.0, sig["confidence"] * (1.0 + pattern_signal["signal_strength"])
+            )
 
-        early_cycle = loop_state.get("iteration", 0) < 30  # MTF needs time to accumulate data
-        if trend_direction == 'bullish' and sig['side'] == 'Buy':
-            sig['confidence'] = min(1.0, sig['confidence'] * (1.0 + trend_score))
-        elif trend_direction == 'bearish' and sig['side'] == 'Sell':
-            sig['confidence'] = min(1.0, sig['confidence'] * (1.0 + trend_score))
-        elif trend_direction == 'neutral' or early_cycle:
+        early_cycle = (
+            loop_state.get("iteration", 0) < 30
+        )  # MTF needs time to accumulate data
+        if trend_direction == "bullish" and sig["side"] == "Buy":
+            sig["confidence"] = min(1.0, sig["confidence"] * (1.0 + trend_score))
+        elif trend_direction == "bearish" and sig["side"] == "Sell":
+            sig["confidence"] = min(1.0, sig["confidence"] * (1.0 + trend_score))
+        elif trend_direction == "neutral" or early_cycle:
             # Allow trades in neutral or early cycles (not enough history yet)
             pass
         else:
@@ -7302,43 +7940,57 @@ def run_one_cycle(
         )
         return
 
-    net_est = estimate_net_profit_v2(side, entry_price, exit_price, qty, maker_fee, exit_is_taker=False)
+    net_est = estimate_net_profit_v2(
+        side, entry_price, exit_price, qty, maker_fee, exit_is_taker=False
+    )
     if net_est < 0.02:
-        emit_result({
-            "status": "skipped",
-            "iteration": iteration,
-            "message": f"TP net {net_est:.6f} < floor 0.02 USDT; qty/target too small for fees.",
-            "entry": entry_price,
-            "tp": exit_price,
-        })
+        emit_result(
+            {
+                "status": "skipped",
+                "iteration": iteration,
+                "message": f"TP net {net_est:.6f} < floor 0.02 USDT; qty/target too small for fees.",
+                "entry": entry_price,
+                "tp": exit_price,
+            }
+        )
         return
 
     min_fill_p = float(args.get("min_fill_probability", 0.30))
-    is_reduce_check = (position_info and position_info.get("size", 0) > 0 and side != position_info["side"])
+    is_reduce_check = (
+        position_info
+        and position_info.get("size", 0) > 0
+        and side != position_info["side"]
+    )
     if not is_reduce_check:
         ok, fill_est = entry_postonly_viable(
             side, entry_price, market, tick_size, min_fill_p, args["loop_interval"]
         )
         if not ok:
-            emit_result({
-                "status": "skipped",
-                "iteration": iteration,
-                "reason": "low_entry_fill_probability",
-                "fill_probability": round(fill_est.probability, 4),
-                "min_fill_probability": min_fill_p,
-                "factors": fill_est.factors,
-                "message": "PostOnly entry unlikely to fill; skip cycle.",
-            })
+            emit_result(
+                {
+                    "status": "skipped",
+                    "iteration": iteration,
+                    "reason": "low_entry_fill_probability",
+                    "fill_probability": round(fill_est.probability, 4),
+                    "min_fill_probability": min_fill_p,
+                    "factors": fill_est.factors,
+                    "message": "PostOnly entry unlikely to fill; skip cycle.",
+                }
+            )
             return
 
     trailing_distance = parse_trailing_stop(trailing_stop)
     stop_loss_price: Optional[float] = None
     if trailing_distance is not None:
-        if len(market.get('closes', [])) >= 5:
-            recent_prices = market['closes'][-5:]
-            price_changes = [abs(recent_prices[i] - recent_prices[i-1]) / recent_prices[i-1]
-                            for i in range(1, len(recent_prices))]
-            market_volatility = sum(price_changes) / len(price_changes) if price_changes else 0.002
+        if len(market.get("closes", [])) >= 5:
+            recent_prices = market["closes"][-5:]
+            price_changes = [
+                abs(recent_prices[i] - recent_prices[i - 1]) / recent_prices[i - 1]
+                for i in range(1, len(recent_prices))
+            ]
+            market_volatility = (
+                sum(price_changes) / len(price_changes) if price_changes else 0.002
+            )
         else:
             market_volatility = 0.002
 
@@ -7357,7 +8009,7 @@ def run_one_cycle(
             position_guard,
             iteration,
             emit_result,
-            position_info=position_info
+            position_info=position_info,
         ):
             return
 
@@ -7380,14 +8032,16 @@ def run_one_cycle(
             loop_interval=args["loop_interval"],
         )
         if exit_px is None:
-            emit_result({
-                "status": "skipped",
-                "iteration": iteration,
-                "reason": "low_exit_fill_probability",
-                "fill_probability": round(fill_est.probability, 4),
-                "factors": fill_est.factors,
-                "message": "Limit reduce unlikely to fill; keep position / wait for TP.",
-            })
+            emit_result(
+                {
+                    "status": "skipped",
+                    "iteration": iteration,
+                    "reason": "low_exit_fill_probability",
+                    "fill_probability": round(fill_est.probability, 4),
+                    "factors": fill_est.factors,
+                    "message": "Limit reduce unlikely to fill; keep position / wait for TP.",
+                }
+            )
             return
 
         exp_pnl, _ = expected_close_pnl(
@@ -7402,32 +8056,42 @@ def run_one_cycle(
         )
         max_loss = float(args.get("max_loss_close_usdt", 0.0))
         if exp_pnl < -max_loss:
-            emit_result({
-                "status": "skipped",
-                "iteration": iteration,
-                "reason": "market_close_would_realize_loss",
-                "expected_close_pnl_usdt": round(exp_pnl, 6),
-                "unrealized_pnl": position_info.get("unrealized_pnl"),
-                "message": "Refusing limit reduce: wait for native SL/TP or profitable hedge.",
-            })
+            emit_result(
+                {
+                    "status": "skipped",
+                    "iteration": iteration,
+                    "reason": "market_close_would_realize_loss",
+                    "expected_close_pnl_usdt": round(exp_pnl, 6),
+                    "unrealized_pnl": position_info.get("unrealized_pnl"),
+                    "message": "Refusing limit reduce: wait for native SL/TP or profitable hedge.",
+                }
+            )
             return
 
         if dry_run:
-            emit_result({
-                "status": "dry_run",
-                "iteration": iteration,
-                "reduce_only": True,
-                "exit_order_type": exit_order_type,
-                "expected_close_pnl_usdt": round(exp_pnl, 6),
-                "exit_limit_price": exit_px,
-                "fill_probability": round(fill_est.probability, 4),
-                "fill_factors": fill_est.factors,
-            })
+            emit_result(
+                {
+                    "status": "dry_run",
+                    "iteration": iteration,
+                    "reduce_only": True,
+                    "exit_order_type": exit_order_type,
+                    "expected_close_pnl_usdt": round(exp_pnl, 6),
+                    "exit_limit_price": exit_px,
+                    "fill_probability": round(fill_est.probability, 4),
+                    "fill_factors": fill_est.factors,
+                }
+            )
             return
 
         entry_res = place_reduce_exit_with_retry(
-            base_url, symbol, position_info["side"], close_qty,
-            market, tick_size, api_key, api_secret,
+            base_url,
+            symbol,
+            position_info["side"],
+            close_qty,
+            market,
+            tick_size,
+            api_key,
+            api_secret,
             exit_order_type,
             args.get("exit_tif", "PostOnly"),
             int(args.get("exit_reprice_ticks", 1)),
@@ -7435,29 +8099,33 @@ def run_one_cycle(
         )
 
         if entry_res.get("retCode") != 0:
-            emit_result({
-                "status": "failed",
-                "iteration": iteration,
-                "stage": "reduce_execution",
-                "response": entry_res,
-                "message": "Reduce order rejected",
-            })
+            emit_result(
+                {
+                    "status": "failed",
+                    "iteration": iteration,
+                    "stage": "reduce_execution",
+                    "response": entry_res,
+                    "message": "Reduce order rejected",
+                }
+            )
         else:
             loop_state["last_order_ts"] = time.time()
-            emit_result({
-                "status": "success",
-                "iteration": iteration,
-                "reduce_only": True,
-                "exit_order_type": exit_order_type,
-                "expected_close_pnl_usdt": round(exp_pnl, 6),
-                "exit_limit_price": exit_px,
-                "fill_probability": round(fill_est.probability, 4),
-                "fill_factors": fill_est.factors,
-                "response": entry_res,
-            })
+            emit_result(
+                {
+                    "status": "success",
+                    "iteration": iteration,
+                    "reduce_only": True,
+                    "exit_order_type": exit_order_type,
+                    "expected_close_pnl_usdt": round(exp_pnl, 6),
+                    "exit_limit_price": exit_px,
+                    "fill_probability": round(fill_est.probability, 4),
+                    "fill_factors": fill_est.factors,
+                    "response": entry_res,
+                }
+            )
         return
 
-    required_margin = (entry_price * qty * (1 + maker_fee) / args.get("leverage", 1.0))
+    required_margin = entry_price * qty * (1 + maker_fee) / args.get("leverage", 1.0)
     if balance_check:
         if not check_account_balance(base_url, api_key, api_secret, required_margin):
             return
@@ -7502,7 +8170,9 @@ def run_one_cycle(
                     "entry_limit_price": entry_price,
                     "take_profit_price": exit_price,
                     "estimated_net_profit_usdt": round(net_est, 6),
-                    "tick_spread_required": round(abs(exit_price - entry_price) / tick_size, 1),
+                    "tick_spread_required": round(
+                        abs(exit_price - entry_price) / tick_size, 1
+                    ),
                     "payload": entry_payload,
                     "architecture": "Chained Native TP Order (Automated Risk Lifecycle)",
                 },
@@ -7511,7 +8181,9 @@ def run_one_cycle(
         return
 
     # Use enhanced order placement with retry logic
-    entry_res = place_micro_order_with_retry(base_url, entry_payload, api_key, api_secret, tick_size=tick_size)
+    entry_res = place_micro_order_with_retry(
+        base_url, entry_payload, api_key, api_secret, tick_size=tick_size
+    )
 
     if entry_res.get("retCode") != 0:
         hint = ""
@@ -7570,7 +8242,12 @@ def run_daemon(args: Dict[str, Any]) -> None:
             klines_boot = send_signed_get(
                 urls["rest"],
                 "/v5/market/kline",
-                {"category": "linear", "symbol": args["symbol"], "interval": "1", "limit": 30},
+                {
+                    "category": "linear",
+                    "symbol": args["symbol"],
+                    "interval": "1",
+                    "limit": 30,
+                },
                 args["api_key"],
                 args["api_secret"],
             )["result"]["list"]
@@ -7579,15 +8256,27 @@ def run_daemon(args: Dict[str, Any]) -> None:
         except Exception as e:
             logger.warning(f"Could not bootstrap klines from REST: {e}")
 
-        public_feed = PersistentPublicLinearFeed(urls["ws_public_linear"], args["symbol"], seed_closes=seed_closes)
+        public_feed = PersistentPublicLinearFeed(
+            urls["ws_public_linear"], args["symbol"], seed_closes=seed_closes
+        )
         public_feed.start()
         if not public_feed.wait_ready(args["ws_timeout"]):
-            emit({"status": "error", "message": "Persistent public WS failed to become ready"})
+            emit(
+                {
+                    "status": "error",
+                    "message": "Persistent public WS failed to become ready",
+                }
+            )
             public_feed.stop()
             if not args["ws_fallback_rest"]:
                 return
             public_feed = None
-            emit({"status": "warning", "message": "Continuing daemon with REST fallback only"})
+            emit(
+                {
+                    "status": "warning",
+                    "message": "Continuing daemon with REST fallback only",
+                }
+            )
 
     private_logger: Optional[PrivateWsLogger] = None
     if args.get("private_ws"):
@@ -7633,7 +8322,13 @@ def run_daemon(args: Dict[str, Any]) -> None:
             public_feed.stop()
         if private_logger:
             private_logger.stop()
-        emit({"status": "daemon_stopped", "reason": "shutdown", "iteration": loop_state.get("iteration", 0)})
+        emit(
+            {
+                "status": "daemon_stopped",
+                "reason": "shutdown",
+                "iteration": loop_state.get("iteration", 0),
+            }
+        )
 
 
 def main(args: Dict[str, Any]) -> None:
@@ -7643,29 +8338,35 @@ def main(args: Dict[str, Any]) -> None:
     qty = float(args.get("qty", 0.01))
     target_profit = float(args.get("target_profit", 0.05))
     maker_fee = float(args.get("maker_fee", 0.0002))
-    
+
     trailing_stop = parse_trailing_stop(args.get("trailing_stop"))
-        
+
     balance_check = bool(args.get("balance_check", False))
     dry_run = bool(args.get("dry_run", False))
     max_spread_bps = float(args.get("max_spread_bps", 50))
     mode = str(args.get("mode", "rest")).lower()
     ws_timeout = float(args.get("ws_timeout", 8))
     testnet = bool(args.get("testnet", False))
-    
+
     # Sync system clock offset with Bybit API time
     urls_base = base_urls(testnet)
     sync_server_time(urls_base["rest"])
-    
+
     loop = bool(args.get("loop", False))
     loop_interval = float(args.get("loop_interval", 2.0))
     cooldown = float(args.get("cooldown", 30))
     max_iterations = int(args.get("max_iterations", 0))
     private_ws = bool(args.get("private_ws", False))
     position_guard = bool(args.get("position_guard", False))
-    position_guard_profit_override = float(args.get("position_guard_profit_override", 0.02))
+    position_guard_profit_override = float(
+        args.get("position_guard_profit_override", 0.02)
+    )
     pos_guard_agg = args.get("position_guard_aggressive", False)
-    position_guard_aggressive = pos_guard_agg if isinstance(pos_guard_agg, bool) else str(pos_guard_agg).lower() in ("true", "1", "yes")
+    position_guard_aggressive = (
+        pos_guard_agg
+        if isinstance(pos_guard_agg, bool)
+        else str(pos_guard_agg).lower() in ("true", "1", "yes")
+    )
     ws_fallback_rest = bool(args.get("ws_fallback_rest", False))
     leverage = float(args.get("leverage", 1.0))
     verbose = bool(args.get("verbose", False))
@@ -7692,7 +8393,12 @@ def main(args: Dict[str, Any]) -> None:
         return
 
     if not (0.02 <= target_profit <= 0.20):
-        emit({"status": "error", "message": "target_profit must be 0.02–0.20 USDT for micro mode"})
+        emit(
+            {
+                "status": "error",
+                "message": "target_profit must be 0.02–0.20 USDT for micro mode",
+            }
+        )
         return
 
     if qty <= 0:
@@ -7749,7 +8455,9 @@ def main(args: Dict[str, Any]) -> None:
 
     urls = base_urls(testnet)
     tick_cache: Dict[str, float] = {}
-    run_one_cycle(normalized, urls, tick_cache, {"iteration": 0, "last_order_ts": 0.0}, None, emit)
+    run_one_cycle(
+        normalized, urls, tick_cache, {"iteration": 0, "last_order_ts": 0.0}, None, emit
+    )
 
 
 def run(args: Dict[str, Any]) -> None:
@@ -7758,7 +8466,7 @@ def run(args: Dict[str, Any]) -> None:
 
 
 if __name__ == "__main__":
-    main(parse_argv(sys.argv[1:]))#!/usr/bin/env python3
+    main(parse_argv(sys.argv[1:]))  #!/usr/bin/env python3
 # ==============================================================================
 # micro_scalp.py — Bybit Micro-Profit Scalper
 #
@@ -7774,16 +8482,14 @@ if __name__ == "__main__":
 # @flag --ws_fallback_rest        Fallback to REST on WebSocket failure.
 # ==============================================================================
 
-import json
-import os
 import sys
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Callable, Dict, Optional
 
 # --- Imports from the existing tool ---
 from bybit_realm import (
+    PersistentPublicLinearFeed,
     base_urls,
     run_one_cycle,
-    PersistentPublicLinearFeed,
 )
 
 
@@ -7877,26 +8583,41 @@ def run(args: Dict[str, Any]) -> Dict[str, Any]:
             emit_capture,
         )
 
-        return result["data"] if result["success"] else {"success": False, "error": "Execution failed"}
+        return (
+            result["data"]
+            if result["success"]
+            else {"success": False, "error": "Execution failed"}
+        )
 
     except Exception as e:
-        return {"success": False, "error": f"Execution error: {str(e)}"}
+        return {"success": False, "error": f"Execution error: {e!s}"}
 
 
 # --- Original main function (for backward compatibility) ---
 def main():
     """Legacy CLI entry point (not used by llm-functions)."""
     import argparse
+
     parser = argparse.ArgumentParser(description="Bybit Micro-Profit Scalper")
     parser.add_argument("--api_key", required=True, help="Bybit API key")
     parser.add_argument("--api_secret", required=True, help="Bybit API secret")
     parser.add_argument("--symbol", default="BTCUSDT", help="Trading pair")
     parser.add_argument("--qty", type=float, default=0.01, help="Order quantity")
-    parser.add_argument("--target_profit", type=float, default=0.05, help="Target profit in USDT")
-    parser.add_argument("--dry_run", action="store_true", help="Simulate without executing trades")
-    parser.add_argument("--position_guard", action="store_true", help="Skip if open position exists")
-    parser.add_argument("--private_ws", action="store_true", help="Enable private WebSocket logs")
-    parser.add_argument("--ws_fallback_rest", action="store_true", help="Fallback to REST on WS failure")
+    parser.add_argument(
+        "--target_profit", type=float, default=0.05, help="Target profit in USDT"
+    )
+    parser.add_argument(
+        "--dry_run", action="store_true", help="Simulate without executing trades"
+    )
+    parser.add_argument(
+        "--position_guard", action="store_true", help="Skip if open position exists"
+    )
+    parser.add_argument(
+        "--private_ws", action="store_true", help="Enable private WebSocket logs"
+    )
+    parser.add_argument(
+        "--ws_fallback_rest", action="store_true", help="Fallback to REST on WS failure"
+    )
     args = parser.parse_args()
 
     # Convert args to dict for the run function

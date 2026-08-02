@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import logging
 import os
 import pickle
 import re
@@ -29,21 +28,21 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Optional
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 # ==============================================================================
@@ -110,19 +109,25 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-NEON_LIME    = "\033[38;5;82m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+NEON_LIME = "\033[38;5;82m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-BOX_TL = "╭"; BOX_TR = "╮"; BOX_BL = "╰"; BOX_BR = "╯"
-BOX_V  = "│"; BOX_H  = "─"; BOX_LT = "├"; BOX_RT = "┤"
+BOX_TL = "╭"
+BOX_TR = "╮"
+BOX_BL = "╰"
+BOX_BR = "╯"
+BOX_V = "│"
+BOX_H = "─"
+BOX_LT = "├"
+BOX_RT = "┤"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -134,7 +139,10 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
 def get_width() -> int:
@@ -146,7 +154,9 @@ def get_width() -> int:
         return 68
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text to stderr by default."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -168,35 +178,57 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = BOX_H * box_w
 
     _cprint(f"{NEON_PURPLE}{BOX_TL}{border}{BOX_TR}{RESET}")
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_PINK}🌱 [GIT STATUS INTELLIGENCE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_PINK}🌱 [GIT STATUS INTELLIGENCE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}{BOX_LT}{border}{BOX_RT}{RESET}")
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Target:{RESET}   {data.get('target', 'N/A')}")
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Target:{RESET}   {data.get('target', 'N/A')}"
+    )
 
     if success:
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Branch:{RESET}   {NEON_GREEN}{BOLD}{data.get('branch', 'N/A')}{RESET} ({data.get('commit_hash', 'N/A')})")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Branch:{RESET}   {NEON_GREEN}{BOLD}{data.get('branch', 'N/A')}{RESET} ({data.get('commit_hash', 'N/A')})"
+        )
         if data.get("tracking"):
-            _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Tracking:{RESET} {data.get('tracking')} {DIM}(Ahead: {data.get('ahead', 0)} | Behind: {data.get('behind', 0)}){RESET}")
-        
-        changes = data.get("changes_summary", {})
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Changes:{RESET}  {NEON_LIME}Staged: {changes.get('staged', 0)}{RESET} | {NEON_YELLOW}Unstaged: {changes.get('unstaged', 0)}{RESET} | {NEON_RED}Untracked: {changes.get('untracked', 0)}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Stashes:{RESET}  {data.get('stash_count', 0)}")
+            _cprint(
+                f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Tracking:{RESET} {data.get('tracking')} {DIM}(Ahead: {data.get('ahead', 0)} | Behind: {data.get('behind', 0)}){RESET}"
+            )
 
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+        changes = data.get("changes_summary", {})
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Changes:{RESET}  {NEON_LIME}Staged: {changes.get('staged', 0)}{RESET} | {NEON_YELLOW}Unstaged: {changes.get('unstaged', 0)}{RESET} | {NEON_RED}Untracked: {changes.get('untracked', 0)}{RESET}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Stashes:{RESET}  {data.get('stash_count', 0)}"
+        )
+
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}{BOX_LT}{border}{BOX_RT}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error:{RESET}    {data['error']}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error:{RESET}    {data['error']}"
+        )
 
     items = data.get("files", [])
     if items:
         _cprint(f"{NEON_PURPLE}{BOX_LT}{border}{BOX_RT}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {BOLD}Changed Files ({len(items)}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {BOLD}Changed Files ({len(items)}):{RESET}"
+        )
         for idx, item in enumerate(items[:10], 1):
             status_code = item.get("status", "??")
             path = item.get("path", "")
-            _cprint(f"{NEON_PURPLE}{BOX_V}{RESET}   {NEON_CYAN}{idx:02d}.{RESET} [{NEON_YELLOW}{status_code}{RESET}] {path}")
+            _cprint(
+                f"{NEON_PURPLE}{BOX_V}{RESET}   {NEON_CYAN}{idx:02d}.{RESET} [{NEON_YELLOW}{status_code}{RESET}] {path}"
+            )
         if len(items) > 10:
-            _cprint(f"{NEON_PURPLE}{BOX_V}{RESET}   {DIM}... and {len(items) - 10} more files{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}{BOX_V}{RESET}   {DIM}... and {len(items) - 10} more files{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}{BOX_BL}{border}{BOX_BR}{RESET}")
 
@@ -204,6 +236,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
@@ -227,13 +260,15 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     """Caching utility with TTL support for status checks."""
@@ -303,6 +338,7 @@ class GracefulShutdown:
 # SECTION 5: Core Git Execution Engine
 # ==============================================================================
 
+
 def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
     """Execute git command and return (returncode, stdout, stderr)."""
     git_bin = os.environ.get("GIT_BINARY") or "git"
@@ -324,6 +360,7 @@ def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
 # ==============================================================================
 # SECTION 6: Primary Master Tool Execution Logic
 # ==============================================================================
+
 
 def execute_tool(
     target: Optional[str] = None,
@@ -351,7 +388,9 @@ def execute_tool(
     target_dir = str(target_path)
 
     # Check if target is inside a Git repository
-    code, is_repo, err = _run_git(["rev-parse", "--is-inside-work-tree"], cwd=target_dir)
+    code, is_repo, err = _run_git(
+        ["rev-parse", "--is-inside-work-tree"], cwd=target_dir
+    )
     if code != 0 or is_repo != "true":
         return {
             "success": False,
@@ -376,10 +415,15 @@ def execute_tool(
         _, commit_hash, _ = _run_git(["rev-parse", "--short", "HEAD"], cwd=target_dir)
 
         # Tracking info
-        _, tracking, _ = _run_git(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd=target_dir)
+        _, tracking, _ = _run_git(
+            ["rev-parse", "--abbrev-ref", "@{upstream}"], cwd=target_dir
+        )
         ahead, behind = 0, 0
         if tracking:
-            _, counts, _ = _run_git(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], cwd=target_dir)
+            _, counts, _ = _run_git(
+                ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+                cwd=target_dir,
+            )
             if counts and "\t" in counts:
                 try:
                     ahead, behind = map(int, counts.split("\t"))
@@ -392,7 +436,7 @@ def execute_tool(
 
         # Detailed Status Parsing
         _, status_raw, _ = _run_git(["status", "--porcelain=v1"], cwd=target_dir)
-        
+
         parsed_files = []
         staged_count = 0
         unstaged_count = 0
@@ -412,13 +456,15 @@ def execute_tool(
             if index_status == "?" and work_status == "?":
                 untracked_count += 1
 
-            parsed_files.append({
-                "status": line[:2],
-                "staged": index_status != " " and index_status != "?",
-                "unstaged": work_status != " " and work_status != "?",
-                "untracked": index_status == "?",
-                "path": file_path,
-            })
+            parsed_files.append(
+                {
+                    "status": line[:2],
+                    "staged": index_status != " " and index_status != "?",
+                    "unstaged": work_status != " " and work_status != "?",
+                    "untracked": index_status == "?",
+                    "path": file_path,
+                }
+            )
 
         duration_ms = round((time.monotonic() - start_time) * 1000, 2)
 
@@ -470,10 +516,13 @@ def execute_tool(
 # SECTION 7: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write JSON output to LLM_OUTPUT destination safely."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -494,6 +543,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 8: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     target: Optional[str] = None,
@@ -527,13 +577,15 @@ def run(
 # SECTION 9: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="git_status_tool.py",
         description=f"Pyrmethus Git Repository Status Intelligence Tool v{__version__}",
     )
     parser.add_argument(
-        "--target", "-t",
+        "--target",
+        "-t",
         metavar="PATH",
         help="Target directory path (default: current working directory)",
     )
@@ -558,7 +610,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

@@ -26,7 +26,6 @@
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import hashlib
 import json
 import logging
@@ -39,7 +38,7 @@ import time
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, List, Literal, Optional, Tuple
 
 # Dependency Verification & Imports
 try:
@@ -53,20 +52,21 @@ try:
     from pygments.lexer import Lexer
     from pygments.lexers import get_lexer_by_name, guess_lexer
     from pygments.token import Token
+
     HAS_PYGMENTS = True
 except ImportError:
     HAS_PYGMENTS = False
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 # ==============================================================================
@@ -128,15 +128,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -146,10 +146,15 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -169,15 +174,31 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [CODE SNAPSHOT RENDERER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [CODE SNAPSHOT RENDERER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Output Path:{RESET} {NEON_GREEN}{data.get('output_path', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Theme:{RESET}       {NEON_PINK}{data.get('theme', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Language:{RESET}    {NEON_YELLOW}{data.get('language', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Lines:{RESET}       {data.get('line_count', 0)}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Dimensions:{RESET}  {data.get('width', 0)}x{data.get('height', 0)} px")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}      {data.get('cached', False)}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Output Path:{RESET} {NEON_GREEN}{data.get('output_path', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Theme:{RESET}       {NEON_PINK}{data.get('theme', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Language:{RESET}    {NEON_YELLOW}{data.get('language', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Lines:{RESET}       {data.get('line_count', 0)}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Dimensions:{RESET}  {data.get('width', 0)}x{data.get('height', 0)} px"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}      {data.get('cached', False)}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -189,6 +210,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     env_name = f"LLM_AGENT_VAR_{name.upper()}"
@@ -209,13 +231,15 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     def __init__(self, cache_dir: Optional[Path] = None) -> None:
@@ -282,24 +306,24 @@ class GracefulShutdown:
 
 THEMES = {
     "cyberpunk": {
-        "bg": (13, 15, 24),            # Deep dark void
-        "window_bg": (22, 25, 43),     # Cyber navy
-        "border": (255, 0, 127),       # Neon magenta/pink
-        "glow": (255, 0, 127, 100),    # Glow magenta alpha
-        "title": (0, 246, 255),        # Cyan title
+        "bg": (13, 15, 24),  # Deep dark void
+        "window_bg": (22, 25, 43),  # Cyber navy
+        "border": (255, 0, 127),  # Neon magenta/pink
+        "glow": (255, 0, 127, 100),  # Glow magenta alpha
+        "title": (0, 246, 255),  # Cyan title
         "line_num": (80, 90, 120),
         "default": (248, 248, 242),
-        "keyword": (255, 0, 127),      # Pink
-        "string": (0, 246, 255),       # Cyan
-        "comment": (98, 114, 164),     # Muted purple
-        "function": (0, 255, 102),     # Neon green
-        "number": (255, 190, 0),       # Bright yellow
-        "operator": (255, 128, 0),     # Neon orange
+        "keyword": (255, 0, 127),  # Pink
+        "string": (0, 246, 255),  # Cyan
+        "comment": (98, 114, 164),  # Muted purple
+        "function": (0, 255, 102),  # Neon green
+        "number": (255, 190, 0),  # Bright yellow
+        "operator": (255, 128, 0),  # Neon orange
     },
     "matrix": {
         "bg": (3, 10, 5),
         "window_bg": (8, 20, 11),
-        "border": (0, 255, 65),        # Matrix Green
+        "border": (0, 255, 65),  # Matrix Green
         "glow": (0, 255, 65, 120),
         "title": (0, 255, 65),
         "line_num": (25, 75, 40),
@@ -314,8 +338,8 @@ THEMES = {
     "synthwave": {
         "bg": (18, 13, 28),
         "window_bg": (26, 19, 41),
-        "border": (255, 126, 219),     # Neon pink
-        "glow": (120, 40, 200, 150),   # Purple glow
+        "border": (255, 126, 219),  # Neon pink
+        "glow": (120, 40, 200, 150),  # Purple glow
         "title": (54, 249, 246),
         "line_num": (108, 103, 131),
         "default": (240, 239, 241),
@@ -329,7 +353,7 @@ THEMES = {
     "tokyo-night": {
         "bg": (22, 22, 30),
         "window_bg": (26, 27, 38),
-        "border": (122, 162, 247),    # Tokyo Blue
+        "border": (122, 162, 247),  # Tokyo Blue
         "glow": (122, 162, 247, 100),
         "title": (187, 154, 247),
         "line_num": (86, 95, 137),
@@ -393,7 +417,9 @@ def _tokenize_code(code: str, language: str) -> List[List[Tuple[str, str]]]:
             return lines_tokens
 
     # Fallback Lexer: Simple regex tokenization
-    kw_regex = re.compile(r"\b(def|class|return|if|else|elif|import|from|for|while|in|as|try|except|with|const|let|var|function|async|await|fn|pub|struct|impl)\b")
+    kw_regex = re.compile(
+        r"\b(def|class|return|if|else|elif|import|from|for|while|in|as|try|except|with|const|let|var|function|async|await|fn|pub|struct|impl)\b"
+    )
     str_regex = re.compile(r"(\".*?\"|'.*?'|`.*?`)")
     num_regex = re.compile(r"\b\d+(\.\d+)?\b")
     comment_regex = re.compile(r"(#.*|//.*)")
@@ -426,7 +452,7 @@ def _tokenize_code(code: str, language: str) -> List[List[Tuple[str, str]]]:
                 tokens.append((m_num.group(0), "number"))
                 pos = m_num.end()
                 continue
-            
+
             # Default single character
             tokens.append((line[pos], "default"))
             pos += 1
@@ -438,6 +464,7 @@ def _tokenize_code(code: str, language: str) -> List[List[Tuple[str, str]]]:
 # ==============================================================================
 # SECTION 6: Snapshot Rendering Logic
 # ==============================================================================
+
 
 def render_code_snapshot(
     code: str,
@@ -457,10 +484,10 @@ def render_code_snapshot(
     # Font Setup
     try:
         font = ImageFont.truetype("DejaVuSansMono.ttf", font_size)
-    except IOError:
+    except OSError:
         try:
             font = ImageFont.truetype("Courier New.ttf", font_size)
-        except IOError:
+        except OSError:
             font = ImageFont.load_default()
 
     # Measure char width and line height using PIL bbox
@@ -480,7 +507,7 @@ def render_code_snapshot(
     # Determine max line length
     raw_lines = code.splitlines() or [""]
     max_cols = max(len(l.expandtabs(4)) for l in raw_lines)
-    
+
     code_width = max(max_cols * char_w + line_num_w, 400)
     code_height = max(len(tokens_by_line) * line_h, line_h)
 
@@ -492,7 +519,7 @@ def render_code_snapshot(
 
     # Background Canvas
     canvas = Image.new("RGBA", (total_w, total_h), palette["bg"] + (255,))
-    
+
     # Outer Neon Glow Layer
     if glow_effect:
         glow_canvas = Image.new("RGBA", (total_w, total_h), (0, 0, 0, 0))
@@ -505,9 +532,15 @@ def render_code_snapshot(
     # Window Layer
     win_box = [margin, margin, margin + win_w, margin + win_h]
     draw = ImageDraw.Draw(canvas)
-    
+
     # Draw Window Frame & Neon Border
-    draw.rounded_rectangle(win_box, radius=12, fill=palette["window_bg"] + (255,), outline=palette["border"], width=2)
+    draw.rounded_rectangle(
+        win_box,
+        radius=12,
+        fill=palette["window_bg"] + (255,),
+        outline=palette["border"],
+        width=2,
+    )
 
     # Draw macOS Window Buttons (Red, Yellow, Green)
     if show_window_frame:
@@ -555,6 +588,7 @@ def render_code_snapshot(
 # SECTION 7: Core Tool Execution
 # ==============================================================================
 
+
 def execute_tool(
     target: str,
     output: Optional[str] = None,
@@ -576,7 +610,11 @@ def execute_tool(
         logging.debug(f"Target argument: {target}")
 
     # Determine code input (Path or Raw String)
-    target_path = Path(target).expanduser().resolve() if len(target) < 500 and not "\n" in target else None
+    target_path = (
+        Path(target).expanduser().resolve()
+        if len(target) < 500 and "\n" not in target
+        else None
+    )
 
     if target_path and target_path.exists() and target_path.is_file():
         try:
@@ -664,9 +702,12 @@ def execute_tool(
 # SECTION 8: Output Routing & Main Entrypoint
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
@@ -722,13 +763,15 @@ def _build_parser() -> argparse.ArgumentParser:
         description=f"AIChat Neon Code Snapshot Tool v{__version__}",
     )
     parser.add_argument(
-        "--target", "-t",
+        "--target",
+        "-t",
         required=True,
         metavar="PATH_OR_CODE",
         help="Target file path or inline code text",
     )
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         default="snapshot.png",
         metavar="PATH",
         help="Destination PNG output path (default: snapshot.png)",
@@ -740,7 +783,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Neon theme selection (default: cyberpunk)",
     )
     parser.add_argument(
-        "--language", "-l",
+        "--language",
+        "-l",
         default="auto",
         help="Programming language (default: auto)",
     )
@@ -785,7 +829,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI colors",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable debug output",

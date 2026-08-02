@@ -112,10 +112,11 @@ tools/
 ## Example Usage (Python)
 ```python
 from bybit_terminal import run
+
 result = run(
-    action='place_order',
-    symbol='BTCUSD',
-    side='Buy',
+    action="place_order",
+    symbol="BTCUSD",
+    side="Buy",
     qty=0.001,
     price=25000,
     stop_loss=24500,

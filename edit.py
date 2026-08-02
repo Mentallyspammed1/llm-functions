@@ -16,49 +16,50 @@ import math
 import os
 import tempfile
 from decimal import Decimal
-from typing import Any, List, Dict, Optional, Set
-
+from typing import Any, List, Optional, Set
 
 # =============================================================================
 # 1. OFF-BY-ONE ERROR IN LOOP
 # =============================================================================
 
+
 def demonstrate_off_by_one():
     """
     Fix off-by-one errors when iterating over arrays.
-    
+
     Problem: Accessing arr[i+1] when i is the last index causes IndexError.
     Solution: Use range(len(arr) - 1) to stay within bounds.
     """
     arr = [1, 2, 3, 4, 5]
-    
+
     print("=== Off-By-One Error Fix ===")
     print(f"Array: {arr}")
     print(f"Length: {len(arr)}")
-    
+
     # BROKEN CODE (commented out to prevent error):
     # for i in range(len(arr)):
     #     print(arr[i+1])  # IndexError when i = 4 (last index)
-    
+
     # FIXED CODE:
     print("\nFixed version (iterating with proper bounds):")
     for i in range(len(arr) - 1):
-        print(f"arr[{i}] = {arr[i]}, arr[{i+1}] = {arr[i+1]}")
-    
+        print(f"arr[{i}] = {arr[i]}, arr[{i + 1}] = {arr[i + 1]}")
+
     # Alternative: Use enumerate for index and value
     print("\nAlternative using enumerate:")
     for i, val in enumerate(arr[:-1]):
-        print(f"Index {i}: {val}, Next: {arr[i+1]}")
+        print(f"Index {i}: {val}, Next: {arr[i + 1]}")
 
 
 # =============================================================================
 # 2. MUTABLE DEFAULT ARGUMENT (LIST/DICT TRAP)
 # =============================================================================
 
+
 def add_item_broken(item: Any, items: List = []) -> List:
     """
     BROKEN: Using mutable default argument.
-    
+
     The empty list [] is created once when the function is defined,
     not each time the function is called. This causes state to persist
     across calls.
@@ -70,7 +71,7 @@ def add_item_broken(item: Any, items: List = []) -> List:
 def add_item_fixed(item: Any, items: Optional[List] = None) -> List:
     """
     FIXED: Use None as default and create new list each call.
-    
+
     This ensures each function call gets its own fresh list.
     """
     if items is None:
@@ -84,7 +85,7 @@ def demonstrate_mutable_default():
     Show the difference between broken and fixed versions.
     """
     print("\n=== Mutable Default Argument Fix ===")
-    
+
     # Demonstrate the problem with broken version
     print("Broken version (mutable default):")
     result1 = add_item_broken("apple")
@@ -92,8 +93,8 @@ def demonstrate_mutable_default():
     result2 = add_item_broken("banana")
     print(f"  Second call: {result2}")  # Will show ['apple', 'banana']!
     result3 = add_item_broken("cherry")
-    print(f"  Third call: {result3}")   # Will show all three!
-    
+    print(f"  Third call: {result3}")  # Will show all three!
+
     # Demonstrate the fix
     print("\nFixed version (immutable default):")
     result1 = add_item_fixed("apple")
@@ -101,38 +102,39 @@ def demonstrate_mutable_default():
     result2 = add_item_fixed("banana")
     print(f"  Second call: {result2}")  # Will only show ['banana']
     result3 = add_item_fixed("cherry")
-    print(f"  Third call: {result3}")   # Will only show ['cherry']
+    print(f"  Third call: {result3}")  # Will only show ['cherry']
 
 
 # =============================================================================
 # 3. STRING VS INTEGER COMPARISON
 # =============================================================================
 
+
 def demonstrate_string_int_comparison():
     """
     Fix type mismatch when comparing user input with integers.
-    
+
     Problem: input() always returns a string, even if user types a number.
     Solution: Convert to int before comparison.
     """
     print("\n=== String vs Integer Comparison Fix ===")
-    
+
     # Simulating user input (normally would use input())
     user_input = "10"  # This is a string!
-    
+
     # BROKEN CODE (will always be False):
     # if user_input == 10:
     #     print("Equal!")
     # else:
     #     print(f"Not equal: '{user_input}' != 10")
-    
+
     # FIXED CODE:
     print(f"User input: '{user_input}' (type: {type(user_input).__name__})")
     if int(user_input) == 10:
         print("✓ Equal! Successfully converted string to int.")
     else:
         print("✗ Not equal")
-    
+
     # Better practice: Validate input first
     def get_valid_number() -> int:
         """Get a valid integer from user input."""
@@ -142,7 +144,7 @@ def demonstrate_string_int_comparison():
                 return int(user_input)
             else:
                 print("Please enter a valid number.")
-    
+
     # Example usage (commented out to avoid blocking):
     # number = get_valid_number()
     # print(f"You entered: {number}")
@@ -152,10 +154,11 @@ def demonstrate_string_int_comparison():
 # 4. REMOVE DUPLICATES WHILE PRESERVING ORDER
 # =============================================================================
 
+
 def unique_preserve_order_broken(seq: List) -> List:
     """
     BROKEN: Using set doesn't preserve order.
-    
+
     Sets are unordered in Python, so converting to set and back
     may change the order of elements.
     """
@@ -165,7 +168,7 @@ def unique_preserve_order_broken(seq: List) -> List:
 def unique_preserve_order_fixed(seq: List) -> List:
     """
     FIXED: Use set to track seen items while preserving order.
-    
+
     This uses a list comprehension with a side effect in the condition
     to add items to the 'seen' set only when they're new.
     """
@@ -178,18 +181,18 @@ def demonstrate_unique_order():
     Show the difference between order-preserving and non-preserving methods.
     """
     print("\n=== Remove Duplicates While Preserving Order ===")
-    
+
     data = [3, 1, 2, 1, 3, 5, 2, 4, 1, 3]
     print(f"Original: {data}")
-    
+
     # Broken version (may not preserve order)
     result_broken = unique_preserve_order_broken(data)
     print(f"Using set(): {result_broken}")
-    
+
     # Fixed version (preserves order)
     result_fixed = unique_preserve_order_fixed(data)
     print(f"Order-preserving: {result_fixed}")
-    
+
     # Alternative using dict.fromkeys() (Python 3.7+ preserves order)
     result_alternative = list(dict.fromkeys(data))
     print(f"Using dict.fromkeys(): {result_alternative}")
@@ -199,54 +202,58 @@ def demonstrate_unique_order():
 # 5. DEEP COPY VS SHALLOW COPY
 # =============================================================================
 
+
 def demonstrate_deep_copy():
     """
     Fix shallow copy issues with nested data structures.
-    
+
     Problem: Slicing [:] or list() creates a shallow copy - nested
     objects are still shared.
     Solution: Use copy.deepcopy() for nested structures.
     """
     print("\n=== Deep Copy vs Shallow Copy Fix ===")
-    
+
     # Original nested list
     original = [[1, 2], [3, 4]]
     print(f"Original: {original}")
-    
+
     # BROKEN CODE (shallow copy):
     shallow = original[:]
     shallow[0][0] = 99
     print(f"After modifying shallow copy: {original}")
-    print(f"  Original was also modified! (shallow copy issue)")
-    
+    print("  Original was also modified! (shallow copy issue)")
+
     # Reset for fair comparison
     original = [[1, 2], [3, 4]]
-    
+
     # FIXED CODE (deep copy):
     deep = copy.deepcopy(original)
     deep[0][0] = 99
     print(f"\nAfter modifying deep copy: {original}")
-    print(f"  Original unchanged! (deep copy works)")
-    
+    print("  Original unchanged! (deep copy works)")
+
     # Additional example with dictionaries
     print("\nExample with nested dictionaries:")
     config_original = {"server": {"host": "localhost", "port": 8080}}
     config_copy = copy.deepcopy(config_original)
     config_copy["server"]["port"] = 3000
-    
+
     print(f"Original: {config_original}")
     print(f"Copy: {config_copy}")
-    print(f"✓ Deep copy preserved original")
+    print("✓ Deep copy preserved original")
 
 
 # =============================================================================
 # 6. EARLY RETURN / GUARD CLAUSE
 # =============================================================================
 
+
 class MockUser:
     """Mock user class for demonstration."""
-    
-    def __init__(self, exists: bool = True, active: bool = True, permission: bool = True):
+
+    def __init__(
+        self, exists: bool = True, active: bool = True, permission: bool = True
+    ):
         self.exists = exists
         self.is_active = active
         self.has_permission = permission
@@ -279,7 +286,7 @@ def process_user_guard_clauses(user: Optional[MockUser]) -> str:
     - Clearer control flow
     """
     # Check if user object exists and has required attributes
-    if user is None or not hasattr(user, 'exists') or not user.exists:
+    if user is None or not hasattr(user, "exists") or not user.exists:
         return "Processing user: User does not exist"
 
     if not user.is_active:
@@ -306,7 +313,9 @@ def demonstrate_guard_clauses():
 
     for i, user in enumerate(test_cases, 1):
         print(f"\nTest case {i}:")
-        print(f"  User exists: {user.exists}, Active: {user.is_active}, Permission: {user.has_permission}")
+        print(
+            f"  User exists: {user.exists}, Active: {user.is_active}, Permission: {user.has_permission}"
+        )
 
         result = process_user_guard_clauses(user)
         print(f"  Result: {result}")
@@ -316,9 +325,10 @@ def demonstrate_guard_clauses():
 # 7. CHECK FOR NONE BEFORE ATTRIBUTE ACCESS
 # =============================================================================
 
+
 class Person:
     """Example class with optional attribute."""
-    
+
     def __init__(self, name: Optional[str] = None):
         self.name = name
 
@@ -326,27 +336,31 @@ class Person:
 def demonstrate_none_check():
     """
     Fix AttributeError by checking for None before attribute access.
-    
+
     Problem: Calling .upper() on None raises AttributeError.
     Solution: Check if object and attribute exist before accessing.
     """
     print("\n=== Check for None Before Attribute Access ===")
-    
+
     # Test cases
     person_with_name = Person(name="Alice")
     person_without_name = Person(name=None)
-    
+
     # BROKEN CODE (will raise AttributeError for person_without_name):
     # result = person_without_name.name.upper()
-    
+
     # FIXED CODE - Option 1: Explicit if/else
     print("Option 1: Explicit if/else check")
-    if person_without_name and hasattr(person_without_name, 'name') and person_without_name.name:
+    if (
+        person_without_name
+        and hasattr(person_without_name, "name")
+        and person_without_name.name
+    ):
         result = person_without_name.name.upper()
     else:
         result = None
     print(f"  Result: {result}")
-    
+
     # FIXED CODE - Option 2: Using try/except
     print("\nOption 2: Using try/except")
     try:
@@ -354,16 +368,16 @@ def demonstrate_none_check():
     except AttributeError:
         result = None
     print(f"  Result: {result}")
-    
+
     # FIXED CODE - Option 3: Using getattr with default
     print("\nOption 3: Using getattr with default")
-    name = getattr(person_without_name, 'name', None)
+    name = getattr(person_without_name, "name", None)
     result = name.upper() if name else None
     print(f"  Result: {result}")
-    
+
     # FIXED CODE - Option 4: Walrus operator (Python 3.8+)
     print("\nOption 4: Using walrus operator (Python 3.8+)")
-    if (name := getattr(person_without_name, 'name', None)):
+    if name := getattr(person_without_name, "name", None):
         result = name.upper()
     else:
         result = None
@@ -374,31 +388,32 @@ def demonstrate_none_check():
 # 8. TRY/EXCEPT FOR SAFER DICTIONARY ACCESS
 # =============================================================================
 
+
 def demonstrate_dict_access():
     """
     Fix KeyError by using safer dictionary access methods.
-    
+
     Problem: Direct key access raises KeyError if key doesn't exist.
     Solution: Use .get() with default or check key existence first.
     """
     print("\n=== Safer Dictionary Access ===")
-    
+
     config = {
         "host": "localhost",
         "port": 8080,
         # "timeout" is intentionally missing
     }
-    
+
     print(f"Config: {config}")
-    
+
     # BROKEN CODE (will raise KeyError):
     # value = config["timeout"]
-    
+
     # FIXED CODE - Option 1: Using .get() with default
     print("\nOption 1: Using .get() with default value")
     timeout = config.get("timeout", 30)
     print(f"  Timeout: {timeout} (default used)")
-    
+
     # FIXED CODE - Option 2: Check key existence first
     print("\nOption 2: Check key existence first")
     if "timeout" in config:
@@ -406,7 +421,7 @@ def demonstrate_dict_access():
     else:
         timeout = 30
     print(f"  Timeout: {timeout}")
-    
+
     # FIXED CODE - Option 3: Using try/except
     print("\nOption 3: Using try/except")
     try:
@@ -414,13 +429,13 @@ def demonstrate_dict_access():
     except KeyError:
         timeout = 30
     print(f"  Timeout: {timeout}")
-    
+
     # FIXED CODE - Option 4: Using dict.setdefault()
     print("\nOption 4: Using setdefault()")
     timeout = config.setdefault("timeout", 30)
     print(f"  Timeout: {timeout}")
     print(f"  Config now: {config} (key was added)")
-    
+
     # Advanced: Nested dictionary access
     print("\nAdvanced: Safe nested dictionary access")
     nested_config = {
@@ -429,7 +444,7 @@ def demonstrate_dict_access():
             # "port" missing
         }
     }
-    
+
     # Safe nested access using get() chaining
     port = nested_config.get("database", {}).get("port", 5432)
     print(f"  Database port: {port} (default used)")
@@ -439,13 +454,14 @@ def demonstrate_dict_access():
 # 9. SAFE FILE READING AND EDITING
 # =============================================================================
 
+
 def read_file_broken(filepath: str) -> str:
     """
     BROKEN: Opening file without context manager (with) and not handling errors.
     If an exception occurs or if we forget to close, the file descriptor leaks.
     Also, if the file doesn't exist, it crashes the program.
     """
-    f = open(filepath, 'r')
+    f = open(filepath)
     content = f.read()
     f.close()  # Might not be reached if an exception occurs above
     return content
@@ -457,12 +473,12 @@ def read_file_fixed(filepath: str) -> Optional[str]:
     and handle FileNotFoundError/IOError gracefully.
     """
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         print(f"Error: File not found at {filepath}")
         return None
-    except IOError as e:
+    except OSError as e:
         print(f"I/O Error reading {filepath}: {e}")
         return None
 
@@ -477,11 +493,11 @@ def edit_file_fixed(filepath: str, content: str) -> bool:
         dir_name = os.path.dirname(filepath)
         if dir_name and not os.path.exists(dir_name):
             os.makedirs(dir_name, exist_ok=True)
-            
-        with open(filepath, 'w', encoding='utf-8') as f:
+
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
         return True
-    except IOError as e:
+    except OSError as e:
         print(f"I/O Error writing to {filepath}: {e}")
         return False
 
@@ -490,13 +506,14 @@ def edit_file_fixed(filepath: str, content: str) -> bool:
 # 10. SAFE FILE TEXT REPLACEMENT (ATOMIC WRITE)
 # =============================================================================
 
+
 def replace_in_file_broken(filepath: str, search_text: str, replacement: str) -> None:
     """
     BROKEN: Opening the file in 'r+' mode and writing without resetting offset
     or truncating can cause partial writes or corrupt data.
     Also, a crash during write leaves the file partially updated/corrupted.
     """
-    with open(filepath, 'r+') as f:
+    with open(filepath, "r+") as f:
         content = f.read()
         new_content = content.replace(search_text, replacement)
         # BUG: We are at EOF, so writing here just appends unless we seek(0)
@@ -511,21 +528,20 @@ def print_colorized_diff(old_text: str, new_text: str, filename: str = "file") -
     COLOR_GREEN = "\033[92m"
     COLOR_CYAN = "\033[96m"
     COLOR_RESET = "\033[0m"
-    
+
     old_lines = old_text.splitlines(keepends=True)
     new_lines = new_text.splitlines(keepends=True)
-    
+
     diff = difflib.unified_diff(
-        old_lines, new_lines,
-        fromfile=f"a/{filename}", tofile=f"b/{filename}"
+        old_lines, new_lines, fromfile=f"a/{filename}", tofile=f"b/{filename}"
     )
-    
+
     for line in diff:
-        if line.startswith('+') and not line.startswith('+++'):
+        if line.startswith("+") and not line.startswith("+++"):
             print(f"{COLOR_GREEN}{line}{COLOR_RESET}", end="")
-        elif line.startswith('-') and not line.startswith('---'):
+        elif line.startswith("-") and not line.startswith("---"):
             print(f"{COLOR_RED}{line}{COLOR_RESET}", end="")
-        elif line.startswith('@@'):
+        elif line.startswith("@@"):
             print(f"{COLOR_CYAN}{line}{COLOR_RESET}", end="")
         else:
             print(line, end="")
@@ -542,29 +558,31 @@ def replace_in_file_fixed(filepath: str, search_text: str, replacement: str) -> 
         content = read_file_fixed(filepath)
         if content is None:
             return False
-            
+
         # 2. Perform replacement
         new_content = content.replace(search_text, replacement)
-        
+
         # Print colorized diff of the changes
         if content != new_content:
             print("\nColorized Diff of Edits:")
             print_colorized_diff(content, new_content, os.path.basename(filepath))
-        
+
         # 3. Write atomically
-        dir_name = os.path.dirname(filepath) or '.'
+        dir_name = os.path.dirname(filepath) or "."
         # Create temp file in the same directory to ensure atomic rename
-        with tempfile.NamedTemporaryFile('w', dir=dir_name, delete=False, encoding='utf-8') as tf:
+        with tempfile.NamedTemporaryFile(
+            "w", dir=dir_name, delete=False, encoding="utf-8"
+        ) as tf:
             tf.write(new_content)
             temp_path = tf.name
-            
+
         # Rename temp file to target file (atomic on POSIX systems)
         os.replace(temp_path, filepath)
         return True
     except Exception as e:
         print(f"Error during atomic replacement in {filepath}: {e}")
         # Clean up temp file if it was created
-        if 'temp_path' in locals() and os.path.exists(temp_path):
+        if "temp_path" in locals() and os.path.exists(temp_path):
             os.remove(temp_path)
         return False
 
@@ -596,24 +614,24 @@ def demonstrate_replace_and_edit():
     """
     print("\n=== Safe File Reading, Editing, and Text Replacement ===")
     test_file = "temp_demo_file.txt"
-    
+
     # 1. Safe edit
     print("Writing initial content to file using edit()...")
     success = edit(test_file, "Hello World!\nPython is awesome.\n")
     if success:
-        print(f"  File created successfully.")
-        
+        print("  File created successfully.")
+
     # 2. Safe read
     print("\nReading content from file using read():")
     content = read(test_file)
-    print(f"  Content: {repr(content)}")
-    
+    print(f"  Content: {content!r}")
+
     # 3. Safe replace (atomic write)
     print("\nReplacing 'awesome' with 'incredible' atomically using replace()...")
     if replace(test_file, "awesome", "incredible"):
         new_content = read(test_file)
-        print(f"  New Content: {repr(new_content)}")
-        
+        print(f"  New Content: {new_content!r}")
+
     # Cleanup
     if os.path.exists(test_file):
         os.remove(test_file)
@@ -623,6 +641,7 @@ def demonstrate_replace_and_edit():
 # =============================================================================
 # 11. MODIFYING A LIST WHILE ITERATING
 # =============================================================================
+
 
 def remove_negatives_broken(lst: List[int]) -> List[int]:
     """
@@ -657,20 +676,20 @@ def demonstrate_iteration_modification():
     Show the issues with modifying a list during iteration and the fixes.
     """
     print("\n=== Collection Modification during Iteration ===")
-    
+
     # Test case with consecutive negative numbers
     numbers_broken = [1, -2, -3, 4, -5, -6, 7]
     print(f"Original list: {numbers_broken}")
-    
+
     # Broken method leaves -3 and -6 because index shifts
     result_broken = remove_negatives_broken(numbers_broken)
     print(f"Broken result (items skipped): {result_broken}")
-    
+
     # Fixed methods clean up properly
     numbers_fixed = [1, -2, -3, 4, -5, -6, 7]
     result_fixed_1 = remove_negatives_fixed_1(numbers_fixed)
     print(f"Fixed (shallow copy iteration): {result_fixed_1}")
-    
+
     numbers_comp = [1, -2, -3, 4, -5, -6, 7]
     result_fixed_2 = remove_negatives_fixed_2(numbers_comp)
     print(f"Fixed (list comprehension):     {result_fixed_2}")
@@ -680,31 +699,32 @@ def demonstrate_iteration_modification():
 # 12. FLOATING POINT PRECISION COMPARISON
 # =============================================================================
 
+
 def demonstrate_floating_point():
     """
     Demonstrate float precision issues and how to compare floats safely.
     """
     print("\n=== Floating Point Precision Comparison ===")
-    
+
     a = 0.1
     b = 0.2
     c = 0.3
-    
+
     # BROKEN comparison
     print(f"Is {a} + {b} == {c}?")
     print(f"  Result of {a} + {b} is: {a + b}")
     print(f"  Direct comparison: {a + b == c} (due to IEEE 754 precision)")
-    
+
     # FIXED - Option 1: Using math.isclose()
     print("\nUsing math.isclose():")
     is_close = math.isclose(a + b, c)
     print(f"  math.isclose({a} + {b}, {c}) -> {is_close}")
-    
+
     # FIXED - Option 2: Using Decimal class for exact arithmetic
     print("\nUsing decimal.Decimal:")
-    exact_a = Decimal('0.1')
-    exact_b = Decimal('0.2')
-    exact_c = Decimal('0.3')
+    exact_a = Decimal("0.1")
+    exact_b = Decimal("0.2")
+    exact_c = Decimal("0.3")
     exact_equal = exact_a + exact_b == exact_c
     print(f"  {exact_a} + {exact_b} == {exact_c} -> {exact_equal}")
 
@@ -712,6 +732,7 @@ def demonstrate_floating_point():
 # =============================================================================
 # 13. WILDCARD EXCEPTION SWALLOWING
 # =============================================================================
+
 
 def divide_numbers_broken(x: float, y: float) -> Optional[float]:
     """
@@ -748,11 +769,11 @@ def demonstrate_exception_swallowing():
     Demonstrate problems with wildcard exceptions vs specific exception catching.
     """
     print("\n=== Exception Catching and Swallowing ===")
-    
+
     print("Dividing 10 by 0 (broken):")
     result_broken = divide_numbers_broken(10, 0)
     print(f"  Result: {result_broken} (silently failed)")
-    
+
     print("Dividing 10 by 0 (fixed):")
     result_fixed = divide_numbers_fixed(10, 0)
     print(f"  Result: {result_fixed}")
@@ -762,6 +783,7 @@ def demonstrate_exception_swallowing():
 # MAIN EXECUTION
 # =============================================================================
 
+
 def main():
     """
     Run all demonstrations.
@@ -769,7 +791,7 @@ def main():
     print("=" * 70)
     print("PYTHON COMMON BUGS AND FIXES - DEMONSTRATION")
     print("=" * 70)
-    
+
     # Run all demonstrations
     demonstrate_off_by_one()
     demonstrate_mutable_default()
@@ -783,7 +805,7 @@ def main():
     demonstrate_iteration_modification()
     demonstrate_floating_point()
     demonstrate_exception_swallowing()
-    
+
     print("\n" + "=" * 70)
     print("ALL DEMONSTRATIONS COMPLETED")
     print("=" * 70)
@@ -791,4 +813,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

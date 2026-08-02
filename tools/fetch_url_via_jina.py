@@ -40,18 +40,18 @@ import urllib.request
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Optional, Union
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 # ==============================================================================
@@ -119,19 +119,17 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
 
 def _strip_ansi(text: str) -> str:
@@ -141,10 +139,15 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive, non-dumb terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text, stripping colors if stream is not a TTY or --no-color is set."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -166,13 +169,25 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [JINA AI READER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [JINA AI READER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}URL:{RESET}      {data.get('url', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Format:{RESET}   {data.get('format', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Status:{RESET}   {NEON_YELLOW}{data.get('status_code', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}URL:{RESET}      {data.get('url', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Format:{RESET}   {data.get('format', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Status:{RESET}   {NEON_YELLOW}{data.get('status_code', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -193,6 +208,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
@@ -216,13 +232,15 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     """Caching utility with TTL support for expensive operations."""
@@ -291,6 +309,7 @@ class GracefulShutdown:
 # ==============================================================================
 # SECTION 5: Core Logic Implementation
 # ==============================================================================
+
 
 def execute_tool(
     url: str,
@@ -441,12 +460,15 @@ def execute_tool(
 # SECTION 6: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write output to LLM_OUTPUT destination safely."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    
+
     # If format is text or markdown and request succeeded, pass raw content to stdout directly if plain format requested
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -466,6 +488,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 7: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     url: str,
@@ -514,13 +537,15 @@ def run(
 # SECTION 8: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fetch_url.py",
         description=f"AIChat Jina AI Reader Web Scraper Tool v{__version__}",
     )
     parser.add_argument(
-        "--url", "-u",
+        "--url",
+        "-u",
         required=True,
         metavar="URL",
         help="Target URL to scrape (required)",
@@ -578,7 +603,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

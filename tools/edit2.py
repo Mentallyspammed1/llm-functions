@@ -100,39 +100,39 @@ from typing import Any, Callable
 from edit_options import EditOptions
 
 __all__ = [
-    "run",
-    "read",
-    "write",
     "append",
-    "replace",
-    "insert_line",
-    "delete_line",
-    "replace_lines",
-    "file_search",
-    "copy",
-    "move",
-    "delete",
-    "info",
-    "create_dir",
-    "list_dir",
-    "diff",
-    "truncate",
-    "read_lines",
-    "set_permissions",
-    "normalize_line_endings",
-    "revert_to_backup",
-    "grep_dir",
-    "file_hash",
-    "word_count",
-    "find_files",
-    "head",
-    "tail",
-    "compare_files",
     "archive",
-    "extract",
-    "template_write",
     "batch",
     "batch_edit",
+    "compare_files",
+    "copy",
+    "create_dir",
+    "delete",
+    "delete_line",
+    "diff",
+    "extract",
+    "file_hash",
+    "file_search",
+    "find_files",
+    "grep_dir",
+    "head",
+    "info",
+    "insert_line",
+    "list_dir",
+    "move",
+    "normalize_line_endings",
+    "read",
+    "read_lines",
+    "replace",
+    "replace_lines",
+    "revert_to_backup",
+    "run",
+    "set_permissions",
+    "tail",
+    "template_write",
+    "truncate",
+    "word_count",
+    "write",
 ]
 
 __version__ = "2.9.0"
@@ -156,18 +156,19 @@ except ImportError:
 
     class _DummyColor:
         """Fallback when colorama is not installed."""
+
         def __getattr__(self, name: str) -> str:
             return ""
 
-    Fore = _DummyColor()   # type: ignore[assignment]
+    Fore = _DummyColor()  # type: ignore[assignment]
     Style = _DummyColor()  # type: ignore[assignment]
 
 
 # SYNTHWAVE RETRO-NEON PALETTE
 CYBER_MAGENTA = "\033[38;5;201m"
-CYBER_LIME    = "\033[38;5;82m"
-CYBER_CYAN    = "\033[38;5;51m"
-RESET         = "\033[0m"
+CYBER_LIME = "\033[38;5;82m"
+CYBER_CYAN = "\033[38;5;51m"
+RESET = "\033[0m"
 
 
 def _cprint(text: str, color: str = CYBER_CYAN, style: str = "") -> None:
@@ -179,15 +180,15 @@ def _cprint(text: str, color: str = CYBER_CYAN, style: str = "") -> None:
 # SECTION 2: Constants
 # ==============================================================================
 
-DEFAULT_MAX_READ:   int   = 10_485_760   # 10 MiB
-DEFAULT_MAX_WRITE:  int   = 104_857_600  # 100 MiB
-DEFAULT_ENCODING:   str   = "utf-8"
-MAX_BACKUPS:        int   = 15
-BINARY_CHECK_BYTES: int   = 32_768
-STDIN_TIMEOUT:      float = 30.0
-MAX_PATH_LENGTH:    int   = 4096
-MAX_ARCHIVE_SIZE:   int   = 524_288_000  # 500 MiB
-MAX_FIND_RESULTS:   int   = 10_000
+DEFAULT_MAX_READ: int = 10_485_760  # 10 MiB
+DEFAULT_MAX_WRITE: int = 104_857_600  # 100 MiB
+DEFAULT_ENCODING: str = "utf-8"
+MAX_BACKUPS: int = 15
+BINARY_CHECK_BYTES: int = 32_768
+STDIN_TIMEOUT: float = 30.0
+MAX_PATH_LENGTH: int = 4096
+MAX_ARCHIVE_SIZE: int = 524_288_000  # 500 MiB
+MAX_FIND_RESULTS: int = 10_000
 
 # Paths that should never be written to even if they resolve inside home
 PSEUDO_FS_PREFIXES: tuple[str, ...] = (
@@ -201,13 +202,15 @@ PSEUDO_FS_PREFIXES: tuple[str, ...] = (
 
 # Sort key lambdas for list_dir
 _SORT_KEYS: dict[str, Callable[[dict[str, Any]], Any]] = {
-    "name":     lambda x: x["name"].lower(),
-    "size":     lambda x: x.get("size", 0),
+    "name": lambda x: x["name"].lower(),
+    "size": lambda x: x.get("size", 0),
     "modified": lambda x: x.get("modified", 0.0),
-    "type":     lambda x: (not x.get("is_dir", False), x["name"].lower()),
+    "type": lambda x: (not x.get("is_dir", False), x["name"].lower()),
 }
 
-_HASH_ALGORITHMS: frozenset[str] = frozenset({"sha256", "sha1", "sha512", "md5", "blake2b"})
+_HASH_ALGORITHMS: frozenset[str] = frozenset(
+    {"sha256", "sha1", "sha512", "md5", "blake2b"}
+)
 
 # Template variable pattern: {{ var_name }} with optional whitespace
 _TEMPLATE_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
@@ -290,19 +293,17 @@ class FileEditor:
     """
 
     def __init__(self) -> None:
-        self.home: Path        = Path.home().resolve()
-        self.temp: Path        = Path(tempfile.gettempdir()).resolve()
-        self._home_str: str    = str(self.home) + os.sep
-        self._temp_str: str    = str(self.temp) + os.sep
+        self.home: Path = Path.home().resolve()
+        self.temp: Path = Path(tempfile.gettempdir()).resolve()
+        self._home_str: str = str(self.home) + os.sep
+        self._temp_str: str = str(self.temp) + os.sep
         self._termux_home: str = "/data/data/com.termux/files/home"
 
     # -------------------------------------------------------------------------
     # Path validation
     # -------------------------------------------------------------------------
 
-    def _validate_path(
-        self, file_path: str, allow_write: bool = True
-    ) -> Path | None:
+    def _validate_path(self, file_path: str, allow_write: bool = True) -> Path | None:
         """
         Return a resolved, sandbox-confined Path or None on any violation.
 
@@ -661,8 +662,7 @@ def read(
             return {
                 "success": False,
                 "error": (
-                    f"File too large: {stat.st_size:,} bytes "
-                    f"(limit: {max_size:,})"
+                    f"File too large: {stat.st_size:,} bytes (limit: {max_size:,})"
                 ),
             }
         if _editor._is_binary(path):
@@ -681,14 +681,14 @@ def read(
         all_lines = content.splitlines()
 
         return {
-            "success":     True,
-            "content":     content,
-            "lines":       all_lines if show_lines else None,
-            "line_count":  len(all_lines),
+            "success": True,
+            "content": content,
+            "lines": all_lines if show_lines else None,
+            "line_count": len(all_lines),
             "total_lines": len(all_lines),
-            "path":        str(path),
-            "size":        stat.st_size,
-            "encoding":    encoding,
+            "path": str(path),
+            "size": stat.st_size,
+            "encoding": encoding,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -708,7 +708,7 @@ def read_lines(
     """
     try:
         start_line = int(start_line) if start_line is not None else 1
-        end_line   = int(end_line)   if end_line   is not None else 1
+        end_line = int(end_line) if end_line is not None else 1
     except (ValueError, TypeError):
         return {
             "success": False,
@@ -741,12 +741,12 @@ def read_lines(
                 "error": f"start_line {start_line} beyond file end ({last} lines)",
             }
         return {
-            "success":    True,
-            "path":       str(path),
-            "lines":      selected,
-            "content":    "\n".join(selected),
+            "success": True,
+            "path": str(path),
+            "lines": selected,
+            "content": "\n".join(selected),
             "start_line": start_line,
-            "end_line":   start_line + len(selected) - 1 if selected else start_line,
+            "end_line": start_line + len(selected) - 1 if selected else start_line,
             "line_count": len(selected),
         }
     except Exception as exc:
@@ -772,7 +772,11 @@ def write(options: EditOptions) -> dict[str, Any]:
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
 
-    content = str(options.content) if not isinstance(options.content, str) else options.content
+    content = (
+        str(options.content)
+        if not isinstance(options.content, str)
+        else options.content
+    )
     content = _normalize_lf(content)
 
     if options.add_newline and content and not content.endswith("\n"):
@@ -788,27 +792,27 @@ def write(options: EditOptions) -> dict[str, Any]:
 
     if options.dry_run:
         return {
-            "success":        True,
-            "path":           str(path),
-            "mode":           "dry-run",
-            "message":        "Write operation would proceed (dry-run)",
-            "size_would_be":  encoded_size,
+            "success": True,
+            "path": str(path),
+            "mode": "dry-run",
+            "message": "Write operation would proceed (dry-run)",
+            "size_would_be": encoded_size,
         }
 
     try:
         original_bytes = path.stat().st_size if path.exists() else 0
-        mode_label     = "overwrite" if path.exists() else "create"
+        mode_label = "overwrite" if path.exists() else "create"
         _editor._atomic_write(path, content, encoding)
         new_bytes = path.stat().st_size
         return {
-            "success":        True,
-            "path":           str(path),
-            "size":           new_bytes,
-            "bytes_delta":    new_bytes - original_bytes,
+            "success": True,
+            "path": str(path),
+            "size": new_bytes,
+            "bytes_delta": new_bytes - original_bytes,
             "original_bytes": original_bytes,
-            "new_bytes":      new_bytes,
-            "mode":           mode_label,
-            "encoding":       encoding,
+            "new_bytes": new_bytes,
+            "mode": mode_label,
+            "encoding": encoding,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -844,8 +848,8 @@ def append(
     if _editor._is_binary(path):
         return {"success": False, "error": "Binary file detected; append refused"}
 
-    content       = _normalize_lf(content)
-    encoded_size  = len(content.encode(encoding, errors="surrogateescape"))
+    content = _normalize_lf(content)
+    encoded_size = len(content.encode(encoding, errors="surrogateescape"))
 
     if encoded_size > max_size:
         return {
@@ -855,9 +859,9 @@ def append(
 
     try:
         original_bytes = path.stat().st_size
-        needs_sep      = add_newline and original_bytes > 0 and not _ends_with_newline(path)
-        newline_size   = 1 if needs_sep else 0
-        combined       = original_bytes + encoded_size + newline_size
+        needs_sep = add_newline and original_bytes > 0 and not _ends_with_newline(path)
+        newline_size = 1 if needs_sep else 0
+        combined = original_bytes + encoded_size + newline_size
 
         if combined > max_size:
             return {
@@ -876,13 +880,13 @@ def append(
 
         new_size = path.stat().st_size
         return {
-            "success":        True,
-            "path":           str(path),
-            "size":           new_size,
-            "bytes_delta":    new_size - original_bytes,
+            "success": True,
+            "path": str(path),
+            "size": new_size,
+            "bytes_delta": new_size - original_bytes,
             "original_bytes": original_bytes,
-            "new_bytes":      new_size,
-            "encoding":       encoding,
+            "new_bytes": new_size,
+            "encoding": encoding,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -897,7 +901,7 @@ def replace(options: EditOptions) -> dict[str, Any]:
     Reports count of replacements made.
     Supports capture-group back-references in replacement strings.
     """
-    file_path   = options.file_path
+    file_path = options.file_path
     search_text = options.search_text or options.pattern
 
     if not search_text:
@@ -920,7 +924,7 @@ def replace(options: EditOptions) -> dict[str, Any]:
         return res
 
     content: str = _normalize_lf(res["content"])
-    path: Path   = res["path"]
+    path: Path = res["path"]
 
     try:
         compiled = _build_regex(search_text, options.use_regex, options.case_sensitive)
@@ -935,35 +939,35 @@ def replace(options: EditOptions) -> dict[str, Any]:
 
         if new_content == content:
             return {
-                "success":      True,
-                "path":         str(path),
+                "success": True,
+                "path": str(path),
                 "replacements": 0,
-                "message":      "No replacements made — pattern not found",
+                "message": "No replacements made — pattern not found",
             }
 
         if options.dry_run:
             return {
-                "success":                True,
-                "path":                   str(path),
-                "mode":                   "dry-run",
-                "message":                "Replace would proceed (dry-run)",
-                "replacements_would_be":  count,
+                "success": True,
+                "path": str(path),
+                "mode": "dry-run",
+                "message": "Replace would proceed (dry-run)",
+                "replacements_would_be": count,
             }
 
         original_bytes = path.stat().st_size
-        backup         = _editor._make_backup(path, options.max_backups)
+        backup = _editor._make_backup(path, options.max_backups)
         _editor._atomic_write(path, new_content, options.encoding)
         new_bytes = path.stat().st_size
 
         return {
-            "success":        True,
-            "path":           str(path),
-            "replacements":   count,
-            "bytes_delta":    new_bytes - original_bytes,
+            "success": True,
+            "path": str(path),
+            "replacements": count,
+            "bytes_delta": new_bytes - original_bytes,
             "original_bytes": original_bytes,
-            "new_bytes":      new_bytes,
-            "backup_path":    str(backup),
-            "size":           new_bytes,
+            "new_bytes": new_bytes,
+            "backup_path": str(backup),
+            "size": new_bytes,
         }
     except re.error as exc:
         return {"success": False, "error": f"Invalid regex: {exc}"}
@@ -973,10 +977,10 @@ def replace(options: EditOptions) -> dict[str, Any]:
 
 @_timed
 def insert_line(
-    file_path:   str,
+    file_path: str,
     line_number: int,
-    content:     str,
-    encoding:    str = DEFAULT_ENCODING,
+    content: str,
+    encoding: str = DEFAULT_ENCODING,
     max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
     """
@@ -991,13 +995,13 @@ def insert_line(
     if not res["success"]:
         return res
     original_content: str = res["content"]
-    path: Path            = res["path"]
+    path: Path = res["path"]
 
-    lines       = original_content.splitlines(keepends=True)
+    lines = original_content.splitlines(keepends=True)
     line_number = max(1, min(int(line_number), len(lines) + 1))
     if not content.endswith("\n"):
         content += "\n"
-    new_lines   = lines[: line_number - 1] + [content] + lines[line_number - 1 :]
+    new_lines = lines[: line_number - 1] + [content] + lines[line_number - 1 :]
     new_content = "".join(new_lines)
 
     original_bytes = len(original_content.encode(encoding, errors="surrogateescape"))
@@ -1006,15 +1010,15 @@ def insert_line(
         _editor._atomic_write(path, new_content, encoding)
         stat = path.stat()
         return {
-            "success":        True,
-            "path":           str(path),
-            "line_number":    line_number,
-            "bytes_delta":    stat.st_size - original_bytes,
+            "success": True,
+            "path": str(path),
+            "line_number": line_number,
+            "bytes_delta": stat.st_size - original_bytes,
             "original_bytes": original_bytes,
-            "new_bytes":      stat.st_size,
+            "new_bytes": stat.st_size,
             "original_lines": len(lines),
-            "new_lines":      len(new_lines),
-            "backup_path":    str(backup),
+            "new_lines": len(new_lines),
+            "backup_path": str(backup),
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -1022,9 +1026,9 @@ def insert_line(
 
 @_timed
 def delete_line(
-    file_path:   str,
+    file_path: str,
     line_number: int,
-    encoding:    str = DEFAULT_ENCODING,
+    encoding: str = DEFAULT_ENCODING,
     max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
     """
@@ -1036,16 +1040,16 @@ def delete_line(
     if not res["success"]:
         return res
     content: str = res["content"]
-    path: Path   = res["path"]
+    path: Path = res["path"]
 
     lines = content.splitlines(keepends=True)
-    ln    = int(line_number)
+    ln = int(line_number)
     if ln < 1 or ln > len(lines):
         return {
             "success": False,
             "error": f"Invalid line number {ln} (file has {len(lines)} lines)",
         }
-    deleted     = lines.pop(ln - 1)
+    deleted = lines.pop(ln - 1)
     new_content = "".join(lines)
 
     original_bytes = len(content.encode(encoding, errors="surrogateescape"))
@@ -1054,16 +1058,16 @@ def delete_line(
         _editor._atomic_write(path, new_content, encoding)
         stat = path.stat()
         return {
-            "success":         True,
-            "path":            str(path),
-            "deleted_line":    ln,
+            "success": True,
+            "path": str(path),
+            "deleted_line": ln,
             "deleted_content": deleted.rstrip("\n"),
-            "bytes_delta":     stat.st_size - original_bytes,
-            "original_bytes":  original_bytes,
-            "new_bytes":       stat.st_size,
-            "original_lines":  len(lines) + 1,
-            "new_lines":       len(lines),
-            "backup_path":     str(backup),
+            "bytes_delta": stat.st_size - original_bytes,
+            "original_bytes": original_bytes,
+            "new_bytes": stat.st_size,
+            "original_lines": len(lines) + 1,
+            "new_lines": len(lines),
+            "backup_path": str(backup),
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -1071,13 +1075,13 @@ def delete_line(
 
 @_timed
 def replace_lines(
-    file_path:   str,
-    start_line:  int,
-    end_line:    int,
-    content:     str,
-    encoding:    str  = DEFAULT_ENCODING,
-    max_backups: int  = MAX_BACKUPS,
-    dry_run:     bool = False,
+    file_path: str,
+    start_line: int,
+    end_line: int,
+    content: str,
+    encoding: str = DEFAULT_ENCODING,
+    max_backups: int = MAX_BACKUPS,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """
     Replace a range of lines [start_line, end_line] with new content.
@@ -1091,7 +1095,7 @@ def replace_lines(
 
     try:
         start_line = int(start_line)
-        end_line   = int(end_line)
+        end_line = int(end_line)
     except (ValueError, TypeError):
         return {"success": False, "error": "start_line and end_line must be integers"}
 
@@ -1099,7 +1103,7 @@ def replace_lines(
     if not res["success"]:
         return res
     original: str = res["content"]
-    path: Path    = res["path"]
+    path: Path = res["path"]
 
     lines = original.splitlines(keepends=True)
     total = len(lines)
@@ -1109,29 +1113,29 @@ def replace_lines(
             "error": f"Invalid range {start_line}–{end_line} (file has {total} lines)",
         }
 
-    content_lines     = content.splitlines()
+    content_lines = content.splitlines()
     replacement_lines = [ln + "\n" for ln in content_lines] if content_lines else []
-    new_lines         = lines[: start_line - 1] + replacement_lines + lines[end_line:]
-    new_content       = "".join(new_lines)
+    new_lines = lines[: start_line - 1] + replacement_lines + lines[end_line:]
+    new_content = "".join(new_lines)
 
     original_bytes = len(original.encode(encoding, errors="surrogateescape"))
-    new_bytes      = len(new_content.encode(encoding, errors="surrogateescape"))
+    new_bytes = len(new_content.encode(encoding, errors="surrogateescape"))
 
     if dry_run:
         return {
-            "success":              True,
-            "path":                 str(path),
-            "mode":                 "dry-run",
-            "message":              "Replace-lines would proceed (dry-run)",
-            "start_line":           start_line,
-            "end_line":             end_line,
-            "original_lines":       total,
-            "new_lines":            len(new_lines),
+            "success": True,
+            "path": str(path),
+            "mode": "dry-run",
+            "message": "Replace-lines would proceed (dry-run)",
+            "start_line": start_line,
+            "end_line": end_line,
+            "original_lines": total,
+            "new_lines": len(new_lines),
             "bytes_delta_would_be": new_bytes - original_bytes,
-            "original_bytes":       original_bytes,
-            "new_bytes_would_be":   new_bytes,
-            "lines_removed":        end_line - start_line + 1,
-            "lines_added":          len(replacement_lines),
+            "original_bytes": original_bytes,
+            "new_bytes_would_be": new_bytes,
+            "lines_removed": end_line - start_line + 1,
+            "lines_added": len(replacement_lines),
         }
 
     try:
@@ -1139,16 +1143,16 @@ def replace_lines(
         _editor._atomic_write(path, new_content, encoding)
         stat = path.stat()
         return {
-            "success":        True,
-            "path":           str(path),
-            "start_line":     start_line,
-            "end_line":       end_line,
-            "bytes_delta":    stat.st_size - original_bytes,
+            "success": True,
+            "path": str(path),
+            "start_line": start_line,
+            "end_line": end_line,
+            "bytes_delta": stat.st_size - original_bytes,
             "original_bytes": original_bytes,
-            "new_bytes":      stat.st_size,
+            "new_bytes": stat.st_size,
             "original_lines": total,
-            "new_lines":      len(new_lines),
-            "backup_path":    str(backup),
+            "new_lines": len(new_lines),
+            "backup_path": str(backup),
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -1156,13 +1160,13 @@ def replace_lines(
 
 @_timed
 def file_search(
-    file_path:      str,
-    pattern:        str,
-    use_regex:      bool = False,
+    file_path: str,
+    pattern: str,
+    use_regex: bool = False,
     case_sensitive: bool = True,
-    line_context:   int  = 0,
-    encoding:       str  = DEFAULT_ENCODING,
-    max_matches:    int  = 1000,
+    line_context: int = 0,
+    encoding: str = DEFAULT_ENCODING,
+    max_matches: int = 1000,
 ) -> dict[str, Any]:
     """
     Search for a pattern inside a single file.
@@ -1175,9 +1179,9 @@ def file_search(
     if not res["success"]:
         return res
     content: str = res["content"]
-    path: Path   = res["path"]
+    path: Path = res["path"]
 
-    lines     = content.splitlines()
+    lines = content.splitlines()
     matches: list[dict[str, Any]] = []
     truncated = False
 
@@ -1196,33 +1200,33 @@ def file_search(
         if match_fn(line):
             entry: dict[str, Any] = {"line": i + 1, "content": line}
             if line_context > 0:
-                ctx_start         = max(0, i - line_context)
-                ctx_end           = min(len(lines), i + line_context + 1)
-                entry["context"]  = lines[ctx_start:ctx_end]
+                ctx_start = max(0, i - line_context)
+                ctx_end = min(len(lines), i + line_context + 1)
+                entry["context"] = lines[ctx_start:ctx_end]
                 entry["context_start_line"] = ctx_start + 1
             matches.append(entry)
 
     return {
-        "success":     True,
-        "path":        str(path),
-        "pattern":     pattern,
-        "matches":     matches,
+        "success": True,
+        "path": str(path),
+        "pattern": pattern,
+        "matches": matches,
         "match_count": len(matches),
-        "truncated":   truncated,
+        "truncated": truncated,
     }
 
 
 @_timed
 def copy(
-    file_path:         str,
-    target_path:       str,
+    file_path: str,
+    target_path: str,
     preserve_metadata: bool = True,
-    recursive:         bool = False,
+    recursive: bool = False,
 ) -> dict[str, Any]:
     """
     Copy a file or directory.  Directories require recursive=True.
     """
-    src = _editor._validate_path(file_path,   allow_write=False)
+    src = _editor._validate_path(file_path, allow_write=False)
     dst = _editor._validate_path(target_path, allow_write=True)
     if not src or not dst:
         return {"success": False, "error": "Invalid or disallowed path(s)"}
@@ -1233,9 +1237,15 @@ def copy(
     try:
         if src.is_dir():
             if not recursive:
-                return {"success": False, "error": "Use recursive=True to copy directories"}
+                return {
+                    "success": False,
+                    "error": "Use recursive=True to copy directories",
+                }
             if dst.exists():
-                return {"success": False, "error": f"Destination already exists: {target_path}"}
+                return {
+                    "success": False,
+                    "error": f"Destination already exists: {target_path}",
+                }
             copy_fn = shutil.copy2 if preserve_metadata else shutil.copy
             shutil.copytree(src, dst, copy_function=copy_fn)
             size = sum(f.stat().st_size for f in dst.rglob("*") if f.is_file())
@@ -1246,12 +1256,12 @@ def copy(
                 shutil.copy(src, dst)
             size = dst.stat().st_size
         return {
-            "success":           True,
-            "source":            str(src),
-            "target":            str(dst),
-            "size":              size,
+            "success": True,
+            "source": str(src),
+            "target": str(dst),
+            "size": size,
             "preserve_metadata": preserve_metadata,
-            "recursive":         recursive,
+            "recursive": recursive,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -1260,7 +1270,7 @@ def copy(
 @_timed
 def move(file_path: str, target_path: str) -> dict[str, Any]:
     """Move or rename a file or directory."""
-    src = _editor._validate_path(file_path,   allow_write=True)
+    src = _editor._validate_path(file_path, allow_write=True)
     dst = _editor._validate_path(target_path, allow_write=True)
     if not src or not dst:
         return {"success": False, "error": "Invalid or disallowed path(s)"}
@@ -1287,13 +1297,21 @@ def delete(file_path: str, recursive: bool = False) -> dict[str, Any]:
     try:
         if path.is_dir():
             if not recursive:
-                return {"success": False, "error": "Use recursive=True to delete directories"}
+                return {
+                    "success": False,
+                    "error": "Use recursive=True to delete directories",
+                }
             size = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
             shutil.rmtree(path)
         else:
             size = path.stat().st_size
             path.unlink()
-        return {"success": True, "path": str(path), "size": size, "recursive": recursive}
+        return {
+            "success": True,
+            "path": str(path),
+            "size": size,
+            "recursive": recursive,
+        }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -1317,35 +1335,37 @@ def info(file_path: str) -> dict[str, Any]:
             symlink_target = "<unreadable>"
 
     base: dict[str, Any] = {
-        "success":        True,
-        "path":           str(path),
-        "name":           path.name,
-        "stem":           path.stem,
-        "extension":      path.suffix,
-        "is_file":        path.is_file(),
-        "is_dir":         path.is_dir(),
-        "is_symlink":     path.is_symlink(),
+        "success": True,
+        "path": str(path),
+        "name": path.name,
+        "stem": path.stem,
+        "extension": path.suffix,
+        "is_file": path.is_file(),
+        "is_dir": path.is_dir(),
+        "is_symlink": path.is_symlink(),
         "symlink_target": symlink_target,
     }
     try:
-        st  = path.stat()
+        st = path.stat()
         lst = path.lstat()
         base.update(
             {
-                "size":              st.st_size,
-                "modified":          st.st_mtime,
-                "created":           st.st_ctime,
-                "accessed":          st.st_atime,
-                "permissions":       oct(st.st_mode)[-3:],
+                "size": st.st_size,
+                "modified": st.st_mtime,
+                "created": st.st_ctime,
+                "accessed": st.st_atime,
+                "permissions": oct(st.st_mode)[-3:],
                 "permissions_octal": oct(lst.st_mode),
-                "inode":             st.st_ino,
+                "inode": st.st_ino,
             }
         )
         if path.is_file() and _FILE_CMD:
             try:
                 r = subprocess.run(
                     [_FILE_CMD, "-b", "--mime-type", str(path)],
-                    capture_output=True, text=True, timeout=2.0,
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0,
                 )
                 if r.returncode == 0 and r.stdout.strip():
                     base["mime_type"] = r.stdout.strip()
@@ -1371,8 +1391,8 @@ def create_dir(file_path: str, parents: bool = True) -> dict[str, Any]:
     if path.exists():
         return {
             "success": False,
-            "error":   f"Path already exists: {file_path}",
-            "is_dir":  path.is_dir(),
+            "error": f"Path already exists: {file_path}",
+            "is_dir": path.is_dir(),
         }
     try:
         path.mkdir(parents=parents, exist_ok=False)
@@ -1383,10 +1403,10 @@ def create_dir(file_path: str, parents: bool = True) -> dict[str, Any]:
 
 @_timed
 def list_dir(
-    file_path:      str,
+    file_path: str,
     include_hidden: bool = False,
-    sort_by:        str  = "name",
-    descending:     bool = False,
+    sort_by: str = "name",
+    descending: bool = False,
 ) -> dict[str, Any]:
     """
     List directory contents with per-entry metadata.
@@ -1404,43 +1424,43 @@ def list_dir(
             if not include_hidden and item.name.startswith("."):
                 continue
             try:
-                st  = item.stat()
+                st = item.stat()
                 lst = item.lstat()
                 items.append(
                     {
-                        "name":        item.name,
-                        "path":        str(item),
-                        "is_file":     item.is_file(),
-                        "is_dir":      item.is_dir(),
-                        "is_symlink":  item.is_symlink(),
-                        "size":        st.st_size,
-                        "modified":    st.st_mtime,
+                        "name": item.name,
+                        "path": str(item),
+                        "is_file": item.is_file(),
+                        "is_dir": item.is_dir(),
+                        "is_symlink": item.is_symlink(),
+                        "size": st.st_size,
+                        "modified": st.st_mtime,
                         "permissions": oct(lst.st_mode)[-3:],
-                        "extension":   item.suffix if item.is_file() else "",
+                        "extension": item.suffix if item.is_file() else "",
                     }
                 )
             except OSError:
                 items.append(
                     {
-                        "name":        item.name,
-                        "path":        str(item),
-                        "is_file":     False,
-                        "is_dir":      False,
-                        "is_symlink":  item.is_symlink(),
-                        "size":        0,
-                        "modified":    0.0,
+                        "name": item.name,
+                        "path": str(item),
+                        "is_file": False,
+                        "is_dir": False,
+                        "is_symlink": item.is_symlink(),
+                        "size": 0,
+                        "modified": 0.0,
                         "permissions": "???",
-                        "extension":   "",
-                        "error":       "stat failed",
+                        "extension": "",
+                        "error": "stat failed",
                     }
                 )
         items.sort(key=sort_key, reverse=descending)
         return {
-            "success":    True,
-            "path":       str(path),
-            "items":      items,
+            "success": True,
+            "path": str(path),
+            "items": items,
             "item_count": len(items),
-            "dir_count":  sum(1 for i in items if i.get("is_dir")),
+            "dir_count": sum(1 for i in items if i.get("is_dir")),
             "file_count": sum(1 for i in items if i.get("is_file")),
         }
     except OSError as exc:
@@ -1449,10 +1469,10 @@ def list_dir(
 
 @_timed
 def diff(
-    file_path:     str,
-    target_path:   str | None = None,
-    encoding:      str        = DEFAULT_ENCODING,
-    context_lines: int        = 3,
+    file_path: str,
+    target_path: str | None = None,
+    encoding: str = DEFAULT_ENCODING,
+    context_lines: int = 3,
 ) -> dict[str, Any]:
     """
     Produce a unified diff between two files or a file and its newest backup.
@@ -1484,8 +1504,12 @@ def diff(
         cmp_path = backups[0]
 
     try:
-        old_lines = cmp_path.read_text(encoding=encoding, errors="surrogateescape").splitlines(keepends=True)
-        new_lines = path.read_text(   encoding=encoding, errors="surrogateescape").splitlines(keepends=True)
+        old_lines = cmp_path.read_text(
+            encoding=encoding, errors="surrogateescape"
+        ).splitlines(keepends=True)
+        new_lines = path.read_text(
+            encoding=encoding, errors="surrogateescape"
+        ).splitlines(keepends=True)
     except UnicodeDecodeError:
         return {"success": False, "error": f"Encoding error reading files ({encoding})"}
     except OSError as exc:
@@ -1493,30 +1517,35 @@ def diff(
 
     diff_lines = list(
         difflib.unified_diff(
-            old_lines, new_lines,
+            old_lines,
+            new_lines,
             fromfile=str(cmp_path),
             tofile=str(path),
             n=context_lines,
         )
     )
-    additions = sum(1 for ln in diff_lines if ln.startswith("+") and not ln.startswith("+++"))
-    deletions = sum(1 for ln in diff_lines if ln.startswith("-") and not ln.startswith("---"))
+    additions = sum(
+        1 for ln in diff_lines if ln.startswith("+") and not ln.startswith("+++")
+    )
+    deletions = sum(
+        1 for ln in diff_lines if ln.startswith("-") and not ln.startswith("---")
+    )
     return {
-        "success":   True,
-        "path":      str(path),
-        "target":    str(cmp_path),
-        "diff":      "".join(diff_lines),
+        "success": True,
+        "path": str(path),
+        "target": str(cmp_path),
+        "diff": "".join(diff_lines),
         "additions": additions,
         "deletions": deletions,
-        "changed":   bool(diff_lines),
+        "changed": bool(diff_lines),
     }
 
 
 @_timed
 def truncate(
-    file_path:   str,
-    size:        int = 0,
-    encoding:    str = DEFAULT_ENCODING,
+    file_path: str,
+    size: int = 0,
+    encoding: str = DEFAULT_ENCODING,
     max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
     """
@@ -1540,18 +1569,18 @@ def truncate(
         return {"success": False, "error": f"Path is not a regular file: {file_path}"}
     try:
         original_bytes = path.stat().st_size
-        backup_path    = _editor._make_backup(path, max_backups=max_backups)
+        backup_path = _editor._make_backup(path, max_backups=max_backups)
         with open(path, "r+b") as fh:
             fh.truncate(size)
         new_bytes = path.stat().st_size
         return {
-            "success":        True,
-            "path":           str(path),
+            "success": True,
+            "path": str(path),
             "original_bytes": original_bytes,
-            "new_bytes":      new_bytes,
-            "bytes_delta":    new_bytes - original_bytes,
-            "backup_path":    str(backup_path),
-            "encoding":       encoding,
+            "new_bytes": new_bytes,
+            "bytes_delta": new_bytes - original_bytes,
+            "backup_path": str(backup_path),
+            "encoding": encoding,
         }
     except OSError as exc:
         return {"success": False, "error": str(exc)}
@@ -1581,15 +1610,18 @@ def set_permissions(file_path: str, mode: str) -> dict[str, Any]:
             "error": f"Invalid mode '{mode}'. Use octal such as '755' or '0o644'.",
         }
     if mode_int > 0o7777:
-        return {"success": False, "error": f"Mode {oct(mode_int)} exceeds maximum 0o7777"}
+        return {
+            "success": False,
+            "error": f"Mode {oct(mode_int)} exceeds maximum 0o7777",
+        }
     try:
         original_mode = oct(path.lstat().st_mode)[-4:]
         os.chmod(path, mode_int)
         new_mode = oct(path.lstat().st_mode)[-4:]
         return {
-            "success":       True,
-            "path":          str(path),
-            "mode":          new_mode,
+            "success": True,
+            "path": str(path),
+            "mode": new_mode,
             "original_mode": original_mode,
         }
     except OSError as exc:
@@ -1598,9 +1630,9 @@ def set_permissions(file_path: str, mode: str) -> dict[str, Any]:
 
 @_timed
 def normalize_line_endings(
-    file_path:   str,
-    to_type:     str,
-    encoding:    str = DEFAULT_ENCODING,
+    file_path: str,
+    to_type: str,
+    encoding: str = DEFAULT_ENCODING,
     max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
     """
@@ -1609,38 +1641,41 @@ def normalize_line_endings(
     Uses binary write to prevent Python from applying OS line-end translation.
     """
     if to_type not in ("lf", "crlf"):
-        return {"success": False, "error": f"Invalid to_type '{to_type}'. Must be 'lf' or 'crlf'."}
+        return {
+            "success": False,
+            "error": f"Invalid to_type '{to_type}'. Must be 'lf' or 'crlf'.",
+        }
 
     res = _editor._read_content(file_path, encoding=encoding)
     if not res["success"]:
         return res
     content: str = res["content"]
-    path: Path   = res["path"]
+    path: Path = res["path"]
 
     original_bytes = path.stat().st_size
-    unified        = _normalize_lf(content)
-    new_content    = unified.replace("\n", "\r\n") if to_type == "crlf" else unified
+    unified = _normalize_lf(content)
+    new_content = unified.replace("\n", "\r\n") if to_type == "crlf" else unified
 
     if new_content == content:
         return {
-            "success":       True,
-            "path":          str(path),
-            "to_type":       to_type,
+            "success": True,
+            "path": str(path),
+            "to_type": to_type,
             "lines_changed": 0,
             "original_bytes": original_bytes,
-            "new_bytes":     original_bytes,
-            "bytes_delta":   0,
-            "backup_path":   None,
-            "message":       "File already uses the target line ending style",
+            "new_bytes": original_bytes,
+            "bytes_delta": 0,
+            "backup_path": None,
+            "message": "File already uses the target line ending style",
         }
 
-    crlf_count   = content.count("\r\n")
-    bare_lf      = content.count("\n") - crlf_count
+    crlf_count = content.count("\r\n")
+    bare_lf = content.count("\n") - crlf_count
     lines_changed = max(0, bare_lf) if to_type == "crlf" else max(0, crlf_count)
 
     try:
         backup_path = _editor._make_backup(path, max_backups=max_backups)
-        raw         = new_content.encode(encoding, errors="surrogateescape")
+        raw = new_content.encode(encoding, errors="surrogateescape")
         raw_fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".~tmp_")
         try:
             os.chmod(tmp_name, 0o600)
@@ -1657,14 +1692,14 @@ def normalize_line_endings(
             raise
         new_bytes = path.stat().st_size
         return {
-            "success":        True,
-            "path":           str(path),
-            "to_type":        to_type,
-            "lines_changed":  lines_changed,
+            "success": True,
+            "path": str(path),
+            "to_type": to_type,
+            "lines_changed": lines_changed,
             "original_bytes": original_bytes,
-            "new_bytes":      new_bytes,
-            "bytes_delta":    new_bytes - original_bytes,
-            "backup_path":    str(backup_path),
+            "new_bytes": new_bytes,
+            "bytes_delta": new_bytes - original_bytes,
+            "backup_path": str(backup_path),
         }
     except OSError as exc:
         return {"success": False, "error": str(exc)}
@@ -1672,9 +1707,9 @@ def normalize_line_endings(
 
 @_timed
 def revert_to_backup(
-    file_path:        str,
+    file_path: str,
     backup_timestamp: str | None = None,
-    max_backups:      int        = MAX_BACKUPS,
+    max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
     """
     Restore a file from one of its timestamped backups.
@@ -1692,7 +1727,10 @@ def revert_to_backup(
 
     backups = _editor._list_backups(path)
     if not backups:
-        return {"success": False, "error": "No backups found; run a mutating operation first."}
+        return {
+            "success": False,
+            "error": "No backups found; run a mutating operation first.",
+        }
 
     chosen: Path | None = None
     if backup_timestamp is not None:
@@ -1716,10 +1754,10 @@ def revert_to_backup(
         previous_backup = _editor._make_backup(path, max_backups=max_backups)
         shutil.copy2(chosen, path)
         return {
-            "success":           True,
-            "path":              str(path),
-            "restored_from":     str(chosen),
-            "previous_backup":   str(previous_backup),
+            "success": True,
+            "path": str(path),
+            "restored_from": str(chosen),
+            "previous_backup": str(previous_backup),
             "available_backups": [str(b) for b in _editor._list_backups(path)],
         }
     except OSError as exc:
@@ -1733,16 +1771,16 @@ def revert_to_backup(
 
 @_timed
 def grep_dir(
-    dir_path:       str,
-    pattern:        str,
-    use_regex:      bool = False,
+    dir_path: str,
+    pattern: str,
+    use_regex: bool = False,
     case_sensitive: bool = True,
     include_hidden: bool = False,
-    file_pattern:   str  = "*",
-    max_matches:    int  = 1000,
-    line_context:   int  = 0,
-    encoding:       str  = DEFAULT_ENCODING,
-    recursive:      bool = True,
+    file_pattern: str = "*",
+    max_matches: int = 1000,
+    line_context: int = 0,
+    encoding: str = DEFAULT_ENCODING,
+    recursive: bool = True,
 ) -> dict[str, Any]:
     """
     Recursively search all text files in a directory for a pattern.
@@ -1753,7 +1791,7 @@ def grep_dir(
         return {"success": False, "error": "pattern cannot be empty"}
 
     pattern = pattern.strip()
-    root    = _editor._validate_path(dir_path, allow_write=False)
+    root = _editor._validate_path(dir_path, allow_write=False)
     if not root or not root.exists() or not root.is_dir():
         return {"success": False, "error": "Invalid or missing directory"}
 
@@ -1765,11 +1803,11 @@ def grep_dir(
     def match_fn(line: str) -> bool:
         return bool(compiled.search(line))
 
-    glob_method   = root.rglob if recursive else root.glob
+    glob_method = root.rglob if recursive else root.glob
     file_matches: list[dict[str, Any]] = []
     total_matches = 0
     files_searched = 0
-    truncated     = False
+    truncated = False
 
     for fpath in sorted(glob_method(file_pattern)):
         if truncated:
@@ -1785,7 +1823,9 @@ def grep_dir(
         files_searched += 1
         file_hits: list[dict[str, Any]] = []
         try:
-            lines = fpath.read_text(encoding=encoding, errors="surrogateescape").splitlines()
+            lines = fpath.read_text(
+                encoding=encoding, errors="surrogateescape"
+            ).splitlines()
         except OSError:
             continue
         for i, line in enumerate(lines):
@@ -1797,23 +1837,27 @@ def grep_dir(
                 if line_context > 0:
                     ctx_s = max(0, i - line_context)
                     ctx_e = min(len(lines), i + line_context + 1)
-                    entry["context"]            = lines[ctx_s:ctx_e]
+                    entry["context"] = lines[ctx_s:ctx_e]
                     entry["context_start_line"] = ctx_s + 1
                 file_hits.append(entry)
                 total_matches += 1
         if file_hits:
             file_matches.append(
-                {"file": str(fpath), "match_count": len(file_hits), "matches": file_hits}
+                {
+                    "file": str(fpath),
+                    "match_count": len(file_hits),
+                    "matches": file_hits,
+                }
             )
 
     return {
-        "success":        True,
-        "path":           str(root),
-        "pattern":        pattern,
-        "file_matches":   file_matches,
-        "total_matches":  total_matches,
+        "success": True,
+        "path": str(root),
+        "pattern": pattern,
+        "file_matches": file_matches,
+        "total_matches": total_matches,
         "files_searched": files_searched,
-        "truncated":      truncated,
+        "truncated": truncated,
     }
 
 
@@ -1842,7 +1886,7 @@ def file_hash(
     if not path.is_file():
         return {"success": False, "error": f"Path is not a regular file: {file_path}"}
     try:
-        h    = hashlib.new(algo)
+        h = hashlib.new(algo)
         size = 0
         with open(path, "rb") as f:
             while True:
@@ -1852,11 +1896,11 @@ def file_hash(
                 h.update(chunk)
                 size += len(chunk)
         return {
-            "success":   True,
-            "path":      str(path),
+            "success": True,
+            "path": str(path),
             "algorithm": algo,
-            "hash":      h.hexdigest(),
-            "size":      size,
+            "hash": h.hexdigest(),
+            "size": size,
         }
     except OSError as exc:
         return {"success": False, "error": str(exc)}
@@ -1865,7 +1909,7 @@ def file_hash(
 @_timed
 def word_count(
     file_path: str,
-    encoding:  str = DEFAULT_ENCODING,
+    encoding: str = DEFAULT_ENCODING,
 ) -> dict[str, Any]:
     """Count lines, words, characters, and bytes in a text file (streaming)."""
     path = _editor._validate_path(file_path, allow_write=False)
@@ -1880,18 +1924,18 @@ def word_count(
     try:
         byte_count = path.stat().st_size
         lines = words = chars = 0
-        with open(path, "r", encoding=encoding, errors="surrogateescape") as f:
+        with open(path, encoding=encoding, errors="surrogateescape") as f:
             for line in f:
                 lines += 1
                 words += len(line.split())
                 chars += len(line)
         return {
-            "success":    True,
-            "path":       str(path),
-            "lines":      lines,
-            "words":      words,
+            "success": True,
+            "path": str(path),
+            "lines": lines,
+            "words": words,
             "characters": chars,
-            "bytes":      byte_count,
+            "bytes": byte_count,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -1899,17 +1943,17 @@ def word_count(
 
 @_timed
 def find_files(
-    dir_path:        str,
-    name_pattern:    str           = "*",
-    use_regex:       bool          = False,
-    include_hidden:  bool          = False,
-    min_size:        int | None    = None,
-    max_size_filter: int | None    = None,
-    modified_after:  float | None  = None,
-    modified_before: float | None  = None,
-    file_type:       str           = "any",
-    recursive:       bool          = True,
-    max_results:     int           = MAX_FIND_RESULTS,
+    dir_path: str,
+    name_pattern: str = "*",
+    use_regex: bool = False,
+    include_hidden: bool = False,
+    min_size: int | None = None,
+    max_size_filter: int | None = None,
+    modified_after: float | None = None,
+    modified_before: float | None = None,
+    file_type: str = "any",
+    recursive: bool = True,
+    max_results: int = MAX_FIND_RESULTS,
 ) -> dict[str, Any]:
     """
     Discover files/directories matching flexible criteria.
@@ -1932,12 +1976,13 @@ def find_files(
         def name_match(n: str) -> bool:
             return bool(name_re.search(n))
     else:
+
         def name_match(n: str) -> bool:  # type: ignore[misc]
             return fnmatch.fnmatch(n, name_pattern)
 
-    glob_method      = root.rglob if recursive else root.glob
+    glob_method = root.rglob if recursive else root.glob
     results: list[dict[str, Any]] = []
-    truncated        = False
+    truncated = False
 
     for entry in sorted(glob_method("*")):
         if not include_hidden and any(
@@ -1955,11 +2000,11 @@ def find_files(
         except OSError:
             continue
         if entry.is_file():
-            if min_size        is not None and st.st_size < min_size:
+            if min_size is not None and st.st_size < min_size:
                 continue
             if max_size_filter is not None and st.st_size > max_size_filter:
                 continue
-        if modified_after  is not None and st.st_mtime < modified_after:
+        if modified_after is not None and st.st_mtime < modified_after:
             continue
         if modified_before is not None and st.st_mtime > modified_before:
             continue
@@ -1968,29 +2013,29 @@ def find_files(
             break
         results.append(
             {
-                "path":     str(entry),
-                "name":     entry.name,
-                "is_file":  entry.is_file(),
-                "is_dir":   entry.is_dir(),
-                "size":     st.st_size,
+                "path": str(entry),
+                "name": entry.name,
+                "is_file": entry.is_file(),
+                "is_dir": entry.is_dir(),
+                "size": st.st_size,
                 "modified": st.st_mtime,
             }
         )
 
     return {
-        "success":      True,
-        "path":         str(root),
-        "results":      results,
+        "success": True,
+        "path": str(root),
+        "results": results,
         "result_count": len(results),
-        "truncated":    truncated,
+        "truncated": truncated,
     }
 
 
 @_timed
 def head(
     file_path: str,
-    n:         int = 10,
-    encoding:  str = DEFAULT_ENCODING,
+    n: int = 10,
+    encoding: str = DEFAULT_ENCODING,
 ) -> dict[str, Any]:
     """Read the first n lines of a file (streaming, memory efficient)."""
     if n < 1:
@@ -2008,12 +2053,12 @@ def head(
                     break
                 selected.append(line.rstrip("\n"))
         return {
-            "success":    True,
-            "path":       str(path),
-            "lines":      selected,
-            "content":    "\n".join(selected),
+            "success": True,
+            "path": str(path),
+            "lines": selected,
+            "content": "\n".join(selected),
             "line_count": len(selected),
-            "n":          n,
+            "n": n,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -2022,8 +2067,8 @@ def head(
 @_timed
 def tail(
     file_path: str,
-    n:         int = 10,
-    encoding:  str = DEFAULT_ENCODING,
+    n: int = 10,
+    encoding: str = DEFAULT_ENCODING,
 ) -> dict[str, Any]:
     """Read the last n lines of a file using a circular buffer (O(n) memory)."""
     if n < 1:
@@ -2040,12 +2085,12 @@ def tail(
                 buf.append(line.rstrip("\n"))
         selected = list(buf)
         return {
-            "success":    True,
-            "path":       str(path),
-            "lines":      selected,
-            "content":    "\n".join(selected),
+            "success": True,
+            "path": str(path),
+            "lines": selected,
+            "content": "\n".join(selected),
             "line_count": len(selected),
-            "n":          n,
+            "n": n,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -2053,10 +2098,10 @@ def tail(
 
 @_timed
 def compare_files(
-    file_path:   str,
+    file_path: str,
     target_path: str,
-    mode:        str = "bytes",
-    encoding:    str = DEFAULT_ENCODING,
+    mode: str = "bytes",
+    encoding: str = DEFAULT_ENCODING,
 ) -> dict[str, Any]:
     """
     Compare two files for equality.
@@ -2066,7 +2111,7 @@ def compare_files(
     """
     if mode not in ("bytes", "text"):
         return {"success": False, "error": "mode must be 'bytes' or 'text'"}
-    src = _editor._validate_path(file_path,   allow_write=False)
+    src = _editor._validate_path(file_path, allow_write=False)
     dst = _editor._validate_path(target_path, allow_write=False)
     if not src or not dst:
         return {"success": False, "error": "Invalid or disallowed path(s)"}
@@ -2078,9 +2123,9 @@ def compare_files(
         size_a = src.stat().st_size
         size_b = dst.stat().st_size
         if mode == "bytes":
-            chunk     = 65_536
-            offset    = 0
-            equal     = True
+            chunk = 65_536
+            offset = 0
+            equal = True
             first_diff: int | None = None
             with open(src, "rb") as fa, open(dst, "rb") as fb:
                 while True:
@@ -2100,12 +2145,12 @@ def compare_files(
                         break
             result: dict[str, Any] = {
                 "success": True,
-                "path":    str(src),
-                "target":  str(dst),
-                "equal":   equal,
-                "size_a":  size_a,
-                "size_b":  size_b,
-                "mode":    "bytes",
+                "path": str(src),
+                "target": str(dst),
+                "equal": equal,
+                "size_a": size_a,
+                "size_b": size_b,
+                "mode": "bytes",
             }
             if not equal:
                 result["first_difference_byte"] = first_diff
@@ -2115,15 +2160,15 @@ def compare_files(
             text_b = dst.read_text(encoding=encoding, errors="surrogateescape")
             norm_a = _normalize_lf(text_a)
             norm_b = _normalize_lf(text_b)
-            equal  = norm_a == norm_b
+            equal = norm_a == norm_b
             result = {
                 "success": True,
-                "path":    str(src),
-                "target":  str(dst),
-                "equal":   equal,
-                "size_a":  size_a,
-                "size_b":  size_b,
-                "mode":    "text",
+                "path": str(src),
+                "target": str(dst),
+                "equal": equal,
+                "size_a": size_a,
+                "size_b": size_b,
+                "mode": "text",
             }
             if not equal:
                 lines_a = norm_a.splitlines()
@@ -2133,7 +2178,9 @@ def compare_files(
                         result["first_difference_line"] = i
                         break
                 else:
-                    result["first_difference_line"] = min(len(lines_a), len(lines_b)) + 1
+                    result["first_difference_line"] = (
+                        min(len(lines_a), len(lines_b)) + 1
+                    )
             return result
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -2141,10 +2188,10 @@ def compare_files(
 
 @_timed
 def archive(
-    source_path:  str,
+    source_path: str,
     archive_path: str,
-    compression:  str  = "deflate",
-    recursive:    bool = True,
+    compression: str = "deflate",
+    recursive: bool = True,
 ) -> dict[str, Any]:
     """
     Create a ZIP archive from a file or directory.
@@ -2154,34 +2201,37 @@ def archive(
     """
     _COMPRESS_MAP: dict[str, int] = {
         "deflate": zipfile.ZIP_DEFLATED,
-        "store":   zipfile.ZIP_STORED,
-        "bz2":     zipfile.ZIP_BZIP2,
-        "lzma":    zipfile.ZIP_LZMA,
+        "store": zipfile.ZIP_STORED,
+        "bz2": zipfile.ZIP_BZIP2,
+        "lzma": zipfile.ZIP_LZMA,
     }
     if compression not in _COMPRESS_MAP:
         return {
             "success": False,
             "error": f"Unknown compression '{compression}'. Choose: {', '.join(_COMPRESS_MAP)}",
         }
-    src = _editor._validate_path(source_path,  allow_write=False)
+    src = _editor._validate_path(source_path, allow_write=False)
     arc = _editor._validate_path(archive_path, allow_write=True)
     if not src or not arc:
         return {"success": False, "error": "Invalid or disallowed path(s)"}
     if not src.exists():
         return {"success": False, "error": f"Source not found: {source_path}"}
     if not (src.is_file() or src.is_dir()):
-        return {"success": False, "error": f"Source is not a file or directory: {source_path}"}
+        return {
+            "success": False,
+            "error": f"Source is not a file or directory: {source_path}",
+        }
     if not str(arc).endswith(".zip"):
         arc = arc.parent / (arc.name + ".zip")
 
-    method       = _COMPRESS_MAP[compression]
-    files_added  = 0
+    method = _COMPRESS_MAP[compression]
+    files_added = 0
     uncompressed = 0
     try:
         with zipfile.ZipFile(arc, "w", compression=method) as zf:
             if src.is_file():
                 zf.write(src, src.name)
-                files_added  = 1
+                files_added = 1
                 uncompressed = src.stat().st_size
             else:
                 glob_fn = src.rglob("*") if recursive else src.glob("*")
@@ -2189,18 +2239,18 @@ def archive(
                     if fpath.is_file():
                         arcname = fpath.relative_to(src.parent)
                         zf.write(fpath, arcname)
-                        files_added  += 1
+                        files_added += 1
                         uncompressed += fpath.stat().st_size
         compressed = arc.stat().st_size
-        ratio      = round(1 - compressed / uncompressed, 4) if uncompressed > 0 else 0.0
+        ratio = round(1 - compressed / uncompressed, 4) if uncompressed > 0 else 0.0
         return {
-            "success":           True,
-            "source":            str(src),
-            "archive":           str(arc),
-            "files_added":       files_added,
+            "success": True,
+            "source": str(src),
+            "archive": str(arc),
+            "files_added": files_added,
             "uncompressed_bytes": uncompressed,
-            "compressed_bytes":  compressed,
-            "ratio":             ratio,
+            "compressed_bytes": compressed,
+            "ratio": ratio,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -2209,8 +2259,8 @@ def archive(
 @_timed
 def extract(
     archive_path: str,
-    target_path:  str,
-    password:     str | None = None,
+    target_path: str,
+    password: str | None = None,
 ) -> dict[str, Any]:
     """
     Extract a ZIP archive to a target directory.
@@ -2219,7 +2269,7 @@ def extract(
     Enforces MAX_ARCHIVE_SIZE against decompression bombs.
     """
     arc = _editor._validate_path(archive_path, allow_write=False)
-    dst = _editor._validate_path(target_path,  allow_write=True)
+    dst = _editor._validate_path(target_path, allow_write=True)
     if not arc or not dst:
         return {"success": False, "error": "Invalid or disallowed path(s)"}
     if not arc.exists() or not arc.is_file():
@@ -2250,11 +2300,16 @@ def extract(
                         or member_path == dst_resolved
                     )
                 if not is_safe:
-                    return {"success": False, "error": f"Unsafe archive entry blocked: {member}"}
+                    return {
+                        "success": False,
+                        "error": f"Unsafe archive entry blocked: {member}",
+                    }
             pwd = password.encode() if password else None
             dst.mkdir(parents=True, exist_ok=True)
             zf.extractall(dst, pwd=pwd)
-            files_extracted = len([i for i in zf.infolist() if not i.filename.endswith("/")])
+            files_extracted = len(
+                [i for i in zf.infolist() if not i.filename.endswith("/")]
+            )
     except RuntimeError as exc:
         if "Bad password" in str(exc) or "password required" in str(exc):
             return {"success": False, "error": "Incorrect archive password"}
@@ -2262,22 +2317,22 @@ def extract(
     except Exception as exc:
         return {"success": False, "error": str(exc)}
     return {
-        "success":         True,
-        "archive":         str(arc),
-        "target":          str(dst),
+        "success": True,
+        "archive": str(arc),
+        "target": str(dst),
         "files_extracted": files_extracted,
-        "total_bytes":     total_uncompressed,
+        "total_bytes": total_uncompressed,
     }
 
 
 @_timed
 def template_write(
-    file_path:      str,
-    template:       str,
-    variables:      dict[str, str],
-    encoding:       str  = DEFAULT_ENCODING,
+    file_path: str,
+    template: str,
+    variables: dict[str, str],
+    encoding: str = DEFAULT_ENCODING,
     create_parents: bool = True,
-    undefined_var:  str  = "error",
+    undefined_var: str = "error",
 ) -> dict[str, Any]:
     """
     Render a {{variable}} template and write it to a file.
@@ -2292,15 +2347,18 @@ def template_write(
     if not isinstance(variables, dict):
         return {"success": False, "error": "variables must be a dict"}
     if undefined_var not in ("error", "keep", "empty"):
-        return {"success": False, "error": "undefined_var must be 'error', 'keep', or 'empty'"}
+        return {
+            "success": False,
+            "error": "undefined_var must be 'error', 'keep', or 'empty'",
+        }
 
     path = _editor._validate_path(file_path, allow_write=True)
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
 
     found_vars = set(_TEMPLATE_RE.findall(template))
-    missing    = sorted(found_vars - set(variables.keys()))
-    used       = sorted(found_vars & set(variables.keys()))
+    missing = sorted(found_vars - set(variables.keys()))
+    used = sorted(found_vars & set(variables.keys()))
 
     if missing and undefined_var == "error":
         return {"success": False, "error": f"Undefined template variable(s): {missing}"}
@@ -2316,12 +2374,12 @@ def template_write(
         _editor._atomic_write(path, rendered, encoding)
         size = path.stat().st_size
         return {
-            "success":           True,
-            "path":              str(path),
-            "variables_used":    used,
+            "success": True,
+            "path": str(path),
+            "variables_used": used,
             "variables_missing": missing,
-            "size":              size,
-            "encoding":          encoding,
+            "size": size,
+            "encoding": encoding,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -2371,7 +2429,7 @@ _ALL_OPERATIONS: frozenset[str] = frozenset(
 
 @_timed
 def batch(
-    operations:       list[dict[str, Any]],
+    operations: list[dict[str, Any]],
     continue_on_error: bool = False,
 ) -> dict[str, Any]:
     """
@@ -2389,7 +2447,10 @@ def batch(
     for i, op_data in enumerate(operations):
         op_name = op_data.get("operation")
         if not op_name:
-            err = {"success": False, "error": f"Operation at index {i} missing 'operation' field"}
+            err = {
+                "success": False,
+                "error": f"Operation at index {i} missing 'operation' field",
+            }
             results.append({"index": i, "operation": None, "result": err})
             if not continue_on_error:
                 return {"success": False, "error": err["error"], "completed": results}
@@ -2406,9 +2467,12 @@ def batch(
 
         try:
             op_options = EditOptions(**op_data)
-            res        = _run(op_options)
+            res = _run(op_options)
         except TypeError as exc:
-            res = {"success": False, "error": f"Invalid arguments for '{op_name}': {exc}"}
+            res = {
+                "success": False,
+                "error": f"Invalid arguments for '{op_name}': {exc}",
+            }
 
         results.append({"index": i, "operation": op_name, "result": res})
 
@@ -2417,7 +2481,7 @@ def batch(
             if not continue_on_error:
                 return {
                     "success": False,
-                    "error":   f"Batch failed at index {i} ({op_name}): {res.get('error')}",
+                    "error": f"Batch failed at index {i} ({op_name}): {res.get('error')}",
                     "completed": results,
                 }
 
@@ -2433,10 +2497,10 @@ def batch(
 
 @_timed
 def batch_edit(
-    file_path:         str,
-    edits:             list[dict[str, Any]],
-    encoding:          str  = DEFAULT_ENCODING,
-    max_backups:       int  = MAX_BACKUPS,
+    file_path: str,
+    edits: list[dict[str, Any]],
+    encoding: str = DEFAULT_ENCODING,
+    max_backups: int = MAX_BACKUPS,
     continue_on_error: bool = False,
 ) -> dict[str, Any]:
     """
@@ -2458,8 +2522,8 @@ def batch_edit(
     res = _editor._read_content(file_path, encoding)
     if not res["success"]:
         return res
-    content: str          = res["content"]
-    path: Path            = res["path"]
+    content: str = res["content"]
+    path: Path = res["path"]
     original_content: str = content
 
     edit_results: list[dict[str, Any]] = []
@@ -2474,14 +2538,16 @@ def batch_edit(
             )
             if not continue_on_error:
                 return {"success": False, "error": err_msg, "completed": edit_results}
-            edit_results.append({"index": i, "operation": op, "success": False, "error": err_msg})
+            edit_results.append(
+                {"index": i, "operation": op, "success": False, "error": err_msg}
+            )
             continue
 
         try:
             if op == "replace":
-                search_text    = edit.get("search_text", "")
-                replacement    = edit.get("replacement", "")
-                use_regex      = edit.get("use_regex", False)
+                search_text = edit.get("search_text", "")
+                replacement = edit.get("replacement", "")
+                use_regex = edit.get("use_regex", False)
                 global_replace = edit.get("global_replace", True)
                 case_sensitive = edit.get("case_sensitive", True)
                 if not search_text:
@@ -2491,21 +2557,26 @@ def batch_edit(
                     content, count = compiled.subn(replacement, content)
                 else:
                     new = compiled.sub(replacement, content, count=1)
-                    count   = 1 if new != content else 0
+                    count = 1 if new != content else 0
                     content = new
                 total_replacements += count
                 edit_results.append(
-                    {"index": i, "operation": op, "success": True, "replacements": count}
+                    {
+                        "index": i,
+                        "operation": op,
+                        "success": True,
+                        "replacements": count,
+                    }
                 )
 
             elif op == "insert_line":
-                ln           = edit.get("line_number")
-                ins_content  = edit.get("content", "")
+                ln = edit.get("line_number")
+                ins_content = edit.get("content", "")
                 if ln is None:
                     raise ValueError("line_number is required for insert_line")
-                ln    = int(ln)
+                ln = int(ln)
                 lines = content.splitlines(keepends=True)
-                ln    = max(1, min(ln, len(lines) + 1))
+                ln = max(1, min(ln, len(lines) + 1))
                 if not ins_content.endswith("\n"):
                     ins_content += "\n"
                 lines.insert(ln - 1, ins_content)
@@ -2519,7 +2590,7 @@ def batch_edit(
                 ln = edit.get("line_number")
                 if ln is None:
                     raise ValueError("line_number is required for delete_line")
-                ln    = int(ln)
+                ln = int(ln)
                 lines = content.splitlines(keepends=True)
                 if ln < 1 or ln > len(lines):
                     raise ValueError(
@@ -2530,35 +2601,43 @@ def batch_edit(
                 lines_deleted += 1
                 edit_results.append(
                     {
-                        "index": i, "operation": op, "success": True,
-                        "deleted_line":    ln,
+                        "index": i,
+                        "operation": op,
+                        "success": True,
+                        "deleted_line": ln,
                         "deleted_content": deleted.rstrip("\n"),
                     }
                 )
 
             elif op == "replace_lines":
-                start_line   = edit.get("start_line")
-                end_line     = edit.get("end_line")
+                start_line = edit.get("start_line")
+                end_line = edit.get("end_line")
                 repl_content = edit.get("content", "")
                 if start_line is None or end_line is None:
-                    raise ValueError("start_line and end_line required for replace_lines")
+                    raise ValueError(
+                        "start_line and end_line required for replace_lines"
+                    )
                 start_line = int(start_line)
-                end_line   = int(end_line)
-                lines      = content.splitlines(keepends=True)
-                total_ln   = len(lines)
+                end_line = int(end_line)
+                lines = content.splitlines(keepends=True)
+                total_ln = len(lines)
                 if start_line < 1 or end_line < start_line or end_line > total_ln:
                     raise ValueError(
                         f"Invalid range {start_line}-{end_line} (file has {total_ln} lines)"
                     )
                 repl_lines = repl_content.splitlines()
-                replacement_lines = [ln + "\n" for ln in repl_lines] if repl_lines else []
-                lines      = lines[: start_line - 1] + replacement_lines + lines[end_line:]
-                content    = "".join(lines)
+                replacement_lines = (
+                    [ln + "\n" for ln in repl_lines] if repl_lines else []
+                )
+                lines = lines[: start_line - 1] + replacement_lines + lines[end_line:]
+                content = "".join(lines)
                 edit_results.append(
                     {
-                        "index": i, "operation": op, "success": True,
-                        "start_line":    start_line,
-                        "end_line":      end_line,
+                        "index": i,
+                        "operation": op,
+                        "success": True,
+                        "start_line": start_line,
+                        "end_line": end_line,
                         "lines_replaced": end_line - start_line + 1,
                         "lines_inserted": len(replacement_lines),
                     }
@@ -2576,37 +2655,41 @@ def batch_edit(
             err_msg = f"Edit {i} ({op}): {exc}"
             if not continue_on_error:
                 return {"success": False, "error": err_msg, "completed": edit_results}
-            edit_results.append({"index": i, "operation": op, "success": False, "error": str(exc)})
+            edit_results.append(
+                {"index": i, "operation": op, "success": False, "error": str(exc)}
+            )
 
     # Only write if content actually changed
     if content == original_content:
         return {
-            "success":       True,
-            "path":          str(path),
-            "message":       "No changes made",
-            "edits":         edit_results,
+            "success": True,
+            "path": str(path),
+            "message": "No changes made",
+            "edits": edit_results,
             "edits_applied": sum(1 for e in edit_results if e.get("success")),
-            "edits_failed":  sum(1 for e in edit_results if not e.get("success")),
+            "edits_failed": sum(1 for e in edit_results if not e.get("success")),
         }
 
     try:
-        backup         = _editor._make_backup(path, max_backups)
+        backup = _editor._make_backup(path, max_backups)
         _editor._atomic_write(path, content, encoding)
-        original_bytes = len(original_content.encode(encoding, errors="surrogateescape"))
-        new_bytes      = path.stat().st_size
+        original_bytes = len(
+            original_content.encode(encoding, errors="surrogateescape")
+        )
+        new_bytes = path.stat().st_size
         return {
-            "success":          True,
-            "path":             str(path),
-            "edits":            edit_results,
-            "edits_applied":    sum(1 for e in edit_results if e.get("success")),
-            "edits_failed":     sum(1 for e in edit_results if not e.get("success")),
+            "success": True,
+            "path": str(path),
+            "edits": edit_results,
+            "edits_applied": sum(1 for e in edit_results if e.get("success")),
+            "edits_failed": sum(1 for e in edit_results if not e.get("success")),
             "total_replacements": total_replacements,
-            "lines_inserted":   lines_inserted,
-            "lines_deleted":    lines_deleted,
-            "original_bytes":   original_bytes,
-            "new_bytes":        new_bytes,
-            "bytes_delta":      new_bytes - original_bytes,
-            "backup_path":      str(backup),
+            "lines_inserted": lines_inserted,
+            "lines_deleted": lines_deleted,
+            "original_bytes": original_bytes,
+            "new_bytes": new_bytes,
+            "bytes_delta": new_bytes - original_bytes,
+            "backup_path": str(backup),
         }
     except Exception as exc:
         return {"success": False, "error": f"Failed to write changes: {exc}"}
@@ -2657,7 +2740,10 @@ def _run(options: EditOptions) -> dict[str, Any]:
     # ------------------------------------------------------------------
     if options.operation == "batch":
         if not options.ops:
-            return {"success": False, "error": "'ops' (JSON array) is required for 'batch'"}
+            return {
+                "success": False,
+                "error": "'ops' (JSON array) is required for 'batch'",
+            }
         return batch(options.ops, continue_on_error=options.continue_on_error)
 
     # ------------------------------------------------------------------
@@ -2667,7 +2753,10 @@ def _run(options: EditOptions) -> dict[str, Any]:
         if not file_path:
             return {"success": False, "error": "file_path is required for 'batch_edit'"}
         if not options.edits:
-            return {"success": False, "error": "'edits' (JSON array) is required for 'batch_edit'"}
+            return {
+                "success": False,
+                "error": "'edits' (JSON array) is required for 'batch_edit'",
+            }
         return batch_edit(
             file_path=file_path,
             edits=options.edits,
@@ -2697,13 +2786,13 @@ def _run(options: EditOptions) -> dict[str, Any]:
         "read_lines": lambda: read_lines(
             file_path,
             int(options.start_line) if options.start_line is not None else 1,
-            int(options.end_line)   if options.end_line   is not None else 1,
+            int(options.end_line) if options.end_line is not None else 1,
             options.encoding,
         ),
-        "write":   lambda: write(options),
-        "append":  lambda: append(
+        "write": lambda: write(options),
+        "append": lambda: append(
             file_path,
-            options.content,       # type: ignore[arg-type]
+            options.content,  # type: ignore[arg-type]
             options.encoding,
             options.add_newline,
             options.max_write_size,
@@ -2711,29 +2800,29 @@ def _run(options: EditOptions) -> dict[str, Any]:
         "replace": lambda: replace(options),
         "insert_line": lambda: insert_line(
             file_path,
-            options.line_number,   # type: ignore[arg-type]
-            options.content,       # type: ignore[arg-type]
+            options.line_number,  # type: ignore[arg-type]
+            options.content,  # type: ignore[arg-type]
             options.encoding,
             options.max_backups,
         ),
         "delete_line": lambda: delete_line(
             file_path,
-            options.line_number,   # type: ignore[arg-type]
+            options.line_number,  # type: ignore[arg-type]
             options.encoding,
             options.max_backups,
         ),
         "replace_lines": lambda: replace_lines(
             file_path,
             int(options.start_line) if options.start_line is not None else 1,  # type: ignore[arg-type]
-            int(options.end_line)   if options.end_line   is not None else 1,   # type: ignore[arg-type]
-            options.content,        # type: ignore[arg-type]
+            int(options.end_line) if options.end_line is not None else 1,  # type: ignore[arg-type]
+            options.content,  # type: ignore[arg-type]
             options.encoding,
             options.max_backups,
             options.dry_run,
         ),
         "search": lambda: file_search(
             file_path,
-            effective_search,      # type: ignore[arg-type]
+            effective_search,  # type: ignore[arg-type]
             options.use_regex,
             options.case_sensitive,
             options.line_context,
@@ -2742,15 +2831,15 @@ def _run(options: EditOptions) -> dict[str, Any]:
         ),
         "copy": lambda: copy(
             file_path,
-            options.target_path,   # type: ignore[arg-type]
+            options.target_path,  # type: ignore[arg-type]
             options.preserve_metadata,
             options.recursive,
         ),
-        "move":        lambda: move(file_path, options.target_path),     # type: ignore[arg-type]
-        "delete":      lambda: delete(file_path, options.recursive),
-        "info":        lambda: info(file_path),
-        "create_dir":  lambda: create_dir(file_path, options.parents),
-        "list_dir":    lambda: list_dir(
+        "move": lambda: move(file_path, options.target_path),  # type: ignore[arg-type]
+        "delete": lambda: delete(file_path, options.recursive),
+        "info": lambda: info(file_path),
+        "create_dir": lambda: create_dir(file_path, options.parents),
+        "list_dir": lambda: list_dir(
             file_path,
             options.include_hidden,
             options.sort_by,
@@ -2770,11 +2859,11 @@ def _run(options: EditOptions) -> dict[str, Any]:
         ),
         "set_permissions": lambda: set_permissions(
             file_path,
-            options.mode,          # type: ignore[arg-type]
+            options.mode,  # type: ignore[arg-type]
         ),
         "normalize_line_endings": lambda: normalize_line_endings(
             file_path,
-            options.to_type,       # type: ignore[arg-type]
+            options.to_type,  # type: ignore[arg-type]
             options.encoding,
             options.max_backups,
         ),
@@ -2785,7 +2874,7 @@ def _run(options: EditOptions) -> dict[str, Any]:
         ),
         "grep_dir": lambda: grep_dir(
             file_path,
-            effective_search,      # type: ignore[arg-type]
+            effective_search,  # type: ignore[arg-type]
             options.use_regex,
             options.case_sensitive,
             options.include_hidden,
@@ -2795,7 +2884,7 @@ def _run(options: EditOptions) -> dict[str, Any]:
             options.encoding,
             options.recursive,
         ),
-        "file_hash":  lambda: file_hash(file_path, options.algorithm),
+        "file_hash": lambda: file_hash(file_path, options.algorithm),
         "word_count": lambda: word_count(file_path, options.encoding),
         "find_files": lambda: find_files(
             file_path,
@@ -2814,24 +2903,24 @@ def _run(options: EditOptions) -> dict[str, Any]:
         "tail": lambda: tail(file_path, options.n_lines, options.encoding),
         "compare_files": lambda: compare_files(
             file_path,
-            options.target_path,   # type: ignore[arg-type]
+            options.target_path,  # type: ignore[arg-type]
             options.compare_mode,
             options.encoding,
         ),
         "archive": lambda: archive(
             file_path,
-            options.target_path,   # type: ignore[arg-type]
+            options.target_path,  # type: ignore[arg-type]
             options.compression,
             options.recursive,
         ),
         "extract": lambda: extract(
             file_path,
-            options.target_path,   # type: ignore[arg-type]
+            options.target_path,  # type: ignore[arg-type]
             options.password,
         ),
         "template_write": lambda: template_write(
             file_path,
-            options.content,       # type: ignore[arg-type]
+            options.content,  # type: ignore[arg-type]
             options.variables or {},
             options.encoding,
             options.create_parents,
@@ -2901,59 +2990,120 @@ Examples:
   python edit_file.py batch_edit myfile.txt --edits '[{{"operation":"replace","search_text":"foo","replacement":"bar"}}]'
         """,
     )
-    parser.add_argument("operation", choices=sorted(_ALL_OPERATIONS), help="Operation to perform")
+    parser.add_argument(
+        "operation", choices=sorted(_ALL_OPERATIONS), help="Operation to perform"
+    )
     parser.add_argument("file_path", nargs="?", help="Primary file or directory path")
-    parser.add_argument("--target",  "-t", dest="target_path", help="Secondary path")
-    parser.add_argument("--content", "-c", help="Content string (use '-' to read from stdin)")
-    parser.add_argument("--search",  "-s", dest="search_text", help="Search text or pattern")
-    parser.add_argument("--replacement", "-r",  help="Replacement text")
+    parser.add_argument("--target", "-t", dest="target_path", help="Secondary path")
+    parser.add_argument(
+        "--content", "-c", help="Content string (use '-' to read from stdin)"
+    )
+    parser.add_argument(
+        "--search", "-s", dest="search_text", help="Search text or pattern"
+    )
+    parser.add_argument("--replacement", "-r", help="Replacement text")
     parser.add_argument("--pattern", "-p", help="Search pattern (alias for --search)")
-    parser.add_argument("--line",    "-n", dest="line_number", type=int, help="Line number (1-based)")
-    parser.add_argument("--start-line",   type=int, help="Start line (1-based, inclusive)")
-    parser.add_argument("--end-line",     type=int, help="End line (1-based, inclusive)")
-    parser.add_argument("--regex",        action="store_true", dest="use_regex",       help="Use regex matching")
-    parser.add_argument("--no-global",    dest="global_replace", action="store_false", default=True)
-    parser.add_argument("--case-insensitive", dest="case_sensitive", action="store_false", default=True)
-    parser.add_argument("--encoding",     default=DEFAULT_ENCODING)
-    parser.add_argument("--context",      dest="line_context",  type=int, default=0)
+    parser.add_argument(
+        "--line", "-n", dest="line_number", type=int, help="Line number (1-based)"
+    )
+    parser.add_argument(
+        "--start-line", type=int, help="Start line (1-based, inclusive)"
+    )
+    parser.add_argument("--end-line", type=int, help="End line (1-based, inclusive)")
+    parser.add_argument(
+        "--regex", action="store_true", dest="use_regex", help="Use regex matching"
+    )
+    parser.add_argument(
+        "--no-global", dest="global_replace", action="store_false", default=True
+    )
+    parser.add_argument(
+        "--case-insensitive", dest="case_sensitive", action="store_false", default=True
+    )
+    parser.add_argument("--encoding", default=DEFAULT_ENCODING)
+    parser.add_argument("--context", dest="line_context", type=int, default=0)
     parser.add_argument("--include-hidden", action="store_true")
-    parser.add_argument("--sort",         dest="sort_by", default="name", choices=list(_SORT_KEYS))
-    parser.add_argument("--descending",   action="store_true")
-    parser.add_argument("--no-lines",     dest="show_lines", action="store_false", default=True)
-    parser.add_argument("--add-newline",  action="store_true", default=False)
+    parser.add_argument(
+        "--sort", dest="sort_by", default="name", choices=list(_SORT_KEYS)
+    )
+    parser.add_argument("--descending", action="store_true")
+    parser.add_argument(
+        "--no-lines", dest="show_lines", action="store_false", default=True
+    )
+    parser.add_argument("--add-newline", action="store_true", default=False)
     parser.add_argument("--diff-context", dest="context_lines", type=int, default=3)
     parser.add_argument("--truncate-size", type=int, default=0)
-    parser.add_argument("--max-backups",   type=int, default=MAX_BACKUPS)
-    parser.add_argument("--max-matches",   type=int, default=1000)
+    parser.add_argument("--max-backups", type=int, default=MAX_BACKUPS)
+    parser.add_argument("--max-matches", type=int, default=1000)
     parser.add_argument("--stdin-timeout", type=float, default=STDIN_TIMEOUT)
-    parser.add_argument("--mode", default=None, help="Octal permission mode or compare mode")
-    parser.add_argument("--to-type", dest="to_type", choices=["lf", "crlf"], default=None)
+    parser.add_argument(
+        "--mode", default=None, help="Octal permission mode or compare mode"
+    )
+    parser.add_argument(
+        "--to-type", dest="to_type", choices=["lf", "crlf"], default=None
+    )
     parser.add_argument("--backup-timestamp", dest="backup_timestamp", default=None)
-    parser.add_argument("--recursive",    action="store_true", default=False)
+    parser.add_argument("--recursive", action="store_true", default=False)
     parser.add_argument("--verbose", "-v", action="store_true")
-    parser.add_argument("--algorithm",    default="sha256", choices=sorted(_HASH_ALGORITHMS))
-    parser.add_argument("--n-lines",      type=int, default=10, dest="n_lines")
-    parser.add_argument("--compare-mode", dest="compare_mode", choices=["bytes", "text"], default="bytes")
-    parser.add_argument("--compression",  choices=["deflate", "store", "bz2", "lzma"], default="deflate")
-    parser.add_argument("--password",     default=None)
-    parser.add_argument("--var",          dest="variables", action="append",
-                        metavar="KEY=VALUE", help="Template variable (repeatable)")
-    parser.add_argument("--undefined-var", dest="undefined_var",
-                        choices=["error", "keep", "empty"], default="error")
+    parser.add_argument(
+        "--algorithm", default="sha256", choices=sorted(_HASH_ALGORITHMS)
+    )
+    parser.add_argument("--n-lines", type=int, default=10, dest="n_lines")
+    parser.add_argument(
+        "--compare-mode",
+        dest="compare_mode",
+        choices=["bytes", "text"],
+        default="bytes",
+    )
+    parser.add_argument(
+        "--compression", choices=["deflate", "store", "bz2", "lzma"], default="deflate"
+    )
+    parser.add_argument("--password", default=None)
+    parser.add_argument(
+        "--var",
+        dest="variables",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Template variable (repeatable)",
+    )
+    parser.add_argument(
+        "--undefined-var",
+        dest="undefined_var",
+        choices=["error", "keep", "empty"],
+        default="error",
+    )
     parser.add_argument("--file-pattern", dest="file_pattern", default="*")
-    parser.add_argument("--min-size",     type=int, default=None, dest="min_size")
-    parser.add_argument("--max-size-filter", type=int, default=None, dest="max_size_filter")
-    parser.add_argument("--modified-after",  type=float, default=None, dest="modified_after")
-    parser.add_argument("--modified-before", type=float, default=None, dest="modified_before")
-    parser.add_argument("--file-type",    dest="file_type", choices=["any", "file", "dir"], default="any")
-    parser.add_argument("--max-results",  type=int, default=MAX_FIND_RESULTS, dest="max_results")
-    parser.add_argument("--edits",        default=None,
-                        help="JSON array of edits for batch_edit mode")
-    parser.add_argument("--continue-on-error", action="store_true", default=False,
-                        dest="continue_on_error",
-                        help="Continue batch/batch_edit on error instead of stopping")
-    parser.add_argument("--dry-run",      action="store_true", default=False,
-                        help="Preview changes without modifying the filesystem")
+    parser.add_argument("--min-size", type=int, default=None, dest="min_size")
+    parser.add_argument(
+        "--max-size-filter", type=int, default=None, dest="max_size_filter"
+    )
+    parser.add_argument(
+        "--modified-after", type=float, default=None, dest="modified_after"
+    )
+    parser.add_argument(
+        "--modified-before", type=float, default=None, dest="modified_before"
+    )
+    parser.add_argument(
+        "--file-type", dest="file_type", choices=["any", "file", "dir"], default="any"
+    )
+    parser.add_argument(
+        "--max-results", type=int, default=MAX_FIND_RESULTS, dest="max_results"
+    )
+    parser.add_argument(
+        "--edits", default=None, help="JSON array of edits for batch_edit mode"
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        default=False,
+        dest="continue_on_error",
+        help="Continue batch/batch_edit on error instead of stopping",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Preview changes without modifying the filesystem",
+    )
     return parser
 
 
@@ -2976,7 +3126,7 @@ def _parse_variables(raw: list[str] | None) -> dict[str, str]:
 
 if __name__ == "__main__":
     _parser = _build_parser()
-    cli     = _parser.parse_args()
+    cli = _parser.parse_args()
 
     # Verbose logging
     if cli.verbose:
@@ -2991,14 +3141,17 @@ if __name__ == "__main__":
     if content_value == "-":
         try:
             import select as _select
+
             if _select.select([sys.stdin], [], [], cli.stdin_timeout)[0]:
                 content_value = sys.stdin.read()
             else:
                 print(
-                    json.dumps({
-                        "success": False,
-                        "error":   f"Timed out waiting for stdin ({cli.stdin_timeout}s)",
-                    }),
+                    json.dumps(
+                        {
+                            "success": False,
+                            "error": f"Timed out waiting for stdin ({cli.stdin_timeout}s)",
+                        }
+                    ),
                     file=sys.stderr,
                 )
                 sys.exit(1)
@@ -3029,10 +3182,14 @@ if __name__ == "__main__":
     ops_data: list[dict[str, Any]] = []
     if cli.operation == "batch" and cli.file_path:
         try:
-            with open(cli.file_path, "r", encoding="utf-8") as f:
+            with open(cli.file_path, encoding="utf-8") as f:
                 ops_data = json.load(f)
         except Exception as exc:
-            print(json.dumps({"success": False, "error": f"Failed to load batch JSON: {exc}"}))
+            print(
+                json.dumps(
+                    {"success": False, "error": f"Failed to load batch JSON: {exc}"}
+                )
+            )
             sys.exit(1)
 
     # Convert CLI arguments to EditOptions

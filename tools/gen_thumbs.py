@@ -47,9 +47,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
-TIME_RE = re.compile(
-    r"^(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:\.(\d+))?$"
-)
+TIME_RE = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:\.(\d+))?$")
 
 _verbose: bool = False
 
@@ -101,7 +99,7 @@ def _parse_time_to_seconds(s: str, duration: float = 0.0) -> float:
     s = (s or "").strip()
     if not s or s == "00:00:00":
         return 0.0
-    
+
     # Percentage (e.g., "50%")
     if s.endswith("%"):
         try:
@@ -111,7 +109,7 @@ def _parse_time_to_seconds(s: str, duration: float = 0.0) -> float:
         except ValueError:
             pass
         raise ValueError(f"invalid percentage: {s}")
-    
+
     # Relative time (e.g., "+5s", "-10s", "+1:30", "+5", "-10")
     if s.startswith(("+", "-")):
         sign = 1 if s[0] == "+" else -1
@@ -129,15 +127,15 @@ def _parse_time_to_seconds(s: str, duration: float = 0.0) -> float:
             if duration > 0:
                 return max(0.0, min(duration, duration - rel))
             return max(0.0, -rel)
-    
+
     # Plain seconds with optional 's' suffix (e.g., "5s", "10.5s")
     if s.endswith("s") and s[:-1].replace(".", "").isdigit():
         return float(s[:-1])
-    
+
     # Plain seconds
     if re.fullmatch(r"\d+(?:\.\d+)?", s):
         return float(s)
-    
+
     # HH:MM:SS[.frac]
     m = TIME_RE.match(s)
     if not m:
@@ -243,13 +241,15 @@ def _compute_timestamps(
         times = [t for t in times if 0 <= t <= duration]
         if manifest_data is not None:
             for t in times[:max_frames]:
-                manifest_data.append({
-                    "timestamp": round(t, 3),
-                    "timestamp_formatted": _format_timestamp(t),
-                    "frame_type": "requested",
-                    "scene_score": None,
-                    "method": "timestamp"
-                })
+                manifest_data.append(
+                    {
+                        "timestamp": round(t, 3),
+                        "timestamp_formatted": _format_timestamp(t),
+                        "frame_type": "requested",
+                        "scene_score": None,
+                        "method": "timestamp",
+                    }
+                )
         return times[:max_frames]
 
     # If percentages provided, convert to absolute times
@@ -260,23 +260,36 @@ def _compute_timestamps(
         times = [t for t in times if 0 <= t <= duration]
         if manifest_data is not None:
             for t in times[:max_frames]:
-                manifest_data.append({
-                    "timestamp": round(t, 3),
-                    "timestamp_formatted": _format_timestamp(t),
-                    "frame_type": "requested",
-                    "scene_score": None,
-                    "method": "percentage"
-                })
+                manifest_data.append(
+                    {
+                        "timestamp": round(t, 3),
+                        "timestamp_formatted": _format_timestamp(t),
+                        "frame_type": "requested",
+                        "scene_score": None,
+                        "method": "percentage",
+                    }
+                )
         return times[:max_frames]
 
     # If keyframes or scene detection requested, use ffmpeg to find them
     if keyframes or scene_threshold > 0:
         if not ffmpeg or not src:
-            _warn("Keyframe/scene detection requires ffmpeg and source path, falling back to interval")
+            _warn(
+                "Keyframe/scene detection requires ffmpeg and source path, falling back to interval"
+            )
         else:
             times = _detect_keyframes_or_scenes(
-                ffmpeg, src, duration, start, end, keyframes, scene_threshold, max_frames,
-                force_keyframes, manifest_data, progress
+                ffmpeg,
+                src,
+                duration,
+                start,
+                end,
+                keyframes,
+                scene_threshold,
+                max_frames,
+                force_keyframes,
+                manifest_data,
+                progress,
             )
             if times:
                 return times
@@ -302,13 +315,15 @@ def _compute_timestamps(
         times.append(start)
     if manifest_data is not None:
         for t in times[:max_frames]:
-            manifest_data.append({
-                "timestamp": round(t, 3),
-                "timestamp_formatted": _format_timestamp(t),
-                "frame_type": "interval",
-                "scene_score": None,
-                "method": "interval"
-            })
+            manifest_data.append(
+                {
+                    "timestamp": round(t, 3),
+                    "timestamp_formatted": _format_timestamp(t),
+                    "frame_type": "interval",
+                    "scene_score": None,
+                    "method": "interval",
+                }
+            )
     return times[:max_frames]
 
 
@@ -333,12 +348,12 @@ def _detect_keyframes_or_scenes(
             filters.append("select='eq(pict_type,I)'")
         if scene_threshold > 0:
             filters.append(f"select='gt(scene,{scene_threshold})'")
-        
+
         if not filters:
             return []
-        
+
         filter_str = ",".join(filters) + ",showinfo"
-        
+
         # Determine time range
         if end > 0:
             if end > start:
@@ -348,22 +363,28 @@ def _detect_keyframes_or_scenes(
         else:
             stop = duration
         start = max(0.0, min(start, duration))
-        
+
         # Run ffmpeg with showinfo to get timestamps
         cmd = [
             ffmpeg,
             "-hide_banner",
-            "-loglevel", "info",
-            "-ss", str(start),
-            "-to", str(stop),
-            "-i", src,
-            "-vf", filter_str,
-            "-f", "null",
-            "-"
+            "-loglevel",
+            "info",
+            "-ss",
+            str(start),
+            "-to",
+            str(stop),
+            "-i",
+            src,
+            "-vf",
+            filter_str,
+            "-f",
+            "null",
+            "-",
         ]
-        
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120.0)
-        
+
         # Parse showinfo output for timestamps
         times = []
         for line in result.stderr.split("\n"):
@@ -378,20 +399,22 @@ def _detect_keyframes_or_scenes(
                             times.append(round(t, 3))
                 except (ValueError, IndexError):
                     pass
-        
+
         # Deduplicate and sort
         times = sorted(set(times))
-        
+
         # Populate manifest data if provided
         if manifest_data is not None:
             for t in times:
-                manifest_data.append({
-                    "timestamp": t,
-                    "formatted": _format_timestamp(t),
-                    "frame_type": "I" if keyframes else "scene",
-                    "scene_score": scene_threshold if scene_threshold > 0 else None,
-                })
-        
+                manifest_data.append(
+                    {
+                        "timestamp": t,
+                        "formatted": _format_timestamp(t),
+                        "frame_type": "I" if keyframes else "scene",
+                        "scene_score": scene_threshold if scene_threshold > 0 else None,
+                    }
+                )
+
         return times[:max_frames]
     except Exception as e:
         _warn(f"Keyframe/scene detection failed: {e}")
@@ -533,13 +556,20 @@ def _extract_frame_precise(
         [
             ffmpeg,
             "-hide_banner",
-            "-loglevel", "error",
-            "-ss", str(seek_before),
-            "-i", src,
-            "-t", "1.0",  # 1 second segment
-            "-vf", vf,
-            "-force_key_frames", str(t - seek_before),
-            "-frames:v", "1",
+            "-loglevel",
+            "error",
+            "-ss",
+            str(seek_before),
+            "-i",
+            src,
+            "-t",
+            "1.0",  # 1 second segment
+            "-vf",
+            vf,
+            "-force_key_frames",
+            str(t - seek_before),
+            "-frames:v",
+            "1",
             *extra,
             "-y",
             str(out_path),
@@ -608,7 +638,9 @@ def _download_url(url: str, temp_dir: Path) -> Path:
     headers = {"User-Agent": "Mozilla/5.0"}
     req = urllib.request.Request(url, headers=headers)
     target = temp_dir / "downloaded_video"
-    with urllib.request.urlopen(req, timeout=30.0) as response, open(target, "wb") as out_file:
+    with urllib.request.urlopen(req, timeout=30.0) as response, open(
+        target, "wb"
+    ) as out_file:
         shutil.copyfileobj(response, out_file)
     return target
 
@@ -663,7 +695,11 @@ def _process_one(
 
         duration = _probe_duration(local_file, ffprobe)
         times = _compute_timestamps(
-            duration, start_s, end_s, interval, max_frames,
+            duration,
+            start_s,
+            end_s,
+            interval,
+            max_frames,
             timestamps=timestamps,
             percentages=percentages,
             keyframes=keyframes,
@@ -677,22 +713,30 @@ def _process_one(
 
         paths: List[Path] = []
         lines: List[str] = []
-        
+
         # Progress bar for frame extraction
         if progress and len(times) > 1:
             try:
                 from tqdm import tqdm
-                time_iter = tqdm(enumerate(times), total=len(times), desc=f"Extracting {stem}", unit="frame")
+
+                time_iter = tqdm(
+                    enumerate(times),
+                    total=len(times),
+                    desc=f"Extracting {stem}",
+                    unit="frame",
+                )
             except ImportError:
                 time_iter = enumerate(times)
                 if progress:
-                    _info(f"Progress bar requested but tqdm not installed. Install with: pip install tqdm")
+                    _info(
+                        "Progress bar requested but tqdm not installed. Install with: pip install tqdm"
+                    )
         else:
             time_iter = enumerate(times)
-        
+
         for i, t in time_iter:
             out_path = per_dir / f"{stem}_{i:04d}_{int(t)}s.{fmt}"
-            
+
             # Use force_keyframes for precise seeking if requested
             if force_keyframes:
                 _extract_frame_precise(
@@ -733,18 +777,20 @@ def _process_one(
             paths.append(out_path)
             if not only_montage:
                 lines.append(str(out_path))
-            
+
             # Populate manifest data for each extracted frame
             if manifest_data is not None:
-                manifest_data.append({
-                    "input": inp,
-                    "output": str(out_path),
-                    "timestamp": round(t, 3),
-                    "timestamp_formatted": _format_timestamp(t),
-                    "frame_index": i,
-                    "width": width,
-                    "format": fmt,
-                })
+                manifest_data.append(
+                    {
+                        "input": inp,
+                        "output": str(out_path),
+                        "timestamp": round(t, 3),
+                        "timestamp_formatted": _format_timestamp(t),
+                        "frame_index": i,
+                        "width": width,
+                        "format": fmt,
+                    }
+                )
 
         grid = _parse_montage(montage)
         if grid:
@@ -754,7 +800,9 @@ def _process_one(
             if _try_montage(use, grid, montage_out, montage_bg, tile_spacing):
                 lines.append(str(montage_out))
             else:
-                lines.append("WARN: Neither ImageMagick nor GraphicsMagick montage was found; skipped montage")
+                lines.append(
+                    "WARN: Neither ImageMagick nor GraphicsMagick montage was found; skipped montage"
+                )
 
         if only_montage and grid:
             # Clean up intermediate frames
@@ -890,12 +938,15 @@ def run(
     # Write manifest if requested
     if manifest and manifest_data:
         import json
+
         manifest_path = out_dir / "manifest.json"
         with open(manifest_path, "w") as f:
             json.dump(manifest_data, f, indent=2)
         all_lines.append(f"Manifest written to: {manifest_path}")
 
     return "\n".join(all_lines) if all_lines else "ERROR: no thumbnails generated"
+
+
 def _cli() -> int:
     global _verbose
     p = argparse.ArgumentParser(description="Generate video thumbnails.")
@@ -907,13 +958,41 @@ def _cli() -> int:
     p.add_argument("--start", default="00:00:00")
     p.add_argument("--end", default="00:00:00")
     p.add_argument("--max_frames", type=int, default=10)
-    p.add_argument("--timestamps", default="", help="Comma-separated specific timestamps (HH:MM:SS or seconds) to capture")
-    p.add_argument("--percentages", default="", help="Comma-separated percentages (0-100) of video duration to capture")
-    p.add_argument("--keyframes", action="store_true", dest="keyframes", help="Capture at keyframes only (I-frames) within time range")
-    p.add_argument("--scene-threshold", type=float, default=0.0, dest="scene_threshold", help="Scene change detection threshold (0.1-1.0)")
-    p.add_argument("--force-keyframes", action="store_true", dest="force_keyframes", help="Force keyframes at exact timestamps (re-encodes for precise seeking)")
-    p.add_argument("--manifest", default="", help="Output JSON manifest with capture details")
-    p.add_argument("--progress", action="store_true", help="Show progress bar for long operations")
+    p.add_argument(
+        "--timestamps",
+        default="",
+        help="Comma-separated specific timestamps (HH:MM:SS or seconds) to capture",
+    )
+    p.add_argument(
+        "--percentages",
+        default="",
+        help="Comma-separated percentages (0-100) of video duration to capture",
+    )
+    p.add_argument(
+        "--keyframes",
+        action="store_true",
+        dest="keyframes",
+        help="Capture at keyframes only (I-frames) within time range",
+    )
+    p.add_argument(
+        "--scene-threshold",
+        type=float,
+        default=0.0,
+        dest="scene_threshold",
+        help="Scene change detection threshold (0.1-1.0)",
+    )
+    p.add_argument(
+        "--force-keyframes",
+        action="store_true",
+        dest="force_keyframes",
+        help="Force keyframes at exact timestamps (re-encodes for precise seeking)",
+    )
+    p.add_argument(
+        "--manifest", default="", help="Output JSON manifest with capture details"
+    )
+    p.add_argument(
+        "--progress", action="store_true", help="Show progress bar for long operations"
+    )
     p.add_argument("--montage", default="")
     p.add_argument("--montage-bg", default="white", dest="montage_bg")
     p.add_argument("--tile-spacing", type=int, default=2, dest="tile_spacing")

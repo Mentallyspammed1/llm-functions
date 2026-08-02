@@ -53,11 +53,19 @@ def run(
 
 if __name__ == "__main__":
     import json
-    print(json.dumps(run({
-        "string": "test",
-        "string_enum": "foo",
-        "boolean": True,
-        "integer": 42,
-        "number": 3.14,
-        "array": ["a", "b"],
-    }), indent=2))
+
+    print(
+        json.dumps(
+            run(
+                {
+                    "string": "test",
+                    "string_enum": "foo",
+                    "boolean": True,
+                    "integer": 42,
+                    "number": 3.14,
+                    "array": ["a", "b"],
+                }
+            ),
+            indent=2,
+        )
+    )

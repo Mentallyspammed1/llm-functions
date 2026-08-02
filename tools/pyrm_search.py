@@ -88,9 +88,7 @@ import random
 import re
 import shutil
 import signal
-import struct
 import sys
-import tempfile
 import threading
 import time
 import urllib.parse
@@ -101,7 +99,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 __version__ = "4.4.2-STABLE"
-TOOL_NAME   = "llm-functions-web-search"
+TOOL_NAME = "llm-functions-web-search"
 
 # ==============================================================================
 # SECTION 1: Credentials
@@ -110,27 +108,29 @@ TOOL_NAME   = "llm-functions-web-search"
 # ==============================================================================
 
 GOOGLE_API_KEY = "AIzaSyBnMVWNJUwlah6vQSvqN-e6ZhOWS1ejgnI"
-GOOGLE_CSE_ID  = "40de0ade1bbd147da"
-YOU_API_KEY    = "ydc-sk-3be25b63a354f86f-cZsqdcYZe3xHo2qxVUZxEmTI1wAzlfG8-23e9d3b8"
+GOOGLE_CSE_ID = "40de0ade1bbd147da"
+YOU_API_KEY = "ydc-sk-3be25b63a354f86f-cZsqdcYZe3xHo2qxVUZxEmTI1wAzlfG8-23e9d3b8"
 
-API_BASE_URL   = "https://www.googleapis.com/customsearch/v1"
+API_BASE_URL = "https://www.googleapis.com/customsearch/v1"
 
 # ==============================================================================
 # SECTION 2: Constants & Thread Locks
 # ==============================================================================
 
-CACHE_BASE_DIR         = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "llm_web_search"
-MANIFEST_FILE          = "search_manifest.json"
-QUOTA_FILE             = CACHE_BASE_DIR / "quota.json"
-HISTORY_FILE           = CACHE_BASE_DIR / "search_history.json"
-ANALYTICS_FILE         = CACHE_BASE_DIR / "analytics.json"
-LOG_FILE               = CACHE_BASE_DIR / "search.log"
-RATE_LIMIT_FILE        = CACHE_BASE_DIR / "rate_limit.json"
+CACHE_BASE_DIR = (
+    Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "llm_web_search"
+)
+MANIFEST_FILE = "search_manifest.json"
+QUOTA_FILE = CACHE_BASE_DIR / "quota.json"
+HISTORY_FILE = CACHE_BASE_DIR / "search_history.json"
+ANALYTICS_FILE = CACHE_BASE_DIR / "analytics.json"
+LOG_FILE = CACHE_BASE_DIR / "search.log"
+RATE_LIMIT_FILE = CACHE_BASE_DIR / "rate_limit.json"
 ENCOUNTERED_LINKS_FILE = CACHE_BASE_DIR / "encountered_links.txt"
 
-MAX_DAILY_REQUESTS      = 100
+MAX_DAILY_REQUESTS = 100
 MAX_REQUESTS_PER_MINUTE = 10
-MAX_CACHE_MB            = 100
+MAX_CACHE_MB = 100
 
 _IO_LOCK = threading.Lock()
 
@@ -174,7 +174,10 @@ def _log_json(level: str, msg: str) -> None:
         try:
             CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
             with open(LOG_FILE, "a", encoding="utf-8") as fp:
-                fp.write(json.dumps({"timestamp": _ts(), "level": level, "message": msg}) + "\n")
+                fp.write(
+                    json.dumps({"timestamp": _ts(), "level": level, "message": msg})
+                    + "\n"
+                )
         except OSError:
             pass
 
@@ -235,6 +238,7 @@ def _write_output(text: str, out_path: str) -> None:
 # SECTION 6: Utility helpers & Link Normalizer
 # ==============================================================================
 
+
 def _urlencode(s: str) -> str:
     return urllib.parse.quote(s, safe="")
 
@@ -265,8 +269,8 @@ def _sanitize_filename(s: str, max_len: int = 80) -> str:
 
 
 def _url_extension(url: str) -> str:
-    path = url.split("?")[0].split("#")[0]
-    ext  = path.rsplit(".", 1)[-1] if "." in path else ""
+    path = url.split("?", maxsplit=1)[0].split("#", maxsplit=1)[0]
+    ext = path.rsplit(".", 1)[-1] if "." in path else ""
     if 1 <= len(ext) <= 5 and re.match(r"^[a-zA-Z0-9]+$", ext):
         return ext.lower()
     return "jpg"
@@ -319,6 +323,7 @@ def _save_json_file(path: Path, data: Any) -> None:
 # SECTION 7: Rate limiting (per-minute, thread-safe)
 # ==============================================================================
 
+
 def _rate_limit_check() -> None:
     with _IO_LOCK:
         CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -335,9 +340,10 @@ def _rate_limit_check() -> None:
 # SECTION 8: Quota tracking (thread-safe)
 # ==============================================================================
 
+
 def _quota_check() -> None:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    data  = _load_json_file(QUOTA_FILE, {"date": today, "count": 0})
+    data = _load_json_file(QUOTA_FILE, {"date": today, "count": 0})
     if data.get("date") != today:
         data = {"date": today, "count": 0}
     count = int(data.get("count", 0))
@@ -351,7 +357,7 @@ def _quota_check() -> None:
 def _quota_increment() -> None:
     with _IO_LOCK:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        data  = _load_json_file(QUOTA_FILE, {"date": today, "count": 0})
+        data = _load_json_file(QUOTA_FILE, {"date": today, "count": 0})
         if data.get("date") != today:
             data = {"date": today, "count": 0}
         data["count"] = int(data.get("count", 0)) + 1
@@ -363,6 +369,7 @@ def _quota_increment() -> None:
 # ==============================================================================
 # SECTION 9: Response cache (gzip-compressed, thread-safe)
 # ==============================================================================
+
 
 def _cache_path(params: str) -> Path:
     return CACHE_BASE_DIR / f"{_hash_string(params)}.json.gz"
@@ -419,9 +426,10 @@ def _cache_enforce_size() -> None:
             )
             for f in files:
                 f.unlink(missing_ok=True)
-                total_mb = sum(
-                    p.stat().st_size for p in CACHE_BASE_DIR.glob("*.json.gz")
-                ) // 1_048_576
+                total_mb = (
+                    sum(p.stat().st_size for p in CACHE_BASE_DIR.glob("*.json.gz"))
+                    // 1_048_576
+                )
                 if total_mb <= MAX_CACHE_MB:
                     break
         except OSError:
@@ -432,8 +440,8 @@ def _cache_prune() -> None:
     if not CACHE_BASE_DIR.exists():
         return
     max_age = 3600
-    now     = _now()
-    pruned  = 0
+    now = _now()
+    pruned = 0
     with _IO_LOCK:
         files = list(CACHE_BASE_DIR.glob("*.json.gz"))
     for cache_file in files:
@@ -456,20 +464,25 @@ def _show_cache_stats(enabled: bool) -> None:
     CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
     with _IO_LOCK:
         entries = list(CACHE_BASE_DIR.glob("*.json.gz"))
-        total   = sum(p.stat().st_size for p in entries if p.exists())
+        total = sum(p.stat().st_size for p in entries if p.exists())
     count = _load_json_file(QUOTA_FILE, {}).get("count", 0)
-    _info(f"Cache: {len(entries)} entries, {_human_size(total)}, {count} API calls today")
+    _info(
+        f"Cache: {len(entries)} entries, {_human_size(total)}, {count} API calls today"
+    )
 
 
 # ==============================================================================
 # SECTION 10: History & analytics (thread-safe)
 # ==============================================================================
 
+
 def _add_to_history(query: str, result_count: int) -> None:
     with _IO_LOCK:
         CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
         history: list = _load_json_file(HISTORY_FILE, [])
-        history.insert(0, {"query": query, "result_count": result_count, "timestamp": _ts()})
+        history.insert(
+            0, {"query": query, "result_count": result_count, "timestamp": _ts()}
+        )
         _save_json_file(HISTORY_FILE, history[:100])
 
 
@@ -492,7 +505,9 @@ def _log_encountered_links(items: list[dict]) -> None:
         try:
             CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
             links = [
-                _normalize_link(item.get("link") or (item.get("image") or {}).get("contextLink", ""))
+                _normalize_link(
+                    item.get("link") or (item.get("image") or {}).get("contextLink", "")
+                )
                 for item in items
                 if item.get("link") or (item.get("image") or {}).get("contextLink")
             ]
@@ -507,21 +522,22 @@ def _log_encountered_links(items: list[dict]) -> None:
 # SECTION 11: Validation
 # ==============================================================================
 
+
 def _validate_params(args: argparse.Namespace) -> None:
-    _validate_int_range(args.num_results,       1,     100,   "--num-results")
-    _validate_int_range(args.start_index,       1,     91,    "--start-index")
-    _validate_int_range(args.timeout,           1,     60,    "--timeout")
-    _validate_int_range(args.max_retries,       0,     5,     "--max-retries")
-    _validate_int_range(args.cache_ttl,         0,     3600,  "--cache-ttl")
-    _validate_int_range(args.download_max,      1,     100,   "--download-max")
-    _validate_int_range(args.download_timeout,  5,     120,   "--download-timeout")
-    _validate_int_range(args.download_workers,  1,     10,    "--download-workers")
-    _validate_int_range(args.image_min_width,   0,     99999, "--image-min-width")
-    _validate_int_range(args.image_min_height,  0,     99999, "--image-min-height")
-    _validate_int_range(args.pages,             1,     10,    "--pages")
-    _validate_int_range(args.rate_limit_delay,  0,     10,    "--rate-limit-delay")
-    _validate_int_range(args.freshness_weight,  0,     10,    "--freshness-weight")
-    _validate_int_range(args.download_limit,    0,     10000, "--download-limit")
+    _validate_int_range(args.num_results, 1, 100, "--num-results")
+    _validate_int_range(args.start_index, 1, 91, "--start-index")
+    _validate_int_range(args.timeout, 1, 60, "--timeout")
+    _validate_int_range(args.max_retries, 0, 5, "--max-retries")
+    _validate_int_range(args.cache_ttl, 0, 3600, "--cache-ttl")
+    _validate_int_range(args.download_max, 1, 100, "--download-max")
+    _validate_int_range(args.download_timeout, 5, 120, "--download-timeout")
+    _validate_int_range(args.download_workers, 1, 10, "--download-workers")
+    _validate_int_range(args.image_min_width, 0, 99999, "--image-min-width")
+    _validate_int_range(args.image_min_height, 0, 99999, "--image-min-height")
+    _validate_int_range(args.pages, 1, 10, "--pages")
+    _validate_int_range(args.rate_limit_delay, 0, 10, "--rate-limit-delay")
+    _validate_int_range(args.freshness_weight, 0, 10, "--freshness-weight")
+    _validate_int_range(args.download_limit, 0, 10000, "--download-limit")
 
     if args.output_format not in ("detailed", "compact", "json", "parsed"):
         _die("Invalid --output-format.")
@@ -530,15 +546,29 @@ def _validate_params(args: argparse.Namespace) -> None:
     if args.search_type not in ("web", "image"):
         _die("Invalid --search-type.")
     if args.image_size and args.image_size not in (
-        "icon", "small", "medium", "large", "xlarge", "xxlarge", "huge"
+        "icon",
+        "small",
+        "medium",
+        "large",
+        "xlarge",
+        "xxlarge",
+        "huge",
     ):
         _die("Invalid --image-size.")
     if args.image_type and args.image_type not in (
-        "clipart", "face", "lineart", "stock", "photo", "animated"
+        "clipart",
+        "face",
+        "lineart",
+        "stock",
+        "photo",
+        "animated",
     ):
         _die("Invalid --image-type.")
     if args.image_color_type and args.image_color_type not in (
-        "color", "gray", "mono", "trans"
+        "color",
+        "gray",
+        "mono",
+        "trans",
     ):
         _die("Invalid --image-color-type.")
     if args.date_filter and not re.match(r"^[dwmy][0-9]*$", args.date_filter):
@@ -561,23 +591,29 @@ def _validate_params(args: argparse.Namespace) -> None:
 # SECTION 12: Build API query parameters
 # ==============================================================================
 
+
 def _build_params(query: str, args: argparse.Namespace) -> dict[str, str]:
     params: dict[str, str] = {
-        "key":   GOOGLE_API_KEY,
-        "cx":    GOOGLE_CSE_ID,
-        "q":     query,
-        "num":   str(args.num_results),
+        "key": GOOGLE_API_KEY,
+        "cx": GOOGLE_CSE_ID,
+        "q": query,
+        "num": str(args.num_results),
         "start": str(args.start_index),
-        "safe":  args.safe or "off",
+        "safe": args.safe or "off",
     }
 
     if args.search_type == "image":
         params["searchType"] = "image"
-        if args.image_size:           params["imgSize"]         = args.image_size
-        if args.image_type:           params["imgType"]         = args.image_type
-        if args.image_color_type:     params["imgColorType"]    = args.image_color_type
-        if args.image_dominant_color: params["imgDominantColor"] = args.image_dominant_color
-        if args.image_rights:         params["rights"]          = args.image_rights
+        if args.image_size:
+            params["imgSize"] = args.image_size
+        if args.image_type:
+            params["imgType"] = args.image_type
+        if args.image_color_type:
+            params["imgColorType"] = args.image_color_type
+        if args.image_dominant_color:
+            params["imgDominantColor"] = args.image_dominant_color
+        if args.image_rights:
+            params["rights"] = args.image_rights
 
     if args.lang:
         params["lr"] = f"lang_{args.lang}"
@@ -585,14 +621,16 @@ def _build_params(query: str, args: argparse.Namespace) -> dict[str, str]:
     elif args.ui_lang:
         params["hl"] = args.ui_lang
 
-    if args.country:   params["cr"] = f"country{args.country.upper()}"
-    if args.date_filter: params["dateRestrict"] = args.date_filter
+    if args.country:
+        params["cr"] = f"country{args.country.upper()}"
+    if args.date_filter:
+        params["dateRestrict"] = args.date_filter
 
     if args.site_filter:
-        params["siteSearch"]       = args.site_filter
+        params["siteSearch"] = args.site_filter
         params["siteSearchFilter"] = "i"
     elif args.site_exclude:
-        params["siteSearch"]       = args.site_exclude
+        params["siteSearch"] = args.site_exclude
         params["siteSearchFilter"] = "e"
 
     if args.file_type and args.search_type == "web":
@@ -621,9 +659,10 @@ def _params_to_qs(params: dict[str, str]) -> str:
 # SECTION 13: HTTP request (retry + exponential backoff + jitter + proxy handler)
 # ==============================================================================
 
+
 def _do_request(
-    params:    dict[str, str],
-    args:      argparse.Namespace,
+    params: dict[str, str],
+    args: argparse.Namespace,
     cache_key: str,
 ) -> Optional[dict]:
     delay = int(args.rate_limit_delay)
@@ -638,7 +677,7 @@ def _do_request(
 
     _quota_check()
 
-    qs  = _params_to_qs(params)
+    qs = _params_to_qs(params)
     url = f"{API_BASE_URL}?{qs}"
     safe_url = url.replace(GOOGLE_API_KEY, "[REDACTED]")
     _debug(f"API URL: {safe_url}")
@@ -654,12 +693,14 @@ def _do_request(
     opener = urllib.request.build_opener()
     if getattr(args, "proxy", None):
         proxy_url = args.proxy
-        proxy_handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        proxy_handler = urllib.request.ProxyHandler(
+            {"http": proxy_url, "https": proxy_url}
+        )
         opener.add_handler(proxy_handler)
 
     for attempt in range(int(args.max_retries) + 1):
         if attempt > 0:
-            wait = min(2 ** attempt + (attempt * 2), 60) + random.uniform(0.1, 1.0)
+            wait = min(2**attempt + (attempt * 2), 60) + random.uniform(0.1, 1.0)
             _debug(f"Retry {attempt}/{args.max_retries} — waiting {wait:.2f}s")
             time.sleep(wait)
 
@@ -685,7 +726,9 @@ def _do_request(
                     body = json.loads(exc.read())
                 except Exception:
                     body = {}
-                _error(f"HTTP {code}: {body.get('error', {}).get('message', exc.reason)}")
+                _error(
+                    f"HTTP {code}: {body.get('error', {}).get('message', exc.reason)}"
+                )
                 return body
             if code == 429:
                 wait = (attempt + 1) * 10 + random.uniform(1, 3)
@@ -710,32 +753,38 @@ def _do_request(
 # SECTION 14: Multi-page fetching (parallel)
 # ==============================================================================
 
+
 def _fetch_page(
-    query:      str,
-    start:      int,
-    args:       argparse.Namespace,
+    query: str,
+    start: int,
+    args: argparse.Namespace,
 ) -> Optional[dict]:
     import copy
+
     page_args = copy.copy(args)
     page_args.num_results = 10
     page_args.start_index = start
-    params    = _build_params(query, page_args)
+    params = _build_params(query, page_args)
     cache_key = _params_to_qs(params)
     return _do_request(params, page_args, cache_key)
 
 
-def _fetch_multiple_pages(query: str, num_pages: int, args: argparse.Namespace) -> Optional[dict]:
-    starts   = [1 + i * 10 for i in range(num_pages)]
-    results  = [None] * num_pages
+def _fetch_multiple_pages(
+    query: str, num_pages: int, args: argparse.Namespace
+) -> Optional[dict]:
+    starts = [1 + i * 10 for i in range(num_pages)]
+    results = [None] * num_pages
 
     with ThreadPoolExecutor(max_workers=min(num_pages, 4)) as ex:
-        futures = {ex.submit(_fetch_page, query, s, args): i for i, s in enumerate(starts)}
+        futures = {
+            ex.submit(_fetch_page, query, s, args): i for i, s in enumerate(starts)
+        }
         for fut in as_completed(futures):
             idx = futures[fut]
             try:
                 results[idx] = fut.result()
             except Exception as exc:
-                _warn(f"Page {idx+1} fetch failed: {exc}")
+                _warn(f"Page {idx + 1} fetch failed: {exc}")
 
     merged: Optional[dict] = None
     for page in results:
@@ -754,6 +803,7 @@ def _fetch_multiple_pages(query: str, num_pages: int, args: argparse.Namespace) 
 # SECTION 15: Image helpers
 # ==============================================================================
 
+
 def _detect_mime(filepath: Path) -> str:
     mime, _ = mimetypes.guess_type(str(filepath))
     if mime:
@@ -761,12 +811,18 @@ def _detect_mime(filepath: Path) -> str:
     try:
         with open(filepath, "rb") as f:
             magic = f.read(12)
-        if magic[:2] == b"\xff\xd8":                    return "image/jpeg"
-        if magic[:8] == b"\x89PNG\r\n\x1a\n":           return "image/png"
-        if magic[:6] in (b"GIF87a", b"GIF89a"):         return "image/gif"
-        if magic[:4] == b"RIFF" and magic[8:12] == b"WEBP": return "image/webp"
-        if magic[:2] == b"BM":                          return "image/bmp"
-        if magic[:4] == b"%PDF":                        return "application/pdf"
+        if magic[:2] == b"\xff\xd8":
+            return "image/jpeg"
+        if magic[:8] == b"\x89PNG\r\n\x1a\n":
+            return "image/png"
+        if magic[:6] in (b"GIF87a", b"GIF89a"):
+            return "image/gif"
+        if magic[:4] == b"RIFF" and magic[8:12] == b"WEBP":
+            return "image/webp"
+        if magic[:2] == b"BM":
+            return "image/bmp"
+        if magic[:4] == b"%PDF":
+            return "application/pdf"
     except OSError:
         pass
     return "application/octet-stream"
@@ -790,11 +846,18 @@ def _check_image_dimensions(filepath: Path, min_w: int, min_h: int) -> bool:
     if not identify:
         return True
     import subprocess
+
     try:
-        out = subprocess.check_output(
-            [identify, "-format", "%wx%h", str(filepath)],
-            stderr=subprocess.DEVNULL, timeout=5,
-        ).decode().strip().split("\n")[0]
+        out = (
+            subprocess.check_output(
+                [identify, "-format", "%wx%h", str(filepath)],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .strip()
+            .split("\n")[0]
+        )
         w, h = (int(x) for x in out.split("x"))
         if (min_w > 0 and w < min_w) or (min_h > 0 and h < min_h):
             _debug(f"Reject {w}x{h} < min {min_w}x{min_h}")
@@ -810,17 +873,34 @@ def _create_thumbnail(filepath: Path, thumb_dir: Path) -> Optional[Path]:
         _warn("ImageMagick 'convert' not found.")
         return None
     import subprocess
+
     thumb = thumb_dir / f"thumb_{filepath.name}"
     try:
         subprocess.run(
             [
-                convert, str(filepath),
-                "-limit", "memory", "64MB", "-limit", "map", "128MB",
-                "-thumbnail", "200x200^", "-gravity", "center",
-                "-extent", "200x200", "-strip", "-quality", "80", str(thumb),
+                convert,
+                str(filepath),
+                "-limit",
+                "memory",
+                "64MB",
+                "-limit",
+                "map",
+                "128MB",
+                "-thumbnail",
+                "200x200^",
+                "-gravity",
+                "center",
+                "-extent",
+                "200x200",
+                "-strip",
+                "-quality",
+                "80",
+                str(thumb),
             ],
-            check=True, timeout=15,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=True,
+            timeout=15,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         return thumb
     except Exception:
@@ -831,7 +911,7 @@ def _create_thumbnail(filepath: Path, thumb_dir: Path) -> Optional[Path]:
 def _encode_base64(filepath: Path, mime: str) -> str:
     try:
         data = filepath.read_bytes()
-        b64  = base64.b64encode(data).decode("ascii")
+        b64 = base64.b64encode(data).decode("ascii")
         return f"data:{mime};base64,{b64}"
     except Exception as exc:
         _warn(f"Base64 encode failed: {exc}")
@@ -842,66 +922,72 @@ def _encode_base64(filepath: Path, mime: str) -> str:
 # SECTION 16: Download single image (with proxy support)
 # ==============================================================================
 
+
 def _download_single_image(
-    url:       str,
-    dest_dir:  Path,
-    index:     int,
-    title:     str,
-    args:      argparse.Namespace,
+    url: str,
+    dest_dir: Path,
+    index: int,
+    title: str,
+    args: argparse.Namespace,
 ) -> dict:
     fmt_filter = getattr(args, "image_format", None)
     if fmt_filter:
-        url_ext  = _url_extension(url)
+        url_ext = _url_extension(url)
         fmt_norm = fmt_filter.lower().replace("jpg", "jpeg")
         if url_ext.replace("jpg", "jpeg") != fmt_norm:
             _debug(f"Skip (format): {url}")
             return {"skipped": True, "reason": "format_mismatch", "url": url}
 
-    ext        = _url_extension(url)
+    ext = _url_extension(url)
     safe_title = _sanitize_filename(title or f"image_{index}", 40)
-    url_hash   = _hash_string(url)
-    filename   = f"{index}_{safe_title}_{url_hash}.{ext}"
-    filepath   = dest_dir / filename
+    url_hash = _hash_string(url)
+    filename = f"{index}_{safe_title}_{url_hash}.{ext}"
+    filepath = dest_dir / filename
 
     if args.skip_existing and filepath.exists():
         size = filepath.stat().st_size
         _debug(f"Skip existing: {filename}")
         return {
-            "skipped": True, "reason": "exists",
-            "path": str(filepath), "filename": filename, "size_bytes": size,
+            "skipped": True,
+            "reason": "exists",
+            "path": str(filepath),
+            "filename": filename,
+            "size_bytes": size,
         }
 
     _debug(f"Downloading [{index}]: {url}")
 
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; llm-functions/4.4.2)",
-        "Referer":    "https://www.google.com/",
+        "Referer": "https://www.google.com/",
     }
     req = urllib.request.Request(url, headers=headers)
 
     opener = urllib.request.build_opener()
     if getattr(args, "proxy", None):
         proxy_url = args.proxy
-        proxy_handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        proxy_handler = urllib.request.ProxyHandler(
+            {"http": proxy_url, "https": proxy_url}
+        )
         opener.add_handler(proxy_handler)
 
     max_dl_retries = 2
-    success        = False
-    http_code      = 0
-    dl_size        = 0
+    success = False
+    http_code = 0
+    dl_size = 0
 
     for attempt in range(max_dl_retries + 1):
         try:
             with opener.open(req, timeout=int(args.download_timeout)) as resp:
                 http_code = resp.status
-                data      = resp.read()
-                dl_size   = len(data)
+                data = resp.read()
+                dl_size = len(data)
                 filepath.write_bytes(data)
                 success = True
                 break
         except Exception as exc:
-            _warn(f"Download attempt {attempt+1} failed: {exc}")
-            time.sleep(2 ** attempt + random.uniform(0.1, 0.5))
+            _warn(f"Download attempt {attempt + 1} failed: {exc}")
+            time.sleep(2**attempt + random.uniform(0.1, 0.5))
 
     if not success or not filepath.exists():
         return {"skipped": True, "reason": "download_failed", "url": url}
@@ -913,21 +999,30 @@ def _download_single_image(
         filepath.unlink(missing_ok=True)
         return {"skipped": True, "reason": "invalid_image", "url": url}
 
-    if not _check_image_dimensions(filepath, int(args.image_min_width), int(args.image_min_height)):
+    if not _check_image_dimensions(
+        filepath, int(args.image_min_width), int(args.image_min_height)
+    ):
         filepath.unlink(missing_ok=True)
         return {"skipped": True, "reason": "below_min_dimensions", "url": url}
 
     mime = _detect_mime(filepath)
 
     actual_dims = "unknown"
-    identify    = shutil.which("identify")
+    identify = shutil.which("identify")
     if identify:
         import subprocess
+
         try:
-            actual_dims = subprocess.check_output(
-                [identify, "-format", "%wx%h", str(filepath)],
-                stderr=subprocess.DEVNULL, timeout=5,
-            ).decode().strip().split("\n")[0]
+            actual_dims = (
+                subprocess.check_output(
+                    [identify, "-format", "%wx%h", str(filepath)],
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+                .decode()
+                .strip()
+                .split("\n")[0]
+            )
         except Exception:
             pass
 
@@ -946,18 +1041,18 @@ def _download_single_image(
     _info(f"Downloaded [{index}]: {filename} ({_human_size(dl_size)})")
 
     return {
-        "skipped":    False,
-        "index":      index,
-        "url":        url,
-        "path":       str(filepath),
-        "filename":   filename,
-        "title":      title or "",
-        "mime_type":  mime,
+        "skipped": False,
+        "index": index,
+        "url": url,
+        "path": str(filepath),
+        "filename": filename,
+        "title": title or "",
+        "mime_type": mime,
         "dimensions": actual_dims,
         "size_bytes": dl_size,
         "http_status": http_code,
-        "thumbnail":  thumb_path,
-        "base64":     b64_data if b64_data else None,
+        "thumbnail": thumb_path,
+        "base64": b64_data if b64_data else None,
     }
 
 
@@ -965,12 +1060,13 @@ def _download_single_image(
 # SECTION 17: Parallel image downloader
 # ==============================================================================
 
+
 def _download_images(response: dict, args: argparse.Namespace) -> list[dict]:
     dest_dir = Path(args.download_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     _info(f"Download dir: {dest_dir.resolve()}")
 
-    items    = (response.get("items") or [])[:int(args.download_max)]
+    items = (response.get("items") or [])[: int(args.download_max)]
     if not items:
         _warn("No image URLs.")
         return []
@@ -985,7 +1081,7 @@ def _download_images(response: dict, args: argparse.Namespace) -> list[dict]:
                 item.get("link", ""),
                 dest_dir,
                 idx + 1,
-                item.get("title", f"image_{idx+1}"),
+                item.get("title", f"image_{idx + 1}"),
                 args,
             ): idx
             for idx, item in enumerate(items)
@@ -996,23 +1092,24 @@ def _download_images(response: dict, args: argparse.Namespace) -> list[dict]:
                 results[idx] = fut.result()
             except Exception as exc:
                 results[idx] = {
-                    "skipped": True, "reason": str(exc),
+                    "skipped": True,
+                    "reason": str(exc),
                     "url": items[idx].get("link", ""),
                 }
 
-    dl_count   = sum(1 for r in results if not r.get("skipped"))
+    dl_count = sum(1 for r in results if not r.get("skipped"))
     skip_count = sum(1 for r in results if r.get("skipped"))
     _info(f"Downloads: {dl_count} ok, {skip_count} skipped.")
 
     if args.generate_manifest:
         manifest = {
-            "generated_at":    _ts(),
-            "query":           args.query,
-            "download_dir":    str(dest_dir),
-            "downloaded":      dl_count,
-            "skipped":         skip_count,
+            "generated_at": _ts(),
+            "query": args.query,
+            "download_dir": str(dest_dir),
+            "downloaded": dl_count,
+            "skipped": skip_count,
             "total_processed": len(results),
-            "images":          results,
+            "images": results,
         }
         mp = dest_dir / MANIFEST_FILE
         try:
@@ -1028,13 +1125,14 @@ def _download_images(response: dict, args: argparse.Namespace) -> list[dict]:
 # SECTION 18: Export functions
 # ==============================================================================
 
+
 def _export_csv(response: dict, query: str) -> str:
     lines = ["Title,URL,Source,Snippet"]
     for item in response.get("items") or []:
-        title   = (item.get("title")       or "").replace('"', '""')
-        link    = _normalize_link(item.get("link", ""))
-        src     = item.get("displayLink",    "")
-        snippet = (item.get("snippet")      or "").replace('"', '""').replace("\n", " ")
+        title = (item.get("title") or "").replace('"', '""')
+        link = _normalize_link(item.get("link", ""))
+        src = item.get("displayLink", "")
+        snippet = (item.get("snippet") or "").replace('"', '""').replace("\n", " ")
         lines.append(f'"{title}","{link}","{src}","{snippet}"')
     return "\n".join(lines) + "\n"
 
@@ -1042,9 +1140,9 @@ def _export_csv(response: dict, query: str) -> str:
 def _export_markdown(response: dict, query: str) -> str:
     lines = [f"# Web Search Results: {query}", ""]
     for item in response.get("items") or []:
-        title   = item.get("title")   or "Untitled"
-        link    = _normalize_link(item.get("link", ""))
-        src     = item.get("displayLink", "N/A")
+        title = item.get("title") or "Untitled"
+        link = _normalize_link(item.get("link", ""))
+        src = item.get("displayLink", "N/A")
         snippet = item.get("snippet") or "No description"
         lines += [f"* [{title}]({link})", f"  **Source:** {src}", f"  {snippet}", ""]
     return "\n".join(lines)
@@ -1053,9 +1151,9 @@ def _export_markdown(response: dict, query: str) -> str:
 def _export_html(response: dict, query: str) -> str:
     items_html = ""
     for item in response.get("items") or []:
-        title   = item.get("title")   or "Untitled"
-        link    = _normalize_link(item.get("link", ""))
-        src     = item.get("displayLink", "N/A")
+        title = item.get("title") or "Untitled"
+        link = _normalize_link(item.get("link", ""))
+        src = item.get("displayLink", "N/A")
         snippet = item.get("snippet") or "No description"
         items_html += (
             f'<article><h2><a href="{link}">{title}</a></h2>'
@@ -1063,9 +1161,9 @@ def _export_html(response: dict, query: str) -> str:
             f'<p class="snippet">{snippet}</p></article>\n'
         )
     return (
-        f'<!DOCTYPE html>\n<html><head><title>Search: {query}</title></head><body>\n'
-        f'<h1>Search Results: {query}</h1>\n'
-        f'{items_html}</body></html>\n'
+        f"<!DOCTYPE html>\n<html><head><title>Search: {query}</title></head><body>\n"
+        f"<h1>Search Results: {query}</h1>\n"
+        f"{items_html}</body></html>\n"
     )
 
 
@@ -1073,9 +1171,9 @@ def _export_html(response: dict, query: str) -> str:
 # SECTION 19: Format web search results
 # ==============================================================================
 
-SEP70   = "=" * 70
-SEP_D   = "-" * 70
-SEP60   = "=" * 60
+SEP70 = "=" * 70
+SEP_D = "-" * 70
+SEP60 = "=" * 60
 
 
 def _format_web_results(response: dict, query: str, args: argparse.Namespace) -> str:
@@ -1113,10 +1211,10 @@ def _format_web_results(response: dict, query: str, args: argparse.Namespace) ->
 
     items = [i for i in items if not _is_blacklisted(i.get("displayLink", ""))]
 
-    si     = response.get("searchInformation") or {}
-    total  = si.get("formattedTotalResults", "Unknown")
-    stime  = si.get("formattedSearchTime", "?")
-    fmt    = args.output_format
+    si = response.get("searchInformation") or {}
+    total = si.get("formattedTotalResults", "Unknown")
+    stime = si.get("formattedSearchTime", "?")
+    fmt = args.output_format
 
     if fmt == "json":
         return json.dumps(response, indent=2 if args.pretty_print else None) + "\n"
@@ -1124,12 +1222,18 @@ def _format_web_results(response: dict, query: str, args: argparse.Namespace) ->
     if fmt == "parsed":
         rows = []
         for item in items:
-            rows.append(json.dumps({
-                "title":         item.get("title"),
-                "link":          _normalize_link(item.get("link", "")),
-                "snippet":       item.get("snippet"),
-                "pageThumbnail": (item.get("pagemap") or {}).get("cse_image", [{}])[0].get("src"),
-            }))
+            rows.append(
+                json.dumps(
+                    {
+                        "title": item.get("title"),
+                        "link": _normalize_link(item.get("link", "")),
+                        "snippet": item.get("snippet"),
+                        "pageThumbnail": (item.get("pagemap") or {})
+                        .get("cse_image", [{}])[0]
+                        .get("src"),
+                    }
+                )
+            )
         return "\n".join(rows) + "\n"
 
     if fmt == "compact":
@@ -1139,24 +1243,32 @@ def _format_web_results(response: dict, query: str, args: argparse.Namespace) ->
             SEP60,
         ]
         for i, item in enumerate(items, 1):
-            lines += [f"[{i}] {item.get('title', '')}", f"    {_normalize_link(item.get('link', ''))}"]
+            lines += [
+                f"[{i}] {item.get('title', '')}",
+                f"    {_normalize_link(item.get('link', ''))}",
+            ]
         return "\n".join(lines) + "\n"
 
     lines = [
-        SEP70, "GOOGLE WEB SEARCH RESULTS", SEP70,
+        SEP70,
+        "GOOGLE WEB SEARCH RESULTS",
+        SEP70,
         f"Query       : {query}",
         f"Total Found : {total}",
         f"Search Time : {stime}s",
         "Safe Search : OFF",
-        SEP70, "",
+        SEP70,
+        "",
     ]
     for i, item in enumerate(items, 1):
         metatags = ((item.get("pagemap") or {}).get("metatags") or [{}])[0]
         pub_time = metatags.get("article:published_time", "")
-        snippet  = re.sub(r"\s+", " ", item.get("snippet") or "").strip()
-        lines   += [f"[{i}] {item.get('title', '')}",
-                    f"    URL     : {_normalize_link(item.get('link', ''))}",
-                    f"    Source  : {item.get('displayLink', '')}"]
+        snippet = re.sub(r"\s+", " ", item.get("snippet") or "").strip()
+        lines += [
+            f"[{i}] {item.get('title', '')}",
+            f"    URL     : {_normalize_link(item.get('link', ''))}",
+            f"    Source  : {item.get('displayLink', '')}",
+        ]
         if pub_time:
             lines.append(f"    Date    : {pub_time}")
         lines += [f"    Snippet : {snippet}", ""]
@@ -1168,11 +1280,12 @@ def _format_web_results(response: dict, query: str, args: argparse.Namespace) ->
 # SECTION 20: Format image search results
 # ==============================================================================
 
+
 def _format_image_results(
-    response:         dict,
-    query:            str,
+    response: dict,
+    query: str,
     download_results: list[dict],
-    args:             argparse.Namespace,
+    args: argparse.Namespace,
 ) -> str:
     api_err = (response.get("error") or {}).get("message")
     if api_err:
@@ -1186,7 +1299,7 @@ def _format_image_results(
 
     _log_encountered_links(items)
 
-    fmt       = args.output_format
+    fmt = args.output_format
     show_meta = args.show_image_metadata
 
     if fmt == "json":
@@ -1199,20 +1312,24 @@ def _format_image_results(
         rows = []
         for item in items:
             img = item.get("image") or {}
-            rows.append(json.dumps({
-                "title":       item.get("title"),
-                "imageUrl":    _normalize_link(item.get("link", "")),
-                "contextPage": _normalize_link(img.get("contextLink", "")),
-                "mimeType":    item.get("mime"),
-                "width":       img.get("width"),
-                "height":      img.get("height"),
-                "thumbnail":   img.get("thumbnailLink"),
-            }))
+            rows.append(
+                json.dumps(
+                    {
+                        "title": item.get("title"),
+                        "imageUrl": _normalize_link(item.get("link", "")),
+                        "contextPage": _normalize_link(img.get("contextLink", "")),
+                        "mimeType": item.get("mime"),
+                        "width": img.get("width"),
+                        "height": img.get("height"),
+                        "thumbnail": img.get("thumbnailLink"),
+                    }
+                )
+            )
         return "\n".join(rows) + "\n"
 
-    si     = response.get("searchInformation") or {}
-    total  = si.get("formattedTotalResults", "Unknown")
-    stime  = si.get("formattedSearchTime", "?")
+    si = response.get("searchInformation") or {}
+    total = si.get("formattedTotalResults", "Unknown")
+    stime = si.get("formattedSearchTime", "?")
 
     if fmt == "compact":
         lines = [
@@ -1234,17 +1351,20 @@ def _format_image_results(
         return "\n".join(lines) + "\n"
 
     lines = [
-        SEP70, "GOOGLE IMAGE SEARCH RESULTS", SEP70,
+        SEP70,
+        "GOOGLE IMAGE SEARCH RESULTS",
+        SEP70,
         f"Query       : {query}",
         f"Total Found : {total}",
         f"Search Time : {stime}s",
         "Safe Search : OFF",
-        SEP70, "",
+        SEP70,
+        "",
     ]
     for i, item in enumerate(items, 1):
-        img     = item.get("image") or {}
+        img = item.get("image") or {}
         snippet = re.sub(r"\s+", " ", item.get("snippet") or "N/A").strip()
-        lines  += [
+        lines += [
             f"[{i}] {item.get('title', 'Untitled')}",
             f"    Image URL : {_normalize_link(item.get('link', ''))}",
             f"    Page URL  : {_normalize_link(img.get('contextLink', ''))}",
@@ -1256,7 +1376,7 @@ def _format_image_results(
                 f"    Height    : {img.get('height', '?')}",
                 f"    MIME      : {item.get('mime', '?')}",
                 f"    Thumbnail : {img.get('thumbnailLink', 'N/A')}",
-                f"    Thumb Dim : {img.get('thumbnailWidth','?')}x{img.get('thumbnailHeight','?')}",
+                f"    Thumb Dim : {img.get('thumbnailWidth', '?')}x{img.get('thumbnailHeight', '?')}",
             ]
         lines += [f"    Snippet   : {snippet}", ""]
 
@@ -1293,6 +1413,7 @@ def _format_image_results(
 # SECTION 21: Batch query processing
 # ==============================================================================
 
+
 def _process_batch_queries(args: argparse.Namespace) -> Optional[dict]:
     raw_queries = [q.strip() for q in args.queries.split("|") if q.strip()]
     last: Optional[dict] = None
@@ -1302,9 +1423,9 @@ def _process_batch_queries(args: argparse.Namespace) -> Optional[dict]:
         if num_pages > 1:
             resp = _fetch_multiple_pages(q, num_pages, args)
         else:
-            params    = _build_params(q, args)
+            params = _build_params(q, args)
             cache_key = _params_to_qs(params)
-            resp      = _do_request(params, args, cache_key)
+            resp = _do_request(params, args, cache_key)
         if resp is None:
             _warn(f"Failed: {q}")
             continue
@@ -1319,6 +1440,7 @@ def _process_batch_queries(args: argparse.Namespace) -> Optional[dict]:
 # SECTION 22: Dependency check
 # ==============================================================================
 
+
 def _check_deps(args: argparse.Namespace) -> None:
     missing = []
     for cmd in []:
@@ -1327,7 +1449,11 @@ def _check_deps(args: argparse.Namespace) -> None:
     if missing:
         _die(f"Missing required dependencies: {', '.join(missing)}.")
 
-    if args.create_thumbnails or int(args.image_min_width) or int(args.image_min_height):
+    if (
+        args.create_thumbnails
+        or int(args.image_min_width)
+        or int(args.image_min_height)
+    ):
         if not shutil.which("convert"):
             _warn("ImageMagick 'convert' not found.")
         if not shutil.which("identify"):
@@ -1341,12 +1467,14 @@ def _check_deps(args: argparse.Namespace) -> None:
 # SECTION 23: Core logic & Signal Handlers
 # ==============================================================================
 
+
 def _execute(args: argparse.Namespace) -> None:
     global _debug_enabled
     _debug_enabled = args.debug
 
     def _sig_handler(signum, frame):
         _die("Operation interrupted by user signal.")
+
     signal.signal(signal.SIGINT, _sig_handler)
     signal.signal(signal.SIGTERM, _sig_handler)
 
@@ -1377,8 +1505,8 @@ def _execute(args: argparse.Namespace) -> None:
         batch_label = f"Batch: {args.queries}"
         if args.export_format:
             text = {
-                "csv":  lambda: _export_csv(response, batch_label),
-                "md":   lambda: _export_markdown(response, batch_label),
+                "csv": lambda: _export_csv(response, batch_label),
+                "md": lambda: _export_markdown(response, batch_label),
                 "html": lambda: _export_html(response, batch_label),
                 "json": lambda: json.dumps(response, indent=2) + "\n",
             }.get(args.export_format, lambda: "")()
@@ -1388,18 +1516,18 @@ def _execute(args: argparse.Namespace) -> None:
         return
 
     num_results = int(args.num_results)
-    num_pages   = int(args.pages)
-    needed      = (num_results + 9) // 10
-    num_pages   = max(num_pages, needed)
+    num_pages = int(args.pages)
+    needed = (num_results + 9) // 10
+    num_pages = max(num_pages, needed)
 
     if num_pages > 1:
         response = _fetch_multiple_pages(query, num_pages, args)
         if response and response.get("items"):
             response["items"] = response["items"][:num_results]
     else:
-        params    = _build_params(query, args)
+        params = _build_params(query, args)
         cache_key = _params_to_qs(params)
-        response  = _do_request(params, args, cache_key)
+        response = _do_request(params, args, cache_key)
 
     if response is None:
         _write_output("Search failed.\n", out_path)
@@ -1411,8 +1539,8 @@ def _execute(args: argparse.Namespace) -> None:
 
     if args.export_format:
         text = {
-            "csv":  lambda: _export_csv(response, query),
-            "md":   lambda: _export_markdown(response, query),
+            "csv": lambda: _export_csv(response, query),
+            "md": lambda: _export_markdown(response, query),
             "html": lambda: _export_html(response, query),
             "json": lambda: json.dumps(response, indent=2) + "\n",
         }.get(args.export_format, lambda: "")()
@@ -1434,62 +1562,63 @@ def _execute(args: argparse.Namespace) -> None:
 # SECTION 24: run() — required aichat tool entry point
 # ==============================================================================
 
+
 def run(
-    query:                str,
-    num_results:          int   = 10,
-    start_index:          int   = 1,
-    date_filter:          str   = "",
-    site_filter:          str   = "",
-    site_exclude:         str   = "",
-    file_type:            str   = "",
-    lang:                 str   = "en",
-    ui_lang:              str   = "en",
-    country:              str   = "",
-    sort_by:              str   = "relevance",
-    output_format:        str   = "detailed",
-    timeout:              int   = 15,
-    max_retries:          int   = 2,
-    cache_ttl:            int   = 300,
-    pages:                int   = 1,
-    rate_limit_delay:     int   = 1,
-    export_format:        str   = "",
-    freshness_weight:     int   = 5,
-    queries:              str   = "",
-    proxy:                str   = "",
-    header:               str   = "",
-    download_limit:       int   = 0,
-    exclude_terms:        str   = "",
-    safe:                 str   = "off",
-    related_site:         str   = "",
-    link_site:            str   = "",
-    exact_terms:          bool  = False,
-    no_duplicates:        bool  = False,
-    no_cache:             bool  = False,
-    debug:                bool  = False,
-    show_cache_stats:     bool  = False,
-    show_progress:        bool  = False,
-    pretty_print:         bool  = False,
-    search_type:          str   = "web",
-    image_size:           str   = "",
-    image_type:           str   = "",
-    image_color_type:     str   = "",
-    image_dominant_color: str   = "",
-    image_rights:         str   = "",
-    image_format:         str   = "",
-    download_dir:         str   = "./search_images",
-    download_max:         int   = 5,
-    download_timeout:     int   = 30,
-    download_workers:     int   = 3,
-    image_min_width:      int   = 0,
-    image_min_height:     int   = 0,
-    download_images:      bool  = False,
-    encode_base64:        bool  = False,
-    generate_manifest:    bool  = False,
-    skip_existing:        bool  = False,
-    verify_images:        bool  = False,
-    create_thumbnails:    bool  = False,
-    show_image_metadata:  bool  = False,
-    json_keys:            str   = "",
+    query: str,
+    num_results: int = 10,
+    start_index: int = 1,
+    date_filter: str = "",
+    site_filter: str = "",
+    site_exclude: str = "",
+    file_type: str = "",
+    lang: str = "en",
+    ui_lang: str = "en",
+    country: str = "",
+    sort_by: str = "relevance",
+    output_format: str = "detailed",
+    timeout: int = 15,
+    max_retries: int = 2,
+    cache_ttl: int = 300,
+    pages: int = 1,
+    rate_limit_delay: int = 1,
+    export_format: str = "",
+    freshness_weight: int = 5,
+    queries: str = "",
+    proxy: str = "",
+    header: str = "",
+    download_limit: int = 0,
+    exclude_terms: str = "",
+    safe: str = "off",
+    related_site: str = "",
+    link_site: str = "",
+    exact_terms: bool = False,
+    no_duplicates: bool = False,
+    no_cache: bool = False,
+    debug: bool = False,
+    show_cache_stats: bool = False,
+    show_progress: bool = False,
+    pretty_print: bool = False,
+    search_type: str = "web",
+    image_size: str = "",
+    image_type: str = "",
+    image_color_type: str = "",
+    image_dominant_color: str = "",
+    image_rights: str = "",
+    image_format: str = "",
+    download_dir: str = "./search_images",
+    download_max: int = 5,
+    download_timeout: int = 30,
+    download_workers: int = 3,
+    image_min_width: int = 0,
+    image_min_height: int = 0,
+    download_images: bool = False,
+    encode_base64: bool = False,
+    generate_manifest: bool = False,
+    skip_existing: bool = False,
+    verify_images: bool = False,
+    create_thumbnails: bool = False,
+    show_image_metadata: bool = False,
+    json_keys: str = "",
 ) -> None:
     """Primary aichat tool entry point."""
     args = argparse.Namespace(
@@ -1556,67 +1685,70 @@ def run(
 # SECTION 25: CLI argument parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="web_search_google.py",
         description=f"Pyrmethus Web Search v{__version__} — Google Custom Search",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--query",              required=True)
-    p.add_argument("--num-results",        type=int, default=10,  dest="num_results")
-    p.add_argument("--start-index",        type=int, default=1,   dest="start_index")
-    p.add_argument("--date-filter",        default="",            dest="date_filter")
-    p.add_argument("--site-filter",        default="",            dest="site_filter")
-    p.add_argument("--site-exclude",       default="",            dest="site_exclude")
-    p.add_argument("--file-type",          default="",            dest="file_type")
-    p.add_argument("--lang",               default="en")
-    p.add_argument("--ui-lang",            default="en",          dest="ui_lang")
-    p.add_argument("--country",            default="")
-    p.add_argument("--sort-by",            default="relevance",   dest="sort_by")
-    p.add_argument("--output-format",      default="detailed",    dest="output_format")
-    p.add_argument("--timeout",            type=int, default=15)
-    p.add_argument("--max-retries",        type=int, default=2,   dest="max_retries")
-    p.add_argument("--cache-ttl",          type=int, default=300, dest="cache_ttl")
-    p.add_argument("--pages",              type=int, default=1)
-    p.add_argument("--rate-limit-delay",   type=int, default=1,   dest="rate_limit_delay")
-    p.add_argument("--export-format",      default="",            dest="export_format")
-    p.add_argument("--freshness-weight",   type=int, default=5,   dest="freshness_weight")
-    p.add_argument("--queries",            default="")
-    p.add_argument("--proxy",              default="")
-    p.add_argument("--header",             default="")
-    p.add_argument("--download-limit",     type=int, default=0,   dest="download_limit")
-    p.add_argument("--exclude-terms",      default="",            dest="exclude_terms")
-    p.add_argument("--safe",               default="off")
-    p.add_argument("--related-site",       default="",            dest="related_site")
-    p.add_argument("--link-site",          default="",            dest="link_site")
-    p.add_argument("--json-keys",          default="",            dest="json_keys")
-    p.add_argument("--exact-terms",        action="store_true",   dest="exact_terms")
-    p.add_argument("--no-duplicates",      action="store_true",   dest="no_duplicates")
-    p.add_argument("--no-cache",           action="store_true",   dest="no_cache")
-    p.add_argument("--debug",              action="store_true")
-    p.add_argument("--show-cache-stats",   action="store_true",   dest="show_cache_stats")
-    p.add_argument("--show-progress",      action="store_true",   dest="show_progress")
-    p.add_argument("--pretty-print",       action="store_true",   dest="pretty_print")
-    p.add_argument("--search-type",        default="web",         dest="search_type")
-    p.add_argument("--image-size",         default="",            dest="image_size")
-    p.add_argument("--image-type",         default="",            dest="image_type")
-    p.add_argument("--image-color-type",   default="",            dest="image_color_type")
-    p.add_argument("--image-dominant-color", default="",          dest="image_dominant_color")
-    p.add_argument("--image-rights",       default="",            dest="image_rights")
-    p.add_argument("--image-format",       default="",            dest="image_format")
-    p.add_argument("--download-dir",       default="./search_images", dest="download_dir")
-    p.add_argument("--download-max",       type=int, default=5,   dest="download_max")
-    p.add_argument("--download-timeout",   type=int, default=30,  dest="download_timeout")
-    p.add_argument("--download-workers",   type=int, default=3,   dest="download_workers")
-    p.add_argument("--image-min-width",    type=int, default=0,   dest="image_min_width")
-    p.add_argument("--image-min-height",   type=int, default=0,   dest="image_min_height")
-    p.add_argument("--download-images",    action="store_true",   dest="download_images")
-    p.add_argument("--encode-base64",      action="store_true",   dest="encode_base64")
-    p.add_argument("--generate-manifest",  action="store_true",   dest="generate_manifest")
-    p.add_argument("--skip-existing",      action="store_true",   dest="skip_existing")
-    p.add_argument("--verify-images",      action="store_true",   dest="verify_images")
-    p.add_argument("--create-thumbnails",  action="store_true",   dest="create_thumbnails")
-    p.add_argument("--show-image-metadata", action="store_true",  dest="show_image_metadata")
+    p.add_argument("--query", required=True)
+    p.add_argument("--num-results", type=int, default=10, dest="num_results")
+    p.add_argument("--start-index", type=int, default=1, dest="start_index")
+    p.add_argument("--date-filter", default="", dest="date_filter")
+    p.add_argument("--site-filter", default="", dest="site_filter")
+    p.add_argument("--site-exclude", default="", dest="site_exclude")
+    p.add_argument("--file-type", default="", dest="file_type")
+    p.add_argument("--lang", default="en")
+    p.add_argument("--ui-lang", default="en", dest="ui_lang")
+    p.add_argument("--country", default="")
+    p.add_argument("--sort-by", default="relevance", dest="sort_by")
+    p.add_argument("--output-format", default="detailed", dest="output_format")
+    p.add_argument("--timeout", type=int, default=15)
+    p.add_argument("--max-retries", type=int, default=2, dest="max_retries")
+    p.add_argument("--cache-ttl", type=int, default=300, dest="cache_ttl")
+    p.add_argument("--pages", type=int, default=1)
+    p.add_argument("--rate-limit-delay", type=int, default=1, dest="rate_limit_delay")
+    p.add_argument("--export-format", default="", dest="export_format")
+    p.add_argument("--freshness-weight", type=int, default=5, dest="freshness_weight")
+    p.add_argument("--queries", default="")
+    p.add_argument("--proxy", default="")
+    p.add_argument("--header", default="")
+    p.add_argument("--download-limit", type=int, default=0, dest="download_limit")
+    p.add_argument("--exclude-terms", default="", dest="exclude_terms")
+    p.add_argument("--safe", default="off")
+    p.add_argument("--related-site", default="", dest="related_site")
+    p.add_argument("--link-site", default="", dest="link_site")
+    p.add_argument("--json-keys", default="", dest="json_keys")
+    p.add_argument("--exact-terms", action="store_true", dest="exact_terms")
+    p.add_argument("--no-duplicates", action="store_true", dest="no_duplicates")
+    p.add_argument("--no-cache", action="store_true", dest="no_cache")
+    p.add_argument("--debug", action="store_true")
+    p.add_argument("--show-cache-stats", action="store_true", dest="show_cache_stats")
+    p.add_argument("--show-progress", action="store_true", dest="show_progress")
+    p.add_argument("--pretty-print", action="store_true", dest="pretty_print")
+    p.add_argument("--search-type", default="web", dest="search_type")
+    p.add_argument("--image-size", default="", dest="image_size")
+    p.add_argument("--image-type", default="", dest="image_type")
+    p.add_argument("--image-color-type", default="", dest="image_color_type")
+    p.add_argument("--image-dominant-color", default="", dest="image_dominant_color")
+    p.add_argument("--image-rights", default="", dest="image_rights")
+    p.add_argument("--image-format", default="", dest="image_format")
+    p.add_argument("--download-dir", default="./search_images", dest="download_dir")
+    p.add_argument("--download-max", type=int, default=5, dest="download_max")
+    p.add_argument("--download-timeout", type=int, default=30, dest="download_timeout")
+    p.add_argument("--download-workers", type=int, default=3, dest="download_workers")
+    p.add_argument("--image-min-width", type=int, default=0, dest="image_min_width")
+    p.add_argument("--image-min-height", type=int, default=0, dest="image_min_height")
+    p.add_argument("--download-images", action="store_true", dest="download_images")
+    p.add_argument("--encode-base64", action="store_true", dest="encode_base64")
+    p.add_argument("--generate-manifest", action="store_true", dest="generate_manifest")
+    p.add_argument("--skip-existing", action="store_true", dest="skip_existing")
+    p.add_argument("--verify-images", action="store_true", dest="verify_images")
+    p.add_argument("--create-thumbnails", action="store_true", dest="create_thumbnails")
+    p.add_argument(
+        "--show-image-metadata", action="store_true", dest="show_image_metadata"
+    )
     return p
 
 

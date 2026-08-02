@@ -10,14 +10,15 @@
 web_search.py - Robust Web Search Tool using You.com (YDC) API
 """
 
-import os
-import json
-import sys
 import argparse
+import json
 import logging
-import requests
+import os
+import sys
 import urllib.parse
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
+import requests
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -29,7 +30,7 @@ def load_env():
     """Load environment variables from .env file."""
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if os.path.exists(env_path):
-        with open(env_path, "r") as f:
+        with open(env_path) as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
@@ -44,7 +45,11 @@ def search_ydc(
     exclude_domains: str = None,
 ) -> List[Dict[str, Any]]:
     """Search using You.com API."""
-    api_key = os.environ.get("YDC_API_KEY") or os.environ.get("YOU_API_KEY") or "ydc-sk-3be25b63a354f86f-cZsqdcYZe3xHo2qxVUZxEmTI1wAzlfG8-23e9d3b8"
+    api_key = (
+        os.environ.get("YDC_API_KEY")
+        or os.environ.get("YOU_API_KEY")
+        or "ydc-sk-3be25b63a354f86f-cZsqdcYZe3xHo2qxVUZxEmTI1wAzlfG8-23e9d3b8"
+    )
     if not api_key:
         return [{"error": "YDC_API_KEY not found in environment or .env file"}]
 
@@ -78,7 +83,7 @@ def search_ydc(
                 )
         return results
     except Exception as e:
-        return [{"error": f"API Error: {str(e)}"}]
+        return [{"error": f"API Error: {e!s}"}]
 
 
 def run(

@@ -74,11 +74,12 @@ CURL_EXIT_CODES = {
 # JSON helpers (never build error JSON with f-strings)
 # =========================================================================
 
+
 def _sanitize_json_text(s: str, max_len: int = 2000) -> str:
     if not s:
         return ""
     # Prevent CPU exhaustion on huge strings by truncating before character analysis
-    s = s[:max_len + 100]
+    s = s[: max_len + 100]
     s = s.replace("\x00", "")
     out: List[str] = []
     for ch in s:
@@ -89,6 +90,7 @@ def _sanitize_json_text(s: str, max_len: int = 2000) -> str:
         else:
             out.append(ch)
     return "".join(out)[:max_len]
+
 
 def _error_json(
     http_code: int,
@@ -111,6 +113,7 @@ def _error_json(
                 payload[k] = v
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
+
 def _success_json(
     http_code: int,
     body: str,
@@ -131,9 +134,11 @@ def _success_json(
         payload["headers"] = headers
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
+
 # =========================================================================
 # Parsing / paths
 # =========================================================================
+
 
 def _parse_headers_csv(raw: str) -> List[str]:
     if not raw or not raw.strip():
@@ -151,6 +156,7 @@ def _parse_headers_csv(raw: str) -> List[str]:
     parts = re.split(r",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", raw)
     return [p.strip().strip('"') for p in parts if p.strip()]
 
+
 def _resolve_output(output: str) -> Optional[str]:
     """None means return body in tool result (stdout semantics)."""
     if output and output.strip():
@@ -163,6 +169,7 @@ def _resolve_output(output: str) -> Optional[str]:
         return None
     return env
 
+
 def _effective_max_time(timeout: int, max_time: int) -> int:
     t, m = int(timeout), int(max_time)
     # If max_time is default (60) and timeout was explicitly customized (not 30)
@@ -171,15 +178,16 @@ def _effective_max_time(timeout: int, max_time: int) -> int:
     # Otherwise, prefer the specified max_time as the explicit ceiling
     return max(m, 1)
 
+
 def _parse_header_file(path: str) -> Dict[str, str]:
     """Parse HTTP headers from file, returning keys in lowercase."""
     if not path or not os.path.exists(path):
         return {}
     headers: Dict[str, str] = {}
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
-        
+
         # Split headers into logical blocks (handling multiple hops/redirects)
         blocks: List[List[str]] = []
         current_block: List[str] = []
@@ -208,9 +216,11 @@ def _parse_header_file(path: str) -> Dict[str, str]:
         pass
     return headers
 
+
 # =========================================================================
 # curl command builder
 # =========================================================================
+
 
 def _build_curl_command(
     url: str,
@@ -294,6 +304,7 @@ def _build_curl_command(
     cmd.append(url)
     return cmd
 
+
 def _read_body_capped(path: str, max_bytes: int) -> Tuple[bytes, bool]:
     truncated = False
     if not os.path.exists(path):
@@ -321,9 +332,11 @@ def _read_body_capped(path: str, max_bytes: int) -> Tuple[bytes, bool]:
         pass
     return b"".join(chunks), truncated
 
+
 # =========================================================================
 # Core fetch
 # =========================================================================
+
 
 def fetch_url(
     url: str,
@@ -402,7 +415,9 @@ def fetch_url(
     try:
         with tempfile.NamedTemporaryFile(delete=False) as body_tmp:
             body_path = body_tmp.name
-        with tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8") as meta_tmp:
+        with tempfile.NamedTemporaryFile(
+            delete=False, mode="w", encoding="utf-8"
+        ) as meta_tmp:
             meta_path = meta_tmp.name
 
         exec_cmd = list(base_cmd)
@@ -411,18 +426,19 @@ def fetch_url(
                 exec_cmd.append("--silent")
             if "--show-error" not in exec_cmd:
                 exec_cmd.append("--show-error")
-        else:
-            if "--silent" not in exec_cmd:
-                exec_cmd.append("--silent")
+        elif "--silent" not in exec_cmd:
+            exec_cmd.append("--silent")
 
-        exec_cmd.extend([
-            "-w",
-            "%{http_code}\n%{url_effective}",
-            "-o",
-            body_path,
-            "-D",
-            meta_path,
-        ])
+        exec_cmd.extend(
+            [
+                "-w",
+                "%{http_code}\n%{url_effective}",
+                "-o",
+                body_path,
+                "-D",
+                meta_path,
+            ]
+        )
 
         proc = subprocess.run(
             exec_cmd,
@@ -454,7 +470,9 @@ def fetch_url(
                 pass
 
         if proc.returncode != 0 and http_code == 0:
-            err_msg = CURL_EXIT_CODES.get(proc.returncode, f"curl exited with code {proc.returncode}")
+            err_msg = CURL_EXIT_CODES.get(
+                proc.returncode, f"curl exited with code {proc.returncode}"
+            )
             return _error_json(
                 0,
                 err_msg,
@@ -530,9 +548,11 @@ def fetch_url(
                 except OSError:
                     pass
 
+
 # =========================================================================
 # llm-functions entry
 # =========================================================================
+
 
 def run(
     url: str,
@@ -621,9 +641,11 @@ def run(
         json_on_success=json_on_success,
     )
 
+
 # =========================================================================
 # CLI
 # =========================================================================
+
 
 def _add_cli_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--url", required=True)
@@ -654,6 +676,7 @@ def _add_cli_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
     p.add_argument("--json-on-success", action="store_true")
 
+
 def _exit_code(result: str) -> int:
     if result.startswith("ERROR:"):
         return 1
@@ -662,6 +685,7 @@ def _exit_code(result: str) -> int:
     if '"status": "error"' in result[:120]:
         return 1
     return 0
+
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Fetch URL with curl")
@@ -699,6 +723,7 @@ def main() -> None:
 
     print(out)
     sys.exit(_exit_code(out))
+
 
 if __name__ == "__main__":
     main()

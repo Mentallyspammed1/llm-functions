@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # ==============================================================================
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
-from typing import Optional, List, Literal
+from typing import Optional
 
 # Add utils to path for bybit_base import
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 import bybit_base
 
 
@@ -25,13 +25,13 @@ def run_tool(
         testnet: Use testnet (optional)
         use_tor: Use Tor (optional)
     """
-    
+
     config = bybit_base.get_config()
     if testnet is not None:
         config["testnet"] = testnet
     if use_tor is not None:
         config["use_tor"] = use_tor
-    
+
     exit_ip = None
     if config.get("use_tor"):
         try:
@@ -46,8 +46,10 @@ def run_tool(
 
     resp = bybit_base.api_request("GET", "/v5/position/list", params, signed=True)
     if resp.get("retCode") != 0:
-        return json.dumps({"error": f"Positions fetch failed: {resp.get('retMsg')}"}, indent=2)
-    
+        return json.dumps(
+            {"error": f"Positions fetch failed: {resp.get('retMsg')}"}, indent=2
+        )
+
     positions = resp.get("result", {}).get("list", [])
     if symbol:
         filtered_positions = [p for p in positions if p["symbol"] == symbol]
@@ -58,7 +60,9 @@ def run_tool(
     open_orders = []
     if include_orders and symbol:
         order_params = {"category": "linear", "symbol": symbol}
-        order_resp = bybit_base.api_request("GET", "/v5/order/realtime", order_params, signed=True)
+        order_resp = bybit_base.api_request(
+            "GET", "/v5/order/realtime", order_params, signed=True
+        )
         if order_resp.get("retCode") == 0:
             open_orders = order_resp.get("result", {}).get("list", [])
 
@@ -67,12 +71,16 @@ def run_tool(
     if filtered_positions:
         summary_lines.append("\n--- Positions ---")
         for p in filtered_positions:
-            summary_lines.append(f"{p['symbol']} | Side: {p['side']} | Size: {p['size']} | Entry: {p['avgPrice']} | Mark: {p['markPrice']} | UPNL: {p['unrealisedPnl']}")
-    
+            summary_lines.append(
+                f"{p['symbol']} | Side: {p['side']} | Size: {p['size']} | Entry: {p['avgPrice']} | Mark: {p['markPrice']} | UPNL: {p['unrealisedPnl']}"
+            )
+
     if open_orders:
         summary_lines.append("\n--- Open Orders ---")
         for o in open_orders:
-            summary_lines.append(f"{o['symbol']} | Side: {o['side']} | Type: {o['orderType']} | Price: {o.get('price', 'MKT')} | Qty: {o['qty']} | Status: {o['orderStatus']}")
+            summary_lines.append(
+                f"{o['symbol']} | Side: {o['side']} | Type: {o['orderType']} | Price: {o.get('price', 'MKT')} | Qty: {o['qty']} | Status: {o['orderStatus']}"
+            )
 
     results = {
         "symbol_filter": symbol if symbol else "All",
@@ -80,7 +88,11 @@ def run_tool(
         "open_orders": open_orders,
     }
 
-    connection_info = f"\n🔒 Connection: Tor (Exit IP: {exit_ip})" if exit_ip else "\n🔓 Connection: Direct"
+    connection_info = (
+        f"\n🔒 Connection: Tor (Exit IP: {exit_ip})"
+        if exit_ip
+        else "\n🔓 Connection: Direct"
+    )
     return f"""✅ Status Retrieved Successfully!{connection_info}
 {"".join(summary_lines)}
 

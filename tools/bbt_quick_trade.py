@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import os
 import re
 import sys
@@ -32,9 +31,7 @@ import time
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
-
-import requests
+from typing import Any, Optional
 
 CURRENT_DIR = Path(__file__).parent.resolve()
 if str(CURRENT_DIR) not in sys.path:
@@ -62,15 +59,15 @@ class ToolJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -80,10 +77,15 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -103,15 +105,23 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [BYBIT QUICK TRADE MANAGER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [BYBIT QUICK TRADE MANAGER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Symbol:{RESET}   {BOLD}{data.get('symbol', 'N/A')}{RESET}  |  {NEON_CYAN}Action:{RESET} {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}")
-    
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Symbol:{RESET}   {BOLD}{data.get('symbol', 'N/A')}{RESET}  |  {NEON_CYAN}Action:{RESET} {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}"
+    )
+
     if "breakeven_price" in data:
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}New SL (Breakeven):{RESET} {NEON_GREEN}${data.get('breakeven_price'):.4f}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}New SL (Breakeven):{RESET} {NEON_GREEN}${data.get('breakeven_price'):.4f}{RESET}"
+        )
 
     if "orders_placed" in data:
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Orders Placed:{RESET} {NEON_GREEN}{data.get('orders_placed')}{RESET} orders in DCA ladder")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Orders Placed:{RESET} {NEON_GREEN}{data.get('orders_placed')}{RESET} orders in DCA ladder"
+        )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -124,7 +134,11 @@ def get_position(symbol: str) -> Optional[dict]:
     if bybit_core and hasattr(bybit_core, "get_positions"):
         res = bybit_core.get_positions(category="linear", symbol=symbol.upper())
         if res.get("retCode") == 0:
-            lst = [p for p in res.get("result", {}).get("list", []) if float(p.get("size", 0)) > 0]
+            lst = [
+                p
+                for p in res.get("result", {}).get("list", [])
+                if float(p.get("size", 0)) > 0
+            ]
             return lst[0] if lst else None
     return None
 
@@ -146,20 +160,27 @@ def execute_tool(
     if action == "move_breakeven":
         pos = get_position(sym)
         if not pos:
-            return {"success": False, "error": f"No active position found for {sym}", "exit_code": EXIT_ERROR}
+            return {
+                "success": False,
+                "error": f"No active position found for {sym}",
+                "exit_code": EXIT_ERROR,
+            }
 
         entry_px = float(pos.get("avgPrice", 0) or pos.get("entryPrice", 0))
         pos_side = pos.get("side", "Buy")
 
         # Include fee offset (0.11% cover)
         fee_offset = entry_px * 0.0011
-        be_price = (entry_px + fee_offset) if pos_side == "Buy" else (entry_px - fee_offset)
+        be_price = (
+            (entry_px + fee_offset) if pos_side == "Buy" else (entry_px - fee_offset)
+        )
 
-        res = bybit_core.api_request("POST", "/v5/position/trading-stop", params={
-            "category": "linear",
-            "symbol": sym,
-            "stopLoss": f"{be_price:.4f}"
-        }, signed=True)
+        res = bybit_core.api_request(
+            "POST",
+            "/v5/position/trading-stop",
+            params={"category": "linear", "symbol": sym, "stopLoss": f"{be_price:.4f}"},
+            signed=True,
+        )
 
         if res.get("retCode") == 0:
             return {
@@ -176,21 +197,30 @@ def execute_tool(
     elif action in ("lock_profit", "partial_close"):
         pos = get_position(sym)
         if not pos:
-            return {"success": False, "error": f"No active position found for {sym}", "exit_code": EXIT_ERROR}
+            return {
+                "success": False,
+                "error": f"No active position found for {sym}",
+                "exit_code": EXIT_ERROR,
+            }
 
         size = float(pos.get("size", 0))
         pos_side = pos.get("side", "Buy")
         close_side = "Sell" if pos_side == "Buy" else "Buy"
         close_qty = round(size * (percent / 100.0), 3)
 
-        res = bybit_core.api_request("POST", "/v5/order/create", params={
-            "category": "linear",
-            "symbol": sym,
-            "side": close_side,
-            "orderType": "Market",
-            "qty": str(close_qty),
-            "reduceOnly": True,
-        }, signed=True)
+        res = bybit_core.api_request(
+            "POST",
+            "/v5/order/create",
+            params={
+                "category": "linear",
+                "symbol": sym,
+                "side": close_side,
+                "orderType": "Market",
+                "qty": str(close_qty),
+                "reduceOnly": True,
+            },
+            signed=True,
+        )
 
         if res.get("retCode") == 0:
             return {
@@ -206,29 +236,48 @@ def execute_tool(
 
     elif action == "dca_ladder":
         if not total_qty or not side:
-            return {"success": False, "error": "dca_ladder requires --total-qty and --side", "exit_code": EXIT_ERROR}
+            return {
+                "success": False,
+                "error": "dca_ladder requires --total-qty and --side",
+                "exit_code": EXIT_ERROR,
+            }
 
         ticker_res = bybit_core.get_ticker(symbol=sym)
-        last_px = float(ticker_res.get("result", {}).get("list", [{}])[0].get("lastPrice", 0))
+        last_px = float(
+            ticker_res.get("result", {}).get("list", [{}])[0].get("lastPrice", 0)
+        )
         if last_px == 0:
-            return {"success": False, "error": "Could not fetch ticker price", "exit_code": EXIT_ERROR}
+            return {
+                "success": False,
+                "error": "Could not fetch ticker price",
+                "exit_code": EXIT_ERROR,
+            }
 
         step_qty = round(total_qty / dca_steps, 3)
         orders = []
 
         for i in range(dca_steps):
             offset_pct = (i + 1) * (dca_range_pct / dca_steps) / 100.0
-            price = (last_px * (1 - offset_pct)) if side.capitalize() == "Buy" else (last_px * (1 + offset_pct))
-            
-            res = bybit_core.api_request("POST", "/v5/order/create", params={
-                "category": "linear",
-                "symbol": sym,
-                "side": side.capitalize(),
-                "orderType": "Limit",
-                "qty": str(step_qty),
-                "price": f"{price:.4f}",
-                "timeInForce": "GTC"
-            }, signed=True)
+            price = (
+                (last_px * (1 - offset_pct))
+                if side.capitalize() == "Buy"
+                else (last_px * (1 + offset_pct))
+            )
+
+            res = bybit_core.api_request(
+                "POST",
+                "/v5/order/create",
+                params={
+                    "category": "linear",
+                    "symbol": sym,
+                    "side": side.capitalize(),
+                    "orderType": "Limit",
+                    "qty": str(step_qty),
+                    "price": f"{price:.4f}",
+                    "timeInForce": "GTC",
+                },
+                signed=True,
+            )
             if res.get("retCode") == 0:
                 orders.append(res.get("result", {}).get("orderId"))
 
@@ -242,12 +291,18 @@ def execute_tool(
             "exit_code": EXIT_SUCCESS,
         }
 
-    return {"success": False, "error": f"Unsupported action: {action}", "exit_code": EXIT_ERROR}
+    return {
+        "success": False,
+        "error": f"Unsupported action: {action}",
+        "exit_code": EXIT_ERROR,
+    }
 
 
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
         sys.stdout.flush()
@@ -272,18 +327,41 @@ def run(
     no_color: bool = False,
     verbose: bool = False,
 ) -> None:
-    res = execute_tool(symbol=symbol, action=action, percent=percent, dca_steps=dca_steps, dca_range_pct=dca_range_pct, total_qty=total_qty, side=side, no_color=no_color, verbose=verbose)
+    res = execute_tool(
+        symbol=symbol,
+        action=action,
+        percent=percent,
+        dca_steps=dca_steps,
+        dca_range_pct=dca_range_pct,
+        total_qty=total_qty,
+        side=side,
+        no_color=no_color,
+        verbose=verbose,
+    )
     print_human_readable_ui(res, no_color=no_color)
     write_llm_output(res)
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="bbt_quick_trade.py", description=f"Bybit Quick Trade Manager v{__version__}")
+    parser = argparse.ArgumentParser(
+        prog="bbt_quick_trade.py",
+        description=f"Bybit Quick Trade Manager v{__version__}",
+    )
     parser.add_argument("--symbol", required=True, help="Trading pair symbol")
-    parser.add_argument("--action", required=True, choices=["move_breakeven", "lock_profit", "partial_close", "dca_ladder"])
-    parser.add_argument("--percent", type=float, default=50.0, help="Percentage for partial close")
-    parser.add_argument("--dca-steps", type=int, default=3, help="Number of DCA limit levels")
-    parser.add_argument("--dca-range-pct", type=float, default=1.5, help="DCA price depth percentage")
+    parser.add_argument(
+        "--action",
+        required=True,
+        choices=["move_breakeven", "lock_profit", "partial_close", "dca_ladder"],
+    )
+    parser.add_argument(
+        "--percent", type=float, default=50.0, help="Percentage for partial close"
+    )
+    parser.add_argument(
+        "--dca-steps", type=int, default=3, help="Number of DCA limit levels"
+    )
+    parser.add_argument(
+        "--dca-range-pct", type=float, default=1.5, help="DCA price depth percentage"
+    )
     parser.add_argument("--total-qty", type=float, help="Total DCA quantity")
     parser.add_argument("--side", choices=["Buy", "Sell"], help="Side for DCA ladder")
     parser.add_argument("--no-color", action="store_true")

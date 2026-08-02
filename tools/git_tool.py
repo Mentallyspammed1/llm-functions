@@ -40,22 +40,22 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Optional, Tuple
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
+    "run",
     "sanitize_path",
-    "__version__",
 ]
 
 # ==============================================================================
@@ -122,19 +122,25 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-NEON_LIME    = "\033[38;5;82m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+NEON_LIME = "\033[38;5;82m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-BOX_TL = "╭"; BOX_TR = "╮"; BOX_BL = "╰"; BOX_BR = "╯"
-BOX_V  = "│"; BOX_H  = "─"; BOX_LT = "├"; BOX_RT = "┤"
+BOX_TL = "╭"
+BOX_TR = "╮"
+BOX_BL = "╰"
+BOX_BR = "╯"
+BOX_V = "│"
+BOX_H = "─"
+BOX_LT = "├"
+BOX_RT = "┤"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -160,7 +166,10 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
 def get_width() -> int:
@@ -172,7 +181,9 @@ def get_width() -> int:
         return 68
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text to stderr by default."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -196,41 +207,70 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = BOX_H * box_w
 
     _cprint(f"{NEON_PURPLE}{BOX_TL}{border}{BOX_TR}{RESET}")
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_PINK}{icon} [GITHUB TERMUX TOOL v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_PINK}{icon} [GITHUB TERMUX TOOL v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}{BOX_LT}{border}{BOX_RT}{RESET}")
     _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Action:{RESET}   {action}")
     if data.get("repo"):
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Repo:{RESET}     {data.get('repo')}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Repo:{RESET}     {data.get('repo')}"
+        )
     if data.get("query"):
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Query:{RESET}    {data.get('query')}")
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Count:{RESET}    {NEON_YELLOW}{data.get('count', 0)}{RESET}")
-    
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Query:{RESET}    {data.get('query')}"
+        )
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Count:{RESET}    {NEON_YELLOW}{data.get('count', 0)}{RESET}"
+    )
+
     rl = data.get("rate_limit", {})
     if rl.get("remaining") is not None:
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}API Limit:{RESET} {NEON_LIME}{rl.get('remaining')}/{rl.get('limit')}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}API Limit:{RESET} {NEON_LIME}{rl.get('remaining')}/{rl.get('limit')}{RESET}"
+        )
 
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}{BOX_LT}{border}{BOX_RT}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error:{RESET}    {data['error']}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error:{RESET}    {data['error']}"
+        )
 
     items = data.get("items", [])
     if items:
         _cprint(f"{NEON_PURPLE}{BOX_LT}{border}{BOX_RT}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {BOLD}Processed Results ({len(items)}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {BOLD}Processed Results ({len(items)}):{RESET}"
+        )
         for idx, item in enumerate(items[:5], 1):
             if isinstance(item, dict):
-                label = item.get("full_name") or item.get("title") or item.get("description") or item.get("login") or item.get("id") or str(item)
+                label = (
+                    item.get("full_name")
+                    or item.get("title")
+                    or item.get("description")
+                    or item.get("login")
+                    or item.get("id")
+                    or str(item)
+                )
                 url = item.get("html_url") or item.get("url", "")
-                _cprint(f"{NEON_PURPLE}{BOX_V}{RESET}   {NEON_CYAN}{idx:02d}.{RESET} {label}")
+                _cprint(
+                    f"{NEON_PURPLE}{BOX_V}{RESET}   {NEON_CYAN}{idx:02d}.{RESET} {label}"
+                )
                 if url:
                     _cprint(f"{NEON_PURPLE}{BOX_V}{RESET}       {DIM}↳ {url}{RESET}")
             else:
                 _cprint(f"{NEON_PURPLE}{BOX_V}{RESET}   {NEON_CYAN}›{RESET} {item}")
         if len(items) > 5:
-            _cprint(f"{NEON_PURPLE}{BOX_V}{RESET}   {DIM}... and {len(items) - 5} more items{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}{BOX_V}{RESET}   {DIM}... and {len(items) - 5} more items{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}{BOX_BL}{border}{BOX_BR}{RESET}")
 
@@ -238,6 +278,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
@@ -261,7 +302,8 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
@@ -273,7 +315,10 @@ def sanitize_path() -> None:
         if not p:
             continue
         norm = os.path.normpath(p)
-        if norm.endswith(os.path.join("llm-functions", "bin")) or os.path.basename(norm) == "llm-functions-bin":
+        if (
+            norm.endswith(os.path.join("llm-functions", "bin"))
+            or os.path.basename(norm) == "llm-functions-bin"
+        ):
             continue
         parts.append(p)
     os.environ["PATH"] = os.pathsep.join(parts)
@@ -285,7 +330,9 @@ def _redact_token(text: str, token: str) -> str:
         return ""
     if token and len(token) > 4:
         text = text.replace(token, f"{token[:4]}****")
-    text = re.sub(r'https://x-access-token:[^@]+@', 'https://x-access-token:****@', text)
+    text = re.sub(
+        r"https://x-access-token:[^@]+@", "https://x-access-token:****@", text
+    )
     return text
 
 
@@ -303,7 +350,9 @@ def _resolve_github_token(user_token: Optional[str] = None) -> str:
     gh_bin = shutil.which("gh")
     if gh_bin:
         try:
-            res = subprocess.run([gh_bin, "auth", "token"], capture_output=True, text=True, timeout=5)
+            res = subprocess.run(
+                [gh_bin, "auth", "token"], capture_output=True, text=True, timeout=5
+            )
             if res.returncode == 0 and res.stdout.strip():
                 return res.stdout.strip()
         except Exception:
@@ -315,6 +364,7 @@ def _resolve_github_token(user_token: Optional[str] = None) -> str:
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     """Caching utility with TTL support for GitHub API requests."""
@@ -384,6 +434,7 @@ class GracefulShutdown:
 # SECTION 5: Native GitHub API Client Engine
 # ==============================================================================
 
+
 def _parse_link_header(link_header: Optional[str]) -> dict[str, str]:
     """Parse standard GitHub Link headers for pagination URLs."""
     links = {}
@@ -409,7 +460,9 @@ def _github_api_request(
     timeout: int = 15,
 ) -> Tuple[bool, Any, int, dict[str, Any]]:
     """Execute native GitHub REST API request with header parsing and error diagnostics."""
-    url = endpoint if endpoint.startswith("http") else f"https://api.github.com{endpoint}"
+    url = (
+        endpoint if endpoint.startswith("http") else f"https://api.github.com{endpoint}"
+    )
     headers = {
         "User-Agent": "Termux-Pyrmethus-GitHub-Tool/2.2.0",
         "Accept": "application/vnd.github+json",
@@ -423,7 +476,9 @@ def _github_api_request(
         headers["Content-Type"] = "application/json"
         encoded_data = json.dumps(data).encode("utf-8")
 
-    req = urllib.request.Request(url, data=encoded_data, headers=headers, method=method.upper())
+    req = urllib.request.Request(
+        url, data=encoded_data, headers=headers, method=method.upper()
+    )
 
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -447,11 +502,13 @@ def _github_api_request(
             parsed_err = json.loads(error_body)
         except Exception:
             parsed_err = {"message": error_body or err.reason}
-        
+
         meta = {
             "rate_limit": {
                 "limit": err.headers.get("X-RateLimit-Limit") if err.headers else None,
-                "remaining": err.headers.get("X-RateLimit-Remaining") if err.headers else None,
+                "remaining": err.headers.get("X-RateLimit-Remaining")
+                if err.headers
+                else None,
                 "reset": err.headers.get("X-RateLimit-Reset") if err.headers else None,
             }
         }
@@ -471,12 +528,19 @@ def _github_api_request(
 # SECTION 6: GitHub Action Handlers
 # ==============================================================================
 
-def _handle_user_info(query: Optional[str], token: str) -> Tuple[bool, Any, dict[str, Any]]:
+
+def _handle_user_info(
+    query: Optional[str], token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
     endpoint = f"/users/{urllib.parse.quote(query)}" if query else "/user"
     ok, data, code, meta = _github_api_request(endpoint, token=token)
     if not ok:
         if code == 401:
-            return False, "Unauthorized: Provide a valid GitHub Personal Access Token (--token or GITHUB_TOKEN).", meta
+            return (
+                False,
+                "Unauthorized: Provide a valid GitHub Personal Access Token (--token or GITHUB_TOKEN).",
+                meta,
+            )
         return False, data.get("message", "Failed to fetch user info."), meta
     return True, data, meta
 
@@ -484,39 +548,66 @@ def _handle_user_info(query: Optional[str], token: str) -> Tuple[bool, Any, dict
 def _handle_repo_info(repo: str, token: str) -> Tuple[bool, Any, dict[str, Any]]:
     if not repo or "/" not in repo:
         return False, "Action 'repo-info' requires --repo in 'OWNER/REPO' format.", {}
-    ok, data, code, meta = _github_api_request(f"/repos/{urllib.parse.quote(repo, safe='/')}", token=token)
+    ok, data, code, meta = _github_api_request(
+        f"/repos/{urllib.parse.quote(repo, safe='/')}", token=token
+    )
     if not ok:
-        return False, data.get("message", f"Failed to fetch repo info for '{repo}'."), meta
+        return (
+            False,
+            data.get("message", f"Failed to fetch repo info for '{repo}'."),
+            meta,
+        )
     return True, data, meta
 
 
-def _handle_repo_list(query: Optional[str], limit: int, token: str) -> Tuple[bool, Any, dict[str, Any]]:
+def _handle_repo_list(
+    query: Optional[str], limit: int, token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
     if query:
-        endpoint = f"/users/{urllib.parse.quote(query)}/repos?per_page={limit}&sort=updated"
+        endpoint = (
+            f"/users/{urllib.parse.quote(query)}/repos?per_page={limit}&sort=updated"
+        )
     else:
-        endpoint = f"/user/repos?per_page={limit}&sort=updated" if token else f"/repositories?per_page={limit}"
-    
+        endpoint = (
+            f"/user/repos?per_page={limit}&sort=updated"
+            if token
+            else f"/repositories?per_page={limit}"
+        )
+
     ok, data, code, meta = _github_api_request(endpoint, token=token)
     if not ok:
         return False, data.get("message", "Failed to list repositories."), meta
     return True, data, meta
 
 
-def _handle_repo_clone(repo: str, target: Optional[str], token: str) -> Tuple[bool, Any, dict[str, Any]]:
+def _handle_repo_clone(
+    repo: str, target: Optional[str], token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
     if not repo:
         return False, "Action 'repo-clone' requires --repo parameter.", {}
-    
+
     sanitize_path()
     git_bin = shutil.which("git")
     if not git_bin:
-        return False, "Git binary not found in Termux environment. Install with: pkg install git", {}
+        return (
+            False,
+            "Git binary not found in Termux environment. Install with: pkg install git",
+            {},
+        )
 
     clone_url = f"https://github.com/{repo}.git" if "/" in repo else repo
     if token and "github.com" in clone_url and "@" not in clone_url:
         clone_url = clone_url.replace("https://", f"https://x-access-token:{token}@")
 
     base_cwd = get_builtin_var("__cwd__") or os.getcwd()
-    dest = str((Path(base_cwd) / (target or repo.split("/")[-1].replace(".git", ""))).expanduser().resolve())
+    dest = str(
+        (
+            Path(base_cwd)
+            / (target or repo.rsplit("/", maxsplit=1)[-1].replace(".git", ""))
+        )
+        .expanduser()
+        .resolve()
+    )
     cmd = [git_bin, "clone", clone_url, dest]
 
     preexec = os.setsid if hasattr(os, "setsid") else None
@@ -532,7 +623,11 @@ def _handle_repo_clone(repo: str, target: Optional[str], token: str) -> Tuple[bo
         try:
             stdout, stderr = proc.communicate(timeout=120)
             if proc.returncode == 0:
-                return True, {"cloned_to": dest, "output": _redact_token(stdout.strip(), token)}, {}
+                return (
+                    True,
+                    {"cloned_to": dest, "output": _redact_token(stdout.strip(), token)},
+                    {},
+                )
             return False, _redact_token(stderr.strip(), token), {}
         except subprocess.TimeoutExpired:
             if hasattr(os, "killpg") and preexec is not None:
@@ -548,7 +643,9 @@ def _handle_repo_clone(repo: str, target: Optional[str], token: str) -> Tuple[bo
         return False, f"Clone process error: {exc}", {}
 
 
-def _handle_issue_list(repo: str, state: str, limit: int, token: str) -> Tuple[bool, Any, dict[str, Any]]:
+def _handle_issue_list(
+    repo: str, state: str, limit: int, token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
     if not repo or "/" not in repo:
         return False, "Action 'issue-list' requires --repo in 'OWNER/REPO' format.", {}
     endpoint = f"/repos/{urllib.parse.quote(repo, safe='/')}/issues?state={urllib.parse.quote(state)}&per_page={limit}"
@@ -558,22 +655,43 @@ def _handle_issue_list(repo: str, state: str, limit: int, token: str) -> Tuple[b
     return True, data, meta
 
 
-def _handle_issue_create(repo: str, title: str, body: str, token: str) -> Tuple[bool, Any, dict[str, Any]]:
+def _handle_issue_create(
+    repo: str, title: str, body: str, token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
     if not repo or "/" not in repo:
-        return False, "Action 'issue-create' requires --repo in 'OWNER/REPO' format.", {}
+        return (
+            False,
+            "Action 'issue-create' requires --repo in 'OWNER/REPO' format.",
+            {},
+        )
     if not title:
-        return False, "Action 'issue-create' requires --query to specify the issue title.", {}
+        return (
+            False,
+            "Action 'issue-create' requires --query to specify the issue title.",
+            {},
+        )
     if not token:
-        return False, "Creating issues requires GitHub authentication (--token or GITHUB_TOKEN).", {}
+        return (
+            False,
+            "Creating issues requires GitHub authentication (--token or GITHUB_TOKEN).",
+            {},
+        )
 
     payload = {"title": title, "body": body or ""}
-    ok, data, code, meta = _github_api_request(f"/repos/{urllib.parse.quote(repo, safe='/')}/issues", method="POST", data=payload, token=token)
+    ok, data, code, meta = _github_api_request(
+        f"/repos/{urllib.parse.quote(repo, safe='/')}/issues",
+        method="POST",
+        data=payload,
+        token=token,
+    )
     if not ok:
         return False, data.get("message", "Failed to create issue."), meta
     return True, data, meta
 
 
-def _handle_pr_list(repo: str, state: str, limit: int, token: str) -> Tuple[bool, Any, dict[str, Any]]:
+def _handle_pr_list(
+    repo: str, state: str, limit: int, token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
     if not repo or "/" not in repo:
         return False, "Action 'pr-list' requires --repo in 'OWNER/REPO' format.", {}
     endpoint = f"/repos/{urllib.parse.quote(repo, safe='/')}/pulls?state={urllib.parse.quote(state)}&per_page={limit}"
@@ -583,19 +701,31 @@ def _handle_pr_list(repo: str, state: str, limit: int, token: str) -> Tuple[bool
     return True, data, meta
 
 
-def _handle_gist_list(query: Optional[str], limit: int, token: str) -> Tuple[bool, Any, dict[str, Any]]:
-    endpoint = f"/users/{urllib.parse.quote(query)}/gists?per_page={limit}" if query else f"/gists?per_page={limit}"
+def _handle_gist_list(
+    query: Optional[str], limit: int, token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
+    endpoint = (
+        f"/users/{urllib.parse.quote(query)}/gists?per_page={limit}"
+        if query
+        else f"/gists?per_page={limit}"
+    )
     ok, data, code, meta = _github_api_request(endpoint, token=token)
     if not ok:
         return False, data.get("message", "Failed to list gists."), meta
     return True, data, meta
 
 
-def _handle_gist_create(query: Optional[str], body: str, token: str) -> Tuple[bool, Any, dict[str, Any]]:
+def _handle_gist_create(
+    query: Optional[str], body: str, token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
     if not body:
         return False, "Action 'gist-create' requires --body content.", {}
     if not token:
-        return False, "Creating gists requires GitHub authentication (--token or GITHUB_TOKEN).", {}
+        return (
+            False,
+            "Creating gists requires GitHub authentication (--token or GITHUB_TOKEN).",
+            {},
+        )
 
     filename = query or "snippet.txt"
     payload = {
@@ -603,13 +733,17 @@ def _handle_gist_create(query: Optional[str], body: str, token: str) -> Tuple[bo
         "public": True,
         "files": {filename: {"content": body}},
     }
-    ok, data, code, meta = _github_api_request("/gists", method="POST", data=payload, token=token)
+    ok, data, code, meta = _github_api_request(
+        "/gists", method="POST", data=payload, token=token
+    )
     if not ok:
         return False, data.get("message", "Failed to create gist."), meta
     return True, data, meta
 
 
-def _handle_search(query: str, limit: int, token: str) -> Tuple[bool, Any, dict[str, Any]]:
+def _handle_search(
+    query: str, limit: int, token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
     if not query:
         return False, "Action 'search' requires a query string (--query).", {}
     encoded_q = urllib.parse.quote(query)
@@ -620,9 +754,15 @@ def _handle_search(query: str, limit: int, token: str) -> Tuple[bool, Any, dict[
     return True, data.get("items", []), meta
 
 
-def _handle_workflow_list(repo: str, limit: int, token: str) -> Tuple[bool, Any, dict[str, Any]]:
+def _handle_workflow_list(
+    repo: str, limit: int, token: str
+) -> Tuple[bool, Any, dict[str, Any]]:
     if not repo or "/" not in repo:
-        return False, "Action 'workflow-list' requires --repo in 'OWNER/REPO' format.", {}
+        return (
+            False,
+            "Action 'workflow-list' requires --repo in 'OWNER/REPO' format.",
+            {},
+        )
     endpoint = f"/repos/{urllib.parse.quote(repo, safe='/')}/actions/workflows?per_page={limit}"
     ok, data, code, meta = _github_api_request(endpoint, token=token)
     if not ok:
@@ -633,6 +773,7 @@ def _handle_workflow_list(repo: str, limit: int, token: str) -> Tuple[bool, Any,
 # ==============================================================================
 # SECTION 7: Primary Master Tool Execution Logic
 # ==============================================================================
+
 
 def execute_tool(
     action: str = "user-info",
@@ -662,7 +803,9 @@ def execute_tool(
     action_key = action.lower().strip()
 
     cache = ToolCache()
-    cache_key = f"github:{action_key}:{repo}:{query}:{state}:{limit_val}:{resolved_token[:10]}"
+    cache_key = (
+        f"github:{action_key}:{repo}:{query}:{state}:{limit_val}:{resolved_token[:10]}"
+    )
     if use_cache and action_key not in ("issue-create", "gist-create", "repo-clone"):
         cached_result = cache.get(cache_key)
         if cached_result is not None:
@@ -687,11 +830,17 @@ def execute_tool(
         elif action_key == "repo-clone":
             ok, payload, meta = _handle_repo_clone(repo or "", target, resolved_token)
         elif action_key == "issue-list":
-            ok, payload, meta = _handle_issue_list(repo or "", state, limit_val, resolved_token)
+            ok, payload, meta = _handle_issue_list(
+                repo or "", state, limit_val, resolved_token
+            )
         elif action_key == "issue-create":
-            ok, payload, meta = _handle_issue_create(repo or "", query or "", body or "", resolved_token)
+            ok, payload, meta = _handle_issue_create(
+                repo or "", query or "", body or "", resolved_token
+            )
         elif action_key == "pr-list":
-            ok, payload, meta = _handle_pr_list(repo or "", state, limit_val, resolved_token)
+            ok, payload, meta = _handle_pr_list(
+                repo or "", state, limit_val, resolved_token
+            )
         elif action_key == "gist-list":
             ok, payload, meta = _handle_gist_list(query, limit_val, resolved_token)
         elif action_key == "gist-create":
@@ -699,7 +848,9 @@ def execute_tool(
         elif action_key == "search":
             ok, payload, meta = _handle_search(query or "", limit_val, resolved_token)
         elif action_key == "workflow-list":
-            ok, payload, meta = _handle_workflow_list(repo or "", limit_val, resolved_token)
+            ok, payload, meta = _handle_workflow_list(
+                repo or "", limit_val, resolved_token
+            )
         else:
             return {
                 "success": False,
@@ -766,10 +917,13 @@ def execute_tool(
 # SECTION 8: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write JSON output to LLM_OUTPUT destination safely."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -791,10 +945,20 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # SECTION 9: Function Entry Point for AIChat
 # ==============================================================================
 
+
 def run(
     action: Literal[
-        "repo-info", "repo-list", "repo-clone", "issue-list", "issue-create",
-        "pr-list", "gist-list", "gist-create", "search", "user-info", "workflow-list"
+        "repo-info",
+        "repo-list",
+        "repo-clone",
+        "issue-list",
+        "issue-create",
+        "pr-list",
+        "gist-list",
+        "gist-create",
+        "search",
+        "user-info",
+        "workflow-list",
     ] = "user-info",
     repo: Optional[str] = None,
     query: Optional[str] = None,
@@ -847,32 +1011,46 @@ def run(
 # SECTION 10: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="github_tool.py",
         description=f"Pyrmethus Termux GitHub Tool v{__version__}",
     )
     parser.add_argument(
-        "--action", "-a",
+        "--action",
+        "-a",
         default="user-info",
         choices=[
-            "repo-info", "repo-list", "repo-clone", "issue-list", "issue-create",
-            "pr-list", "gist-list", "gist-create", "search", "user-info", "workflow-list"
+            "repo-info",
+            "repo-list",
+            "repo-clone",
+            "issue-list",
+            "issue-create",
+            "pr-list",
+            "gist-list",
+            "gist-create",
+            "search",
+            "user-info",
+            "workflow-list",
         ],
         help="GitHub operation action (default: user-info)",
     )
     parser.add_argument(
-        "--repo", "-r",
+        "--repo",
+        "-r",
         metavar="OWNER/REPO",
         help="Target repository (e.g. octocat/Hello-World)",
     )
     parser.add_argument(
-        "--query", "-q",
+        "--query",
+        "-q",
         metavar="TEXT",
         help="Search query or title for issue/gist",
     )
     parser.add_argument(
-        "--body", "-b",
+        "--body",
+        "-b",
         metavar="TEXT",
         help="Body text for issue/PR/gist creation",
     )
@@ -883,13 +1061,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Filter state for issues/PRs (default: open)",
     )
     parser.add_argument(
-        "--limit", "-l",
+        "--limit",
+        "-l",
         type=int,
         default=30,
         help="Maximum results to return (default: 30)",
     )
     parser.add_argument(
-        "--token", "-t",
+        "--token",
+        "-t",
         metavar="TOKEN",
         help="GitHub Personal Access Token",
     )
@@ -919,7 +1099,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

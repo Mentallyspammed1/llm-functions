@@ -46,9 +46,8 @@ import urllib.parse
 import urllib.request
 import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 __version__ = "1.2.0"
 
@@ -56,15 +55,15 @@ __version__ = "1.2.0"
 # SECTION 1: Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[mGKHF]")
 
@@ -116,16 +115,30 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [WEB FETCHER ENGINE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [WEB FETCHER ENGINE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}       {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target URL:{RESET}   {data.get('url', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}HTTP Status:{RESET}  {NEON_GREEN}{data.get('status_code', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Size Bytes:{RESET}   {NEON_YELLOW}{data.get('size_bytes', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}       {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target URL:{RESET}   {data.get('url', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}HTTP Status:{RESET}  {NEON_GREEN}{data.get('status_code', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Size Bytes:{RESET}   {NEON_YELLOW}{data.get('size_bytes', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if "attempts" in data and data["attempts"] > 1:
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Attempts:{RESET}     {NEON_PINK}{data['attempts']}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Attempts:{RESET}     {NEON_PINK}{data['attempts']}{RESET}"
+        )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -136,7 +149,11 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Content Preview:{RESET}")
         for line in str(body_preview).splitlines()[:4]:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}{line[:58]}...{RESET}" if len(line) > 58 else f"{NEON_PURPLE}│{RESET}   {line}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}{line[:58]}...{RESET}"
+                if len(line) > 58
+                else f"{NEON_PURPLE}│{RESET}   {line}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -144,6 +161,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 2: Core Logic Implementation
 # ==============================================================================
+
 
 def extract_json_path(data: Any, path: str) -> Any:
     """Extract a value from nested structures using dotted paths and array indexing."""
@@ -185,7 +203,9 @@ def _format_output(data: dict[str, Any], fmt: str) -> str:
                 writer.writerow([k, str(v)])
         return out.getvalue()
     else:
-        content = data.get("content") or data.get("preview") or data.get("error") or str(data)
+        content = (
+            data.get("content") or data.get("preview") or data.get("error") or str(data)
+        )
         return str(content)
 
 
@@ -215,7 +235,11 @@ def execute_tool(
     action_clean = action.lower().strip()
 
     if action_clean != "batch" and not url:
-        return {"success": False, "error": "URL parameter is required for single-URL actions", "exit_code": 1}
+        return {
+            "success": False,
+            "error": "URL parameter is required for single-URL actions",
+            "exit_code": 1,
+        }
 
     # Normalize target URL
     target_url = url.strip() if url else ""
@@ -235,7 +259,11 @@ def execute_tool(
         req_headers["Authorization"] = f"Basic {encoded_auth}"
 
     # Setup SSL Context
-    ssl_ctx = ssl._create_unverified_context() if no_verify_ssl else ssl.create_default_context()
+    ssl_ctx = (
+        ssl._create_unverified_context()
+        if no_verify_ssl
+        else ssl.create_default_context()
+    )
 
     # Setup Opener with Proxy support
     handlers: list[urllib.request.BaseHandler] = []
@@ -244,18 +272,30 @@ def execute_tool(
     if proxy:
         handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
 
-    opener = urllib.request.build_opener(*handlers) if handlers else urllib.request.build_opener()
+    opener = (
+        urllib.request.build_opener(*handlers)
+        if handlers
+        else urllib.request.build_opener()
+    )
 
     # --------------------------------------------------------------------------
     # ACTION: BATCH MODE PROCESSING
     # --------------------------------------------------------------------------
     if action_clean == "batch":
         if not batch or not Path(batch).exists():
-            return {"success": False, "error": f"Batch file missing or invalid: '{batch}'", "exit_code": 1}
+            return {
+                "success": False,
+                "error": f"Batch file missing or invalid: '{batch}'",
+                "exit_code": 1,
+            }
         try:
             batch_data = json.loads(Path(batch).read_text(encoding="utf-8"))
             if not isinstance(batch_data, list):
-                return {"success": False, "error": "Batch JSON root must be an array of request objects", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": "Batch JSON root must be an array of request objects",
+                    "exit_code": 1,
+                }
 
             batch_results = []
             max_workers = min(10, max(1, len(batch_data)))
@@ -299,7 +339,11 @@ def execute_tool(
             res_dict["formatted_output"] = _format_output(res_dict, format)
             return res_dict
         except Exception as exc:
-            return {"success": False, "error": f"Batch execution failed: {exc}", "exit_code": 1}
+            return {
+                "success": False,
+                "error": f"Batch execution failed: {exc}",
+                "exit_code": 1,
+            }
 
     # --------------------------------------------------------------------------
     # RETRY EXECUTION WRAPPER FOR SINGLE ACTIONS
@@ -315,10 +359,18 @@ def execute_tool(
             # ACTION 1: FETCH / HEAD / HEADERS
             # ------------------------------------------------------------------
             if action_clean in ("fetch", "head", "headers"):
-                req_method = "HEAD" if action_clean in ("head", "headers") else method.upper()
-                payload = data.encode("utf-8") if data and req_method in ("POST", "PUT", "PATCH") else None
+                req_method = (
+                    "HEAD" if action_clean in ("head", "headers") else method.upper()
+                )
+                payload = (
+                    data.encode("utf-8")
+                    if data and req_method in ("POST", "PUT", "PATCH")
+                    else None
+                )
 
-                req = urllib.request.Request(target_url, data=payload, headers=req_headers, method=req_method)
+                req = urllib.request.Request(
+                    target_url, data=payload, headers=req_headers, method=req_method
+                )
 
                 with opener.open(req, timeout=timeout) as resp:
                     status_code = resp.getcode()
@@ -339,7 +391,9 @@ def execute_tool(
                         try:
                             parsed_json = json.loads(body_text)
                             extracted_val = extract_json_path(parsed_json, extract)
-                            body_text = json.dumps(extracted_val, indent=2, ensure_ascii=False)
+                            body_text = json.dumps(
+                                extracted_val, indent=2, ensure_ascii=False
+                            )
                         except json.JSONDecodeError:
                             pass
 
@@ -353,7 +407,9 @@ def execute_tool(
                         "size_bytes": len(raw_body),
                         "headers": safe_headers,
                         "content": body_text if action_clean != "headers" else None,
-                        "preview": json.dumps(safe_headers, indent=2) if action_clean == "headers" else body_text[:200],
+                        "preview": json.dumps(safe_headers, indent=2)
+                        if action_clean == "headers"
+                        else body_text[:200],
                         "attempts": attempts,
                         "duration_ms": duration_ms,
                         "exit_code": 0,
@@ -365,10 +421,16 @@ def execute_tool(
             # ACTION 2: DOWNLOAD (STREAMED CHUNKS)
             # ------------------------------------------------------------------
             elif action_clean == "download":
-                out_file = Path(output).expanduser().resolve() if output else Path.cwd() / "downloaded_file"
+                out_file = (
+                    Path(output).expanduser().resolve()
+                    if output
+                    else Path.cwd() / "downloaded_file"
+                )
                 out_file.parent.mkdir(parents=True, exist_ok=True)
 
-                req = urllib.request.Request(target_url, headers=req_headers, method="GET")
+                req = urllib.request.Request(
+                    target_url, headers=req_headers, method="GET"
+                )
                 with opener.open(req, timeout=timeout) as resp:
                     status_code = resp.getcode()
                     sha256_hash = hashlib.sha256()
@@ -427,7 +489,11 @@ def execute_tool(
                 tls_ms = 0.0
                 if parsed.scheme == "https":
                     t2 = time.perf_counter()
-                    trace_ssl_ctx = ssl._create_unverified_context() if no_verify_ssl else ssl.create_default_context()
+                    trace_ssl_ctx = (
+                        ssl._create_unverified_context()
+                        if no_verify_ssl
+                        else ssl.create_default_context()
+                    )
                     with trace_ssl_ctx.wrap_socket(raw_sock, server_hostname=host):
                         tls_ms = round((time.perf_counter() - t2) * 1000, 2)
                 else:
@@ -443,7 +509,9 @@ def execute_tool(
                     "resolved_ips": ips,
                     "dns_latency_ms": dns_ms,
                     "tcp_connect_latency_ms": tcp_ms,
-                    "tls_handshake_latency_ms": tls_ms if parsed.scheme == "https" else None,
+                    "tls_handshake_latency_ms": tls_ms
+                    if parsed.scheme == "https"
+                    else None,
                     "attempts": attempts,
                     "duration_ms": duration_ms,
                     "exit_code": 0,
@@ -452,7 +520,11 @@ def execute_tool(
                 return res_dict
 
             else:
-                return {"success": False, "error": f"Unsupported or unknown action: '{action}'", "exit_code": 1}
+                return {
+                    "success": False,
+                    "error": f"Unsupported or unknown action: '{action}'",
+                    "exit_code": 1,
+                }
 
         except Exception as exc:
             last_error = exc
@@ -474,6 +546,7 @@ def execute_tool(
 # ==============================================================================
 # SECTION 3: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
+
 
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination."""
@@ -498,6 +571,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 4: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     action: str,
@@ -550,30 +624,35 @@ def run(
 # SECTION 5: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="web_fetcher.py",
         description=f"AIChat Advanced Web Fetcher & Diagnostics Tool v{__version__}",
     )
     parser.add_argument(
-        "--action", "-a",
+        "--action",
+        "-a",
         required=True,
         choices=["fetch", "head", "download", "ping", "headers", "trace", "batch"],
         help="Action to perform (required)",
     )
     parser.add_argument(
-        "--url", "-u",
+        "--url",
+        "-u",
         type=str,
         default=None,
         help="Target URL (required for single-URL actions)",
     )
     parser.add_argument(
-        "--method", "-m",
+        "--method",
+        "-m",
         default="GET",
         help="HTTP method: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS (default: GET)",
     )
     parser.add_argument(
-        "--data", "-d",
+        "--data",
+        "-d",
         type=str,
         default=None,
         help="Data payload for POST/PUT/PATCH requests",
@@ -597,7 +676,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Basic auth credentials in 'username:password' format",
     )
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=str,
         default=None,
         help="Destination file path for download action",
@@ -647,7 +727,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

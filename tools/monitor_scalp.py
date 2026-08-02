@@ -16,16 +16,17 @@
 # =============================================================================
 
 import argparse
+import hashlib
+import hmac
 import json
+import logging
 import os
 import sys
-import time
 import threading
-import hmac
-import hashlib
+import time
+from typing import Any, Dict, List, Optional
+
 import requests
-import logging
-from typing import Optional, Dict, Any, List, Tuple
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -94,7 +95,9 @@ def _sign(api_secret: str, payload: str) -> str:
     return hmac.new(api_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def _headers(api_key: str, api_secret: str, payload: str, timestamp_ms: Optional[str] = None) -> Dict[str, str]:
+def _headers(
+    api_key: str, api_secret: str, payload: str, timestamp_ms: Optional[str] = None
+) -> Dict[str, str]:
     ts = timestamp_ms or str(int(time.time() * 1000))
     prehash = ts + api_key + RECV_WINDOW + payload
     return {
@@ -163,7 +166,9 @@ def spread_bps(ticker: Dict[str, Any]) -> Optional[float]:
         return None
 
 
-def fetch_positions(api_key: str, api_secret: str, symbols: List[str]) -> Optional[List[Dict]]:
+def fetch_positions(
+    api_key: str, api_secret: str, symbols: List[str]
+) -> Optional[List[Dict]]:
     params = {"category": "linear", "settleCoin": "USDT"}
     qs = query_string(params)
     try:
@@ -205,7 +210,9 @@ def fetch_positions_ws_or_rest(
     return fetch_positions(api_key, api_secret, symbols)
 
 
-def set_leverage(api_key: str, api_secret: str, symbol: str, leverage: int) -> Dict[str, Any]:
+def set_leverage(
+    api_key: str, api_secret: str, symbol: str, leverage: int
+) -> Dict[str, Any]:
     global _leverage_set_for
     if symbol in _leverage_set_for:
         return {"success": True, "cached": True, "symbol": symbol}
@@ -480,12 +487,16 @@ def on_ws_message(message: str, symbols: List[str], verbose: bool) -> None:
                     continue
                 with ws_cache_lock:
                     ws_positions_cache[sym] = item
-            log_message(f"WS position update: {len(data.get('data', []))} rows", verbose=True)
+            log_message(
+                f"WS position update: {len(data.get('data', []))} rows", verbose=True
+            )
     except Exception as e:
         log_message(f"WS Error: {e}", verbose=True)
 
 
-def start_ws_listener(api_key: str, api_secret: str, symbols: List[str], verbose: bool) -> None:
+def start_ws_listener(
+    api_key: str, api_secret: str, symbols: List[str], verbose: bool
+) -> None:
     global ws_active, ws_thread
     if ws_active:
         return
@@ -501,10 +512,13 @@ def start_ws_listener(api_key: str, api_secret: str, symbols: List[str], verbose
         ws_url = _ws_url()
         while ws_active:
             try:
+
                 def on_open(ws):
                     log_message("WS Connected", verbose=True)
                     ws.send(json.dumps(_ws_auth_payload(api_key, api_secret)))
-                    ws.send(json.dumps({"op": "subscribe", "args": ["position.linear"]}))
+                    ws.send(
+                        json.dumps({"op": "subscribe", "args": ["position.linear"]})
+                    )
 
                 def on_message(ws, message):
                     on_ws_message(message, list(sym_set), verbose)
@@ -532,7 +546,7 @@ def load_ws_cache() -> None:
     """Load persisted WS cache from disk (if present)."""
     if os.path.exists(WS_CACHE_FILE):
         try:
-            with open(WS_CACHE_FILE, "r") as f:
+            with open(WS_CACHE_FILE) as f:
                 data = json.load(f)
                 with ws_cache_lock:
                     ws_positions_cache.update(data)
@@ -628,7 +642,10 @@ class ScalpEngine:
         if self.use_ws and not self.force_rest:
             start_ws_listener(self.api_key, self.api_secret, self.symbols, self.verbose)
         else:
-            log_message("WebSocket listener disabled (force‑rest or not requested)", verbose=self.verbose)
+            log_message(
+                "WebSocket listener disabled (force‑rest or not requested)",
+                verbose=self.verbose,
+            )
 
         try:
             while True:
@@ -640,31 +657,49 @@ class ScalpEngine:
                     }
 
                 positions = fetch_positions_ws_or_rest(
-                    self.api_key, self.api_secret, self.symbols, self.use_ws and not self.force_rest
+                    self.api_key,
+                    self.api_secret,
+                    self.symbols,
+                    self.use_ws and not self.force_rest,
                 )
                 if positions is None:
-                    log_message("Positions fetch returned None – sleeping", verbose=self.verbose)
+                    log_message(
+                        "Positions fetch returned None – sleeping", verbose=self.verbose
+                    )
                     time.sleep(self.interval)
                     continue
 
                 free = symbols_without_position(positions, self.symbols)
-                log_message(f"Fetched {len(positions)} positions; free symbols: {free}", verbose=self.verbose)
+                log_message(
+                    f"Fetched {len(positions)} positions; free symbols: {free}",
+                    verbose=self.verbose,
+                )
 
                 if free:
-                    target_sym = free[self.symbols.index(target_sym) if (target_sym := free[0]) else 0]
+                    target_sym = free[
+                        self.symbols.index(target_sym) if (target_sym := free[0]) else 0
+                    ]
                     # Actually we just rotate through the free list
-                    target_sym = free[self.symbols.index(free[0]) % len(free)] if free else None
+                    target_sym = (
+                        free[self.symbols.index(free[0]) % len(free)] if free else None
+                    )
                     if not target_sym:
                         time.sleep(self.interval)
                         continue
 
                     # Cool‑down check
                     if self._check_cool_down(target_sym):
-                        log_message(f"Cool‑down active for {target_sym}; skipping this round", verbose=self.verbose)
+                        log_message(
+                            f"Cool‑down active for {target_sym}; skipping this round",
+                            verbose=self.verbose,
+                        )
                         time.sleep(self.interval)
                         continue
 
-                    log_message(f"Opportunity on {target_sym}; placing scalp...", verbose=self.verbose)
+                    log_message(
+                        f"Opportunity on {target_sym}; placing scalp...",
+                        verbose=self.verbose,
+                    )
                     result = place_scalp_order(
                         self.api_key,
                         self.api_secret,
@@ -698,11 +733,17 @@ class ScalpEngine:
 # CLI entry point
 # ---------------------------------------------------------------------------
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bybit Position Monitor & Micro‑Scalper")
+    parser = argparse.ArgumentParser(
+        description="Bybit Position Monitor & Micro‑Scalper"
+    )
     parser.add_argument("--symbol", required=True, help="Trading pair, e.g. BTCUSDT")
-    parser.add_argument("--qty", type=float, required=True, help="Quantity (base asset)")
+    parser.add_argument(
+        "--qty", type=float, required=True, help="Quantity (base asset)"
+    )
     parser.add_argument("--leverage", type=int, required=True, help="Leverage value")
-    parser.add_argument("--interval", type=int, default=30, help="Poll interval in seconds")
+    parser.add_argument(
+        "--interval", type=int, default=30, help="Poll interval in seconds"
+    )
     parser.add_argument("--trailing-stop", type=float, help="Trailing‑stop distance")
     parser.add_argument("--target-profit", type=float, help="Target profit in USDT")
     parser.add_argument(
@@ -722,10 +763,16 @@ def main() -> None:
         default=None,
         help="Skip scalp if spread exceeds this many basis points",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Simulate without real orders")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Simulate without real orders"
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
-    parser.add_argument("--use-ws", action="store_true", help="Use WebSocket for positions")
-    parser.add_argument("--force-rest", action="store_true", help="Disable WebSocket entirely")
+    parser.add_argument(
+        "--use-ws", action="store_true", help="Use WebSocket for positions"
+    )
+    parser.add_argument(
+        "--force-rest", action="store_true", help="Disable WebSocket entirely"
+    )
     parser.add_argument(
         "--cool-down",
         type=int,
@@ -737,7 +784,9 @@ def main() -> None:
         type=str,
         help="Path to JSON config file containing any of the above options",
     )
-    parser.add_argument("--sell-scalp", action="store_true", help="Enable sell‑scalp mode")
+    parser.add_argument(
+        "--sell-scalp", action="store_true", help="Enable sell‑scalp mode"
+    )
     args = parser.parse_args()
 
     # -----------------------------------------------------------------------
@@ -746,14 +795,16 @@ def main() -> None:
     config_data: Optional[Dict[str, Any]] = None
     if args.config:
         try:
-            with open(args.config, "r") as f:
+            with open(args.config) as f:
                 config_data = json.load(f)
         except Exception as e:
             log_message(f"Failed to load config file: {e}", verbose=args.verbose)
             config_data = {}
 
     # Merge CLI args with config; CLI values take precedence
-    def merge_args_namespace(ns: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    def merge_args_namespace(
+        ns: argparse.Namespace, cfg: Dict[str, Any]
+    ) -> Dict[str, Any]:
         merged = vars(ns).copy()
         for k, v in cfg.items():
             if v is not None and k in merged:

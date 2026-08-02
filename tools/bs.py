@@ -53,7 +53,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 try:
     import requests
@@ -68,6 +68,7 @@ except ImportError:
 # Optional progress bar import
 try:
     from tqdm import tqdm
+
     HAS_TQDM = True
 except ImportError:
     HAS_TQDM = False
@@ -116,15 +117,15 @@ class GracefulShutdown:
 # SECTION 2: UI Palette & Visual Helpers
 # ==============================================================================
 
-NEON_CYAN   = "\033[38;5;51m"
-NEON_GREEN  = "\033[38;5;46m"
-NEON_RED    = "\033[38;5;196m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
 NEON_YELLOW = "\033[38;5;226m"
 NEON_PURPLE = "\033[38;5;129m"
-NEON_PINK   = "\033[38;5;198m"
-RESET       = "\033[0m"
-BOLD        = "\033[1m"
-DIM         = "\033[2m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[a-zA-Z]")
 
@@ -136,10 +137,15 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Check if stderr is connected to an interactive TTY."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print formatted ANSI text to target stream."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -174,10 +180,19 @@ def get_agent_var(name: str, default: str = "") -> str:
     return os.environ.get(f"LLM_AGENT_VAR_{name.upper()}", default)
 
 
-def _get_progress_bar(iterable: Iterable[Any], total: int, desc: str, disable: bool) -> Iterable[Any]:
+def _get_progress_bar(
+    iterable: Iterable[Any], total: int, desc: str, disable: bool
+) -> Iterable[Any]:
     """Provide tqdm progress bar if available, else fallback cleanly."""
     if HAS_TQDM and not disable:
-        return tqdm(iterable, total=total, desc=desc, unit="file", colour="cyan", disable=disable)
+        return tqdm(
+            iterable,
+            total=total,
+            desc=desc,
+            unit="file",
+            colour="cyan",
+            disable=disable,
+        )
     return iterable
 
 
@@ -200,10 +215,18 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         f"{status_color}{BOLD}{status_symbol} {status_text}{RESET}"
     )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}        {NEON_YELLOW}{data.get('query', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}        {data.get('count', 0)}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Downloads:{RESET}    {NEON_GREEN}{data.get('download_count', 0)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}        {NEON_YELLOW}{data.get('query', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}        {data.get('count', 0)}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Downloads:{RESET}    {NEON_GREEN}{data.get('download_count', 0)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -212,14 +235,18 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     results = data.get("results", [])
     if results:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Search Results Preview ({len(results)}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Search Results Preview ({len(results)}):{RESET}"
+        )
         for res in results[:5]:
             title = res.get("title", "Untitled")[:48]
             url = res.get("url", "")[:50]
             _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {BOLD}{title}{RESET}")
             _cprint(f"{NEON_PURPLE}│{RESET}     {DIM}{url}{RESET}")
         if len(results) > 5:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(results) - 5} more results{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(results) - 5} more results{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -250,7 +277,7 @@ def _unwrap_brave_redirect(url: str) -> str:
     if "/g?r=" in url or "search.brave.com/g?" in url:
         parsed = urllib.parse.urlparse(url)
         qs = urllib.parse.parse_qs(parsed.query)
-        if "r" in qs and qs["r"]:
+        if qs.get("r"):
             return qs["r"][0]
     return url
 
@@ -315,10 +342,14 @@ def _is_valid_url(
     ):
         return None
 
-    if exclude_domains and any(domain == d or domain.endswith("." + d) for d in exclude_domains):
+    if exclude_domains and any(
+        domain == d or domain.endswith("." + d) for d in exclude_domains
+    ):
         return None
 
-    if include_domains and not any(domain == d or domain.endswith("." + d) for d in include_domains):
+    if include_domains and not any(
+        domain == d or domain.endswith("." + d) for d in include_domains
+    ):
         return None
 
     return unwrapped
@@ -419,7 +450,9 @@ class BraveSearchEngine:
                     url, params=params, timeout=(5.0, float(self.timeout))
                 )
                 if resp.status_code == 429:
-                    self._log("Brave returned HTTP 429 Rate Limit. Attempting DuckDuckGo fallback...")
+                    self._log(
+                        "Brave returned HTTP 429 Rate Limit. Attempting DuckDuckGo fallback..."
+                    )
                     ddg_url = "https://html.duckduckgo.com/html/"
                     ddg_headers = {
                         "User-Agent": "Lynx/2.8.9rel.1 libwww-FM/2.14 SSL-MM/1.4.1 OpenSSL/1.1.1w",
@@ -446,7 +479,9 @@ class BraveSearchEngine:
                 if attempt < self.max_retries:
                     time.sleep(0.5 * (2 ** (attempt - 1)))
 
-        raise RuntimeError(f"HTTP request failed after {self.max_retries} attempt(s): {last_err}")
+        raise RuntimeError(
+            f"HTTP request failed after {self.max_retries} attempt(s): {last_err}"
+        )
 
     def parse_results(
         self,
@@ -466,7 +501,9 @@ class BraveSearchEngine:
                 if "@graph" in data and isinstance(data["@graph"], list):
                     for sub in data["@graph"]:
                         nodes.extend(_extract_json_ld_nodes(sub))
-                elif "itemListElement" in data and isinstance(data["itemListElement"], list):
+                elif "itemListElement" in data and isinstance(
+                    data["itemListElement"], list
+                ):
                     nodes.extend(data["itemListElement"])
                 elif data.get("@type") in ("SearchResult", "WebPage", "Article"):
                     nodes.append(data)
@@ -489,14 +526,20 @@ class BraveSearchEngine:
                 for item in _extract_json_ld_nodes(raw_data):
                     if len(results) >= max_results:
                         break
-                    valid_url = _is_valid_url(item.get("url", ""), seen_urls, include_domains, exclude_domains)
+                    valid_url = _is_valid_url(
+                        item.get("url", ""), seen_urls, include_domains, exclude_domains
+                    )
                     if valid_url:
                         seen_urls.add(valid_url)
                         results.append(
                             {
-                                "title": item.get("name") or item.get("headline") or "Untitled",
+                                "title": item.get("name")
+                                or item.get("headline")
+                                or "Untitled",
                                 "url": valid_url,
-                                "description": _clean_snippet_text(item.get("description", "No description available")),
+                                "description": _clean_snippet_text(
+                                    item.get("description", "No description available")
+                                ),
                                 "position": len(results) + 1,
                             }
                         )
@@ -518,15 +561,19 @@ class BraveSearchEngine:
             if len(results) >= max_results:
                 break
 
-            title_tag = (
-                snippet.find("a", class_=re.compile(r"result-title|heading|title|snippet-title", re.I))
-                or snippet.find("a", href=True)
-            )
+            title_tag = snippet.find(
+                "a",
+                class_=re.compile(r"result-title|heading|title|snippet-title", re.I),
+            ) or snippet.find("a", href=True)
             if not title_tag or not title_tag.get("href"):
                 continue
 
-            full_url = urllib.parse.urljoin("https://search.brave.com", title_tag["href"])
-            valid_url = _is_valid_url(full_url, seen_urls, include_domains, exclude_domains)
+            full_url = urllib.parse.urljoin(
+                "https://search.brave.com", title_tag["href"]
+            )
+            valid_url = _is_valid_url(
+                full_url, seen_urls, include_domains, exclude_domains
+            )
             if not valid_url:
                 continue
 
@@ -535,9 +582,16 @@ class BraveSearchEngine:
 
             desc_tag = snippet.find(
                 ["div", "p", "span", "a"],
-                class_=re.compile(r"snippet-description|description|body|snippet-content|result__snippet", re.I),
+                class_=re.compile(
+                    r"snippet-description|description|body|snippet-content|result__snippet",
+                    re.I,
+                ),
             )
-            raw_desc = desc_tag.get_text(strip=True) if desc_tag else "No description available"
+            raw_desc = (
+                desc_tag.get_text(strip=True)
+                if desc_tag
+                else "No description available"
+            )
 
             results.append(
                 {
@@ -559,7 +613,9 @@ class BraveSearchEngine:
             if len(results) >= max_results:
                 break
             full_url = urllib.parse.urljoin("https://search.brave.com", a_tag["href"])
-            valid_url = _is_valid_url(full_url, seen_urls, include_domains, exclude_domains)
+            valid_url = _is_valid_url(
+                full_url, seen_urls, include_domains, exclude_domains
+            )
             title = a_tag.get_text(strip=True)
 
             if valid_url and len(title) > 5:
@@ -585,10 +641,16 @@ class BraveSearchEngine:
             for existing in self.download_dir.glob(f"{position}_{url_hash}.*"):
                 if existing.is_file() and not existing.name.startswith(".tmp_"):
                     try:
-                        cached_text = existing.read_text(encoding="utf-8", errors="replace")
+                        cached_text = existing.read_text(
+                            encoding="utf-8", errors="replace"
+                        )
                         clean_text = re.sub(r"<[^>]+>", " ", cached_text)
                         clean_text = re.sub(r"\s+", " ", clean_text).strip()
-                        preview = clean_text[:200] + "..." if len(clean_text) > 200 else clean_text
+                        preview = (
+                            clean_text[:200] + "..."
+                            if len(clean_text) > 200
+                            else clean_text
+                        )
                         return {
                             "success": True,
                             "position": position,
@@ -600,7 +662,9 @@ class BraveSearchEngine:
                             "formatted_size": _human_bytes(existing.stat().st_size),
                             "preview": preview,
                             "cached": True,
-                            "downloaded_at": datetime.fromtimestamp(existing.stat().st_mtime, timezone.utc).isoformat(),
+                            "downloaded_at": datetime.fromtimestamp(
+                                existing.stat().st_mtime, timezone.utc
+                            ).isoformat(),
                         }
                     except Exception:
                         pass
@@ -679,6 +743,7 @@ class BraveSearchEngine:
 # SECTION 4: Core Execution Controller
 # ==============================================================================
 
+
 def execute_tool(
     query: str,
     count: int = 10,
@@ -711,7 +776,11 @@ def execute_tool(
     if verbose:
         logging.basicConfig(level=logging.DEBUG, format="[DEBUG] %(message)s")
     if log_file:
-        logging.basicConfig(filename=log_file, level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s")
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)s %(message)s",
+        )
 
     count_val = max(1, min(count, 50))
     offset_val = max(0, offset)
@@ -719,11 +788,21 @@ def execute_tool(
     max_dl_val = max(1, min(max_downloads, 10))
     rate_limit_val = max(0, rate_limit or 0)
 
-    include_set = {d.strip().lower() for d in filter_domains.split(",") if d.strip()} if filter_domains else set()
-    exclude_set = {d.strip().lower() for d in exclude_domains.split(",") if d.strip()} if exclude_domains else set()
+    include_set = (
+        {d.strip().lower() for d in filter_domains.split(",") if d.strip()}
+        if filter_domains
+        else set()
+    )
+    exclude_set = (
+        {d.strip().lower() for d in exclude_domains.split(",") if d.strip()}
+        if exclude_domains
+        else set()
+    )
 
     effective_cache_dir = Path(cache_dir) if cache_dir else DEFAULT_CACHE_DIR
-    effective_download_dir = Path(download_dir) if download_dir else _get_default_download_dir()
+    effective_download_dir = (
+        Path(download_dir) if download_dir else _get_default_download_dir()
+    )
 
     shutdown = GracefulShutdown()
     engine = BraveSearchEngine(
@@ -823,9 +902,15 @@ def execute_tool(
 
         if include_raw:
             # Token-optimized raw HTML sanitization
-            sanitized = re.sub(r"<script[^>]*>[\s\S]*?</script>", "", raw_html, flags=re.I)
-            sanitized = re.sub(r"<style[^>]*>[\s\S]*?</style>", "", sanitized, flags=re.I)
-            sanitized = re.sub(r"data:image/[^;]+;base64,[a-zA-Z0-9+/=]+", "", sanitized)
+            sanitized = re.sub(
+                r"<script[^>]*>[\s\S]*?</script>", "", raw_html, flags=re.I
+            )
+            sanitized = re.sub(
+                r"<style[^>]*>[\s\S]*?</style>", "", sanitized, flags=re.I
+            )
+            sanitized = re.sub(
+                r"data:image/[^;]+;base64,[a-zA-Z0-9+/=]+", "", sanitized
+            )
             result_payload["raw_html"] = sanitized[:100_000]
 
         termux_toast(f"Search complete: {len(results)} results", "green")
@@ -849,6 +934,7 @@ def execute_tool(
 # SECTION 5: Output Routing & Entry Points
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any], output_format: str = "json") -> None:
     """Format and write JSON/JSONL/CSV payload to target LLM destination."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
@@ -861,17 +947,33 @@ def write_llm_output(data: dict[str, Any], output_format: str = "json") -> None:
         if results:
             writer.writerow(["position", "title", "url", "description"])
             for r in results:
-                writer.writerow([r.get("position"), r.get("title"), r.get("url"), r.get("description")])
+                writer.writerow(
+                    [
+                        r.get("position"),
+                        r.get("title"),
+                        r.get("url"),
+                        r.get("description"),
+                    ]
+                )
         else:
             writer.writerow(["key", "value"])
             for k, v in data.items():
-                writer.writerow([k, json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)])
+                writer.writerow(
+                    [
+                        k,
+                        json.dumps(v, ensure_ascii=False)
+                        if isinstance(v, (dict, list))
+                        else str(v),
+                    ]
+                )
         return
 
     if fmt == "jsonl":
         json_payload = json.dumps(data, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
     else:  # default json
-        json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+        json_payload = (
+            json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+        )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -950,26 +1052,30 @@ def run(
 # SECTION 6: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="brave_intel.py",
         description=f"AIChat Brave Search Engine Scraper v{__version__}",
     )
     parser.add_argument(
-        "--query", "-q",
+        "--query",
+        "-q",
         required=True,
         metavar="STRING",
         help="Search query term (required)",
     )
     parser.add_argument(
-        "--count", "-c",
+        "--count",
+        "-c",
         type=int,
         default=10,
         metavar="NUM",
         help="Number of search results (default: 10, max: 50)",
     )
     parser.add_argument(
-        "--offset", "-o",
+        "--offset",
+        "-o",
         type=int,
         default=0,
         metavar="NUM",
@@ -983,12 +1089,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Request timeout in seconds (default: 15)",
     )
     parser.add_argument(
-        "--language", "-l",
+        "--language",
+        "-l",
         metavar="LANG",
         help="Language code filter (e.g. en, es, zh-CN)",
     )
     parser.add_argument(
-        "--country", "-r",
+        "--country",
+        "-r",
         metavar="COUNTRY",
         help="Country code filter (e.g. us, uk, jp)",
     )
@@ -1029,7 +1137,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

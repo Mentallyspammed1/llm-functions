@@ -1,10 +1,11 @@
-import re
-
-with open("micro_scalp.py", "r") as f:
+with open("micro_scalp.py") as f:
     content = f.read()
 
 # Add imports
-content = content.replace("import sys", "import sys\nfrom statistics import stdev\nfrom collections import deque")
+content = content.replace(
+    "import sys",
+    "import sys\nfrom statistics import stdev\nfrom collections import deque",
+)
 
 # Fix 1: calculate_optimal_qty
 calc_qty_code = """
@@ -188,7 +189,14 @@ class MultiTimeframeAnalyzer:
 # Inject after build_market_snapshot
 content = content.replace(
     "def get_market_data_rest(",
-    multi_tf + "\n" + calc_qty_code + "\n" + eval_sig_v2 + "\n" + adaptive_sl + "\ndef get_market_data_rest("
+    multi_tf
+    + "\n"
+    + calc_qty_code
+    + "\n"
+    + eval_sig_v2
+    + "\n"
+    + adaptive_sl
+    + "\ndef get_market_data_rest(",
 )
 
 # Now patch run_one_cycle

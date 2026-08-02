@@ -27,7 +27,6 @@
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import hashlib
 import json
 import logging
@@ -38,21 +37,21 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, List, Literal, Optional, Tuple
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 # ==============================================================================
@@ -126,20 +125,18 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 # Advanced ANSI escape sequence stripping regex
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
 
 def _strip_ansi(text: str) -> str:
@@ -149,10 +146,15 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive, non-dumb terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text, stripping colors if stream is not a TTY or --no-color is set."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -160,7 +162,9 @@ def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n"
     print(text, file=target, flush=True, end=end)
 
 
-def print_progress(current: int, total: int, message: str = "", no_color: bool = False) -> None:
+def print_progress(
+    current: int, total: int, message: str = "", no_color: bool = False
+) -> None:
     """Render a visual progress bar for long-running batch operations."""
     if not _is_tty() or no_color:
         return
@@ -195,13 +199,25 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [CRON SCHEDULER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [CRON SCHEDULER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}    {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target:{RESET}    {data.get('target', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}     {NEON_YELLOW}{data.get('count', 0)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}    {NEON_YELLOW}{data.get('cached', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}  {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}    {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target:{RESET}    {data.get('target', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}     {NEON_YELLOW}{data.get('count', 0)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}    {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}  {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -210,11 +226,15 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     items = data.get("items", [])
     if items:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Cron Records / Entries ({len(items)}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Cron Records / Entries ({len(items)}):{RESET}"
+        )
         for item in items[:10]:
             _cprint(f"{NEON_PURPLE}│{RESET}    {NEON_CYAN}›{RESET} {item}")
         if len(items) > 10:
-            _cprint(f"{NEON_PURPLE}│{RESET}    {DIM}... and {len(items) - 10} more items{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}    {DIM}... and {len(items) - 10} more items{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -222,6 +242,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
@@ -245,7 +266,8 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
@@ -264,6 +286,7 @@ def _parse_env_vars(env_vars: Optional[list[str]]) -> dict[str, str]:
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     """Caching utility with TTL support for expensive operations."""
@@ -403,7 +426,9 @@ def execute_tool(
 
     if verbose:
         logging.basicConfig(level=logging.DEBUG, format="[DEBUG] %(message)s")
-        logging.debug(f"Starting cron_scheduler execution with action '{action}' on target: {target}")
+        logging.debug(
+            f"Starting cron_scheduler execution with action '{action}' on target: {target}"
+        )
 
     parsed_env = _parse_env_vars(env_vars)
     limit_val = limit if (limit is not None and limit >= 0) else 100
@@ -505,7 +530,9 @@ def execute_tool(
                         "exit_code": EXIT_ERROR,
                         "duration_ms": round((time.monotonic() - start_time) * 1000, 2),
                     }
-            processed_items = [f"Removed {removed_count} job(s) matching '{cmd_pattern}'"]
+            processed_items = [
+                f"Removed {removed_count} job(s) matching '{cmd_pattern}'"
+            ]
 
         elif action == CronAction.AUDIT.value:
             log_files: list[Path] = []
@@ -513,12 +540,20 @@ def execute_tool(
                 log_files = [target_path]
             elif target_path.is_dir():
                 pattern = file_pattern or "*cron*.log"
-                iterator = target_path.rglob(pattern) if recursive else target_path.glob(pattern)
+                iterator = (
+                    target_path.rglob(pattern)
+                    if recursive
+                    else target_path.glob(pattern)
+                )
                 log_files = [p for p in iterator if p.is_file()]
 
             if not log_files:
                 # Attempt standard system log fallback paths
-                for fallback in [Path("/var/log/syslog"), Path("/var/log/cron.log"), Path.home() / ".cron.log"]:
+                for fallback in [
+                    Path("/var/log/syslog"),
+                    Path("/var/log/cron.log"),
+                    Path.home() / ".cron.log",
+                ]:
                     if fallback.exists():
                         log_files.append(fallback)
                         break
@@ -526,8 +561,12 @@ def execute_tool(
             audit_lines: list[str] = []
             for lfile in log_files:
                 try:
-                    content = lfile.read_text(encoding="utf-8", errors="replace").splitlines()
-                    cron_matches = [line for line in content if "CRON" in line or "cron" in line]
+                    content = lfile.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines()
+                    cron_matches = [
+                        line for line in content if "CRON" in line or "cron" in line
+                    ]
                     audit_lines.extend(cron_matches[-log_limit:])
                 except Exception as read_err:
                     if verbose:
@@ -551,7 +590,9 @@ def execute_tool(
             "target": str(target_path),
             "mode": mode,
             "count": len(processed_items),
-            "items": processed_items if mode == "detailed" else processed_items[:limit_val],
+            "items": processed_items
+            if mode == "detailed"
+            else processed_items[:limit_val],
             "parsed_env_vars": parsed_env,
             "context": get_execution_context(),
             "cached": False,
@@ -588,10 +629,13 @@ def execute_tool(
 # SECTION 6: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination safely."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -611,6 +655,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 7: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     target: str = "~/",
@@ -668,30 +713,35 @@ def run(
 # SECTION 8: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cron_scheduler_tool.py",
         description=f"Termux Task & Cron Automation Tool v{__version__}",
     )
     parser.add_argument(
-        "--target", "-t",
+        "--target",
+        "-t",
         default="~/",
         metavar="PATH",
         help="Target file or directory path (default: ~/)",
     )
     parser.add_argument(
-        "--action", "-a",
+        "--action",
+        "-a",
         choices=["list", "add", "remove", "audit"],
         default="list",
         help="Action to perform: list, add, remove, audit (default: list)",
     )
     parser.add_argument(
-        "--schedule", "-s",
+        "--schedule",
+        "-s",
         metavar="CRON_EXPR",
         help="Standard 5-part cron schedule string (e.g. '*/15 * * * *')",
     )
     parser.add_argument(
-        "--command", "-c",
+        "--command",
+        "-c",
         metavar="CMD",
         help="Shell command string to schedule or identify for removal",
     )
@@ -748,7 +798,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

@@ -15,33 +15,43 @@
 # @option --balance-check!          <Optional> Perform a pre‑order account‑balance validation.
 # ==============================================================================
 
+import hashlib
+import hmac
+import json
+import os
 import sys
 import time
-import os
-import hmac
-import hashlib
-import json
+from typing import Any, Dict
+
 import requests
-from typing import Dict, Any
 
 BASE_URL = "https://bybit.com"
+
 
 # ---------------------------------------------------------------------------
 # Helper: signature generation
 # ---------------------------------------------------------------------------
-def generate_signature(secret: str, timestamp: int, api_key: str, recv_window: int, payload: str) -> str:
+def generate_signature(
+    secret: str, timestamp: int, api_key: str, recv_window: int, payload: str
+) -> str:
     param_str = f"{timestamp}{api_key}{recv_window}{payload}"
-    return hmac.new(secret.encode("utf-8"), param_str.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.new(
+        secret.encode("utf-8"), param_str.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
 
 
 # ---------------------------------------------------------------------------
 # Helper: signed POST request
 # ---------------------------------------------------------------------------
-def send_signed_post(endpoint: str, payload_dict: Dict[str, Any], api_key: str, api_secret: str) -> Dict[str, Any]:
+def send_signed_post(
+    endpoint: str, payload_dict: Dict[str, Any], api_key: str, api_secret: str
+) -> Dict[str, Any]:
     timestamp = int(time.time() * 1000)
     recv_window = 5000
     payload_json = json.dumps(payload_dict)
-    signature = generate_signature(api_secret, timestamp, api_key, recv_window, payload_json)
+    signature = generate_signature(
+        api_secret, timestamp, api_key, recv_window, payload_json
+    )
 
     headers = {
         "X-BAPI-API-KEY": api_key,
@@ -68,10 +78,14 @@ def get_market_data(symbol: str) -> Dict[str, Any]:
     best_bid, best_ask = float(ob_data["b"]), float(ob_data["a"])
     bid_vol = sum(float(b) for b in ob_data["b"])
     ask_vol = sum(float(a) for a in ob_data["a"])
-    imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol) if (bid_vol + ask_vol) > 0 else 0.0
+    imbalance = (
+        (bid_vol - ask_vol) / (bid_vol + ask_vol) if (bid_vol + ask_vol) > 0 else 0.0
+    )
 
     # 1‑minute candles for micro‑momentum
-    kline_url = f"{BASE_URL}/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=3"
+    kline_url = (
+        f"{BASE_URL}/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=3"
+    )
     kline_list = session.get(kline_url).json()["result"]["list"]
     close_now = float(kline_list[-1]["close"])
     close_past = float(kline_list[-2]["close"])
@@ -101,7 +115,9 @@ def round_to_tick(price: float, tick_size: float) -> float:
 # ---------------------------------------------------------------------------
 # Helper: account‑balance validation (optional)
 # ---------------------------------------------------------------------------
-def check_account_balance(api_key: str, api_secret: str, required_margin: float) -> bool:
+def check_account_balance(
+    api_key: str, api_secret: str, required_margin: float
+) -> bool:
     """
     Query the Bybit account endpoint and verify that the *free* balance can cover
     the required margin. Returns True if OK, False otherwise.
@@ -110,7 +126,9 @@ def check_account_balance(api_key: str, api_secret: str, required_margin: float)
     payload = {}
     resp = send_signed_post(endpoint, payload, api_key, api_secret)
     if resp.get("retCode") != 0:
-        print(json.dumps({"status": "error", "message": f"Balance check failed: {resp}"}))
+        print(
+            json.dumps({"status": "error", "message": f"Balance check failed: {resp}"})
+        )
         return False
 
     balance = resp.get("result", {}).get("accountInfo", {}).get("list", {})
@@ -143,7 +161,14 @@ def main(args: Dict[str, Any]) -> None:
     api_key = args.get("api_key") or os.environ.get("BYBIT_API_KEY")
     api_secret = args.get("api_secret") or os.environ.get("BYBIT_API_SECRET")
     if not api_key or not api_secret:
-        print(json.dumps({"status": "error", "message": "Missing BYBIT_API_KEY or BYBIT_API_SECRET in environment variables."}))
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "message": "Missing BYBIT_API_KEY or BYBIT_API_SECRET in environment variables.",
+                }
+            )
+        )
         return
     symbol = args.get("symbol")
     qty = float(args.get("qty"))
@@ -151,8 +176,8 @@ def main(args: Dict[str, Any]) -> None:
     maker_fee = float(args.get("maker_fee"))
 
     # New optional flags
-    trailing_stop = args.get("trailing_stop")          # e.g. 0.001 = 0.1% of entry price
-    balance_check = args.get("balance_check", False)   # boolean flag
+    trailing_stop = args.get("trailing_stop")  # e.g. 0.001 = 0.1% of entry price
+    balance_check = args.get("balance_check", False)  # boolean flag
 
     # -----------------------------------------------------------------------
     # Basic validation
@@ -177,7 +202,11 @@ def main(args: Dict[str, Any]) -> None:
         imbalance, momentum = market["imbalance"], market["momentum"]
         tick_size = market["tick_size"]
     except Exception as exc:
-        print(json.dumps({"status": "error", "message": f"Market data fetch failed: {str(exc)}"}))
+        print(
+            json.dumps(
+                {"status": "error", "message": f"Market data fetch failed: {exc!s}"}
+            )
+        )
         return
 
     # -----------------------------------------------------------------------
@@ -192,14 +221,18 @@ def main(args: Dict[str, Any]) -> None:
         # ---- entry fee (maker fee) -------------------------------------------------
         entry_fee = entry_price * qty * maker_fee
         # ---- raw exit price that yields `target_profit` after fees -----------------
-        raw_exit = (target_profit + entry_fee + entry_price * qty) / (qty * (1 - maker_fee))
+        raw_exit = (target_profit + entry_fee + entry_price * qty) / (
+            qty * (1 - maker_fee)
+        )
         exit_price = round_to_tick(raw_exit, tick_size)
 
     elif momentum < -0.0001 and imbalance < -0.05:
         side, tp_side = "Sell", "Buy"
         entry_price = best_ask
         entry_fee = entry_price * qty * maker_fee
-        raw_exit = ((entry_price * qty) - entry_fee - target_profit) / (qty * (1 + maker_fee))
+        raw_exit = ((entry_price * qty) - entry_fee - target_profit) / (
+            qty * (1 + maker_fee)
+        )
         exit_price = round_to_tick(raw_exit, tick_size)
 
     # -----------------------------------------------------------------------
@@ -296,7 +329,11 @@ def main(args: Dict[str, Any]) -> None:
     entry_res = send_signed_post("/v5/order/create", entry_payload, api_key, api_secret)
 
     if entry_res.get("retCode") != 0:
-        print(json.dumps({"status": "failed", "stage": "execution", "response": entry_res}))
+        print(
+            json.dumps(
+                {"status": "failed", "stage": "execution", "response": entry_res}
+            )
+        )
         return
 
     # -----------------------------------------------------------------------

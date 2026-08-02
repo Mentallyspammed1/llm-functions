@@ -16,9 +16,10 @@
 Bybit Trading & Execution Tools
 Requires BYBIT_API_KEY and BYBIT_API_SECRET
 """
-import os
-import json
+
 import argparse
+import json
+import os
 from pathlib import Path
 
 # Load .env if exists
@@ -43,7 +44,7 @@ session = HTTP(
     testnet=TESTNET,
     api_key=os.getenv("BYBIT_API_KEY"),
     api_secret=os.getenv("BYBIT_API_SECRET"),
-    proxy=PROXY
+    proxy=PROXY,
 )
 
 
@@ -56,11 +57,11 @@ def bybit_place_order(symbol, side, order_type, qty, price=None, time_in_force="
             "side": side,
             "orderType": order_type,
             "qty": str(qty),
-            "timeInForce": time_in_force
+            "timeInForce": time_in_force,
         }
         if price:
             params["price"] = str(price)
-        
+
         result = session.place_order(**params)
         print(json.dumps(result, indent=2))
     except Exception as e:
@@ -70,7 +71,9 @@ def bybit_place_order(symbol, side, order_type, qty, price=None, time_in_force="
 def bybit_cancel_order(symbol, order_id):
     """Cancel a single order"""
     try:
-        result = session.cancel_order(category="linear", symbol=symbol, orderId=order_id)
+        result = session.cancel_order(
+            category="linear", symbol=symbol, orderId=order_id
+        )
         print(json.dumps(result, indent=2))
     except Exception as e:
         print(json.dumps({"error": str(e)}))
@@ -92,7 +95,7 @@ def bybit_set_leverage(symbol, leverage):
             category="linear",
             symbol=symbol,
             buyLeverage=str(leverage),
-            sellLeverage=str(leverage)
+            sellLeverage=str(leverage),
         )
         print(json.dumps(result, indent=2))
     except Exception as e:
@@ -107,7 +110,7 @@ def bybit_set_trading_stop(symbol, tp=None, sl=None):
             params["takeProfit"] = str(tp)
         if sl:
             params["stopLoss"] = str(sl)
-        
+
         result = session.set_trading_stop(**params)
         print(json.dumps(result, indent=2))
     except Exception as e:
@@ -117,7 +120,9 @@ def bybit_set_trading_stop(symbol, tp=None, sl=None):
 def bybit_get_order_history(symbol=None, limit=20):
     """Get order history (filled/cancelled)"""
     try:
-        result = session.get_order_history(category="linear", symbol=symbol, limit=limit)
+        result = session.get_order_history(
+            category="linear", symbol=symbol, limit=limit
+        )
         print(json.dumps(result, indent=2))
     except Exception as e:
         print(json.dumps({"error": str(e)}))
@@ -142,7 +147,14 @@ def main():
         if not args.qty:
             print(json.dumps({"error": "--qty required"}))
             return
-        bybit_place_order(args.symbol, args.side, args.order_type, args.qty, args.price, args.time_in_force)
+        bybit_place_order(
+            args.symbol,
+            args.side,
+            args.order_type,
+            args.qty,
+            args.price,
+            args.time_in_force,
+        )
     elif args.action == "cancel":
         if not args.order_id:
             print(json.dumps({"error": "--order_id required"}))

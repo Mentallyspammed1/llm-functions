@@ -33,8 +33,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
-import base64
 import concurrent.futures
 import csv
 import hashlib
@@ -51,11 +49,8 @@ import sys
 import tempfile
 import time
 from datetime import datetime, timedelta
-from enum import Enum
-from functools import wraps
 from pathlib import Path
-from string import Template
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, TypeVar, Union
+from typing import Any, Literal, Optional
 from urllib.parse import quote_plus, urljoin, urlparse
 
 # Guard third-party imports
@@ -64,25 +59,31 @@ try:
     from requests.adapters import HTTPAdapter
     from requests.packages.urllib3.util.retry import Retry  # type: ignore
 except ImportError:
-    print("Error: 'requests' module is required. Install with: pip install requests", file=sys.stderr)
+    print(
+        "Error: 'requests' module is required. Install with: pip install requests",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 try:
     from bs4 import BeautifulSoup
 except ImportError:
-    print("Error: 'beautifulsoup4' module is required. Install with: pip install beautifulsoup4", file=sys.stderr)
+    print(
+        "Error: 'beautifulsoup4' module is required. Install with: pip install beautifulsoup4",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 __version__ = "3.3.2"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 EXIT_SUCCESS = 0
@@ -93,19 +94,17 @@ EXIT_PERMISSION_DENIED = 126
 EXIT_INVALID_INPUT = 127
 EXIT_INTERRUPTED = 130
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
 REALISTIC_USER_AGENTS = [
     # Chrome (Windows/Mac/Linux)
@@ -132,10 +131,15 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -198,6 +202,7 @@ class ToolJSONEncoder(json.JSONEncoder):
 
 class ToolCache:
     """Caching subsystem with custom directories and TTL bounds."""
+
     def __init__(self, cache_dir: Optional[str] = None) -> None:
         if cache_dir:
             self.cache_dir = Path(cache_dir).expanduser().resolve()
@@ -215,7 +220,7 @@ class ToolCache:
             try:
                 mtime = cache_file.stat().st_mtime
                 if time.time() - mtime < ttl_seconds:
-                    with open(cache_file, "r", encoding="utf-8") as f:
+                    with open(cache_file, encoding="utf-8") as f:
                         return json.load(f)
             except Exception:
                 pass
@@ -238,7 +243,9 @@ class GracefulShutdown:
         self.old_sigterm = signal.signal(signal.SIGTERM, self._handle_signal)
 
     def _handle_signal(self, signum: int, frame: Any) -> None:
-        sys.stderr.write(f"\n[INFO] Operation interrupted (Signal {signum}). Cleaning up...\n")
+        sys.stderr.write(
+            f"\n[INFO] Operation interrupted (Signal {signum}). Cleaning up...\n"
+        )
         sys.exit(EXIT_INTERRUPTED)
 
     def restore(self) -> None:
@@ -258,21 +265,39 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [VIDEO SEARCH ENGINE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [VIDEO SEARCH ENGINE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}    {data.get('query', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Engine:{RESET}   {data.get('engine', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}    {NEON_YELLOW}{data.get('count', 0)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}    {data.get('query', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Engine:{RESET}   {data.get('engine', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}    {NEON_YELLOW}{data.get('count', 0)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if data.get("downloaded_thumbs_count"):
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Downloaded Thumbs:{RESET} {NEON_GREEN}{data['downloaded_thumbs_count']}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Downloaded Thumbs:{RESET} {NEON_GREEN}{data['downloaded_thumbs_count']}{RESET}"
+        )
 
     if data.get("html_file"):
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}HTML File:{RESET}{NEON_GREEN} {data['html_file']}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}HTML File:{RESET}{NEON_GREEN} {data['html_file']}{RESET}"
+        )
     if data.get("csv_file"):
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}CSV File:{RESET} {NEON_GREEN} {data['csv_file']}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}CSV File:{RESET} {NEON_GREEN} {data['csv_file']}{RESET}"
+        )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -281,17 +306,27 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     results = data.get("results", [])
     if results:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Results (Top {min(len(results), 5)}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Results (Top {min(len(results), 5)}):{RESET}"
+        )
         for i, item in enumerate(results[:5], 1):
             title = item.get("title", "Untitled")[:45]
             link = item.get("link", "#")
             dur = item.get("time", "")
             time_str = f" [{dur}]" if dur and dur != "N/A" else ""
-            local_str = f" {NEON_GREEN}[Offline Thumb]{RESET}" if item.get("local_thumb") else ""
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}{i}.{RESET} {title}{DIM}{time_str}{RESET}{local_str}")
+            local_str = (
+                f" {NEON_GREEN}[Offline Thumb]{RESET}"
+                if item.get("local_thumb")
+                else ""
+            )
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}{i}.{RESET} {title}{DIM}{time_str}{RESET}{local_str}"
+            )
             _cprint(f"{NEON_PURPLE}│{RESET}      {DIM}↳ {link}{RESET}")
         if len(results) > 5:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(results) - 5} more results{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(results) - 5} more results{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -314,7 +349,8 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
         "os": get_builtin_var("__os__") or sys.platform,
     }
 
@@ -329,6 +365,7 @@ def get_headers(custom_ua: Optional[str] = None) -> dict[str, str]:
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
     }
+
 
 ENGINE_MAP: dict[str, dict[str, Any]] = {
     "pexels": {
@@ -555,16 +592,26 @@ def _engine_rate_wait(engine: str) -> None:
         _ENGINE_LAST_REQUEST[engine] = time.monotonic()
 
 
-def _retry_request(session, method: str, url: str, *, max_retries: int = 3,
-                   backoff_factor: float = 1.0, timeout: int = 15,
-                   verify: bool = True, **kwargs) -> "requests.Response":
+def _retry_request(
+    session,
+    method: str,
+    url: str,
+    *,
+    max_retries: int = 3,
+    backoff_factor: float = 1.0,
+    timeout: int = 15,
+    verify: bool = True,
+    **kwargs,
+) -> requests.Response:
     """HTTP request with exponential backoff and retry-aware 429/5xx handling."""
     last_exc: Optional[Exception] = None
-    last_resp: Optional["requests.Response"] = None
+    last_resp: Optional[requests.Response] = None
 
     for attempt in range(max_retries):
         try:
-            resp = session.request(method, url, timeout=timeout, verify=verify, **kwargs)
+            resp = session.request(
+                method, url, timeout=timeout, verify=verify, **kwargs
+            )
             last_resp = resp
 
             # Respect Retry-After header on 429/503
@@ -574,24 +621,26 @@ def _retry_request(session, method: str, url: str, *, max_retries: int = 3,
                     try:
                         wait_s = float(retry_after)
                     except ValueError:
-                        wait_s = backoff_factor * (2 ** attempt)
+                        wait_s = backoff_factor * (2**attempt)
                 else:
-                    wait_s = backoff_factor * (2 ** attempt)
+                    wait_s = backoff_factor * (2**attempt)
                 if attempt < max_retries - 1:
                     time.sleep(min(wait_s, 30))
                     continue
 
             if resp.status_code >= 500 and attempt < max_retries - 1:
-                time.sleep(backoff_factor * (2 ** attempt))
+                time.sleep(backoff_factor * (2**attempt))
                 continue
 
             return resp
-        except (requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout,
-                requests.exceptions.ChunkedEncodingError) as e:
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ) as e:
             last_exc = e
             if attempt < max_retries - 1:
-                time.sleep(backoff_factor * (2 ** attempt))
+                time.sleep(backoff_factor * (2**attempt))
                 continue
             raise
 
@@ -599,7 +648,9 @@ def _retry_request(session, method: str, url: str, *, max_retries: int = 3,
         return last_resp
     if last_exc is not None:
         raise last_exc
-    raise ToolError("Request failed after retries with no response or exception captured.")
+    raise ToolError(
+        "Request failed after retries with no response or exception captured."
+    )
 
 
 def slugify(text: str) -> str:
@@ -610,7 +661,9 @@ def slugify(text: str) -> str:
     return text[:100] or "untitled"
 
 
-def extract_item(item: BeautifulSoup, cfg: dict, base_url: str) -> Optional[dict[str, Any]]:
+def extract_item(
+    item: BeautifulSoup, cfg: dict, base_url: str
+) -> Optional[dict[str, Any]]:
     try:
         title = ""
         title_sel = cfg.get("title_selector", "")
@@ -664,7 +717,16 @@ def extract_item(item: BeautifulSoup, cfg: dict, base_url: str) -> Optional[dict
             for sel in selectors:
                 el = item.select_one(sel)
                 if el:
-                    for attr in ["data-src", "data-src-hq", "vrhdata", "data-lazy", "data-original", "data-thumb", "src", "poster"]:
+                    for attr in [
+                        "data-src",
+                        "data-src-hq",
+                        "vrhdata",
+                        "data-lazy",
+                        "data-original",
+                        "data-thumb",
+                        "src",
+                        "poster",
+                    ]:
                         val = el.get(attr, "").strip()
                         if val and not val.startswith("data:"):
                             img_url = urljoin(base_url, val)
@@ -711,11 +773,15 @@ def execute_scrape(
 ) -> list[dict[str, Any]]:
     cfg = ENGINE_MAP.get(engine)
     if not cfg:
-        raise ToolError(f"Unsupported engine '{engine}'. Available engines: {', '.join(ENGINE_MAP.keys())}")
+        raise ToolError(
+            f"Unsupported engine '{engine}'. Available engines: {', '.join(ENGINE_MAP.keys())}"
+        )
 
     base_url = cfg["url"]
     session = requests.Session()
-    retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+    retries = Retry(
+        total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]
+    )
     session.mount("http://", HTTPAdapter(max_retries=retries))
     session.mount("https://", HTTPAdapter(max_retries=retries))
 
@@ -741,9 +807,13 @@ def execute_scrape(
 
     try:
         resp = _retry_request(
-            session, "GET", url,
-            max_retries=3, backoff_factor=1.0,
-            timeout=timeout, verify=not no_verify,
+            session,
+            "GET",
+            url,
+            max_retries=3,
+            backoff_factor=1.0,
+            timeout=timeout,
+            verify=not no_verify,
         )
         resp.raise_for_status()
     except Exception as e:
@@ -798,9 +868,13 @@ def download_thumbnails(
                     session.proxies = {"http": proxy, "https": proxy}
                 session.headers.update(get_headers(custom_ua))
                 resp = _retry_request(
-                    session, "GET", url,
-                    max_retries=2, backoff_factor=0.5,
-                    timeout=timeout, verify=not no_verify,
+                    session,
+                    "GET",
+                    url,
+                    max_retries=2,
+                    backoff_factor=0.5,
+                    timeout=timeout,
+                    verify=not no_verify,
                 )
                 if resp.status_code == 200:
                     fpath.write_bytes(resp.content)
@@ -820,9 +894,13 @@ def download_thumbnails(
     return downloaded_count
 
 
-def generate_html_report(query: str, engine: str, results: list[dict[str, Any]], out_dir: Path) -> str:
+def generate_html_report(
+    query: str, engine: str, results: list[dict[str, Any]], out_dir: Path
+) -> str:
     out_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{engine}_{slugify(query)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+    filename = (
+        f"{engine}_{slugify(query)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+    )
     filepath = out_dir / filename
 
     if not _validate_sandbox(filepath):
@@ -834,16 +912,19 @@ def generate_html_report(query: str, engine: str, results: list[dict[str, Any]],
         if local_thumb and Path(local_thumb).exists():
             thumb = Path(local_thumb).as_uri()
         else:
-            thumb = item.get("img_url") or "https://via.placeholder.com/320x200?text=No+Thumbnail"
+            thumb = (
+                item.get("img_url")
+                or "https://via.placeholder.com/320x200?text=No+Thumbnail"
+            )
 
         cards_html.append(f"""
         <div class="card">
-            <a href="{item['link']}" target="_blank">
-                <img src="{thumb}" alt="{item['title']}" loading="lazy" onError="this.src='https://via.placeholder.com/320x200?text=Image+Error';">
+            <a href="{item["link"]}" target="_blank">
+                <img src="{thumb}" alt="{item["title"]}" loading="lazy" onError="this.src='https://via.placeholder.com/320x200?text=Image+Error';">
             </a>
             <div class="info">
-                <a class="title" href="{item['link']}" target="_blank">{item['title']}</a>
-                <div class="meta">⏱️ {item.get('time', 'N/A')}</div>
+                <a class="title" href="{item["link"]}" target="_blank">{item["title"]}</a>
+                <div class="meta">⏱️ {item.get("time", "N/A")}</div>
             </div>
         </div>
         """)
@@ -878,9 +959,13 @@ def generate_html_report(query: str, engine: str, results: list[dict[str, Any]],
     return str(filepath)
 
 
-def generate_csv_report(query: str, engine: str, results: list[dict[str, Any]], out_dir: Path) -> str:
+def generate_csv_report(
+    query: str, engine: str, results: list[dict[str, Any]], out_dir: Path
+) -> str:
     out_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{engine}_{slugify(query)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = (
+        f"{engine}_{slugify(query)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
     filepath = out_dir / filename
 
     if not _validate_sandbox(filepath):
@@ -888,16 +973,27 @@ def generate_csv_report(query: str, engine: str, results: list[dict[str, Any]], 
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["Title", "Link", "Thumbnail URL", "Local Thumbnail Path", "Duration", "Source"])
+        writer.writerow(
+            [
+                "Title",
+                "Link",
+                "Thumbnail URL",
+                "Local Thumbnail Path",
+                "Duration",
+                "Source",
+            ]
+        )
         for item in results:
-            writer.writerow([
-                item.get("title"),
-                item.get("link"),
-                item.get("img_url"),
-                item.get("local_thumb", ""),
-                item.get("time"),
-                item.get("source")
-            ])
+            writer.writerow(
+                [
+                    item.get("title"),
+                    item.get("link"),
+                    item.get("img_url"),
+                    item.get("local_thumb", ""),
+                    item.get("time"),
+                    item.get("source"),
+                ]
+            )
     return str(filepath)
 
 
@@ -941,7 +1037,9 @@ def execute_tool(
     engine_val = engine.lower().strip()
 
     cache = ToolCache(cache_dir)
-    cache_key = f"{query}:{engine_val}:{limit_val}:{page_val}:{output_format}:{download_thumbs}"
+    cache_key = (
+        f"{query}:{engine_val}:{limit_val}:{page_val}:{output_format}:{download_thumbs}"
+    )
     if use_cache:
         cached_result = cache.get(cache_key, cache_ttl)
         if cached_result is not None:
@@ -963,12 +1061,24 @@ def execute_tool(
         )
 
         if exclude_words:
-            excludes = [w.strip().lower() for w in exclude_words.split(",") if w.strip()]
-            results = [item for item in results if not any(w in item["title"].lower() for w in excludes)]
+            excludes = [
+                w.strip().lower() for w in exclude_words.split(",") if w.strip()
+            ]
+            results = [
+                item
+                for item in results
+                if not any(w in item["title"].lower() for w in excludes)
+            ]
 
         if require_words:
-            requires = [w.strip().lower() for w in require_words.split(",") if w.strip()]
-            results = [item for item in results if all(w in item["title"].lower() for w in requires)]
+            requires = [
+                w.strip().lower() for w in require_words.split(",") if w.strip()
+            ]
+            results = [
+                item
+                for item in results
+                if all(w in item["title"].lower() for w in requires)
+            ]
 
         if no_thumbs:
             for item in results:
@@ -1047,7 +1157,9 @@ def execute_tool(
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write JSON payload to LLM_OUTPUT target safely."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -1056,7 +1168,9 @@ def write_llm_output(data: dict[str, Any]) -> None:
     else:
         out_file_path = Path(out_path).expanduser().resolve()
         if not _validate_sandbox(out_file_path):
-            sys.stderr.write(f"Error: Output target '{out_file_path}' lies outside sandbox.\n")
+            sys.stderr.write(
+                f"Error: Output target '{out_file_path}' lies outside sandbox.\n"
+            )
             sys.stdout.write(json_payload)
             sys.stdout.flush()
             return
@@ -1144,31 +1258,36 @@ def _build_parser() -> argparse.ArgumentParser:
         description=f"AIChat Video Search Tool v{__version__}",
     )
     parser.add_argument(
-        "--query", "-q",
+        "--query",
+        "-q",
         required=True,
         metavar="TEXT",
         help="Search query terms (required)",
     )
     parser.add_argument(
-        "--engine", "-e",
+        "--engine",
+        "-e",
         default="pexels",
         choices=list(ENGINE_MAP.keys()),
         help="Video search engine (default: pexels)",
     )
     parser.add_argument(
-        "--limit", "-l",
+        "--limit",
+        "-l",
         type=int,
         default=20,
         help="Max results to return (default: 20)",
     )
     parser.add_argument(
-        "--page", "-p",
+        "--page",
+        "-p",
         type=int,
         default=1,
         help="Starting page number (default: 1)",
     )
     parser.add_argument(
-        "--output-format", "-o",
+        "--output-format",
+        "-o",
         dest="output_format",
         choices=["json", "html", "csv"],
         default="json",
@@ -1253,7 +1372,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Share output reports using termux-share",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable debug logging",
     )
@@ -1291,12 +1411,12 @@ if __name__ == "__main__":
 
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)
-    
+
     target_report = res.get("html_file") or res.get("csv_file")
     if args.open and target_report:
         open_report(target_report)
 
     if args.share and target_report and shutil.which("termux-share"):
         subprocess.run(["termux-share", target_report])
-        
+
     sys.exit(res.get("exit_code", EXIT_SUCCESS))

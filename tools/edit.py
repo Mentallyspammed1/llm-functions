@@ -99,6 +99,7 @@ from typing import (
     Callable,
 )
 
+
 class EditOptions(dict):
     """Simple dict-subclass that supports attribute access with defaults."""
 
@@ -153,13 +154,13 @@ class EditOptions(dict):
         "ops": [],
         "edits": [],
         "continue_on_error": False,
-        "dry_run": False
+        "dry_run": False,
     }
 
     def __init__(self, **kwargs):
         # Normalize 'path' alias to 'file_path'
-        if 'path' in kwargs and 'file_path' not in kwargs:
-            kwargs['file_path'] = kwargs.pop('path')
+        if "path" in kwargs and "file_path" not in kwargs:
+            kwargs["file_path"] = kwargs.pop("path")
         # Merge defaults with provided kwargs
         data = self.DEFAULTS.copy()
         data.update(kwargs)
@@ -169,40 +170,41 @@ class EditOptions(dict):
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
 
+
 __all__ = [
-    "run",
-    "read",
-    "write",
     "append",
-    "replace",
-    "insert_line",
-    "delete_line",
-    "replace_lines",
-    "file_search",
-    "copy",
-    "move",
-    "delete",
-    "info",
-    "create_dir",
-    "list_dir",
-    "diff",
-    "truncate",
-    "read_lines",
-    "set_permissions",
-    "normalize_line_endings",
-    "revert_to_backup",
-    "grep_dir",
-    "file_hash",
-    "word_count",
-    "find_files",
-    "head",
-    "tail",
-    "compare_files",
     "archive",
-    "extract",
-    "template_write",
     "batch",
     "batch_edit",
+    "compare_files",
+    "copy",
+    "create_dir",
+    "delete",
+    "delete_line",
+    "diff",
+    "extract",
+    "file_hash",
+    "file_search",
+    "find_files",
+    "grep_dir",
+    "head",
+    "info",
+    "insert_line",
+    "list_dir",
+    "move",
+    "normalize_line_endings",
+    "read",
+    "read_lines",
+    "replace",
+    "replace_lines",
+    "revert_to_backup",
+    "run",
+    "set_permissions",
+    "tail",
+    "template_write",
+    "truncate",
+    "word_count",
+    "write",
 ]
 
 __version__ = "2.9.3"
@@ -235,10 +237,11 @@ except ImportError:
 
 
 # SYNTHWAVE RETRO-NEON PALETTE
-CYBER_MAGENTA = '\033[38;5;201m'
-CYBER_LIME = '\033[38;5;82m'
-CYBER_CYAN = '\033[38;5;51m'
-RESET = '\033[0m'
+CYBER_MAGENTA = "\033[38;5;201m"
+CYBER_LIME = "\033[38;5;82m"
+CYBER_CYAN = "\033[38;5;51m"
+RESET = "\033[0m"
+
 
 def _cprint(text: str, color: str = CYBER_CYAN, style: str = "") -> None:
     """Print with Cyber-Neon palette to stderr to keep stdout clean for JSON."""
@@ -275,7 +278,9 @@ _SORT_KEYS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "type": lambda x: (not x.get("is_dir", False), x["name"].lower()),
 }
 
-_HASH_ALGORITHMS: frozenset[str] = frozenset({"sha256", "sha1", "sha512", "md5", "blake2b", "sha3_256", "sha3_512"})
+_HASH_ALGORITHMS: frozenset[str] = frozenset(
+    {"sha256", "sha1", "sha512", "md5", "blake2b", "sha3_256", "sha3_512"}
+)
 
 _TEMPLATE_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}")
 
@@ -363,9 +368,7 @@ class FileEditor:
         self._temp_str: str = str(self.temp) + os.sep
         self._termux_home: str = "/data/data/com.termux/files/home" + os.sep
 
-    def _validate_path(
-        self, file_path: str, allow_write: bool = True
-    ) -> Path | None:
+    def _validate_path(self, file_path: str, allow_write: bool = True) -> Path | None:
         """Return a resolved, sandbox-confined Path or None on any violation."""
         if not file_path or not isinstance(file_path, str):
             return None
@@ -448,7 +451,9 @@ class FileEditor:
                     )
                     if r.returncode == 0:
                         mime = r.stdout.strip()
-                        is_binary = not (mime.startswith(_TEXT_MIME_PREFIXES) or not mime)
+                        is_binary = not (
+                            mime.startswith(_TEXT_MIME_PREFIXES) or not mime
+                        )
                         if len(_MIME_CACHE) >= _MAX_MIME_CACHE_SIZE:
                             _MIME_CACHE.clear()
                         _MIME_CACHE[path_str] = None if is_binary else mime
@@ -560,7 +565,9 @@ class FileEditor:
 
                     lock_age = time.time() - lock_path.stat().st_mtime
                     if lock_age > STALE_LOCK_SECONDS:
-                        logger.warning("Breaking stale lock %s (age=%.1fs)", lock_path, lock_age)
+                        logger.warning(
+                            "Breaking stale lock %s (age=%.1fs)", lock_path, lock_age
+                        )
                         lock_path.unlink(missing_ok=True)
                         continue
                 except OSError:
@@ -700,18 +707,12 @@ def read_lines(
 ) -> dict[str, Any]:
     """Efficiently read a contiguous line range without loading the whole file."""
     if start_line is None or end_line is None:
-        return {
-            "success": False,
-            "error": "Both start_line and end_line are required"
-        }
+        return {"success": False, "error": "Both start_line and end_line are required"}
     try:
         start_line = int(start_line)
         end_line = int(end_line)
     except (ValueError, TypeError):
-        return {
-            "success": False,
-            "error": "start_line and end_line must be integers"
-        }
+        return {"success": False, "error": "start_line and end_line must be integers"}
 
     if start_line < 1 or end_line < start_line:
         return {
@@ -765,7 +766,11 @@ def write(options: EditOptions) -> dict[str, Any]:
     if not path:
         return {"success": False, "error": "Invalid or disallowed file path"}
 
-    content = str(options.content) if not isinstance(options.content, str) else options.content
+    content = (
+        str(options.content)
+        if not isinstance(options.content, str)
+        else options.content
+    )
 
     if content:
         content = content.replace("\r\n", "\n").replace("\r", "\n")
@@ -787,7 +792,7 @@ def write(options: EditOptions) -> dict[str, Any]:
             "path": str(path),
             "mode": "dry-run",
             "message": "Write operation would proceed",
-            "size_would_be": encoded_size
+            "size_would_be": encoded_size,
         }
 
     try:
@@ -850,7 +855,9 @@ def append(
 
     try:
         original = path.stat().st_size
-        newline_size = 1 if (add_newline and original > 0 and not _ends_with_newline(path)) else 0
+        newline_size = (
+            1 if (add_newline and original > 0 and not _ends_with_newline(path)) else 0
+        )
         combined = original + encoded_size + newline_size
 
         if combined > max_size:
@@ -951,27 +958,26 @@ def replace(options: EditOptions) -> dict[str, Any]:
                 new_content, count = compiled.subn(replacement, content, count=1)
                 if new_content == content:
                     count = 0
-        else:
-            # High-performance native string replacement for literal matches
-            if options.case_sensitive:
-                count = content.count(search_text)
-                if count > 0:
-                    if options.global_replace:
-                        new_content = content.replace(search_text, replacement)
-                    else:
-                        new_content = content.replace(search_text, replacement, 1)
-                        count = 1
-                else:
-                    new_content = content
-            else:
-                compiled = re.compile(re.escape(search_text), re.IGNORECASE)
-                def_replacement = replacement.replace('\\', r'\\')
+        # High-performance native string replacement for literal matches
+        elif options.case_sensitive:
+            count = content.count(search_text)
+            if count > 0:
                 if options.global_replace:
-                    new_content, count = compiled.subn(def_replacement, content)
+                    new_content = content.replace(search_text, replacement)
                 else:
-                    new_content, count = compiled.subn(def_replacement, content, count=1)
-                    if new_content == content:
-                        count = 0
+                    new_content = content.replace(search_text, replacement, 1)
+                    count = 1
+            else:
+                new_content = content
+        else:
+            compiled = re.compile(re.escape(search_text), re.IGNORECASE)
+            def_replacement = replacement.replace("\\", r"\\")
+            if options.global_replace:
+                new_content, count = compiled.subn(def_replacement, content)
+            else:
+                new_content, count = compiled.subn(def_replacement, content, count=1)
+                if new_content == content:
+                    count = 0
 
         if new_content == content:
             return {
@@ -987,7 +993,7 @@ def replace(options: EditOptions) -> dict[str, Any]:
                 "path": str(path),
                 "mode": "dry-run",
                 "message": "Replace operation would proceed",
-                "replacements_would_be": count
+                "replacements_would_be": count,
             }
 
         original_bytes = path.stat().st_size
@@ -1154,23 +1160,27 @@ def replace_lines(
         else:
             return {
                 "success": False,
-                "error": f"File is empty, cannot replace lines {start_line}-{end_line}"
+                "error": f"File is empty, cannot replace lines {start_line}-{end_line}",
             }
     else:
         lines = original.splitlines(keepends=True)
 
     total = len(lines)
 
-    if start_line > total and total > 0:
+    if start_line > total > 0:
         return {
             "success": False,
-            "error": f"start_line {start_line} exceeds file length ({total} lines)"
+            "error": f"start_line {start_line} exceeds file length ({total} lines)",
         }
 
     effective_end_line = min(end_line, total)
 
-    content_normalized = content.replace("\r\n", "\n").replace("\r", "\n") if content else ""
-    content_lines = content_normalized.splitlines(keepends=True) if content_normalized else []
+    content_normalized = (
+        content.replace("\r\n", "\n").replace("\r", "\n") if content else ""
+    )
+    content_lines = (
+        content_normalized.splitlines(keepends=True) if content_normalized else []
+    )
 
     if content_lines and not content_lines[-1].endswith("\n"):
         content_lines[-1] = content_lines[-1] + "\n"
@@ -1254,6 +1264,7 @@ def file_search(
         def match_fn(line: str) -> bool:
             return bool(comp.search(line))
     elif case_sensitive:
+
         def match_fn(line: str) -> bool:
             return pattern in line if isinstance(line, str) else False
     else:
@@ -1424,7 +1435,9 @@ def info(file_path: str) -> dict[str, Any]:
             try:
                 r = subprocess.run(
                     [_FILE_CMD, "-b", "--mime-type", str(path)],
-                    capture_output=True, text=True, timeout=2.0,
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0,
                 )
                 if r.returncode == 0 and r.stdout.strip():
                     base["mime_type"] = r.stdout.strip()
@@ -1834,6 +1847,7 @@ def grep_dir(
         def match_fn(line: str) -> bool:
             return bool(comp.search(line))
     elif case_sensitive:
+
         def match_fn(line: str) -> bool:
             return pattern in line if isinstance(line, str) else False
     else:
@@ -1966,7 +1980,7 @@ def word_count(
         lines = 0
         words = 0
         chars = 0
-        with open(path, "r", encoding=encoding, errors="surrogateescape") as f:
+        with open(path, encoding=encoding, errors="surrogateescape") as f:
             for line in f:
                 lines += 1
                 words += len(line.split())
@@ -2322,7 +2336,9 @@ def extract(
                 except AttributeError:
                     dst_str = os.path.normpath(str(dst_resolved))
                     member_str = os.path.normpath(str(member_path))
-                    is_safe = member_str.startswith(dst_str + os.sep) or member_str == dst_str
+                    is_safe = (
+                        member_str.startswith(dst_str + os.sep) or member_str == dst_str
+                    )
                 if not is_safe:
                     return {
                         "success": False,
@@ -2533,7 +2549,9 @@ def batch_edit(
                     "error": err_msg,
                     "completed": edit_results,
                 }
-            edit_results.append({"index": i, "operation": op, "success": False, "error": err_msg})
+            edit_results.append(
+                {"index": i, "operation": op, "success": False, "error": err_msg}
+            )
             continue
 
         try:
@@ -2556,28 +2574,32 @@ def batch_edit(
                         new = compiled.sub(replacement, content, count=1)
                         count = 1 if new != content else 0
                         content = new
-                else:
-                    if case_sensitive:
-                        count = content.count(search_text)
-                        if count > 0:
-                            if global_replace:
-                                content = content.replace(search_text, replacement)
-                            else:
-                                content = content.replace(search_text, replacement, 1)
-                                count = 1
-                    else:
-                        def_replacement = replacement.replace('\\', r'\\')
-                        compiled = re.compile(re.escape(search_text), re.IGNORECASE)
+                elif case_sensitive:
+                    count = content.count(search_text)
+                    if count > 0:
                         if global_replace:
-                            content, count = compiled.subn(def_replacement, content)
+                            content = content.replace(search_text, replacement)
                         else:
-                            new = compiled.sub(def_replacement, content, count=1)
-                            count = 1 if new != content else 0
-                            content = new
+                            content = content.replace(search_text, replacement, 1)
+                            count = 1
+                else:
+                    def_replacement = replacement.replace("\\", r"\\")
+                    compiled = re.compile(re.escape(search_text), re.IGNORECASE)
+                    if global_replace:
+                        content, count = compiled.subn(def_replacement, content)
+                    else:
+                        new = compiled.sub(def_replacement, content, count=1)
+                        count = 1 if new != content else 0
+                        content = new
 
                 total_replacements += count
                 edit_results.append(
-                    {"index": i, "operation": op, "success": True, "replacements": count}
+                    {
+                        "index": i,
+                        "operation": op,
+                        "success": True,
+                        "replacements": count,
+                    }
                 )
 
             elif op == "insert_line":
@@ -2594,7 +2616,12 @@ def batch_edit(
                 content = "".join(lines)
                 lines_inserted += 1
                 edit_results.append(
-                    {"index": i, "operation": op, "success": True, "line_number": line_number}
+                    {
+                        "index": i,
+                        "operation": op,
+                        "success": True,
+                        "line_number": line_number,
+                    }
                 )
 
             elif op == "delete_line":
@@ -2612,7 +2639,9 @@ def batch_edit(
                 lines_deleted += 1
                 edit_results.append(
                     {
-                        "index": i, "operation": op, "success": True,
+                        "index": i,
+                        "operation": op,
+                        "success": True,
                         "deleted_line": line_number,
                         "deleted_content": deleted.rstrip("\n"),
                     }
@@ -2623,7 +2652,9 @@ def batch_edit(
                 end_line = edit.get("end_line")
                 repl_content = edit.get("content", "")
                 if start_line is None or end_line is None:
-                    raise ValueError("start_line and end_line are required for replace_lines")
+                    raise ValueError(
+                        "start_line and end_line are required for replace_lines"
+                    )
                 start_line = int(start_line)
                 end_line = int(end_line)
                 lines = content.splitlines(keepends=True)
@@ -2633,13 +2664,18 @@ def batch_edit(
                         f"Invalid range {start_line}-{end_line} (file has {total_lines} lines)"
                     )
                 repl_lines = repl_content.splitlines()
-                replacement_lines = [line + "\n" for line in repl_lines] if repl_lines else []
+                replacement_lines = (
+                    [line + "\n" for line in repl_lines] if repl_lines else []
+                )
                 lines = lines[: start_line - 1] + replacement_lines + lines[end_line:]
                 content = "".join(lines)
                 edit_results.append(
                     {
-                        "index": i, "operation": op, "success": True,
-                        "start_line": start_line, "end_line": end_line,
+                        "index": i,
+                        "operation": op,
+                        "success": True,
+                        "start_line": start_line,
+                        "end_line": end_line,
                         "lines_replaced": end_line - start_line + 1,
                         "lines_inserted": len(replacement_lines),
                     }
@@ -2651,9 +2687,7 @@ def batch_edit(
                 if add_newline and content and not content.endswith("\n"):
                     content += "\n"
                 content += app_content
-                edit_results.append(
-                    {"index": i, "operation": op, "success": True}
-                )
+                edit_results.append({"index": i, "operation": op, "success": True})
 
         except (ValueError, re.error) as exc:
             err_msg = f"Edit {i} ({op}): {exc}"
@@ -2663,7 +2697,9 @@ def batch_edit(
                     "error": err_msg,
                     "completed": edit_results,
                 }
-            edit_results.append({"index": i, "operation": op, "success": False, "error": str(exc)})
+            edit_results.append(
+                {"index": i, "operation": op, "success": False, "error": str(exc)}
+            )
 
     if content == original_content:
         return {
@@ -2676,7 +2712,9 @@ def batch_edit(
         }
 
     if dry_run:
-        original_bytes = len(original_content.encode(encoding, errors="surrogateescape"))
+        original_bytes = len(
+            original_content.encode(encoding, errors="surrogateescape")
+        )
         new_bytes = len(content.encode(encoding, errors="surrogateescape"))
         return {
             "success": True,
@@ -2697,7 +2735,9 @@ def batch_edit(
     try:
         backup = _editor._make_backup(path, max_backups)
         _editor._atomic_write(path, content, encoding)
-        original_bytes = len(original_content.encode(encoding, errors="surrogateescape"))
+        original_bytes = len(
+            original_content.encode(encoding, errors="surrogateescape")
+        )
         new_bytes = path.stat().st_size
         return {
             "success": True,
@@ -2772,17 +2812,24 @@ def _run(options: EditOptions) -> dict[str, Any]:
     effective_search: str | None = options.search_text or options.pattern
 
     operation_dispatch: dict[str, Callable[[], dict[str, Any]]] = {
-        "read": lambda: read(file_path, options.max_size, options.encoding, options.show_lines, options.start_line, options.end_line),
+        "read": lambda: read(
+            file_path,
+            options.max_size,
+            options.encoding,
+            options.show_lines,
+            options.start_line,
+            options.end_line,
+        ),
         "read_lines": lambda: read_lines(
             file_path,
             options.start_line,  # type: ignore
-            options.end_line,    # type: ignore
+            options.end_line,  # type: ignore
             options.encoding,
         ),
         "write": lambda: write(options),
         "append": lambda: append(
             file_path,
-            options.content, # type: ignore
+            options.content,  # type: ignore
             options.encoding,
             options.add_newline,
             options.max_write_size,
@@ -2790,29 +2837,29 @@ def _run(options: EditOptions) -> dict[str, Any]:
         "replace": lambda: replace(options),
         "insert_line": lambda: insert_line(
             file_path,
-            options.line_number, # type: ignore
-            options.content, # type: ignore
+            options.line_number,  # type: ignore
+            options.content,  # type: ignore
             options.encoding,
             options.max_backups,
         ),
         "delete_line": lambda: delete_line(
             file_path,
-            options.line_number, # type: ignore
+            options.line_number,  # type: ignore
             options.encoding,
             options.max_backups,
         ),
         "replace_lines": lambda: replace_lines(
             file_path,
-            options.start_line, # type: ignore
-            options.end_line,   # type: ignore
-            options.content,    # type: ignore
+            options.start_line,  # type: ignore
+            options.end_line,  # type: ignore
+            options.content,  # type: ignore
             options.encoding,
             options.max_backups,
             options.dry_run,
         ),
         "search": lambda: file_search(
             file_path,
-            effective_search, # type: ignore
+            effective_search,  # type: ignore
             options.use_regex,
             options.case_sensitive,
             options.line_context,
@@ -2821,7 +2868,7 @@ def _run(options: EditOptions) -> dict[str, Any]:
         ),
         "file_search": lambda: file_search(
             file_path,
-            effective_search, # type: ignore
+            effective_search,  # type: ignore
             options.use_regex,
             options.case_sensitive,
             options.line_context,
@@ -2830,34 +2877,42 @@ def _run(options: EditOptions) -> dict[str, Any]:
         ),
         "copy": lambda: copy(
             file_path,
-            options.target_path, # type: ignore
+            options.target_path,  # type: ignore
             options.preserve_metadata,
             options.recursive,
         ),
         "move": lambda: move(
             file_path,
-            options.target_path, # type: ignore
+            options.target_path,  # type: ignore
         ),
         "delete": lambda: delete(file_path, options.recursive),
         "info": lambda: info(file_path),
         "create_dir": lambda: create_dir(file_path, options.parents),
-        "list_dir": lambda: list_dir(file_path, options.include_hidden, options.sort_by, options.descending),
-        "diff": lambda: diff(file_path, options.target_path, options.encoding, options.context_lines),
-        "truncate": lambda: truncate(file_path, options.truncate_size, options.encoding, options.max_backups),
+        "list_dir": lambda: list_dir(
+            file_path, options.include_hidden, options.sort_by, options.descending
+        ),
+        "diff": lambda: diff(
+            file_path, options.target_path, options.encoding, options.context_lines
+        ),
+        "truncate": lambda: truncate(
+            file_path, options.truncate_size, options.encoding, options.max_backups
+        ),
         "set_permissions": lambda: set_permissions(
             file_path,
-            options.mode, # type: ignore
+            options.mode,  # type: ignore
         ),
         "normalize_line_endings": lambda: normalize_line_endings(
             file_path,
-            options.to_type, # type: ignore
+            options.to_type,  # type: ignore
             options.encoding,
             options.max_backups,
         ),
-        "revert_to_backup": lambda: revert_to_backup(file_path, options.backup_timestamp, options.max_backups),
+        "revert_to_backup": lambda: revert_to_backup(
+            file_path, options.backup_timestamp, options.max_backups
+        ),
         "grep_dir": lambda: grep_dir(
             file_path,
-            effective_search, # type: ignore
+            effective_search,  # type: ignore
             options.use_regex,
             options.case_sensitive,
             options.include_hidden,
@@ -2886,31 +2941,36 @@ def _run(options: EditOptions) -> dict[str, Any]:
         "tail": lambda: tail(file_path, options.n_lines, options.encoding),
         "compare_files": lambda: compare_files(
             file_path,
-            options.target_path, # type: ignore
+            options.target_path,  # type: ignore
             options.compare_mode,
             options.encoding,
         ),
         "archive": lambda: archive(
             file_path,
-            options.target_path, # type: ignore
+            options.target_path,  # type: ignore
             options.compression,
             options.recursive,
         ),
         "extract": lambda: extract(
             file_path,
-            options.target_path, # type: ignore
+            options.target_path,  # type: ignore
             options.password,
         ),
         "template_write": lambda: template_write(
             file_path,
-            options.content, # type: ignore
+            options.content,  # type: ignore
             options.variables or {},
             options.encoding,
             options.create_parents,
             options.undefined_var,
         ),
         "batch_edit": lambda: batch_edit(
-            file_path, options.edits or [], options.encoding, options.max_backups, options.continue_on_error, options.dry_run,
+            file_path,
+            options.edits or [],
+            options.encoding,
+            options.max_backups,
+            options.continue_on_error,
+            options.dry_run,
         ),
     }
 
@@ -3068,16 +3128,21 @@ Examples:
         "--max-results", type=int, default=MAX_FIND_RESULTS, dest="max_results"
     )
     parser.add_argument(
-        "--edits", default=None,
+        "--edits",
+        default=None,
         help="JSON array of edits for batch_edit mode",
     )
     parser.add_argument(
-        "--continue-on-error", action="store_true", default=False,
+        "--continue-on-error",
+        action="store_true",
+        default=False,
         dest="continue_on_error",
         help="Continue batch_edit on error instead of stopping",
     )
     parser.add_argument(
-        "--dry-run", action="store_true", default=False,
+        "--dry-run",
+        action="store_true",
+        default=False,
         help="Preview changes without modifying the filesystem",
     )
     return parser
@@ -3153,10 +3218,14 @@ if __name__ == "__main__":
     ops_data = []
     if cli.operation == "batch" and cli.file_path:
         try:
-            with open(cli.file_path, 'r') as f:
+            with open(cli.file_path) as f:
                 ops_data = json.load(f)
         except Exception as e:
-            print(json.dumps({"success": False, "error": f"Failed to load batch JSON: {e}"}))
+            print(
+                json.dumps(
+                    {"success": False, "error": f"Failed to load batch JSON: {e}"}
+                )
+            )
             sys.exit(1)
 
     options = EditOptions(
@@ -3205,7 +3274,7 @@ if __name__ == "__main__":
         edits=json.loads(cli.edits) if cli.edits else [],
         continue_on_error=cli.continue_on_error,
         dry_run=cli.dry_run,
-        ops=ops_data
+        ops=ops_data,
     )
     result = _run(options)
 

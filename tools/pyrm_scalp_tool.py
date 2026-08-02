@@ -46,7 +46,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, InvalidOperation, getcontext
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation, getcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -62,6 +62,7 @@ if str(CURRENT_DIR) not in sys.path:
 # ---------------------------------------------------------------------------
 try:
     import proxy_utils
+
     proxy_utils.set_proxy_environment()
 except ImportError:
     proxy_utils = None
@@ -93,15 +94,15 @@ except ImportError:
 
 __version__ = "3.2.0-ASCENDED"
 __all__ = [
-    "run",
-    "run_scalper_cycle",
-    "process_symbol",
-    "manage_positions",
     "CircuitBreaker",
-    "PerformanceTracker",
     "FilterCache",
     "MarginBudget",
+    "PerformanceTracker",
     "__version__",
+    "manage_positions",
+    "process_symbol",
+    "run",
+    "run_scalper_cycle",
 ]
 
 # ---------------------------------------------------------------------------
@@ -279,18 +280,13 @@ def print_human_readable_ui(
     if skipped:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         _cprint(
-            f"{NEON_PURPLE}│{RESET} "
-            f"{NEON_YELLOW}{BOLD}Skipped ({len(skipped)}):{RESET}"
+            f"{NEON_PURPLE}│{RESET} {NEON_YELLOW}{BOLD}Skipped ({len(skipped)}):{RESET}"
         )
         for sym, reason in list(skipped.items())[:6]:
-            _cprint(
-                f"{NEON_PURPLE}│{RESET}   "
-                f"{NEON_YELLOW}⚑{RESET} {sym}: {reason}"
-            )
+            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_YELLOW}⚑{RESET} {sym}: {reason}")
         if len(skipped) > 6:
             _cprint(
-                f"{NEON_PURPLE}│{RESET}   "
-                f"{DIM}... and {len(skipped) - 6} more{RESET}"
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(skipped) - 6} more{RESET}"
             )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
@@ -299,6 +295,7 @@ def print_human_readable_ui(
 # ==============================================================================
 # SECTION 3: PRECISION MATH
 # ==============================================================================
+
 
 def _d(value: Any) -> Decimal:
     if value is None or value == "":
@@ -333,23 +330,20 @@ def round_to_tick(price: float, tick_size: float) -> float:
         return float(price)
     p_d = Decimal(str(price))
     t_d = Decimal(str(tick_size))
-    return float(
-        (p_d / t_d).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * t_d
-    )
+    return float((p_d / t_d).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * t_d)
 
 
 def quantize_qty(qty: float, qty_step: float, rounding=ROUND_DOWN) -> float:
     """Floor quantity to qty_step (exchange-safe)."""
     if qty_step <= 0:
         return float(qty)
-    return float(
-        Decimal(str(qty)).quantize(Decimal(str(qty_step)), rounding=rounding)
-    )
+    return float(Decimal(str(qty)).quantize(Decimal(str(qty_step)), rounding=rounding))
 
 
 # ==============================================================================
 # SECTION 4: CIRCUIT BREAKER · PERFORMANCE · CACHE · MARGIN · COOLDOWN
 # ==============================================================================
+
 
 @dataclass
 class CircuitBreaker:
@@ -368,9 +362,10 @@ class CircuitBreaker:
                 if symbol not in self._opened_at:
                     self._opened_at[symbol] = time.monotonic()
                     log.warning(
-                        "[CircuitBreaker] %s OPEN after %d failures "
-                        "(retry in %.0fs).",
-                        symbol, self.threshold, self.reset_seconds,
+                        "[CircuitBreaker] %s OPEN after %d failures (retry in %.0fs).",
+                        symbol,
+                        self.threshold,
+                        self.reset_seconds,
                     )
 
     def record_success(self, symbol: str) -> None:
@@ -387,7 +382,8 @@ class CircuitBreaker:
             if elapsed >= self.reset_seconds:
                 log.info(
                     "[CircuitBreaker] %s HALF-OPEN after %.0fs.",
-                    symbol, elapsed,
+                    symbol,
+                    elapsed,
                 )
                 del self._opened_at[symbol]
                 self._failures[symbol] = 0
@@ -543,6 +539,7 @@ _orders_lock = threading.Lock()
 # SECTION 5: BYBIT API HELPERS
 # ==============================================================================
 
+
 def set_symbol_leverage(symbol: str, leverage: int) -> bool:
     if not bybit_core:
         return False
@@ -559,24 +556,30 @@ def set_symbol_leverage(symbol: str, leverage: int) -> bool:
             signed=True,
         )
         msg = str(res.get("retMsg", "")).lower()
-        ok = (
-            res.get("retCode") == 0
-            or "already" in msg
-            or "not modified" in msg
-        )
+        ok = res.get("retCode") == 0 or "already" in msg or "not modified" in msg
         if not ok:
             import re
-            match = re.search(r"maxLeverage\s*\[(\d+)\]", res.get("retMsg", ""), re.IGNORECASE)
+
+            match = re.search(
+                r"maxLeverage\s*\[(\d+)\]", res.get("retMsg", ""), re.IGNORECASE
+            )
             if match:
                 val = int(match.group(1))
                 max_lev = val // 100 if val >= 100 else val
                 if 0 < max_lev < leverage:
-                    log.info("[%s] Auto-adjusting leverage %dx -> %dx (risk limit)", symbol, leverage, max_lev)
+                    log.info(
+                        "[%s] Auto-adjusting leverage %dx -> %dx (risk limit)",
+                        symbol,
+                        leverage,
+                        max_lev,
+                    )
                     return set_symbol_leverage(symbol, max_lev)
-                    
+
             log.warning(
                 "[%s] set leverage %dx failed: %s",
-                symbol, leverage, res.get("retMsg"),
+                symbol,
+                leverage,
+                res.get("retMsg"),
             )
         return ok
     except Exception as exc:
@@ -602,8 +605,7 @@ def get_wallet_balance() -> float:
                 for coin in acct_row.get("coin", []) or []:
                     if coin.get("coin") == "USDT":
                         val = float(
-                            coin.get("equity", coin.get("walletBalance", 0))
-                            or 0
+                            coin.get("equity", coin.get("walletBalance", 0)) or 0
                         )
                         if val > 0:
                             log.debug("Balance %s: $%.2f", acct, val)
@@ -634,9 +636,7 @@ def get_symbol_filters(
 
     try:
         if hasattr(bybit_core, "get_instruments_info"):
-            res = bybit_core.get_instruments_info(
-                category="linear", symbol=symbol
-            )
+            res = bybit_core.get_instruments_info(category="linear", symbol=symbol)
         else:
             res = bybit_core.api_request(
                 "GET",
@@ -733,9 +733,7 @@ def detect_sr_walls(
     support = _wall_price(bids, "bid")
     resistance = _wall_price(asks, "ask")
 
-    final_support = (
-        support if support is not None else best_bid - 15 * tick_size
-    )
+    final_support = support if support is not None else best_bid - 15 * tick_size
     final_resistance = (
         resistance if resistance is not None else best_ask + 15 * tick_size
     )
@@ -800,6 +798,7 @@ def log_trade(action: str, symbol: str, details: Dict[str, Any]) -> None:
 # SECTION 6: POSITION MANAGER (BREAKEVEN)
 # ==============================================================================
 
+
 def manage_positions(target_profit: float) -> float:
     """
     Move SL to fee-aware breakeven once net unrealized clears trigger.
@@ -819,9 +818,7 @@ def manage_positions(target_profit: float) -> float:
         try:
             symbol = pos["symbol"]
             size = float(pos.get("size", 0) or 0)
-            entry_price = float(
-                pos.get("avgPrice", 0) or pos.get("entryPrice", 0) or 0
-            )
+            entry_price = float(pos.get("avgPrice", 0) or pos.get("entryPrice", 0) or 0)
             side = str(pos.get("side", "")).capitalize()
             unr_pnl = float(pos.get("unrealisedPnl", 0) or 0)
             current_sl = float(pos.get("stopLoss", 0) or 0)
@@ -838,7 +835,12 @@ def manage_positions(target_profit: float) -> float:
 
             log.info(
                 "[%s] %s size=%.4f entry=%.6f netPnL=$%+.4f fees=$%.4f",
-                symbol, side, size, entry_price, net_pnl, total_fees,
+                symbol,
+                side,
+                size,
+                entry_price,
+                net_pnl,
+                total_fees,
             )
 
             trigger = max(0.003, target_profit * 0.10)
@@ -849,8 +851,8 @@ def manage_positions(target_profit: float) -> float:
 
             # SL fill is taker — both legs taker for BE offset
             be_per_unit = entry_price * _TAKER_FEE * 2
-            
-            # UPGRADE: Dynamic Trailing SL 
+
+            # UPGRADE: Dynamic Trailing SL
             # If net profit exceeds 50% of the target, lock in half of the accumulated profit
             lock_in_profit = 0.0
             if net_pnl > (target_profit * 0.5):
@@ -881,7 +883,10 @@ def manage_positions(target_profit: float) -> float:
             log_type = "Trailing SL" if lock_in_profit > 0 else "BE trigger"
             log.info(
                 "[%s] %s ($%.4f net PnL) → Moving SL to %s",
-                symbol, log_type, net_pnl, be_str,
+                symbol,
+                log_type,
+                net_pnl,
+                be_str,
             )
             res = bybit_core.api_request(
                 "POST",
@@ -906,13 +911,9 @@ def manage_positions(target_profit: float) -> float:
                     },
                 )
             else:
-                log.warning(
-                    "[%s] SL amend failed: %s", symbol, res.get("retMsg")
-                )
+                log.warning("[%s] SL amend failed: %s", symbol, res.get("retMsg"))
         except Exception as exc:
-            log.error(
-                "manage_positions %s: %s", pos.get("symbol", "?"), exc
-            )
+            log.error("manage_positions %s: %s", pos.get("symbol", "?"), exc)
 
     return total_unrealized
 
@@ -920,6 +921,7 @@ def manage_positions(target_profit: float) -> float:
 # ==============================================================================
 # SECTION 7: SYMBOL PROCESSOR
 # ==============================================================================
+
 
 def process_symbol(
     symbol: str,
@@ -1029,9 +1031,7 @@ def process_symbol(
                 )
                 if isinstance(wb, dict):
                     trend_sig = str(
-                        (wb.get("trading_signal") or {}).get(
-                            "action", "NEUTRAL"
-                        )
+                        (wb.get("trading_signal") or {}).get("action", "NEUTRAL")
                     ).upper()
                     l2 = wb.get("l2_signal") or {}
                     if isinstance(l2, dict):
@@ -1039,12 +1039,8 @@ def process_symbol(
                         l2_bears = float(l2.get("bears", 0) or 0)
                     tr = wb.get("trades") or {}
                     if isinstance(tr, dict):
-                        price_velo = float(
-                            tr.get("price_velocity", 0) or 0
-                        )
-                        agg_ratio = float(
-                            tr.get("aggressor_ratio", 0) or 0
-                        )
+                        price_velo = float(tr.get("price_velocity", 0) or 0)
+                        agg_ratio = float(tr.get("aggressor_ratio", 0) or 0)
             except Exception as err:
                 log.warning("%s WBTA error: %s", tag, err)
 
@@ -1058,7 +1054,11 @@ def process_symbol(
 
         log.debug(
             "%s imb=%.3f trend=%s mom=%.3f spread=%.1fbps",
-            tag, imbalance, trend_sig, momentum, spread_bps,
+            tag,
+            imbalance,
+            trend_sig,
+            momentum,
+            spread_bps,
         )
 
         # ---- Direction ---------------------------------------------------
@@ -1066,41 +1066,36 @@ def process_symbol(
             side = "Buy"
             entry_price = best_ask
             if "SELL" in trend_sig or momentum < -0.1:
-                _skip(
-                    f"Buy conflict trend={trend_sig} mom={momentum:+.3f}"
-                )
+                _skip(f"Buy conflict trend={trend_sig} mom={momentum:+.3f}")
                 return
         elif imbalance < 0.45:
             side = "Sell"
             entry_price = best_bid
             if "BUY" in trend_sig or momentum > 0.1:
-                _skip(
-                    f"Sell conflict trend={trend_sig} mom={momentum:+.3f}"
-                )
+                _skip(f"Sell conflict trend={trend_sig} mom={momentum:+.3f}")
                 return
         else:
             _skip(f"neutral book ({imbalance:.1%})")
             return
 
         # ---- Filters & sizing --------------------------------------------
-        qty_step, min_qty, tick_size, min_notional = get_symbol_filters(
-            symbol
-        )
+        qty_step, min_qty, tick_size, min_notional = get_symbol_filters(symbol)
         min_notional = max(float(min_notional or 5.0), 5.0)
 
-        support, resistance = detect_sr_walls(
-            bids, asks, tick_size, best_bid, best_ask
-        )
+        support, resistance = detect_sr_walls(bids, asks, tick_size, best_bid, best_ask)
 
         target_val = max(float(target_value_usdt), min_notional + 0.05)
-        
+
         # UPGRADE: Dynamic Momentum Sizing
         # Bet 50% heavier if we have high confluence between extreme orderbook imbalance and strong momentum
         is_strong_buy = imbalance >= 0.70 and momentum >= 0.8
         is_strong_sell = imbalance <= 0.30 and momentum <= -0.8
         if is_strong_buy or is_strong_sell:
             target_val *= 1.50
-            log.info("[%s] 🚀 STRONG MOMENTUM DETECTED! Scaling position size by 1.5x", symbol)
+            log.info(
+                "[%s] 🚀 STRONG MOMENTUM DETECTED! Scaling position size by 1.5x",
+                symbol,
+            )
 
         # qty from notional, quantized to qty_step
         raw_qty = target_val / entry_price
@@ -1123,10 +1118,7 @@ def process_symbol(
 
         # Per-symbol hard cap vs equity
         if required_margin > balance * 0.70:
-            _skip(
-                f"margin ${required_margin:.2f} > 70% equity "
-                f"${balance * 0.70:.2f}"
-            )
+            _skip(f"margin ${required_margin:.2f} > 70% equity ${balance * 0.70:.2f}")
             return
 
         # Cross-thread margin budget (prevents over-commit)
@@ -1162,18 +1154,10 @@ def process_symbol(
             if entry_calc <= 0:
                 entry_calc = entry_price
 
-            default_tp = (
-                entry_calc * 1.005 if side == "Buy" else entry_calc * 0.995
-            )
-            default_sl = (
-                entry_calc * 0.995 if side == "Buy" else entry_calc * 1.005
-            )
-            tp_price = float(
-                metrics.get("target_exit_price", default_tp)
-            )
-            sl_price = float(
-                metrics.get("stop_loss_price", default_sl)
-            )
+            default_tp = entry_calc * 1.005 if side == "Buy" else entry_calc * 0.995
+            default_sl = entry_calc * 0.995 if side == "Buy" else entry_calc * 1.005
+            tp_price = float(metrics.get("target_exit_price", default_tp))
+            sl_price = float(metrics.get("stop_loss_price", default_sl))
 
             # Clamp to S/R
             if side == "Buy":
@@ -1214,16 +1198,12 @@ def process_symbol(
             if side == "Buy":
                 be_tp = entry_calc + (fees / qty)
                 if tp_price < be_tp:
-                    _skip(
-                        f"TP {tp_price:.6f} < BE {be_tp:.6f}"
-                    )
+                    _skip(f"TP {tp_price:.6f} < BE {be_tp:.6f}")
                     return
             else:
                 be_tp = entry_calc - (fees / qty)
                 if tp_price > be_tp:
-                    _skip(
-                        f"TP {tp_price:.6f} > BE {be_tp:.6f}"
-                    )
+                    _skip(f"TP {tp_price:.6f} > BE {be_tp:.6f}")
                     return
 
             # Sanity: SL on correct side of entry
@@ -1237,7 +1217,7 @@ def process_symbol(
             qty_str = format_precision(qty, qty_step, ROUND_DOWN)
             tp_str = format_precision(tp_price, tick_size, ROUND_HALF_UP)
             sl_str = format_precision(sl_price, tick_size, ROUND_HALF_UP)
-            
+
             # Use the formatted string directly to avoid float precision drift
             final_qty_val = float(qty_str) if qty_str else 0.0
             if final_qty_val <= 0:
@@ -1247,7 +1227,12 @@ def process_symbol(
             notional = final_qty_val * entry_calc
             log.info(
                 "%s %s qty=%s ($%.2f) TP=%s SL=%s",
-                tag, side, qty_str, notional, tp_str, sl_str,
+                tag,
+                side,
+                qty_str,
+                notional,
+                tp_str,
+                sl_str,
             )
 
             # ---- Submit --------------------------------------------------
@@ -1259,7 +1244,7 @@ def process_symbol(
             order_kwargs: Dict[str, Any] = {
                 "symbol": symbol,
                 "side": side,
-                "qty": qty_str, # PASS STRING DIRECTLY
+                "qty": qty_str,  # PASS STRING DIRECTLY
                 "order_type": "Market",
                 "sl_price": float(sl_str),
                 "leverage": leverage,
@@ -1280,9 +1265,7 @@ def process_symbol(
             if res.get("success"):
                 _circuit_breaker.record_success(symbol)
                 _cooldown.mark(symbol)
-                exp = float(
-                    res.get("expected_profit_usdt", target) or target
-                )
+                exp = float(res.get("expected_profit_usdt", target) or target)
                 _perf_tracker.record_signal(exp if not dry_run else 0.0)
                 global _orders_this_cycle
                 with _orders_lock:
@@ -1306,6 +1289,7 @@ def process_symbol(
 # ==============================================================================
 # SECTION 8: ORCHESTRATOR
 # ==============================================================================
+
 
 def run_scalper_cycle(
     symbols: List[str],
@@ -1365,8 +1349,7 @@ def run_scalper_cycle(
                 log.error("closed-pnl fetch: %s", err)
 
         log.info(
-            "[Session] realized=$%+.4f unrealized=$%+.4f total=$%+.4f "
-            "open=%d %s",
+            "[Session] realized=$%+.4f unrealized=$%+.4f total=$%+.4f open=%d %s",
             session_realized,
             session_unrealized,
             session_realized + session_unrealized,
@@ -1381,18 +1364,32 @@ def run_scalper_cycle(
                 max_positions,
             )
             payload = _summary(
-                balance, session_realized, session_unrealized,
-                target, leverage, symbols, {}, occupied, t0, no_color,
+                balance,
+                session_realized,
+                session_unrealized,
+                target,
+                leverage,
+                symbols,
+                {},
+                occupied,
+                t0,
+                no_color,
             )
             return payload
 
         if balance < 10.0 and len(positions) >= 3:
             log.info("Small-account guard (bal<$10, pos>=3) — skip entries.")
             payload = _summary(
-                balance, session_realized, session_unrealized,
-                target, leverage, symbols,
+                balance,
+                session_realized,
+                session_unrealized,
+                target,
+                leverage,
+                symbols,
                 {"*": "small account concurrency limit"},
-                occupied, t0, no_color,
+                occupied,
+                t0,
+                no_color,
             )
             return payload
     else:
@@ -1401,9 +1398,7 @@ def run_scalper_cycle(
     # Position notional
     if pos_pct > 0:
         target_value_usdt = balance * (pos_pct / 100.0)
-        log.info(
-            "pos_pct=%.1f%% → notional $%.2f", pos_pct, target_value_usdt
-        )
+        log.info("pos_pct=%.1f%% → notional $%.2f", pos_pct, target_value_usdt)
     else:
         cap = max(5.05, balance * 2.0)
         if target_value_usdt > cap:
@@ -1424,8 +1419,13 @@ def run_scalper_cycle(
     log.info(
         "Margin budget $%.2f (equity $%.2f − open≈$%.2f) | "
         "target PnL $%.4f | lev %dx | notional $%.2f | symbols %d",
-        budget_total, balance, open_margin_est,
-        target, leverage, target_value_usdt, len(symbols),
+        budget_total,
+        balance,
+        open_margin_est,
+        target,
+        leverage,
+        target_value_usdt,
+        len(symbols),
     )
 
     skipped: Dict[str, str] = {}
@@ -1452,9 +1452,7 @@ def run_scalper_cycle(
     if not runnable:
         log.info("No runnable symbols this cycle.")
     else:
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=workers
-        ) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futs = {
                 pool.submit(
                     process_symbol,
@@ -1478,14 +1476,20 @@ def run_scalper_cycle(
                 try:
                     fut.result()
                 except Exception as exc:
-                    log.error(
-                        "[%s] thread error: %s", sym, exc, exc_info=True
-                    )
+                    log.error("[%s] thread error: %s", sym, exc, exc_info=True)
                     _circuit_breaker.record_failure(sym)
 
     return _summary(
-        balance, session_realized, session_unrealized,
-        target, leverage, symbols, skipped, occupied, t0, no_color,
+        balance,
+        session_realized,
+        session_unrealized,
+        target,
+        leverage,
+        symbols,
+        skipped,
+        occupied,
+        t0,
+        no_color,
     )
 
 
@@ -1526,10 +1530,7 @@ def _summary(
 
 def write_llm_output(data: Dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    blob = (
-        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder)
-        + "\n"
-    )
+    blob = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
     if out_path in ("/dev/stdout", "/dev/fd/1", "-"):
         sys.stdout.write(blob)
         sys.stdout.flush()
@@ -1539,9 +1540,7 @@ def write_llm_output(data: Dict[str, Any]) -> None:
             with open(out_path, "a", encoding="utf-8") as fp:
                 fp.write(blob)
         except OSError as err:
-            sys.stderr.write(
-                f"Failed writing LLM_OUTPUT '{out_path}': {err}\n"
-            )
+            sys.stderr.write(f"Failed writing LLM_OUTPUT '{out_path}': {err}\n")
             sys.stdout.write(blob)
             sys.stdout.flush()
 
@@ -1554,11 +1553,7 @@ def run(**kwargs: Any) -> Dict[str, Any]:
         "POLUSDT,SUIUSDT,LINKUSDT,AVAXUSDT,DOTUSDT,CHZUSDT,"
         "VETUSDT,ATOMUSDT,NEARUSDT",
     )
-    symbols = [
-        s.strip().upper()
-        for s in str(symbols_raw).split(",")
-        if s.strip()
-    ]
+    symbols = [s.strip().upper() for s in str(symbols_raw).split(",") if s.strip()]
 
     pos_val_raw = kwargs.get("pos_value", 50.0)
     try:
@@ -1593,10 +1588,10 @@ def run(**kwargs: Any) -> Dict[str, Any]:
     )
 
 
-
 # ==============================================================================
 # SECTION 9: CLI ARGUMENT PARSER & ARGC/AICHAT INTERFACE
 # ==============================================================================
+
 
 def _coerce(val: str) -> Any:
     """Coerce env-var string to most specific Python type."""
@@ -1633,51 +1628,80 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Comma-separated symbols",
     )
     parser.add_argument(
-        "--pos-value", type=float, default=50.0, dest="pos_value",
+        "--pos-value",
+        type=float,
+        default=50.0,
+        dest="pos_value",
         help="USDT position value target",
     )
     parser.add_argument(
-        "--pos-pct", type=float, default=0.0, dest="pos_pct",
+        "--pos-pct",
+        type=float,
+        default=0.0,
+        dest="pos_pct",
         help="Position value as %% of account balance",
     )
     parser.add_argument(
-        "--leverage", type=int, default=50,
+        "--leverage",
+        type=int,
+        default=50,
         help="Leverage multiplier",
     )
     parser.add_argument(
-        "--target", type=float, default=0.02,
+        "--target",
+        type=float,
+        default=0.02,
         help="Target net USDT profit per trade",
     )
     parser.add_argument(
-        "--risk-reward", type=float, default=1.0, dest="risk_reward",
+        "--risk-reward",
+        type=float,
+        default=1.0,
+        dest="risk_reward",
         help="Risk/Reward ratio",
     )
     parser.add_argument(
-        "--trailing-stop", type=float, default=None, dest="trailing_stop",
+        "--trailing-stop",
+        type=float,
+        default=None,
+        dest="trailing_stop",
         help="Trailing stop distance",
     )
     parser.add_argument(
-        "--loop", action="store_true",
+        "--loop",
+        action="store_true",
         help="Run continuously in a loop",
     )
     parser.add_argument(
-        "--loop-delay", type=int, default=15, dest="loop_delay",
+        "--loop-delay",
+        type=int,
+        default=15,
+        dest="loop_delay",
         help="Seconds delay between loop cycles",
     )
     parser.add_argument(
-        "--max-workers", type=int, default=10, dest="max_workers",
+        "--max-workers",
+        type=int,
+        default=10,
+        dest="max_workers",
         help="Thread pool size for concurrent symbol analysis",
     )
     parser.add_argument(
-        "--dry-run", action="store_true", dest="dry_run",
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
         help="Simulate without submitting live orders",
     )
     parser.add_argument(
-        "--no-color", action="store_true", dest="no_color",
+        "--no-color",
+        action="store_true",
+        dest="no_color",
         help="Disable ANSI color UI",
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true",
+        "--verbose",
+        "-v",
+        action="store_true",
         help="Enable verbose debug logging",
     )
     return parser
@@ -1685,13 +1709,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _install_signal_handlers() -> None:
     """Register SIGINT/SIGTERM to set the global shutdown event."""
+
     def _handler(signum: int, frame: Any) -> None:
-        log.info(
-            "Signal %d received — requesting graceful shutdown...", signum
-        )
+        log.info("Signal %d received — requesting graceful shutdown...", signum)
         _SHUTDOWN.set()
 
-    signal.signal(signal.SIGINT,  _handler)
+    signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
 
 
@@ -1718,14 +1741,12 @@ if __name__ == "__main__":
 
     _install_signal_handlers()
 
-    symbol_list = [
-        s.strip().upper() for s in args.symbols.split(",") if s.strip()
-    ]
+    symbol_list = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
 
     if args.loop:
         log.info(
-            "Loop mode active — starting scalper daemon "
-            "(cycle interval: %ds).", args.loop_delay,
+            "Loop mode active — starting scalper daemon (cycle interval: %ds).",
+            args.loop_delay,
         )
         cycle_num = 0
         while not _SHUTDOWN.is_set():
@@ -1753,7 +1774,8 @@ if __name__ == "__main__":
             # FIX: sleep in interruptible chunks so SIGTERM is responsive
             log.info(
                 "Cycle #%d complete. Next cycle in %ds.",
-                cycle_num, args.loop_delay,
+                cycle_num,
+                args.loop_delay,
             )
             deadline = time.monotonic() + args.loop_delay
             while not _SHUTDOWN.is_set() and time.monotonic() < deadline:

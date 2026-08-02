@@ -9,9 +9,10 @@
 Bybit Market Data Tools
 Public market data endpoints - no authentication required
 """
-import os
-import json
+
 import argparse
+import json
+import os
 from pathlib import Path
 
 # Load .env if exists
@@ -57,10 +58,7 @@ def bybit_get_klines(symbol, interval="15", limit=100):
     """Get candlestick/kline data"""
     try:
         result = session.get_kline(
-            category="linear",
-            symbol=symbol,
-            interval=interval,
-            limit=limit
+            category="linear", symbol=symbol, interval=interval, limit=limit
         )
         print(json.dumps(result, indent=2))
     except Exception as e:
@@ -70,7 +68,9 @@ def bybit_get_klines(symbol, interval="15", limit=100):
 def bybit_get_funding_rate(symbol):
     """Get current funding rate"""
     try:
-        result = session.get_funding_rate_history(category="linear", symbol=symbol, limit=1)
+        result = session.get_funding_rate_history(
+            category="linear", symbol=symbol, limit=1
+        )
         print(json.dumps(result, indent=2))
     except Exception as e:
         print(json.dumps({"error": str(e)}))

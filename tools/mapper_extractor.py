@@ -15,10 +15,11 @@ pairs them sequentially as (lat, lon) coordinates, formats them with the
 requested precision, and writes a CSV-like table.
 """
 
+import argparse
 import re
 import sys
 import urllib.request
-import argparse
+
 
 def run(url: str, precision: int = 6, output: str = None) -> None:
     """
@@ -32,19 +33,24 @@ def run(url: str, precision: int = 6, output: str = None) -> None:
     # Fetch the URL content
     try:
         with urllib.request.urlopen(url) as response:
-            content = response.read().decode('utf-8', errors='ignore')
+            content = response.read().decode("utf-8", errors="ignore")
     except Exception as e:
         sys.stderr.write(f"Error fetching URL: {e}\n")
         return
 
     # Find all floating-point numbers (including integers) in the content
-    numbers = re.findall(r'[-+]?\d*\.\d+|\d+', content)
+    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", content)
 
     # Pair them as (lat, lon) coordinates
-    coords = [(float(numbers[i]), float(numbers[i+1])) for i in range(0, len(numbers)-1, 2)]
+    coords = [
+        (float(numbers[i]), float(numbers[i + 1]))
+        for i in range(0, len(numbers) - 1, 2)
+    ]
 
     # Format each coordinate pair with the requested precision
-    formatted_lines = ["{:.{p}f},{:.{p}f}".format(lat, lon, p=precision) for lat, lon in coords]
+    formatted_lines = [
+        "{:.{p}f},{:.{p}f}".format(lat, lon, p=precision) for lat, lon in coords
+    ]
 
     # Build the output table (CSV-like)
     table = "\n".join(formatted_lines)
@@ -59,10 +65,18 @@ def run(url: str, precision: int = 6, output: str = None) -> None:
     else:
         print(table)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract coordinates from a URL.")
     parser.add_argument("url", help="URL to scan for coordinates")
-    parser.add_argument("--precision", type=int, default=6, help="Decimal precision for coordinates (default: 6)")
-    parser.add_argument("--output", type=str, default=None, help="Output file path (default: stdout)")
+    parser.add_argument(
+        "--precision",
+        type=int,
+        default=6,
+        help="Decimal precision for coordinates (default: 6)",
+    )
+    parser.add_argument(
+        "--output", type=str, default=None, help="Output file path (default: stdout)"
+    )
     args = parser.parse_args()
     run(args.url, args.precision, args.output)

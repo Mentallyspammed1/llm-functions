@@ -77,6 +77,7 @@ except ImportError:
 
 try:
     import proxy_utils
+
     proxy_utils.set_proxy_environment()
 except ImportError:
     proxy_utils = None
@@ -94,8 +95,8 @@ __all__ = [
     "calculate_exit_price_by_pnl",
     "calculate_exit_price_for_net_loss",
     "calculate_pnl_by_exit_price",
-    "format_precision",
     "execute_smart_order",
+    "format_precision",
     "run",
 ]
 
@@ -266,17 +267,11 @@ def print_human_readable_ui(
     if warnings:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         for w in warnings[:4]:
-            _cprint(
-                f"{NEON_PURPLE}│{RESET} "
-                f"{NEON_YELLOW}⚑{RESET} {w}"
-            )
+            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_YELLOW}⚑{RESET} {w}")
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(
-            f"{NEON_PURPLE}│{RESET} "
-            f"{NEON_RED}Error:{RESET}       {data['error']}"
-        )
+        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}       {data['error']}")
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -284,6 +279,7 @@ def print_human_readable_ui(
 # ==============================================================================
 # SECTION 3: PRECISION MATH & FINANCIAL CALCULATORS
 # ==============================================================================
+
 
 def format_precision(
     value: Any,
@@ -450,9 +446,7 @@ def _safe_eval_arithmetic(expr: str, balance: float) -> Optional[float]:
     for node in ast.walk(tree):
         if not isinstance(node, allowed_nodes):
             return None
-        if isinstance(node, ast.Constant) and not isinstance(
-            node.value, (int, float)
-        ):
+        if isinstance(node, ast.Constant) and not isinstance(node.value, (int, float)):
             return None
 
     try:
@@ -489,9 +483,7 @@ def _eval_formula(val: Any, balance: float) -> Any:
     if scientific_calculator:
         try:
             expr = s.replace("balance", str(balance))
-            stats_res = scientific_calculator.execute_tool(
-                mode="eval", expr=expr
-            )
+            stats_res = scientific_calculator.execute_tool(mode="eval", expr=expr)
             if stats_res.get("success"):
                 try:
                     out = float(stats_res.get("result", val))
@@ -508,6 +500,7 @@ def _eval_formula(val: Any, balance: float) -> Any:
 # SECTION 4: API REQUEST WRAPPERS
 # ==============================================================================
 
+
 def _safe_api(
     method: str,
     path: str,
@@ -518,9 +511,7 @@ def _safe_api(
     """Resilient API wrapper using bybit_core or falling back to direct requests."""
     if bybit_core and hasattr(bybit_core, "api_request"):
         try:
-            return bybit_core.api_request(
-                method, path, params=params, signed=signed
-            )
+            return bybit_core.api_request(method, path, params=params, signed=signed)
         except Exception as err:
             log.exception("bybit_core API call failed: %s", err)
 
@@ -536,13 +527,9 @@ def _safe_api(
 
     try:
         if method.upper() == "GET":
-            resp = requests.get(
-                url, params=params, timeout=10, proxies=proxies
-            )
+            resp = requests.get(url, params=params, timeout=10, proxies=proxies)
         else:
-            resp = requests.post(
-                url, json=params, timeout=10, proxies=proxies
-            )
+            resp = requests.post(url, json=params, timeout=10, proxies=proxies)
         return resp.json()
     except Exception as exc:
         return {
@@ -581,9 +568,7 @@ def get_instrument_info(
 
     # Prefer bybit_core helper
     if bybit_core and hasattr(bybit_core, "get_instruments_info"):
-        data = bybit_core.get_instruments_info(
-            category=category, symbol=symbol
-        )
+        data = bybit_core.get_instruments_info(category=category, symbol=symbol)
     else:
         data = _safe_api(
             "GET",
@@ -601,9 +586,7 @@ def get_instrument_info(
             lev_filter = info.get("leverageFilter", {}) or {}
 
             qty_step = float(lot.get("qtyStep", qty_step) or qty_step)
-            tick_size = float(
-                price_filter.get("tickSize", tick_size) or tick_size
-            )
+            tick_size = float(price_filter.get("tickSize", tick_size) or tick_size)
             min_qty = float(lot.get("minOrderQty", 0) or 0)
             min_price = float(price_filter.get("minPrice", 0) or 0)
             try:
@@ -674,9 +657,7 @@ def get_wallet_balance() -> Tuple[float, Optional[dict]]:
             rows = data.get("result", {}).get("list", []) or [{}]
             coins = rows[0].get("coin", []) if rows else []
             usdt = next((c for c in coins if c.get("coin") == "USDT"), {})
-            equity = float(
-                usdt.get("equity", usdt.get("walletBalance", 0)) or 0
-            )
+            equity = float(usdt.get("equity", usdt.get("walletBalance", 0)) or 0)
             if equity > 0:
                 return equity, data
     return 0.0, None
@@ -725,6 +706,7 @@ def _friendly_ret_msg(ret_code: Any, ret_msg: Any) -> str:
 # ==============================================================================
 # SECTION 5: CORE SMART ORDER ENGINE
 # ==============================================================================
+
 
 def execute_smart_order(
     symbol: str = "BTCUSDT",
@@ -789,22 +771,19 @@ def execute_smart_order(
     side = "Buy" if side_l == "buy" else ("Sell" if side_l == "sell" else "Buy")
 
     ot_l = (order_type or "market").lower().strip()
-    order_type = (
-        "Limit" if ot_l == "limit" else "Market"
-    )
+    order_type = "Limit" if ot_l == "limit" else "Market"
 
     tif = (time_in_force or "GTC").strip()
     if tif not in ("GTC", "IOC", "FOK", "PostOnly"):
         tif = "GTC"
-        warnings.append(f"Invalid time_in_force; defaulting to GTC.")
+        warnings.append("Invalid time_in_force; defaulting to GTC.")
 
     # Balance for formulas (signed call — skip hard fail on dry-run)
     balance, _bal_raw = get_wallet_balance()
     balance_for_math = balance if balance > 0 else 10.0
     if balance <= 0:
         warnings.append(
-            "Wallet balance unavailable or zero; using $10 paper balance "
-            "for risk math."
+            "Wallet balance unavailable or zero; using $10 paper balance for risk math."
         )
         balance = 0.0
 
@@ -885,12 +864,8 @@ def execute_smart_order(
             "error": "Limit orders require a positive --entry-price.",
         }
 
-    sl_trigger_by = _TRIGGER_MAP.get(
-        str(sl_trigger_by or "Mark"), "MarkPrice"
-    )
-    tp_trigger_by = _TRIGGER_MAP.get(
-        str(tp_trigger_by or "Mark"), "MarkPrice"
-    )
+    sl_trigger_by = _TRIGGER_MAP.get(str(sl_trigger_by or "Mark"), "MarkPrice")
+    tp_trigger_by = _TRIGGER_MAP.get(str(tp_trigger_by or "Mark"), "MarkPrice")
 
     try:
         position_idx = int(position_idx)
@@ -914,18 +889,14 @@ def execute_smart_order(
     ) = get_instrument_info(symbol, category=category)
 
     if info and info.get("status") and str(info.get("status")) != "Trading":
-        warnings.append(
-            f"Instrument status is {info.get('status')!r}, not Trading."
-        )
+        warnings.append(f"Instrument status is {info.get('status')!r}, not Trading.")
 
     # ------------------------------------------------------------------
     # 2. Margin Mode & Leverage
     # ------------------------------------------------------------------
     if margin_mode and not dry_run:
         mode_l = margin_mode.lower().strip()
-        trade_mode = (
-            _TRADE_MODE_ISOLATED if mode_l == "isolated" else _TRADE_MODE_CROSS
-        )
+        trade_mode = _TRADE_MODE_ISOLATED if mode_l == "isolated" else _TRADE_MODE_CROSS
         # Correct V5 endpoint for per-symbol cross/isolated switch
         body: Dict[str, Any] = {
             "category": category,
@@ -950,8 +921,7 @@ def execute_smart_order(
     if leverage_i and leverage_i > 0 and not skip_leverage and not dry_run:
         if max_leverage and leverage_i > max_leverage:
             warnings.append(
-                f"Leverage {leverage_i}x capped to instrument max "
-                f"{max_leverage:g}x."
+                f"Leverage {leverage_i}x capped to instrument max {max_leverage:g}x."
             )
             leverage_i = int(max_leverage)
         lev_params: Dict[str, Any] = {
@@ -1006,26 +976,21 @@ def execute_smart_order(
         if min_price and calc_price < min_price:
             return {
                 "success": False,
-                "error": (
-                    f"Entry {calc_price} below minPrice {min_price}."
-                ),
+                "error": (f"Entry {calc_price} below minPrice {min_price}."),
                 "warnings": warnings,
             }
+    # Market: use ask for buys / bid for sells when available
+    elif side == "Buy":
+        calc_price = ask_px if ask_px > 0 else current_price
     else:
-        # Market: use ask for buys / bid for sells when available
-        if side == "Buy":
-            calc_price = ask_px if ask_px > 0 else current_price
-        else:
-            calc_price = bid_px if bid_px > 0 else current_price
+        calc_price = bid_px if bid_px > 0 else current_price
 
     # Risk sizing entry buffer for market orders (slippage)
     slip = max(0.0, slippage_bps) / 10_000.0
     risk_entry = calc_price
     if not is_limit and slip > 0:
         risk_entry = (
-            calc_price * (1.0 + slip)
-            if side == "Buy"
-            else calc_price * (1.0 - slip)
+            calc_price * (1.0 + slip) if side == "Buy" else calc_price * (1.0 - slip)
         )
 
     # ------------------------------------------------------------------
@@ -1072,9 +1037,7 @@ def execute_smart_order(
         stop_loss = float(sl_price)
     elif sl_dist is not None:
         stop_loss = (
-            calc_price - abs(sl_dist)
-            if side == "Buy"
-            else calc_price + abs(sl_dist)
+            calc_price - abs(sl_dist) if side == "Buy" else calc_price + abs(sl_dist)
         )
     else:
         stop_loss = (
@@ -1087,8 +1050,7 @@ def execute_smart_order(
         return {
             "success": False,
             "error": (
-                f"Invalid Long Stop Loss ({stop_loss}): "
-                f"Must be < Entry ({calc_price})."
+                f"Invalid Long Stop Loss ({stop_loss}): Must be < Entry ({calc_price})."
             ),
             "warnings": warnings,
         }
@@ -1124,17 +1086,13 @@ def execute_smart_order(
     else:
         px_dist = abs(risk_entry - stop_loss)
         qty_calc = risk_amount / px_dist if px_dist > 0 else 0.0
-        warnings.append(
-            "Fee-adjusted SL distance near zero; using raw price distance."
-        )
+        warnings.append("Fee-adjusted SL distance near zero; using raw price distance.")
 
     explicit_qty = qty is not None and qty > 0
     if explicit_qty:
         actual_qty = float(qty)  # type: ignore[arg-type]
     else:
-        actual_qty = float(
-            format_precision(qty_calc, qty_step, ROUND_DOWN) or 0
-        )
+        actual_qty = float(format_precision(qty_calc, qty_step, ROUND_DOWN) or 0)
 
     # Min qty bump + optional SL re-anchor when auto-sizing
     if min_qty and actual_qty < min_qty:
@@ -1143,9 +1101,7 @@ def execute_smart_order(
             stop_loss = calculate_exit_price_for_net_loss(
                 risk_entry, actual_qty, side, risk_amount, e_fee, x_fee_sl
             )
-            warnings.append(
-                "Qty raised to minOrderQty; SL re-anchored to risk budget."
-            )
+            warnings.append("Qty raised to minOrderQty; SL re-anchored to risk budget.")
         elif explicit_qty:
             warnings.append(
                 "Explicit qty below minOrderQty — raised to exchange minimum; "
@@ -1163,23 +1119,16 @@ def execute_smart_order(
 
     # Market max qty
     if not is_limit and max_mkt_qty and actual_qty > max_mkt_qty:
-        actual_qty = float(
-            format_precision(max_mkt_qty, qty_step, ROUND_DOWN) or 0
-        )
+        actual_qty = float(format_precision(max_mkt_qty, qty_step, ROUND_DOWN) or 0)
         qty_str = format_precision(actual_qty, qty_step, ROUND_DOWN)
-        warnings.append(
-            f"Qty capped to maxMktOrderQty={max_mkt_qty}."
-        )
+        warnings.append(f"Qty capped to maxMktOrderQty={max_mkt_qty}.")
 
     notional = actual_qty * calc_price
 
     # Notional cap — re-check risk after shrink
     if max_position_usdt and notional > max_position_usdt:
         cap_qty = float(
-            format_precision(
-                max_position_usdt / calc_price, qty_step, ROUND_DOWN
-            )
-            or 0
+            format_precision(max_position_usdt / calc_price, qty_step, ROUND_DOWN) or 0
         )
         if cap_qty <= 0:
             return {
@@ -1191,14 +1140,10 @@ def execute_smart_order(
         qty_str = format_precision(actual_qty, qty_step, ROUND_DOWN)
         actual_qty = float(qty_str) if qty_str else 0.0
         notional = actual_qty * calc_price
-        warnings.append(
-            f"Notional capped to max_position_usdt=${max_position_usdt}."
-        )
+        warnings.append(f"Notional capped to max_position_usdt=${max_position_usdt}.")
         # If auto-sized, tighten SL to keep risk; if user SL fixed, warn
         net_at_sl = abs(
-            calculate_net_pnl(
-                risk_entry, stop_loss, actual_qty, side, e_fee, x_fee_sl
-            )
+            calculate_net_pnl(risk_entry, stop_loss, actual_qty, side, e_fee, x_fee_sl)
         )
         if not explicit_qty and sl_price is None and net_at_sl > risk_amount:
             stop_loss = calculate_exit_price_for_net_loss(
@@ -1228,16 +1173,13 @@ def execute_smart_order(
         # Bump qty to satisfy min notional
         need_qty = min_notional / calc_price * 1.01
         bumped = float(
-            format_precision(max(need_qty, min_qty or 0), qty_step, ROUND_DOWN)
-            or 0
+            format_precision(max(need_qty, min_qty or 0), qty_step, ROUND_DOWN) or 0
         )
         # ROUND_DOWN may still be under — step up once
         if bumped * calc_price < min_notional:
             try:
                 bumped = float(
-                    format_precision(
-                        bumped + float(qty_step), qty_step, ROUND_DOWN
-                    )
+                    format_precision(bumped + float(qty_step), qty_step, ROUND_DOWN)
                     or 0
                 )
             except Exception:
@@ -1255,9 +1197,7 @@ def execute_smart_order(
                 ),
                 "warnings": warnings,
             }
-        warnings.append(
-            f"Qty bumped to satisfy min notional ${min_notional:.2f}."
-        )
+        warnings.append(f"Qty bumped to satisfy min notional ${min_notional:.2f}.")
         if sl_price is None:
             stop_loss = calculate_exit_price_for_net_loss(
                 risk_entry, actual_qty, side, risk_amount, e_fee, x_fee_sl
@@ -1294,8 +1234,7 @@ def execute_smart_order(
             return {
                 "success": False,
                 "error": (
-                    f"Invalid Long TP ({take_profit}): "
-                    f"Must be > Entry ({calc_price})."
+                    f"Invalid Long TP ({take_profit}): Must be > Entry ({calc_price})."
                 ),
                 "warnings": warnings,
             }
@@ -1303,8 +1242,7 @@ def execute_smart_order(
             return {
                 "success": False,
                 "error": (
-                    f"Invalid Short TP ({take_profit}): "
-                    f"Must be < Entry ({calc_price})."
+                    f"Invalid Short TP ({take_profit}): Must be < Entry ({calc_price})."
                 ),
                 "warnings": warnings,
             }
@@ -1360,7 +1298,9 @@ def execute_smart_order(
     if trailing_stop and tp_price is None and tp_usdt is None:
         # Still attach RR-based TP as safety unless user wants trail-only;
         # keep TP for risk symmetry (scalper may pass tp_price=None intentionally)
-        log.info("Trailing stop enabled without explicit TP; keeping default target profit for safety symmetry.")
+        log.info(
+            "Trailing stop enabled without explicit TP; keeping default target profit for safety symmetry."
+        )
 
     # ------------------------------------------------------------------
     # 10. Build Payload & Submit
@@ -1385,9 +1325,7 @@ def execute_smart_order(
         params["takeProfit"] = take_profit_str
 
     if is_limit:
-        params["price"] = format_precision(
-            calc_price, tick_size, ROUND_HALF_UP
-        )
+        params["price"] = format_precision(calc_price, tick_size, ROUND_HALF_UP)
 
     if trailing_stop and trailing_stop > 0:
         params["trailingStop"] = format_precision(
@@ -1407,9 +1345,7 @@ def execute_smart_order(
             params["triggerDirection"] = trigger_direction_i
         else:
             # 1 = rises to, 2 = falls to
-            params["triggerDirection"] = (
-                1 if trigger_price >= current_price else 2
-            )
+            params["triggerDirection"] = 1 if trigger_price >= current_price else 2
         tb_raw = str(trigger_by or "Mark").replace("Price", "")
         tb_raw = tb_raw.capitalize() if tb_raw else "Mark"
         params["triggerBy"] = _TRIGGER_MAP.get(tb_raw, "MarkPrice")
@@ -1455,14 +1391,10 @@ def execute_smart_order(
     }
 
     if dry_run:
-        result_payload["note"] = (
-            "Dry run active. Order was NOT submitted to exchange."
-        )
+        result_payload["note"] = "Dry run active. Order was NOT submitted to exchange."
         return result_payload
 
-    data = _safe_api(
-        "POST", "/v5/order/create", params=params, signed=True
-    )
+    data = _safe_api("POST", "/v5/order/create", params=params, signed=True)
     if data.get("retCode") == 0:
         result_payload.update(
             {
@@ -1475,9 +1407,7 @@ def execute_smart_order(
 
     return {
         "success": False,
-        "error": _friendly_ret_msg(
-            data.get("retCode"), data.get("retMsg")
-        ),
+        "error": _friendly_ret_msg(data.get("retCode"), data.get("retMsg")),
         "retCode": data.get("retCode"),
         "order_params": params,
         "warnings": warnings,
@@ -1496,11 +1426,11 @@ def execute_smart_order(
 # SECTION 6: OUTPUT ROUTING
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
     json_payload = (
-        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder)
-        + "\n"
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
     )
     if out_path in ("/dev/stdout", "/dev/fd/1", "-"):
         sys.stdout.write(json_payload)
@@ -1511,9 +1441,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
             with open(out_path, "a", encoding="utf-8") as fp:
                 fp.write(json_payload)
         except OSError as err:
-            sys.stderr.write(
-                f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n"
-            )
+            sys.stderr.write(f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n")
             sys.stdout.write(json_payload)
             sys.stdout.flush()
 
@@ -1521,6 +1449,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 7: PROGRAMMATIC ENTRY POINT
 # ==============================================================================
+
 
 def run(
     symbol: str = "BTCUSDT",
@@ -1610,6 +1539,7 @@ def run(
 # SECTION 8: CLI ARGUMENT PARSER & ENTRYPOINT
 # ==============================================================================
 
+
 def _coerce(val: str) -> Any:
     """Coerce env-var string → None | bool | int | float | str."""
     if val == "":
@@ -1638,9 +1568,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description=f"Bybit Smart Order Engine v{__version__}",
     )
     parser.add_argument("--symbol", default="BTCUSDT")
-    parser.add_argument(
-        "--side", default="Buy", choices=["Buy", "Sell", "buy", "sell"]
-    )
+    parser.add_argument("--side", default="Buy", choices=["Buy", "Sell", "buy", "sell"])
     parser.add_argument(
         "--order-type",
         default="Market",
@@ -1661,9 +1589,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trailing-activation", default=None)
     parser.add_argument("--reduce-only", action="store_true")
     parser.add_argument("--margin-mode", choices=["isolated", "cross"])
-    parser.add_argument(
-        "--position-idx", type=int, default=0, choices=[0, 1, 2]
-    )
+    parser.add_argument("--position-idx", type=int, default=0, choices=[0, 1, 2])
     parser.add_argument(
         "--time-in-force",
         default="GTC",
@@ -1683,9 +1609,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-position-usdt", default=None)
     parser.add_argument("--trigger-price", dest="trigger_price", default=None)
-    parser.add_argument(
-        "--trigger-direction", dest="trigger_direction", default=None
-    )
+    parser.add_argument("--trigger-direction", dest="trigger_direction", default=None)
     parser.add_argument(
         "--trigger-by",
         dest="trigger_by",

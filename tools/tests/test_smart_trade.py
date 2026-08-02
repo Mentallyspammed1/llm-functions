@@ -1,6 +1,6 @@
+import importlib.util
 import sys
 from pathlib import Path
-import importlib.util
 
 # Load bybit-terminal.py dynamically to handle the hyphen in the filename
 file_path = Path(__file__).parent.parent / "bybit-terminal.py"
@@ -12,19 +12,24 @@ spec.loader.exec_module(bybit_terminal)
 BybitRealm = bybit_terminal.BybitRealm
 TradingConfig = bybit_terminal.TradingConfig
 
-from unittest.mock import MagicMock
 import unittest
+from unittest.mock import MagicMock
+
 
 class TestSmartTrade(unittest.TestCase):
     def test_smart_trade_buy_trending_up(self):
         config = TradingConfig()
         bot = BybitRealm(config)
         # Mock dependencies
-        bot.get_market_regime = MagicMock(return_value={"status": "ok", "regime": "TRENDING_UP"})
+        bot.get_market_regime = MagicMock(
+            return_value={"status": "ok", "regime": "TRENDING_UP"}
+        )
         bot.place_order = MagicMock(return_value={"status": "ok"})
-        
-        result = bot.place_smart_trade("BTCUSDT", "Buy", 0.001, 50000.0, tp_pct=1.0, sl_pct=1.0)
-        
+
+        result = bot.place_smart_trade(
+            "BTCUSDT", "Buy", 0.001, 50000.0, tp_pct=1.0, sl_pct=1.0
+        )
+
         self.assertEqual(result["status"], "ok")
         bot.place_order.assert_called_once()
         # Verify TP/SL calculations (Buy 50000 + 1% = 50500, 50000 - 1% = 49500)
@@ -35,14 +40,17 @@ class TestSmartTrade(unittest.TestCase):
     def test_smart_trade_buy_trending_down(self):
         config = TradingConfig()
         bot = BybitRealm(config)
-        bot.get_market_regime = MagicMock(return_value={"status": "ok", "regime": "TRENDING_DOWN"})
+        bot.get_market_regime = MagicMock(
+            return_value={"status": "ok", "regime": "TRENDING_DOWN"}
+        )
         bot.place_order = MagicMock()
-        
+
         result = bot.place_smart_trade("BTCUSDT", "Buy", 0.001, 50000.0)
-        
+
         self.assertEqual(result["status"], "error")
         self.assertIn("Refusing Buy", result["msg"])
         bot.place_order.assert_not_called()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

@@ -46,15 +46,15 @@ __version__ = "1.1.0"
 # SECTION 1: Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[mGKHF]")
 
@@ -94,26 +94,44 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [WEB CRAWLER & MEDIA EXTRACTOR]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [WEB CRAWLER & MEDIA EXTRACTOR]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Start URL:{RESET}      {data.get('start_url', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Pages Crawled:{RESET}  {NEON_YELLOW}{data.get('total_crawled_count', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Keyword Match:{RESET}  {NEON_GREEN}{data.get('keyword_matches_count', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Media Downloads:{RESET}{NEON_GREEN}{data.get('total_downloads_count', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}       {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Start URL:{RESET}      {data.get('start_url', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Pages Crawled:{RESET}  {NEON_YELLOW}{data.get('total_crawled_count', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Keyword Match:{RESET}  {NEON_GREEN}{data.get('keyword_matches_count', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Media Downloads:{RESET}{NEON_GREEN}{data.get('total_downloads_count', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}       {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}          {data['error']}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}          {data['error']}"
+        )
 
     pages = data.get("pages", [])
     if pages:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Crawled Pages Summary ({len(pages)}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Crawled Pages Summary ({len(pages)}):{RESET}"
+        )
         for page in pages[:5]:
             url = page.get("url", "")
             kw_match = " [KEYWORD FOUND]" if page.get("keyword_found") else ""
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {url[:50]}...{NEON_GREEN}{kw_match}{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {url[:50]}...{NEON_GREEN}{kw_match}{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -121,6 +139,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 2: Core Logic Implementation
 # ==============================================================================
+
 
 class LinkExtractor(HTMLParser):
     """HTML parser that extracts text and links while excluding code/style tags."""
@@ -172,10 +191,21 @@ def _canonicalize_url(url: str) -> str:
     """Normalize URL by stripping fragments and trailing slashes."""
     parsed = urllib.parse.urlparse(url.strip())
     path = parsed.path.rstrip("/") if parsed.path != "/" else "/"
-    return urllib.parse.urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), path, parsed.params, parsed.query, ""))
+    return urllib.parse.urlunparse(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            path,
+            parsed.params,
+            parsed.query,
+            "",
+        )
+    )
 
 
-def fetch_and_parse(url: str, verbose: bool = False) -> Tuple[str, str, Set[str], Set[str]]:
+def fetch_and_parse(
+    url: str, verbose: bool = False
+) -> Tuple[str, str, Set[str], Set[str]]:
     """Fetch URL and return status, page_text, extracted links, and image links."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -188,16 +218,16 @@ def fetch_and_parse(url: str, verbose: bool = False) -> Tuple[str, str, Set[str]
             content_type = response.headers.get("Content-Type", "")
             if "text/html" not in content_type.lower():
                 return "skipped_non_html", "", set(), set()
-            
+
             raw_bytes = response.read()
             try:
                 html = raw_bytes.decode("utf-8", errors="replace")
             except Exception:
                 html = raw_bytes.decode("latin-1", errors="replace")
-                
+
             parser = LinkExtractor(url)
             parser.feed(html)
-            
+
             page_text = re.sub(r"\s+", " ", parser.get_text()).strip()
             return "ok", page_text, parser.links, parser.image_links
     except Exception as e:
@@ -213,7 +243,11 @@ def download_image_file(url: str, download_dir: Path) -> Optional[str]:
     try:
         parsed_url = urllib.parse.urlparse(url)
         orig_filename = os.path.basename(parsed_url.path)
-        ext = os.path.splitext(orig_filename)[1].lower() if "." in orig_filename else ".jpg"
+        ext = (
+            os.path.splitext(orig_filename)[1].lower()
+            if "." in orig_filename
+            else ".jpg"
+        )
         if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"):
             ext = ".jpg"
 
@@ -239,12 +273,13 @@ def make_thumbnail(image_path: str, thumb_dir: Path, width: int = 150) -> Option
     thumb_dir.mkdir(parents=True, exist_ok=True)
     try:
         from PIL import Image
+
         with Image.open(image_path) as img:
             img_rgb = img.convert("RGB")
             ratio = width / float(img_rgb.size[0])
             height = int(float(img_rgb.size[1]) * float(ratio))
             img_rgb.thumbnail((width, height), Image.Resampling.LANCZOS)
-            
+
             filename = "thumb_" + Path(image_path).name
             thumb_path = thumb_dir / filename
             img_rgb.save(thumb_path, "JPEG")
@@ -272,15 +307,23 @@ def execute_tool(
     Core execution logic for crawling web pages and extracting links/media.
     """
     start_time = time.perf_counter()
-    
+
     if not start_url.startswith(("http://", "https://")):
         start_url = "https://" + start_url.strip()
 
     parsed_start = urllib.parse.urlparse(start_url)
     start_domain = parsed_start.netloc.lower()
 
-    media_path = Path(media_dir).expanduser().resolve() if media_dir else Path.cwd() / "cache" / "crawled_media"
-    thumb_path = Path(thumb_dir).expanduser().resolve() if thumb_dir else Path.cwd() / "cache" / "crawled_thumbs"
+    media_path = (
+        Path(media_dir).expanduser().resolve()
+        if media_dir
+        else Path.cwd() / "cache" / "crawled_media"
+    )
+    thumb_path = (
+        Path(thumb_dir).expanduser().resolve()
+        if thumb_dir
+        else Path.cwd() / "cache" / "crawled_thumbs"
+    )
 
     keyword_lower = keyword.lower().strip() if keyword else None
 
@@ -315,7 +358,7 @@ def execute_tool(
                 "snippet": None,
                 "links_found_count": len(links),
                 "images_found_count": len(image_links),
-                "downloads": []
+                "downloads": [],
             }
 
             if status == "ok":
@@ -326,7 +369,9 @@ def execute_tool(
                         keyword_matches_count += 1
                         start_idx = max(0, idx - 80)
                         end_idx = min(len(page_text), idx + len(keyword_lower) + 80)
-                        page_info["snippet"] = "..." + page_text[start_idx:end_idx].strip() + "..."
+                        page_info["snippet"] = (
+                            "..." + page_text[start_idx:end_idx].strip() + "..."
+                        )
 
                 if download_images and image_links:
                     for img_url in image_links:
@@ -336,10 +381,12 @@ def execute_tool(
                             meta = {
                                 "url": img_url,
                                 "saved_path": saved_file,
-                                "thumbnail_path": None
+                                "thumbnail_path": None,
                             }
                             if generate_thumbnails:
-                                thumb_file = make_thumbnail(saved_file, thumb_path, thumb_width)
+                                thumb_file = make_thumbnail(
+                                    saved_file, thumb_path, thumb_width
+                                )
                                 meta["thumbnail_path"] = thumb_file
                             page_info["downloads"].append(meta)
 
@@ -365,20 +412,21 @@ def execute_tool(
             "total_downloads_count": total_downloads_count,
             "pages": crawled_pages,
             "duration_ms": duration_ms,
-            "exit_code": 0
+            "exit_code": 0,
         }
 
     except Exception as exc:
         return {
             "success": False,
             "error": f"Web crawler execution failed: {exc}",
-            "exit_code": 1
+            "exit_code": 1,
         }
 
 
 # ==============================================================================
 # SECTION 3: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
+
 
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination."""
@@ -403,6 +451,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 4: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     start_url: str,
@@ -436,7 +485,7 @@ def run(
         no_color=no_color,
         verbose=verbose,
     )
-    
+
     print_human_readable_ui(result, no_color=no_color)
     write_llm_output(result)
 
@@ -445,13 +494,15 @@ def run(
 # SECTION 5: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="web_crawler.py",
         description=f"AIChat Web Crawler & Link Follower Tool v{__version__}",
     )
     parser.add_argument(
-        "--start-url", "-s",
+        "--start-url",
+        "-s",
         required=True,
         dest="start_url",
         metavar="TEXT",
@@ -472,7 +523,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum total pages to crawl (default: 10)",
     )
     parser.add_argument(
-        "--keyword", "-k",
+        "--keyword",
+        "-k",
         type=str,
         default=None,
         help="Search for a specific keyword in page text",
@@ -527,7 +579,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",
@@ -551,7 +604,7 @@ if __name__ == "__main__":
         no_color=args.no_color,
         verbose=args.verbose,
     )
-    
+
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)
     sys.exit(res.get("exit_code", 0))

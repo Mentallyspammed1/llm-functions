@@ -2,15 +2,18 @@ import re
 import sys
 
 # Read the fully working whalebot
-with open('whalebot.working.py', 'r') as f:
+with open("whalebot.working.py") as f:
     code = f.read()
 
 # Read the Tor proxy / json / run code from bybit_wbta
-with open('tools/bybit_wbta.py', 'r') as f:
+with open("tools/bybit_wbta.py") as f:
     old_code = f.read()
 
 # 1. Extract TorProxyManager and BybitRealmClient from old code
-tor_regex = re.compile(r'(# ═════════════════════════════════════════════════════════════════════════════\n# TOR PROXY MANAGER\n# ═════════════════════════════════════════════════════════════════════════════\n\nclass TorProxyManager:.*?)\n# ═════════════════════════════════════════════════════════════════════════════\n# ORDERBOOK INTELLIGENCE', re.DOTALL)
+tor_regex = re.compile(
+    r"(# ═════════════════════════════════════════════════════════════════════════════\n# TOR PROXY MANAGER\n# ═════════════════════════════════════════════════════════════════════════════\n\nclass TorProxyManager:.*?)\n# ═════════════════════════════════════════════════════════════════════════════\n# ORDERBOOK INTELLIGENCE",
+    re.DOTALL,
+)
 tor_match = tor_regex.search(old_code)
 if tor_match:
     tor_block = tor_match.group(1)
@@ -20,81 +23,82 @@ else:
 
 # 2. Inject Tor block into new code before Orderbook Intelligence
 code = re.sub(
-    r'# ═════════════════════════════════════════════════════════════════════════════\n#  ORDERBOOK INTELLIGENCE ENGINE',
-    tor_block + '\n# ═════════════════════════════════════════════════════════════════════════════\n# ORDERBOOK INTELLIGENCE ENGINE',
-    code
+    r"# ═════════════════════════════════════════════════════════════════════════════\n#  ORDERBOOK INTELLIGENCE ENGINE",
+    tor_block
+    + "\n# ═════════════════════════════════════════════════════════════════════════════\n# ORDERBOOK INTELLIGENCE ENGINE",
+    code,
 )
 
 # 3. Modify OrderbookIntelligence to accept BybitRealmClient
 code = re.sub(
     r'class OrderbookIntelligence:.*?def __init__\(self, symbol: str, base_url: str = "https://api\.bybit\.com"\) -> None:\n        self\.symbol   = symbol\.upper\(\)\n        self\.base_url = base_url',
-    r'class OrderbookIntelligence:\n    def __init__(self, symbol: str, client) -> None:\n        self.symbol = symbol.upper()\n        self.client = client',
+    r"class OrderbookIntelligence:\n    def __init__(self, symbol: str, client) -> None:\n        self.symbol = symbol.upper()\n        self.client = client",
     code,
-    flags=re.DOTALL
+    flags=re.DOTALL,
 )
 
 # Replace its _get with self.client._get
 code = re.sub(
-    r'    def _get\(self, endpoint: str, params: Dict\) -> Dict:.*?return \{\}',
-    r'',
+    r"    def _get\(self, endpoint: str, params: Dict\) -> Dict:.*?return \{\}",
+    r"",
     code,
-    flags=re.DOTALL
+    flags=re.DOTALL,
 )
-code = re.sub(r'self\._get\(', r'self.client._get(', code)
+code = re.sub(r"self\._get\(", r"self.client._get(", code)
 
 
 # 4. Modify TechnicalObservatory to accept BybitRealmClient
 code = re.sub(
     r'class TechnicalObservatory:.*?def __init__\(self, symbol: str, interval: str\) -> None:\n        self\.symbol   = symbol\.upper\(\)\n        self\.interval = interval\n        self\.base_url = "https://api\.bybit\.com"',
-    r'class TechnicalObservatory:\n    def __init__(self, symbol: str, interval: str, client) -> None:\n        self.symbol = symbol.upper()\n        self.interval = interval\n        self.client = client',
+    r"class TechnicalObservatory:\n    def __init__(self, symbol: str, interval: str, client) -> None:\n        self.symbol = symbol.upper()\n        self.interval = interval\n        self.client = client",
     code,
-    flags=re.DOTALL
+    flags=re.DOTALL,
 )
 
 # Replace its _get with self.client._get
 code = re.sub(
-    r'    def _get\(self, endpoint: str, params: Dict\) -> Dict:.*?return \{\}',
-    r'',
+    r"    def _get\(self, endpoint: str, params: Dict\) -> Dict:.*?return \{\}",
+    r"",
     code,
-    flags=re.DOTALL
+    flags=re.DOTALL,
 )
 
 # 5. Modify MarketOrchestrator
 # Add use_tor and json_out to init
 code = re.sub(
-    r'class MarketOrchestrator:\n\n    def __init__\(self, symbol: str, interval: str, delay: int\) -> None:',
-    r'class MarketOrchestrator:\n\n    def __init__(self, symbol: str, interval: str, delay: int, use_tor: bool = False, once: bool = False, json_out: bool = False) -> None:\n        self.use_tor = use_tor\n        self.once = once\n        self.json_out = json_out\n        self.client = BybitRealmClient(use_tor=use_tor)',
-    code
+    r"class MarketOrchestrator:\n\n    def __init__\(self, symbol: str, interval: str, delay: int\) -> None:",
+    r"class MarketOrchestrator:\n\n    def __init__(self, symbol: str, interval: str, delay: int, use_tor: bool = False, once: bool = False, json_out: bool = False) -> None:\n        self.use_tor = use_tor\n        self.once = once\n        self.json_out = json_out\n        self.client = BybitRealmClient(use_tor=use_tor)",
+    code,
 )
 # Pass client
 code = re.sub(
-    r'self\.tech = TechnicalObservatory\(symbol, interval\)',
-    r'self.tech = TechnicalObservatory(symbol, interval, self.client)',
-    code
+    r"self\.tech = TechnicalObservatory\(symbol, interval\)",
+    r"self.tech = TechnicalObservatory(symbol, interval, self.client)",
+    code,
 )
 code = re.sub(
-    r'self\.l2 = OrderbookIntelligence\(symbol\)',
-    r'self.l2 = OrderbookIntelligence(symbol, self.client)',
-    code
+    r"self\.l2 = OrderbookIntelligence\(symbol\)",
+    r"self.l2 = OrderbookIntelligence(symbol, self.client)",
+    code,
 )
 
 # Modify run_cycle to stamp symbol and pass json_out
 code = re.sub(
-    r'ta_metrics = self\.tech\.build_indicators\(df\)',
+    r"ta_metrics = self\.tech\.build_indicators\(df\)",
     r'ta_metrics = self.tech.build_indicators(df)\n            ta_metrics["symbol"] = self.symbol',
-    code
+    code,
 )
 code = re.sub(
-    r'OutputRenderer\.display_metrics\(\n            ta=ta_metrics,\n            ob_met=ob_metrics,\n            tr_met=tr_metrics,\n            fi_met=fi_metrics,\n            l2_bulls=l2_bulls,\n            l2_bears=l2_bears,\n            l2_label=l2_label,\n            l2_notes=l2_notes,\n        \)',
-    r'OutputRenderer.display_metrics(\n            ta=ta_metrics,\n            ob_met=ob_metrics,\n            tr_met=tr_metrics,\n            fi_met=fi_metrics,\n            l2_bulls=l2_bulls,\n            l2_bears=l2_bears,\n            l2_label=l2_label,\n            l2_notes=l2_notes,\n            json_out=self.json_out\n        )',
-    code
+    r"OutputRenderer\.display_metrics\(\n            ta=ta_metrics,\n            ob_met=ob_metrics,\n            tr_met=tr_metrics,\n            fi_met=fi_metrics,\n            l2_bulls=l2_bulls,\n            l2_bears=l2_bears,\n            l2_label=l2_label,\n            l2_notes=l2_notes,\n        \)",
+    r"OutputRenderer.display_metrics(\n            ta=ta_metrics,\n            ob_met=ob_metrics,\n            tr_met=tr_metrics,\n            fi_met=fi_metrics,\n            l2_bulls=l2_bulls,\n            l2_bears=l2_bears,\n            l2_label=l2_label,\n            l2_notes=l2_notes,\n            json_out=self.json_out\n        )",
+    code,
 )
 
 # Modify run loop to handle self.once
 code = re.sub(
-    r'            try:\n                self\.run_cycle\(\)\n                self\.errors = 0\n                time\.sleep\(self\.delay\)',
-    r'            try:\n                self.run_cycle()\n                if self.once:\n                    break\n                self.errors = 0\n                time.sleep(self.delay)',
-    code
+    r"            try:\n                self\.run_cycle\(\)\n                self\.errors = 0\n                time\.sleep\(self\.delay\)",
+    r"            try:\n                self.run_cycle()\n                if self.once:\n                    break\n                self.errors = 0\n                time.sleep(self.delay)",
+    code,
 )
 
 # 6. OutputRenderer json_out
@@ -145,9 +149,9 @@ json_out_code = """    @classmethod
 """
 
 code = re.sub(
-    r'    @classmethod\n    def display_metrics\(\n        cls,\n        ta: Dict\[str, Any\],\n        ob_met: Dict\[str, Any\],\n        tr_met: Dict\[str, Any\],\n        fi_met: Dict\[str, Any\],\n        l2_bulls: int,\n        l2_bears: int,\n        l2_label: str,\n        l2_notes: List\[str\],\n    \) -> None:',
+    r"    @classmethod\n    def display_metrics\(\n        cls,\n        ta: Dict\[str, Any\],\n        ob_met: Dict\[str, Any\],\n        tr_met: Dict\[str, Any\],\n        fi_met: Dict\[str, Any\],\n        l2_bulls: int,\n        l2_bears: int,\n        l2_label: str,\n        l2_notes: List\[str\],\n    \) -> None:",
     json_out_code,
-    code
+    code,
 )
 
 # 7. Append _coerce_bool and run()
@@ -195,7 +199,7 @@ def run(
 """
 code = code + run_code
 
-with open('tools/bybit_wbta_merged.py', 'w') as f:
+with open("tools/bybit_wbta_merged.py", "w") as f:
     f.write(code)
 
 print("Patching complete")

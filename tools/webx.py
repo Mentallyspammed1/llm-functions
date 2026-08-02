@@ -90,6 +90,7 @@ WGET_BIN = shutil.which("wget")
 # Data structures (webx / llm-functions output shape)
 # =========================================================================
 
+
 @dataclass
 class SearchResult:
     position: int
@@ -98,6 +99,7 @@ class SearchResult:
     snippet: str = ""
     content: str = ""
     error: str = ""
+
 
 @dataclass
 class SearchMetadata:
@@ -110,9 +112,11 @@ class SearchMetadata:
     had_bot_detection: bool = False
     retries_used: int = 0
 
+
 # =========================================================================
 # Tool detection
 # =========================================================================
+
 
 def _preferred_fetcher() -> str:
     if CURLIE_BIN:
@@ -123,9 +127,8 @@ def _preferred_fetcher() -> str:
         return "curl"
     if WGET_BIN:
         return "wget"
-    raise EnvironmentError(
-        "No HTTP tool found. Install: curlie, wget2, curl, or wget"
-    )
+    raise OSError("No HTTP tool found. Install: curlie, wget2, curl, or wget")
+
 
 def _get_tool_version(tool_name: str) -> Optional[str]:
     binary_map = {
@@ -149,9 +152,11 @@ def _get_tool_version(tool_name: str) -> Optional[str]:
     except Exception:
         return None
 
+
 # =========================================================================
 # HTML text extractor (stdlib fallback)
 # =========================================================================
+
 
 class ContentExtractor(HTMLParser):
     def __init__(self, max_length: int = 3000):
@@ -169,8 +174,23 @@ class ContentExtractor(HTMLParser):
         elif tag == "title":
             self._in_title = True
         elif tag in (
-            "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "span",
-            "td", "th", "blockquote", "pre", "article", "section", "main",
+            "p",
+            "div",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "li",
+            "span",
+            "td",
+            "th",
+            "blockquote",
+            "pre",
+            "article",
+            "section",
+            "main",
         ):
             if self.content and self.content[-1] not in (" ", "\n"):
                 self.content.append(" ")
@@ -202,9 +222,11 @@ class ContentExtractor(HTMLParser):
     def get_title(self) -> str:
         return " ".join(self._title_parts).strip()
 
+
 # =========================================================================
 # Response validation
 # =========================================================================
+
 
 def _detect_bot_challenge(html: str) -> bool:
     html_lower = html.lower()
@@ -215,6 +237,7 @@ def _detect_bot_challenge(html: str) -> bool:
         if title_pattern in html_lower:
             return True
     return False
+
 
 def _validate_json_response(body: Optional[str]) -> Tuple[bool, str]:
     if body is None:
@@ -232,17 +255,23 @@ def _validate_json_response(body: Optional[str]) -> Tuple[bool, str]:
         return False, "JSON root is not an object"
     return True, ""
 
+
 def _validate_response(html: Optional[str], url: str) -> Tuple[bool, str]:
     if html is None:
         return False, "Response is None"
     stripped = html.strip()
     if not stripped:
         return False, "Empty response body"
-    if len(stripped) < 80 and not stripped.startswith("<?xml") and not stripped.startswith("<rss"):
+    if (
+        len(stripped) < 80
+        and not stripped.startswith("<?xml")
+        and not stripped.startswith("<rss")
+    ):
         return False, f"Suspiciously short response ({len(stripped)} bytes)"
     if _detect_bot_challenge(stripped):
         return False, "Bot detection / CAPTCHA page detected"
     return True, ""
+
 
 def _strip_html_snippet(text: str) -> str:
     if not text or "<" not in text:
@@ -251,12 +280,15 @@ def _strip_html_snippet(text: str) -> str:
         return BeautifulSoup(text, "html.parser").get_text(" ", strip=True)
     return re.sub(r"<[^>]+>", " ", text).strip()
 
+
 # =========================================================================
 # HTTP fetch
 # =========================================================================
 
+
 def _random_user_agent() -> str:
     return random.choice(_USER_AGENT_POOL)
+
 
 def _build_fetch_command(
     url: str,
@@ -283,8 +315,15 @@ def _build_fetch_command(
     if fetcher in ("curlie", "curl"):
         binary = CURLIE_BIN if fetcher == "curlie" else CURL_BIN
         cmd = [
-            binary, "-s", "-S", "-L", "--compressed",
-            "--max-time", str(timeout), "--max-redirs", "10",
+            binary,
+            "-s",
+            "-S",
+            "-L",
+            "--compressed",
+            "--max-time",
+            str(timeout),
+            "--max-redirs",
+            "10",
         ]
         if http11_only:
             cmd.append("--http1.1")
@@ -296,8 +335,13 @@ def _build_fetch_command(
 
     elif fetcher == "wget2":
         cmd = [
-            WGET2_BIN, "-q", "-O", "-",
-            f"--timeout={timeout}", "--max-redirect=10", "--compression=auto",
+            WGET2_BIN,
+            "-q",
+            "-O",
+            "-",
+            f"--timeout={timeout}",
+            "--max-redirect=10",
+            "--compression=auto",
         ]
         for key, val in headers.items():
             cmd.append(f"--header={key}: {val}")
@@ -315,6 +359,7 @@ def _build_fetch_command(
 
     return cmd
 
+
 def _fetch_url(
     url: str,
     timeout: int = 10,
@@ -331,9 +376,14 @@ def _fetch_url(
     fetcher = _preferred_fetcher()
     ua = user_agent or _random_user_agent()
     cmd = _build_fetch_command(
-        url=url, fetcher=fetcher, timeout=timeout, user_agent=ua,
-        extra_headers=extra_headers, http11_only=http11_only,
-        method=method, data=data,
+        url=url,
+        fetcher=fetcher,
+        timeout=timeout,
+        user_agent=ua,
+        extra_headers=extra_headers,
+        http11_only=http11_only,
+        method=method,
+        data=data,
     )
     if verbose:
         logger.debug("Fetch [%s]: %s", fetcher, " ".join(cmd))
@@ -350,7 +400,10 @@ def _fetch_url(
     if proc.returncode != 0:
         logger.warning(
             "%s rc=%d for %s: %s",
-            fetcher, proc.returncode, url, (proc.stderr or "")[:200],
+            fetcher,
+            proc.returncode,
+            url,
+            (proc.stderr or "")[:200],
         )
         return None
 
@@ -366,6 +419,7 @@ def _fetch_url(
         logger.warning("Invalid response from %s: %s", url, reason)
         return None
     return proc.stdout
+
 
 def _fetch_url_with_retry(
     url: str,
@@ -384,29 +438,37 @@ def _fetch_url_with_retry(
     retries_used = 0
     for attempt in range(max_retries + 1):
         result = _fetch_url(
-            url, timeout=timeout, verbose=verbose,
+            url,
+            timeout=timeout,
+            verbose=verbose,
             user_agent=user_agent or _random_user_agent(),
-            extra_headers=extra_headers, http11_only=http11_only,
-            method=method, data=data, expect_json=expect_json,
+            extra_headers=extra_headers,
+            http11_only=http11_only,
+            method=method,
+            data=data,
+            expect_json=expect_json,
             skip_validation=skip_validation,
         )
         if result is not None:
             return result, retries_used
         retries_used += 1
         if attempt < max_retries:
-            time.sleep((2 ** attempt) + random.uniform(0.3, 1.2))
+            time.sleep((2**attempt) + random.uniform(0.3, 1.2))
     return None, retries_used
+
 
 # =========================================================================
 # SearXNG instance discovery (searx.space)
 # =========================================================================
 
+
 def _searx_cache_path() -> str:
     custom = os.environ.get("SEARXNG_CACHE_FILE", "").strip()
     if custom:
         return custom
-    home = os.path.expanduser("\~")
+    home = os.path.expanduser(r"\~")
     return os.path.join(home, ".cache", "webx_searxng_good.json")
+
 
 def _load_cached_searx_bases() -> List[str]:
     path = _searx_cache_path()
@@ -422,6 +484,7 @@ def _load_cached_searx_bases() -> List[str]:
         pass
     return []
 
+
 def _save_cached_searx_bases(bases: List[str]) -> None:
     if not bases:
         return
@@ -436,6 +499,7 @@ def _save_cached_searx_bases(bases: List[str]) -> None:
             )
     except OSError:
         pass
+
 
 def _parse_searx_space_instances(raw: str) -> List[str]:
     """Extract base URLs from searx.space instances.json (schema-tolerant)."""
@@ -471,6 +535,7 @@ def _parse_searx_space_instances(raw: str) -> List[str]:
             urls.append(url)
     return urls
 
+
 def _fetch_searx_space_url_list(timeout: int = 15, verbose: bool = False) -> List[str]:
     logger = logging.getLogger(__name__)
     html, _ = _fetch_url_with_retry(
@@ -486,6 +551,7 @@ def _fetch_searx_space_url_list(timeout: int = 15, verbose: bool = False) -> Lis
             logger.warning("Could not fetch searx.space instances.json")
         return []
     return _parse_searx_space_instances(html)
+
 
 def _probe_searx_base(base: str, timeout: int = 10, verbose: bool = False) -> int:
     """Return number of results if JSON works, else 0."""
@@ -507,6 +573,7 @@ def _probe_searx_base(base: str, timeout: int = 10, verbose: bool = False) -> in
         return len(results) if isinstance(results, list) else 0
     except (json.JSONDecodeError, TypeError):
         return 0
+
 
 def _discover_searx_instances(
     timeout: int = 10,
@@ -550,9 +617,11 @@ def _discover_searx_instances(
         _save_cached_searx_bases(good)
     return good
 
+
 # =========================================================================
 # Content extraction
 # =========================================================================
+
 
 def _extract_text_bs4(html: str, max_length: int = 3000) -> Tuple[str, str]:
     soup = BeautifulSoup(html, "html.parser")
@@ -561,23 +630,28 @@ def _extract_text_bs4(html: str, max_length: int = 3000) -> Tuple[str, str]:
     for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "iframe"]):
         tag.decompose()
     main_content = (
-        soup.find("main") or soup.find("article")
+        soup.find("main")
+        or soup.find("article")
         or soup.find("div", {"id": re.compile(r"content|main", re.I)})
-        or soup.body or soup
+        or soup.body
+        or soup
     )
     text = main_content.get_text(separator=" ", strip=True)
     text = re.sub(r"\s+", " ", text)
     return text[:max_length], title
+
 
 def _extract_text_stdlib(html: str, max_length: int = 3000) -> Tuple[str, str]:
     parser = ContentExtractor(max_length)
     parser.feed(html)
     return parser.get_text(), parser.get_title()
 
+
 def _extract_text(html: str, max_length: int = 3000) -> Tuple[str, str]:
     if HAS_BS4:
         return _extract_text_bs4(html, max_length)
     return _extract_text_stdlib(html, max_length)
+
 
 def crawl_url(
     url: str,
@@ -587,7 +661,10 @@ def crawl_url(
     max_retries: int = 1,
 ) -> str:
     html, retries = _fetch_url_with_retry(
-        url, timeout=timeout, max_retries=max_retries, verbose=verbose,
+        url,
+        timeout=timeout,
+        max_retries=max_retries,
+        verbose=verbose,
     )
     if html is None:
         return f"[Error: Failed to fetch {url} after {retries} retries]"
@@ -596,12 +673,15 @@ def crawl_url(
     text, _ = _extract_text(html, max_length)
     return text if text else "[No extractable text content]"
 
+
 # =========================================================================
 # Parsers
 # =========================================================================
 
+
 def _looks_like_news_query(q: str) -> bool:
     return bool(re.search(r"\b(news|headlines|breaking|latest)\b", q, re.I))
+
 
 def _parse_google_news_rss(xml_text: str, num_results: int) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
@@ -621,14 +701,17 @@ def _parse_google_news_rss(xml_text: str, num_results: int) -> List[Dict[str, st
         snippet = ""
         if desc_el is not None and desc_el.text:
             snippet = _strip_html_snippet(desc_el.text)
-        results.append({
-            "url": url,
-            "title": (title_el.text or "").strip() if title_el is not None else "",
-            "snippet": snippet,
-        })
+        results.append(
+            {
+                "url": url,
+                "title": (title_el.text or "").strip() if title_el is not None else "",
+                "snippet": snippet,
+            }
+        )
         if len(results) >= num_results:
             break
     return results
+
 
 def _parse_duckduckgo_bs4(html: str, num_results: int) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
@@ -641,22 +724,25 @@ def _parse_duckduckgo_bs4(html: str, num_results: int) -> List[Dict[str, str]]:
         href = a_tag.get("href", "")
         if "uddg=" in href:
             try:
-                href = urllib.parse.parse_qs(
-                    urllib.parse.urlparse(href).query
-                ).get("uddg", [""])[0]
+                href = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get(
+                    "uddg", [""]
+                )[0]
             except Exception:
                 continue
         href = urllib.parse.unquote(href)
         if not href.startswith("http") or "duckduckgo.com" in href:
             continue
-        results.append({
-            "url": href,
-            "title": a_tag.get_text(strip=True),
-            "snippet": snippet_tag.get_text(strip=True) if snippet_tag else "",
-        })
+        results.append(
+            {
+                "url": href,
+                "title": a_tag.get_text(strip=True),
+                "snippet": snippet_tag.get_text(strip=True) if snippet_tag else "",
+            }
+        )
         if len(results) >= num_results:
             break
     return results
+
 
 def _parse_duckduckgo_regex(html: str, num_results: int) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
@@ -671,12 +757,14 @@ def _parse_duckduckgo_regex(html: str, num_results: int) -> List[Dict[str, str]]
             break
     return results
 
+
 def _parse_duckduckgo(html: str, num_results: int) -> List[Dict[str, str]]:
     if HAS_BS4:
         r = _parse_duckduckgo_bs4(html, num_results)
         if r:
             return r
     return _parse_duckduckgo_regex(html, num_results)
+
 
 def _decode_bing_url(href: str) -> str:
     if not href.startswith("https://www.bing.com/ck/a"):
@@ -689,7 +777,7 @@ def _decode_bing_url(href: str) -> str:
         b64_part = encoded_url
         for prefix in ("a1L", "a1", "a"):
             if b64_part.startswith(prefix) and prefix != "aHR0c":
-                b64_part = b64_part[len(prefix):]
+                b64_part = b64_part[len(prefix) :]
                 break
         if not b64_part.startswith("aHR0"):
             if encoded_url.startswith("a1"):
@@ -704,6 +792,7 @@ def _decode_bing_url(href: str) -> str:
         return decoded_url if decoded_url.startswith("http") else href
     except Exception:
         return href
+
 
 def _parse_bing_bs4(html: str, num_results: int) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
@@ -726,21 +815,25 @@ def _parse_bing_bs4(html: str, num_results: int) -> List[Dict[str, str]]:
         p = result.select_one("p")
         if p:
             snippet = p.get_text(strip=True)
-        results.append({
-            "url": clean_url,
-            "title": title_link.get_text(strip=True),
-            "snippet": snippet,
-        })
+        results.append(
+            {
+                "url": clean_url,
+                "title": title_link.get_text(strip=True),
+                "snippet": snippet,
+            }
+        )
         if len(results) >= num_results:
             break
     return results
+
 
 def _parse_bing_regex(html: str, num_results: int) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
     seen: set[str] = set()
     for m in re.finditer(
         r'<li[^>]*class="[^"]*b_algo[^"]*"[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>([^<]*)</a>',
-        html, re.DOTALL | re.I,
+        html,
+        re.DOTALL | re.I,
     ):
         url = _decode_bing_url(m.group(1))
         title = re.sub(r"\s+", " ", m.group(2)).strip()
@@ -752,12 +845,14 @@ def _parse_bing_regex(html: str, num_results: int) -> List[Dict[str, str]]:
             return results
     return results
 
+
 def _parse_bing(html: str, num_results: int) -> List[Dict[str, str]]:
     if HAS_BS4:
         r = _parse_bing_bs4(html, num_results)
         if r:
             return r
     return _parse_bing_regex(html, num_results)
+
 
 def _parse_searx_json(html: str, num_results: int) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
@@ -767,16 +862,19 @@ def _parse_searx_json(html: str, num_results: int) -> List[Dict[str, str]]:
             url = item.get("url", "")
             if not url.startswith("http"):
                 continue
-            results.append({
-                "url": url,
-                "title": item.get("title", ""),
-                "snippet": item.get("content", "") or item.get("snippet", ""),
-            })
+            results.append(
+                {
+                    "url": url,
+                    "title": item.get("title", ""),
+                    "snippet": item.get("content", "") or item.get("snippet", ""),
+                }
+            )
             if len(results) >= num_results:
                 break
     except (json.JSONDecodeError, KeyError, TypeError):
         pass
     return results
+
 
 def _parse_brave_bs4(html: str, num_results: int) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
@@ -791,25 +889,36 @@ def _parse_brave_bs4(html: str, num_results: int) -> List[Dict[str, str]]:
         if not href.startswith("http"):
             continue
         snippet_tag = r.select_one(".snippet-description")
-        results.append({
-            "url": href,
-            "title": a_tag.get_text(strip=True),
-            "snippet": snippet_tag.get_text(strip=True) if snippet_tag else "",
-        })
+        results.append(
+            {
+                "url": href,
+                "title": a_tag.get_text(strip=True),
+                "snippet": snippet_tag.get_text(strip=True) if snippet_tag else "",
+            }
+        )
         if len(results) >= num_results:
             break
     return results
+
 
 def _parse_google_bs4(html: str, num_results: int) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
     seen: set[str] = set()
     soup = BeautifulSoup(html, "html.parser")
-    skip_domains = ("google.com", "google.co.", "gstatic.com", "youtube.com", "accounts.google")
+    skip_domains = (
+        "google.com",
+        "google.co.",
+        "gstatic.com",
+        "youtube.com",
+        "accounts.google",
+    )
     for a_tag in soup.select("a[href]"):
         href = a_tag.get("href", "")
         if "/url?q=" in href:
             try:
-                url = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get("q", [""])[0]
+                url = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get(
+                    "q", [""]
+                )[0]
             except Exception:
                 continue
         elif href.startswith("http"):
@@ -825,6 +934,7 @@ def _parse_google_bs4(html: str, num_results: int) -> List[Dict[str, str]]:
             break
     return results
 
+
 def _parse_google_regex(html: str, num_results: int) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
     seen: set[str] = set()
@@ -838,6 +948,7 @@ def _parse_google_regex(html: str, num_results: int) -> List[Dict[str, str]]:
             break
     return results
 
+
 def _parse_google(html: str, num_results: int) -> List[Dict[str, str]]:
     if HAS_BS4:
         r = _parse_google_bs4(html, num_results)
@@ -845,11 +956,15 @@ def _parse_google(html: str, num_results: int) -> List[Dict[str, str]]:
             return r
     return _parse_google_regex(html, num_results)
 
+
 # =========================================================================
 # Brave Search API (optional)
 # =========================================================================
 
-def _search_brave_api(query: str, num_results: int, timeout: int) -> List[Dict[str, str]]:
+
+def _search_brave_api(
+    query: str, num_results: int, timeout: int
+) -> List[Dict[str, str]]:
     api_key = os.environ.get("BRAVE_API_KEY", "").strip()
     if not api_key:
         return []
@@ -873,20 +988,24 @@ def _search_brave_api(query: str, num_results: int, timeout: int) -> List[Dict[s
         for item in data.get("web", {}).get("results", []):
             u = item.get("url", "")
             if u.startswith("http"):
-                out.append({
-                    "url": u,
-                    "title": item.get("title", ""),
-                    "snippet": item.get("description", ""),
-                })
+                out.append(
+                    {
+                        "url": u,
+                        "title": item.get("title", ""),
+                        "snippet": item.get("description", ""),
+                    }
+                )
             if len(out) >= num_results:
                 break
         return out
     except (json.JSONDecodeError, KeyError):
         return []
 
+
 # =========================================================================
 # Engine list
 # =========================================================================
+
 
 def _static_searx_fallback_bases() -> List[str]:
     return [
@@ -895,6 +1014,7 @@ def _static_searx_fallback_bases() -> List[str]:
         "https://search.bladerunn.in",
         "https://searx.work",
     ]
+
 
 def _searx_engine_configs(
     query: str,
@@ -916,7 +1036,9 @@ def _searx_engine_configs(
 
     discover_env = os.environ.get("SEARXNG_DISCOVER", "").strip().lower()
     force_discover = discover_env in ("1", "true", "yes")
-    auto_discover = force_discover or (not custom and not os.environ.get("SEARXNG_URLS", "").strip())
+    auto_discover = force_discover or (
+        not custom and not os.environ.get("SEARXNG_URLS", "").strip()
+    )
 
     if auto_discover:
         max_probe = int(os.environ.get("SEARXNG_PROBE_MAX", "12") or "12")
@@ -939,19 +1061,22 @@ def _searx_engine_configs(
 
     engines: List[Dict[str, Any]] = []
     for base in bases[:8]:
-        engines.append({
-            "name": f"SearXNG ({base})",
-            "url": (
-                f"{base}/search?q={eq}&format=json"
-                f"&language={lang}&safesearch={searx_safe}"
-            ),
-            "method": "GET",
-            "parser": _parse_searx_json,
-            "is_json": True,
-            "extra_headers": {"Accept": "application/json"},
-            "skip_bot_check": True,
-        })
+        engines.append(
+            {
+                "name": f"SearXNG ({base})",
+                "url": (
+                    f"{base}/search?q={eq}&format=json"
+                    f"&language={lang}&safesearch={searx_safe}"
+                ),
+                "method": "GET",
+                "parser": _parse_searx_json,
+                "is_json": True,
+                "extra_headers": {"Accept": "application/json"},
+                "skip_bot_check": True,
+            }
+        )
     return engines
+
 
 def _build_search_engines(
     query: str,
@@ -971,74 +1096,83 @@ def _build_search_engines(
     engines: List[Dict[str, Any]] = []
 
     if _looks_like_news_query(query):
-        engines.append({
-            "name": "Google News RSS",
-            "url": (
-                "https://news.google.com/rss/search?"
-                f"q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
-            ),
-            "method": "GET",
-            "parser": _parse_google_news_rss,
-            "is_json": False,
-            "extra_headers": {"Accept": "application/rss+xml, application/xml, */*"},
-            "skip_bot_check": True,
-            "skip_validation": True,
-        })
+        engines.append(
+            {
+                "name": "Google News RSS",
+                "url": (
+                    "https://news.google.com/rss/search?"
+                    f"q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+                ),
+                "method": "GET",
+                "parser": _parse_google_news_rss,
+                "is_json": False,
+                "extra_headers": {
+                    "Accept": "application/rss+xml, application/xml, */*"
+                },
+                "skip_bot_check": True,
+                "skip_validation": True,
+            }
+        )
 
-    engines.extend([
-        {
-            "name": "DuckDuckGo HTML",
-            "url": "https://html.duckduckgo.com/html/",
-            "method": "POST",
-            "data": {"q": query, "b": "", "kl": f"{region}-{lang}"},
-            "parser": _parse_duckduckgo,
-            "is_json": False,
-            "extra_headers": {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": "https://html.duckduckgo.com/",
+    engines.extend(
+        [
+            {
+                "name": "DuckDuckGo HTML",
+                "url": "https://html.duckduckgo.com/html/",
+                "method": "POST",
+                "data": {"q": query, "b": "", "kl": f"{region}-{lang}"},
+                "parser": _parse_duckduckgo,
+                "is_json": False,
+                "extra_headers": {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Referer": "https://html.duckduckgo.com/",
+                },
             },
-        },
-        {
-            "name": "Bing",
-            "url": (
-                f"https://www.bing.com/search?q={encoded_query}"
-                f"&setlang={lang}&cc={region}"
-            ),
-            "method": "GET",
-            "parser": _parse_bing,
-            "is_json": False,
-            "extra_headers": None,
-        },
-    ])
+            {
+                "name": "Bing",
+                "url": (
+                    f"https://www.bing.com/search?q={encoded_query}"
+                    f"&setlang={lang}&cc={region}"
+                ),
+                "method": "GET",
+                "parser": _parse_bing,
+                "is_json": False,
+                "extra_headers": None,
+            },
+        ]
+    )
 
     engines.extend(_searx_engine_configs(query, lang, searx_safe, timeout, verbose))
 
-    engines.extend([
-        {
-            "name": "Brave",
-            "url": (
-                f"https://search.brave.com/search"
-                f"?q={encoded_query}&source=web&safesearch={safe_search}"
-            ),
-            "method": "GET",
-            "parser": _parse_brave_bs4,
-            "is_json": False,
-            "extra_headers": None,
-        },
-        {
-            "name": "Google",
-            "url": (
-                f"https://www.google.com/search?q={encoded_query}"
-                f"&hl={lang}&gl={region}&num={num_results}&safe={google_safe}"
-            ),
-            "method": "GET",
-            "parser": _parse_google,
-            "is_json": False,
-            "extra_headers": None,
-        },
-    ])
+    engines.extend(
+        [
+            {
+                "name": "Brave",
+                "url": (
+                    f"https://search.brave.com/search"
+                    f"?q={encoded_query}&source=web&safesearch={safe_search}"
+                ),
+                "method": "GET",
+                "parser": _parse_brave_bs4,
+                "is_json": False,
+                "extra_headers": None,
+            },
+            {
+                "name": "Google",
+                "url": (
+                    f"https://www.google.com/search?q={encoded_query}"
+                    f"&hl={lang}&gl={region}&num={num_results}&safe={google_safe}"
+                ),
+                "method": "GET",
+                "parser": _parse_google,
+                "is_json": False,
+                "extra_headers": None,
+            },
+        ]
+    )
 
     return engines
+
 
 def _web_search(
     query: str,
@@ -1068,7 +1202,13 @@ def _web_search(
         return api_results, metadata
 
     engines = _build_search_engines(
-        query, num_results, lang, region, safe_search, timeout, verbose,
+        query,
+        num_results,
+        lang,
+        region,
+        safe_search,
+        timeout,
+        verbose,
     )
 
     for engine in engines:
@@ -1116,9 +1256,11 @@ def _web_search(
     metadata.retries_used = total_retries
     return [], metadata
 
+
 # =========================================================================
 # Logging & validation
 # =========================================================================
+
 
 def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.WARNING
@@ -1128,6 +1270,7 @@ def setup_logging(verbose: bool = False) -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+
 def validate_query(query: str) -> str:
     if not query or not query.strip():
         raise ValueError("Search query cannot be empty")
@@ -1136,9 +1279,11 @@ def validate_query(query: str) -> str:
         raise ValueError(f"Query too long ({len(cleaned)} chars, max 500)")
     return cleaned
 
+
 # =========================================================================
 # Main search (internal)
 # =========================================================================
+
 
 def search_google(
     query: str,
@@ -1178,7 +1323,9 @@ def search_google(
 
     logger.info(
         "%d results from %s (%dms)",
-        metadata.total_results, metadata.engine_used, metadata.search_time_ms,
+        metadata.total_results,
+        metadata.engine_used,
+        metadata.search_time_ms,
     )
 
     results: List[Dict[str, Any]] = []
@@ -1191,8 +1338,11 @@ def search_google(
         )
         if crawl:
             crawled = crawl_url(
-                item["url"], timeout=timeout, max_length=content_length,
-                verbose=verbose, max_retries=1,
+                item["url"],
+                timeout=timeout,
+                max_length=content_length,
+                verbose=verbose,
+                max_retries=1,
             )
             if crawled and not crawled.startswith("[Error:"):
                 result.content = crawled
@@ -1204,9 +1354,11 @@ def search_google(
 
     return results
 
+
 # =========================================================================
 # Diagnostics
 # =========================================================================
+
 
 def diagnose(verbose: bool = True) -> Dict[str, Any]:
     setup_logging(verbose)
@@ -1215,7 +1367,7 @@ def diagnose(verbose: bool = True) -> Dict[str, Any]:
 
     try:
         fetcher = _preferred_fetcher()
-    except EnvironmentError as e:
+    except OSError as e:
         report["fetcher_error"] = str(e)
         fetcher = None
 
@@ -1241,13 +1393,17 @@ def diagnose(verbose: bool = True) -> Dict[str, Any]:
         report["searx_space_urls_fetched"] = len(space)
         report["searx_space_sample"] = space[:5]
 
-        for base in (_load_cached_searx_bases()[:2] or _static_searx_fallback_bases()[:2]):
+        for base in (
+            _load_cached_searx_bases()[:2] or _static_searx_fallback_bases()[:2]
+        ):
             n = _probe_searx_base(base, timeout=10, verbose=verbose)
             report[f"probe_{base}"] = n
 
         html, _ = _fetch_url_with_retry(
             "https://html.duckduckgo.com/html/",
-            timeout=12, max_retries=0, method="POST",
+            timeout=12,
+            max_retries=0,
+            method="POST",
             data={"q": "test", "b": ""},
             extra_headers={
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -1261,9 +1417,11 @@ def diagnose(verbose: bool = True) -> Dict[str, Any]:
 
     return report
 
+
 # =========================================================================
 # webx / llm-functions entry — MUST keep signature and JSON shape
 # =========================================================================
+
 
 def run(
     query: str,
@@ -1313,9 +1471,11 @@ def run(
     except Exception as e:
         return f"ERROR: unexpected: {e}"
 
+
 # =========================================================================
 # CLI (unchanged flags for webx wrappers)
 # =========================================================================
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Web search tool")
@@ -1324,7 +1484,9 @@ def main() -> None:
     parser.add_argument("--lang", default="en")
     parser.add_argument("--region", default="us")
     parser.add_argument(
-        "--safe-search", choices=["off", "moderate", "strict"], default="moderate",
+        "--safe-search",
+        choices=["off", "moderate", "strict"],
+        default="moderate",
     )
     parser.add_argument("--pause", type=float, default=2.0)
     parser.add_argument("--crawl", action="store_true")
@@ -1355,6 +1517,7 @@ def main() -> None:
     )
     print(out)
     sys.exit(0 if not out.startswith("ERROR:") else 1)
+
 
 if __name__ == "__main__":
     main()

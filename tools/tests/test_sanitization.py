@@ -1,18 +1,27 @@
-import sys
-import os
-import unittest
 import importlib.util
+import os
+import sys
+import unittest
 
 # Add the tools directory to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Load bybit-realm.py dynamically
-spec = importlib.util.spec_from_file_location("bybit_realm", os.path.abspath(os.path.join(os.path.dirname(__file__), '../bybit-realm.py')))
+spec = importlib.util.spec_from_file_location(
+    "bybit_realm",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "../bybit-realm.py")),
+)
 bybit_realm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bybit_realm)
 
 # Import the sanitization functions
-from bybit_realm import _sanitize_order_type, _sanitize_position_idx, _sanitize_bool, _sanitize_trigger_by
+from bybit_realm import (
+    _sanitize_bool,
+    _sanitize_order_type,
+    _sanitize_position_idx,
+    _sanitize_trigger_by,
+)
+
 
 class TestSanitization(unittest.TestCase):
     def test_sanitize_order_type(self):
@@ -26,8 +35,8 @@ class TestSanitization(unittest.TestCase):
         self.assertEqual(_sanitize_position_idx(0), 0)
         self.assertEqual(_sanitize_position_idx(1), 1)
         self.assertEqual(_sanitize_position_idx(2), 2)
-        self.assertEqual(_sanitize_position_idx(3), 1) # Fallback
-        self.assertEqual(_sanitize_position_idx("a"), 1) # Fallback
+        self.assertEqual(_sanitize_position_idx(3), 1)  # Fallback
+        self.assertEqual(_sanitize_position_idx("a"), 1)  # Fallback
 
     def test_sanitize_bool(self):
         self.assertTrue(_sanitize_bool(True))
@@ -43,5 +52,6 @@ class TestSanitization(unittest.TestCase):
         self.assertEqual(_sanitize_trigger_by("something"), "LastPrice")
         self.assertEqual(_sanitize_trigger_by("0"), "MarkPrice")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

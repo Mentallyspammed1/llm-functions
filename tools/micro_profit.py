@@ -43,12 +43,11 @@ import logging
 import os
 import re
 import sys
-import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, InvalidOperation, getcontext
+from datetime import datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, getcontext
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from requests.exceptions import RequestException
@@ -59,6 +58,7 @@ getcontext().prec = 24
 # Module Imports
 try:
     import proxy_utils
+
     proxy_utils.set_proxy_environment()
 except ImportError:
     proxy_utils = None
@@ -80,10 +80,10 @@ except ImportError:
 
 __version__ = "4.5.2-ASCENDED"
 __all__ = [
-    "run",
-    "calculate_micro_profit",
     "TradeMetrics",
     "__version__",
+    "calculate_micro_profit",
+    "run",
 ]
 
 log = logging.getLogger(__name__)
@@ -120,15 +120,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN   = "\033[38;5;51m"
-NEON_GREEN  = "\033[38;5;46m"
-NEON_RED    = "\033[38;5;196m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
 NEON_YELLOW = "\033[38;5;226m"
 NEON_PURPLE = "\033[38;5;129m"
-NEON_PINK   = "\033[38;5;198m"
-RESET       = "\033[0m"
-BOLD        = "\033[1m"
-DIM         = "\033[2m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(
     r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])"
@@ -251,6 +251,7 @@ def print_human_readable_ui(
 # SECTION 3: DECIMALS & DATA MODELS
 # ==============================================================================
 
+
 def _d(value: Any) -> Decimal:
     """Sanitize and convert inputs safely to Decimal. Returns Decimal(0) on failure."""
     if value is None:
@@ -267,9 +268,7 @@ def _d(value: Any) -> Decimal:
 def _round_f(value: Decimal, places: int = 8) -> float:
     """Round a Decimal to `places` decimal places and return as float."""
     try:
-        return float(
-            value.quantize(Decimal(10) ** -places, rounding=ROUND_HALF_UP)
-        )
+        return float(value.quantize(Decimal(10) ** -places, rounding=ROUND_HALF_UP))
     except InvalidOperation:
         return float(value)
 
@@ -346,6 +345,7 @@ def _get_book_execution_price(
 # SECTION 4: CORE MICRO-PROFIT CALCULATION ENGINE
 # ==============================================================================
 
+
 def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
     """
     Calculate micro-profit exit/stop bounds, position sizing, and fee impact.
@@ -382,7 +382,15 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
     log.debug(
         "Inputs: symbol=%s side=%s qty=%s lev=%s target=%s "
         "mk=%s tk=%s fr=%s slippage=%s",
-        s, side, q, lev, target, mk, tk, fr, slippage,
+        s,
+        side,
+        q,
+        lev,
+        target,
+        mk,
+        tk,
+        fr,
+        slippage,
     )
 
     # ------------------------------------------------------------------
@@ -415,7 +423,9 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                         ob = resp.get("result", {})
                         log.debug("Fetched orderbook via bybit_core for %s", s)
                 except Exception as e_core:
-                    log.debug("bybit_core.get_orderbook failed, falling back: %s", e_core)
+                    log.debug(
+                        "bybit_core.get_orderbook failed, falling back: %s", e_core
+                    )
 
             if ob is None:
                 url = (
@@ -429,7 +439,7 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                         ob = r.json().get("result", {})
                 except RequestException as e_req:
                     log.debug("Bybit API request failed: %s", e_req)
-            
+
             if ob:
                 bids = ob.get("b", [])
                 asks = ob.get("a", [])
@@ -453,7 +463,9 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                 data = r.json()
                 bids = data.get("bids", [])
                 asks = data.get("asks", [])
-                log.debug("Fetched %d bids / %d asks from Gate.io.", len(bids), len(asks))
+                log.debug(
+                    "Fetched %d bids / %d asks from Gate.io.", len(bids), len(asks)
+                )
             except RequestException as exc:
                 log.debug("Gate.io orderbook fetch failed: %s", exc)
 
@@ -466,20 +478,16 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                 data = r.json()
                 bids = data.get("bids", [])
                 asks = data.get("asks", [])
-                log.debug("Fetched %d bids / %d asks from Binance.", len(bids), len(asks))
+                log.debug(
+                    "Fetched %d bids / %d asks from Binance.", len(bids), len(asks)
+                )
             except RequestException as exc:
                 log.debug("Binance orderbook fetch failed: %s", exc)
 
-    bid_depth_val = sum(
-        _d(p[0]) * _d(p[1]) for p in bids[:20] if len(p) >= 2
-    )
-    ask_depth_val = sum(
-        _d(p[0]) * _d(p[1]) for p in asks[:20] if len(p) >= 2
-    )
+    bid_depth_val = sum(_d(p[0]) * _d(p[1]) for p in bids[:20] if len(p) >= 2)
+    ask_depth_val = sum(_d(p[0]) * _d(p[1]) for p in asks[:20] if len(p) >= 2)
     total_depth = bid_depth_val + ask_depth_val
-    imbalance = (
-        bid_depth_val / total_depth if total_depth > 0 else Decimal("0.5")
-    )
+    imbalance = bid_depth_val / total_depth if total_depth > 0 else Decimal("0.5")
 
     best_bid = _d(bids[0][0]) if bids else Decimal(0)
     best_ask = _d(asks[0][0]) if asks else Decimal(0)
@@ -503,9 +511,7 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
 
     if entry <= 0:
         entry = Decimal(1.0)  # Safe fallback when no market data available
-        warnings.append(
-            "No market data available; using fallback entry price of $1.0."
-        )
+        warnings.append("No market data available; using fallback entry price of $1.0.")
 
     # ------------------------------------------------------------------
     # 3. Fee & Slippage Configuration
@@ -534,13 +540,15 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
             rec_qty = risk_budget / margin_per_unit
             log.debug(
                 "Position sized by risk_percent=%.4f → rec_qty=%.6f",
-                float(risk_pct), float(rec_qty),
+                float(risk_pct),
+                float(rec_qty),
             )
         else:
             rec_qty = (acc_bal * half_kelly) / margin_per_unit
             log.debug(
                 "Position sized by half-Kelly=%.4f → rec_qty=%.6f",
-                float(half_kelly), float(rec_qty),
+                float(half_kelly),
+                float(rec_qty),
             )
 
     trading_qty = q if q > 0 else rec_qty
@@ -560,13 +568,11 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                 "success": False,
                 "error": "Exit fees and slippage are too high (>= 100%) to calculate a valid exit price.",
             }
-        exit_p = (
-            (target / trading_qty) + entry * (Decimal(1) + e_fee)
-        ) / denom_tp
+        exit_p = ((target / trading_qty) + entry * (Decimal(1) + e_fee)) / denom_tp
     else:
-        exit_p = (
-            entry * (Decimal(1) - e_fee) - (target / trading_qty)
-        ) / (Decimal(1) + x_fee_tp)
+        exit_p = (entry * (Decimal(1) - e_fee) - (target / trading_qty)) / (
+            Decimal(1) + x_fee_tp
+        )
 
     log.debug("Solved exit_p=%.6f for target=%.4f", float(exit_p), float(target))
 
@@ -581,13 +587,11 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                 "success": False,
                 "error": "Stop-loss fees and slippage are too high (>= 100%) to calculate a valid stop price.",
             }
-        sl_p = (
-            entry * (Decimal(1) + e_fee) - (risk_amt / trading_qty)
-        ) / denom_sl
+        sl_p = (entry * (Decimal(1) + e_fee) - (risk_amt / trading_qty)) / denom_sl
     else:
-        sl_p = (
-            (risk_amt / trading_qty) + entry * (Decimal(1) - e_fee)
-        ) / (Decimal(1) + x_fee_sl)
+        sl_p = ((risk_amt / trading_qty) + entry * (Decimal(1) - e_fee)) / (
+            Decimal(1) + x_fee_sl
+        )
 
     # ------------------------------------------------------------------
     # 7. Liquidation Price
@@ -602,9 +606,7 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
     # 8. Risk Warnings & Wall Detection
     # ------------------------------------------------------------------
     if not bids or not asks:
-        warnings.append(
-            "Order book is empty; depth metrics may be inaccurate."
-        )
+        warnings.append("Order book is empty; depth metrics may be inaccurate.")
 
     # FIX: Prevent negative spread if orderbook is crossed
     spread_bps_val = (
@@ -613,18 +615,12 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
         else Decimal(0)
     )
     if spread_bps_val > Decimal(15):
-        warnings.append(
-            "High bid-ask spread; execution slippage risk is elevated."
-        )
+        warnings.append("High bid-ask spread; execution slippage risk is elevated.")
 
     if side == "buy" and imbalance < Decimal("0.45"):
-        warnings.append(
-            "Bearish book imbalance; downward price pressure expected."
-        )
+        warnings.append("Bearish book imbalance; downward price pressure expected.")
     elif side == "sell" and imbalance > Decimal("0.55"):
-        warnings.append(
-            "Bullish book imbalance; upward price pressure expected."
-        )
+        warnings.append("Bullish book imbalance; upward price pressure expected.")
 
     if trading_qty > 0 and target > (entry * trading_qty * Decimal("0.05")):
         warnings.append(
@@ -660,9 +656,9 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                 stats = scientific_calculator.execute_tool(
                     mode="stats", data=sizes
                 ).get("result", {})
-                b_mean  = stats.get("mean", 0)
+                b_mean = stats.get("mean", 0)
                 b_stdev = stats.get("stdev", 0)
-                b_max   = stats.get("max", 0)
+                b_max = stats.get("max", 0)
                 if b_max > b_mean + (2 * b_stdev) and b_max > 0:
                     wall_side = "buy" if label == "buy" else "sell"
                     warnings.append(
@@ -695,10 +691,7 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
 
     slippage_cost = entry * trading_qty * slippage * Decimal(2)  # entry + exit
 
-    estimated_fees = (
-        (entry * trading_qty * e_fee_base)
-        + (exit_p * trading_qty * mk)
-    )
+    estimated_fees = (entry * trading_qty * e_fee_base) + (exit_p * trading_qty * mk)
 
     funding_cost = entry * trading_qty * fr
 
@@ -774,11 +767,11 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
 # SECTION 5: OUTPUT ROUTING (LLM_OUTPUT)
 # ==============================================================================
 
+
 def write_llm_output(data: Dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
     json_payload = (
-        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder)
-        + "\n"
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
     )
 
     if out_path in ("/dev/stdout", "/dev/fd/1", "-"):
@@ -790,9 +783,7 @@ def write_llm_output(data: Dict[str, Any]) -> None:
             with open(out_path, "a", encoding="utf-8") as fp:
                 fp.write(json_payload)
         except OSError as err:
-            sys.stderr.write(
-                f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n"
-            )
+            sys.stderr.write(f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n")
             sys.stdout.write(json_payload)
             sys.stdout.flush()
 
@@ -800,6 +791,7 @@ def write_llm_output(data: Dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 6: PROGRAMMATIC ENTRY POINT FOR AICHAT
 # ==============================================================================
+
 
 def run(**kwargs: Any) -> Dict[str, Any]:
     """Execute micro-profit calculation and route results."""
@@ -813,9 +805,7 @@ def run(**kwargs: Any) -> Dict[str, Any]:
         log.debug("Verbose logging enabled. kwargs=%s", list(kwargs.keys()))
 
     result = calculate_micro_profit(**kwargs)
-    print_human_readable_ui(
-        result, no_color=bool(kwargs.get("no_color", False))
-    )
+    print_human_readable_ui(result, no_color=bool(kwargs.get("no_color", False)))
     write_llm_output(result)
     return result
 
@@ -823,6 +813,7 @@ def run(**kwargs: Any) -> Dict[str, Any]:
 # ==============================================================================
 # SECTION 7: CLI ARGUMENT PARSER & ENTRYPOINT
 # ==============================================================================
+
 
 def _coerce(val: str) -> Any:
     """
@@ -852,92 +843,126 @@ def _build_parser() -> argparse.ArgumentParser:
         description=f"Micro-Profit Estimator Engine v{__version__}",
     )
     parser.add_argument(
-        "--symbol", required=True,
+        "--symbol",
+        required=True,
         help="Trading pair symbol (e.g. BTCUSDT)",
     )
     parser.add_argument(
-        "--side", required=True,
+        "--side",
+        required=True,
         choices=["Buy", "Sell", "buy", "sell"],
         help="Order side",
     )
     parser.add_argument(
-        "--qty", type=float, required=True,
+        "--qty",
+        type=float,
+        required=True,
         help="Order quantity in base asset",
     )
     parser.add_argument(
-        "--target", type=float, default=5.0,
+        "--target",
+        type=float,
+        default=5.0,
         help="Target net profit in USDT",
     )
     parser.add_argument(
-        "--leverage", type=int, default=1,
+        "--leverage",
+        type=int,
+        default=1,
         help="Leverage multiplier",
     )
     parser.add_argument(
-        "--maker_fee", type=float, default=0.0002,
+        "--maker_fee",
+        type=float,
+        default=0.0002,
         help="Maker fee rate",
     )
     parser.add_argument(
-        "--taker_fee", type=float, default=0.00055,
+        "--taker_fee",
+        type=float,
+        default=0.00055,
         help="Taker fee rate",
     )
     parser.add_argument(
-        "--funding_rate", type=float, default=0.0001,
+        "--funding_rate",
+        type=float,
+        default=0.0001,
         help="Funding rate per interval",
     )
     parser.add_argument(
-        "--slippage", type=float, default=0.0001,
+        "--slippage",
+        type=float,
+        default=0.0001,
         help="Estimated slippage rate",
     )
     parser.add_argument(
-        "--risk_reward", type=float, default=2.0,
+        "--risk_reward",
+        type=float,
+        default=2.0,
         help="Target risk to reward ratio",
     )
     parser.add_argument(
-        "--kelly_win", type=float, default=0.55,
+        "--kelly_win",
+        type=float,
+        default=0.55,
         help="Estimated win rate for Kelly criterion",
     )
     parser.add_argument(
-        "--depth", type=int, default=40,
+        "--depth",
+        type=int,
+        default=40,
         help="Order book depth level",
     )
     parser.add_argument(
-        "--account_balance", type=float, default=0.0,
+        "--account_balance",
+        type=float,
+        default=0.0,
         help="Account balance for sizing",
     )
     parser.add_argument(
-        "--risk_percent", type=float, default=0.0,
+        "--risk_percent",
+        type=float,
+        default=0.0,
         help="Risk percent per trade (0 = use Kelly)",
     )
     parser.add_argument(
-        "--bids_json", default="[]",
+        "--bids_json",
+        default="[]",
         help="JSON encoded bids array",
     )
     parser.add_argument(
-        "--asks_json", default="[]",
+        "--asks_json",
+        default="[]",
         help="JSON encoded asks array",
     )
     parser.add_argument(
-        "--use_vwap_entry", action="store_true",
+        "--use_vwap_entry",
+        action="store_true",
         help="Use VWAP entry price from depth",
     )
     parser.add_argument(
-        "--execute_order", action="store_true",
+        "--execute_order",
+        action="store_true",
         help="Submit order after calculations",
     )
     parser.add_argument(
-        "--dry_run", action="store_true",
+        "--dry_run",
+        action="store_true",
         help="Simulate order placement",
     )
     parser.add_argument(
-        "--limit_entry", action="store_true",
+        "--limit_entry",
+        action="store_true",
         help="Use limit order for entry",
     )
     parser.add_argument(
-        "--no_color", action="store_true",
+        "--no_color",
+        action="store_true",
         help="Disable ANSI color UI",
     )
     parser.add_argument(
-        "--verbose", action="store_true",
+        "--verbose",
+        action="store_true",
         help="Enable verbose debug logging",
     )
     return parser

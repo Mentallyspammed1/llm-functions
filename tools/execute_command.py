@@ -25,7 +25,6 @@
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import hashlib
 import json
 import logging
@@ -37,26 +36,26 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
-    "run_command",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "duration_to_seconds",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "sanitize_path",
     "inject_curl_timeouts",
-    "duration_to_seconds",
     "interpret_exit_code",
-    "__version__",
+    "run",
+    "run_command",
+    "sanitize_path",
 ]
 
 # ==============================================================================
@@ -125,28 +124,34 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_PINK    = "\033[38;5;198m"
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_ORANGE  = "\033[38;5;202m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_RED     = "\033[38;5;196m"
-NEON_BLUE    = "\033[38;5;33m"
+NEON_PINK = "\033[38;5;198m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_ORANGE = "\033[38;5;202m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_RED = "\033[38;5;196m"
+NEON_BLUE = "\033[38;5;33m"
 NEON_MAGENTA = "\033[38;5;201m"
-NEON_LIME    = "\033[38;5;82m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_LIME = "\033[38;5;82m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-GLOW_CYAN    = NEON_CYAN   + BOLD
-GLOW_GREEN   = NEON_GREEN  + BOLD
-GLOW_RED     = NEON_RED    + BOLD
-GLOW_YELLOW  = NEON_YELLOW + BOLD
-GLOW_PINK    = NEON_PINK   + BOLD
+GLOW_CYAN = NEON_CYAN + BOLD
+GLOW_GREEN = NEON_GREEN + BOLD
+GLOW_RED = NEON_RED + BOLD
+GLOW_YELLOW = NEON_YELLOW + BOLD
+GLOW_PINK = NEON_PINK + BOLD
 
-BOX_TL = "╭"; BOX_TR = "╮"; BOX_BL = "╰"; BOX_BR = "╯"
-BOX_V  = "│"; BOX_H  = "─"; BOX_LT = "├"; BOX_RT = "┤"
+BOX_TL = "╭"
+BOX_TR = "╮"
+BOX_BL = "╰"
+BOX_BR = "╯"
+BOX_V = "│"
+BOX_H = "─"
+BOX_LT = "├"
+BOX_RT = "┤"
 
 _NO_COLOR: bool = False
 _ANSI_RE = re.compile(
@@ -167,7 +172,10 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive, non-dumb terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
 def _cprint(text: str, end: str = "\n", file: Any = None) -> None:
@@ -191,6 +199,7 @@ def get_width() -> int:
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
 
+
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
     env_name = f"LLM_AGENT_VAR_{name.upper()}"
@@ -213,7 +222,8 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
@@ -239,7 +249,10 @@ def sanitize_path() -> None:
         if not p:
             continue
         norm = os.path.normpath(p)
-        if norm.endswith(os.path.join("llm-functions", "bin")) or os.path.basename(norm) == "llm-functions-bin":
+        if (
+            norm.endswith(os.path.join("llm-functions", "bin"))
+            or os.path.basename(norm) == "llm-functions-bin"
+        ):
             continue
         parts.append(p)
     os.environ["PATH"] = os.pathsep.join(parts)
@@ -248,6 +261,7 @@ def sanitize_path() -> None:
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     """Caching utility with TTL support for expensive operations."""
@@ -364,6 +378,7 @@ def seconds_to_human(sec: float) -> str:
 # SECTION 6: Curl / Wget Timeout Injection & Command Icons
 # ==============================================================================
 
+
 def _find_binary(name: str) -> str:
     """Locate absolute binary path, dynamically checking Termux environment directories first."""
     prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
@@ -381,7 +396,9 @@ def _find_binary(name: str) -> str:
     return shutil.which(name) or name
 
 
-def _inject_curl_timeouts_single(cmd_segment: str, connect_timeout: float, max_time: float) -> str:
+def _inject_curl_timeouts_single(
+    cmd_segment: str, connect_timeout: float, max_time: float
+) -> str:
     """Inject timeouts into a single command segment."""
     stripped = cmd_segment.lstrip()
     leading = cmd_segment[: len(cmd_segment) - len(stripped)]
@@ -404,12 +421,12 @@ def _inject_curl_timeouts_single(cmd_segment: str, connect_timeout: float, max_t
             flags.append("--silent")
 
         curl_bin = _find_binary("curl")
-        rest = stripped[len("curl"):].lstrip()
+        rest = stripped[len("curl") :].lstrip()
         return f"{leading}{curl_bin} {' '.join(flags)} {rest}".strip()
 
     if re.match(r"^wget(\s|$)", stripped) and "--timeout" not in cmd_segment:
         wget_bin = _find_binary("wget")
-        rest = stripped[len("wget"):].lstrip()
+        rest = stripped[len("wget") :].lstrip()
         extra = f"--timeout={int(max_time)}"
         if "--no-verbose" not in cmd_segment and "-nv" not in cmd_segment:
             extra += " --no-verbose"
@@ -427,25 +444,30 @@ def inject_curl_timeouts(cmd: str, connect_timeout: float, max_time: float) -> s
         if seg.strip() in ("&&", "||", ";", "|"):
             modified_segments.append(seg)
         else:
-            modified_segments.append(_inject_curl_timeouts_single(seg, connect_timeout, max_time))
+            modified_segments.append(
+                _inject_curl_timeouts_single(seg, connect_timeout, max_time)
+            )
     return "".join(modified_segments)
 
 
 _ICON_PATTERNS: list[tuple[str, str]] = [
-    (r"^(git|hg|svn)(\s|$)",                                           "📦"),
+    (r"^(git|hg|svn)(\s|$)", "📦"),
     (r"^(npm|yarn|pnpm|apt|apt-get|yum|dnf|pacman|brew|pip|uv|bun|deno)(\s|$)", "📦"),
-    (r"^(curl|wget|http|aria2c)(\s|$)",                                "🌐"),
-    (r"^(python[0-9.]*|node|ruby|perl|php|lua|rustc|zig|go)(\s|$)",   "🐍"),
-    (r"^(docker|kubectl|helm|podman|k3s|terraform|ansible)(\s|$)",     "🐳"),
-    (r"^(ls|ll|la|dir|pwd|mkdir|rm|cp|mv|touch|cat|grep|rg|fd|bat|eza|find|awk|sed|tr|sort|uniq|wc|jq|yq)(\s|$)", "📁"),
-    (r"^(ffmpeg|ffprobe|convert|magick|sox)(\s|$)",                    "🎬"),
-    (r"^(ffuf|gobuster|nmap|nikto|sqlmap|hydra)(\s|$)",                "🔍"),
-    (r"^(ssh|scp|rsync|sftp|ftp)(\s|$)",                               "🔐"),
-    (r"^(systemctl|service|journalctl|launchctl)(\s|$)",               "⚙️ "),
-    (r"^(make|cmake|ninja|gcc|g\+\+|clang|cargo)(\s|$)",               "🔨"),
-    (r"^(tar|zip|unzip|gzip|bzip2|xz|7z)(\s|$)",                      "🗜️ "),
-    (r"^(mysql|psql|sqlite3|mongo|redis-cli)(\s|$)",                   "🗄️ "),
-    (r"^(vi|vim|nvim|nano|emacs|code)(\s|$)",                          "✏️ "),
+    (r"^(curl|wget|http|aria2c)(\s|$)", "🌐"),
+    (r"^(python[0-9.]*|node|ruby|perl|php|lua|rustc|zig|go)(\s|$)", "🐍"),
+    (r"^(docker|kubectl|helm|podman|k3s|terraform|ansible)(\s|$)", "🐳"),
+    (
+        r"^(ls|ll|la|dir|pwd|mkdir|rm|cp|mv|touch|cat|grep|rg|fd|bat|eza|find|awk|sed|tr|sort|uniq|wc|jq|yq)(\s|$)",
+        "📁",
+    ),
+    (r"^(ffmpeg|ffprobe|convert|magick|sox)(\s|$)", "🎬"),
+    (r"^(ffuf|gobuster|nmap|nikto|sqlmap|hydra)(\s|$)", "🔍"),
+    (r"^(ssh|scp|rsync|sftp|ftp)(\s|$)", "🔐"),
+    (r"^(systemctl|service|journalctl|launchctl)(\s|$)", "⚙️ "),
+    (r"^(make|cmake|ninja|gcc|g\+\+|clang|cargo)(\s|$)", "🔨"),
+    (r"^(tar|zip|unzip|gzip|bzip2|xz|7z)(\s|$)", "🗜️ "),
+    (r"^(mysql|psql|sqlite3|mongo|redis-cli)(\s|$)", "🗄️ "),
+    (r"^(vi|vim|nvim|nano|emacs|code)(\s|$)", "✏️ "),
 ]
 
 
@@ -463,13 +485,13 @@ def get_cmd_icon(cmd: str) -> str:
 # ==============================================================================
 
 _EXIT_CODES: dict[int, str] = {
-    0:   "Success",
-    1:   "General error",
-    2:   "Misuse of shell builtins or permission error",
-    3:   "No such process",
-    13:  "Permission denied",
-    17:  "File exists",
-    28:  "No space left on device",
+    0: "Success",
+    1: "General error",
+    2: "Misuse of shell builtins or permission error",
+    3: "No such process",
+    13: "Permission denied",
+    17: "File exists",
+    28: "No space left on device",
     111: "Connection refused",
     124: "Command timed out",
     125: "timeout binary itself failed",
@@ -538,6 +560,7 @@ def detect_shadowing_hint(output: str) -> Optional[str]:
 # SECTION 8: Terminal UI & Header/Footer Rendering
 # ==============================================================================
 
+
 def _border(width: int) -> str:
     return BOX_H * max(width, 10)
 
@@ -588,11 +611,15 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         for line in output.splitlines():
             _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {line}")
     else:
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}(Command produced no stdout/stderr){RESET}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}(Command produced no stdout/stderr){RESET}"
+        )
 
     if exit_code != 0:
         _cprint(f"{NEON_PURPLE}{BOX_LT}{border_str}{BOX_RT}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error Info:{RESET} {interpret_exit_code(exit_code)}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error Info:{RESET} {interpret_exit_code(exit_code)}"
+        )
 
     _cprint(f"{NEON_PURPLE}{BOX_BL}{border_str}{BOX_BR}{RESET}")
 
@@ -603,8 +630,8 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 
 _SHELL_MAP: dict[str, list[str]] = {
     "bash": ["/bin/bash", "-c"],
-    "sh":   ["/bin/sh",   "-c"],
-    "zsh":  ["/bin/zsh",  "-c"],
+    "sh": ["/bin/sh", "-c"],
+    "zsh": ["/bin/zsh", "-c"],
 }
 _TERMUX_PREFIX = os.environ.get("PREFIX", "/data/data/com.termux/files/usr") + "/bin"
 for _sh in ("bash", "sh", "zsh"):
@@ -668,7 +695,10 @@ def run_command(
         try:
             raw_bytes, _ = process.communicate(timeout=timeout_sec)
             if len(raw_bytes) > MAX_OUTPUT_BYTES:
-                raw_bytes = raw_bytes[:MAX_OUTPUT_BYTES] + b"\n... [Output truncated at 20MB limit]\n"
+                raw_bytes = (
+                    raw_bytes[:MAX_OUTPUT_BYTES]
+                    + b"\n... [Output truncated at 20MB limit]\n"
+                )
             raw = raw_bytes.decode("utf-8", errors="replace")
             output = raw.replace("\r\n", "\n").replace("\r", "\n")
             exit_code = process.returncode
@@ -716,6 +746,7 @@ def run_command(
 # SECTION 10: Primary Master Tool Execution Logic
 # ==============================================================================
 
+
 def execute_tool(
     command: str,
     timeout: Optional[str] = None,
@@ -757,9 +788,8 @@ def execute_tool(
         wd = (Path(base_dir) / working_dir).expanduser().resolve()
         if wd.is_dir():
             cwd = str(wd)
-        else:
-            if verbose:
-                logging.debug(f"Working dir not found: {working_dir}, using default CWD.")
+        elif verbose:
+            logging.debug(f"Working dir not found: {working_dir}, using default CWD.")
 
     cache = ToolCache()
     cache_key = f"{cmd}:{cwd}:{shell}:{timeout_sec}:{strip_ansi}:{extra_env}"
@@ -819,10 +849,13 @@ def execute_tool(
 # SECTION 11: Output Routing (LLM vs Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write structured execution output to LLM_OUTPUT destination."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-", "/dev/stderr"}
     if out_path in direct_targets:
@@ -843,6 +876,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 12: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     command: str,
@@ -894,6 +928,7 @@ def run(
 # SECTION 13: CLI Argument Parser & Runner
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="execute_command.py",
@@ -901,7 +936,8 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--command", "-c",
+        "--command",
+        "-c",
         required=True,
         metavar="STRING",
         help="Command to run (required)",
@@ -968,7 +1004,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Strip ANSI codes from output before returning",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

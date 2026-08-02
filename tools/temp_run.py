@@ -3,7 +3,13 @@ def run(action, **kwargs):
     logger.info(f"Executing Action: {action} | Params: {kwargs}")
     try:
         if action == "pnl":
-            return calculate_tp_pnl(kwargs.get("entry"), kwargs.get("tp"), kwargs.get("qty"), kwargs.get("side"), leverage=kwargs.get("leverage", 1.0))
+            return calculate_tp_pnl(
+                kwargs.get("entry"),
+                kwargs.get("tp"),
+                kwargs.get("qty"),
+                kwargs.get("side"),
+                leverage=kwargs.get("leverage", 1.0),
+            )
         elif action == "signal":
             return analyze_trade_signal(kwargs.get("symbol"))
         elif action == "depth":

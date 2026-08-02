@@ -35,15 +35,15 @@ __version__ = "1.1.0"
 # SECTION 1: Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[mGKHF]")
 
@@ -58,10 +58,9 @@ def _is_tty() -> bool:
     return sys.stdout.isatty()
 
 
-import sys
 import re
-from typing import Any, TextIO, Optional
 from functools import lru_cache
+from typing import TextIO
 
 
 def _is_tty(file: Optional[TextIO] = None) -> bool:
@@ -130,19 +129,15 @@ __all__ = [
     "_cprint",
     "_is_tty",
     "_strip_ansi",
-    "cprint_success",
-    "cprint_error",
-    "cprint_warning",
-    "cprint_info",
     "cprint_debug",
+    "cprint_error",
+    "cprint_info",
+    "cprint_success",
+    "cprint_warning",
 ]
 
-import json
-import os
-import sys
-import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, TextIO
+from typing import Callable
 
 try:
     from typing import Self
@@ -334,9 +329,13 @@ def print_human_readable_ui(
     border = "─" * bw
 
     def print_line(content: str = "") -> None:
-        _cprint(f"{NEON_PURPLE}│{RESET} {content:<{inner_w}}{NEON_PURPLE}│{RESET}", stream)
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {content:<{inner_w}}{NEON_PURPLE}│{RESET}", stream
+        )
 
-    def print_border(top: bool = False, bottom: bool = False, middle: bool = False) -> None:
+    def print_border(
+        top: bool = False, bottom: bool = False, middle: bool = False
+    ) -> None:
         if top:
             _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}", stream)
         elif bottom:
@@ -358,20 +357,30 @@ def print_human_readable_ui(
         cpu_bar = _progress_bar(cpu, color_fn=_color_for_pct)
         ram_bar = _progress_bar(ram, color_fn=_color_for_pct)
         storage_bar = _progress_bar(storage, color_fn=_color_for_pct)
-        print_line(f"{NEON_CYAN}CPU Load:{RESET}       {NEON_YELLOW}{cpu:>5.1f}%{RESET} {cpu_bar}")
-        print_line(f"{NEON_CYAN}RAM Usage:{RESET}      {NEON_YELLOW}{ram:>5.1f}%{RESET} {ram_bar}")
-        print_line(f"{NEON_CYAN}Storage Used:{RESET}   {NEON_YELLOW}{storage:>5.1f}%{RESET} {storage_bar}")
+        print_line(
+            f"{NEON_CYAN}CPU Load:{RESET}       {NEON_YELLOW}{cpu:>5.1f}%{RESET} {cpu_bar}"
+        )
+        print_line(
+            f"{NEON_CYAN}RAM Usage:{RESET}      {NEON_YELLOW}{ram:>5.1f}%{RESET} {ram_bar}"
+        )
+        print_line(
+            f"{NEON_CYAN}Storage Used:{RESET}   {NEON_YELLOW}{storage:>5.1f}%{RESET} {storage_bar}"
+        )
     else:
         print_line(f"{NEON_CYAN}CPU Load:{RESET}       {NEON_YELLOW}{cpu:.1f}%{RESET}")
         print_line(f"{NEON_CYAN}RAM Usage:{RESET}      {NEON_YELLOW}{ram:.1f}%{RESET}")
-        print_line(f"{NEON_CYAN}Storage Used:{RESET}   {NEON_YELLOW}{storage:.1f}%{RESET}")
+        print_line(
+            f"{NEON_CYAN}Storage Used:{RESET}   {NEON_YELLOW}{storage:.1f}%{RESET}"
+        )
 
     bat_str = f"{battery}%" if isinstance(battery, (int, float)) else str(battery)
     print_line(f"{NEON_CYAN}Battery Level:{RESET}  {NEON_GREEN}{bat_str}{RESET}")
 
     ts = time.strftime(cfg.timestamp_format, time.localtime(opt_data.timestamp))
     print_line(f"{NEON_CYAN}Timestamp:{RESET}      {DIM}{ts}{RESET}")
-    print_line(f"{NEON_CYAN}Duration:{RESET}       {DIM}{opt_data.duration_ms}ms{RESET}")
+    print_line(
+        f"{NEON_CYAN}Duration:{RESET}       {DIM}{opt_data.duration_ms}ms{RESET}"
+    )
 
     heavy_procs = opt_data.heavy_processes[: cfg.max_processes]
     if heavy_procs:
@@ -382,7 +391,9 @@ def print_human_readable_ui(
             name = proc.get("name", "unknown")
             cpu_p = proc.get("cpu", 0)
             mem_p = proc.get("mem", 0)
-            print_line(f"   {NEON_RED}› PID {pid}{RESET} ({name}): {cpu_p}% CPU, {mem_p}% MEM")
+            print_line(
+                f"   {NEON_RED}› PID {pid}{RESET} ({name}): {cpu_p}% CPU, {mem_p}% MEM"
+            )
 
     rituals = opt_data.optimization_rituals[: cfg.max_rituals]
     if rituals:
@@ -400,7 +411,9 @@ def print_human_readable_ui(
     print_border(bottom=True)
 
 
-def print_json_output(data: dict[str, Any] | OptimizerData, stream: TextIO | None = None) -> None:
+def print_json_output(
+    data: dict[str, Any] | OptimizerData, stream: TextIO | None = None
+) -> None:
     """Print structured JSON output for machine consumption."""
     stream = stream or sys.stdout
     if isinstance(data, OptimizerData):
@@ -438,16 +451,15 @@ def create_optimizer_data(
 # ==============================================================================
 # SECTION 2: Core Logic Implementation
 # ==============================================================================
-import os
-import time
 import platform
-from pathlib import Path
-from typing import Tuple, Optional, Dict, Any
-from functools import lru_cache
+import time
 from dataclasses import dataclass
+from functools import lru_cache
+from typing import Dict, Tuple
 
 try:
     import psutil
+
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
@@ -477,7 +489,7 @@ def _get_cpu_and_ram() -> Tuple[float, float]:
     # Read CPU load average
     try:
         if Path("/proc/loadavg").exists():
-            with open("/proc/loadavg", "r") as f:
+            with open("/proc/loadavg") as f:
                 parts = f.read().split()
                 if len(parts) >= 3:
                     load1 = float(parts[0])
@@ -492,7 +504,7 @@ def _get_cpu_and_ram() -> Tuple[float, float]:
     try:
         if Path("/proc/meminfo").exists():
             mem_data: Dict[str, int] = {}
-            with open("/proc/meminfo", "r") as f:
+            with open("/proc/meminfo") as f:
                 for line in f:
                     parts = line.split(":")
                     if len(parts) == 2:
@@ -547,7 +559,7 @@ def get_system_stats(use_cache: bool = True) -> SystemStats:
 
     try:
         if Path("/proc/loadavg").exists():
-            with open("/proc/loadavg", "r") as f:
+            with open("/proc/loadavg") as f:
                 parts = f.read().split()
                 if len(parts) >= 3:
                     load_avg_1m = float(parts[0])
@@ -559,11 +571,11 @@ def get_system_stats(use_cache: bool = True) -> SystemStats:
     try:
         if PSUTIL_AVAILABLE:
             mem = psutil.virtual_memory()
-            ram_total_gb = round(mem.total / (1024 ** 3), 2)
-            ram_available_gb = round(mem.available / (1024 ** 3), 2)
+            ram_total_gb = round(mem.total / (1024**3), 2)
+            ram_available_gb = round(mem.available / (1024**3), 2)
         elif Path("/proc/meminfo").exists():
             mem_data: Dict[str, int] = {}
-            with open("/proc/meminfo", "r") as f:
+            with open("/proc/meminfo") as f:
                 for line in f:
                     parts = line.split(":")
                     if len(parts) == 2:
@@ -575,8 +587,8 @@ def get_system_stats(use_cache: bool = True) -> SystemStats:
                             continue
             total_kb = mem_data.get("MemTotal", 0)
             avail_kb = mem_data.get("MemAvailable", mem_data.get("MemFree", 0))
-            ram_total_gb = round(total_kb / (1024 ** 2), 2)
-            ram_available_gb = round(avail_kb / (1024 ** 2), 2)
+            ram_total_gb = round(total_kb / (1024**2), 2)
+            ram_available_gb = round(avail_kb / (1024**2), 2)
     except Exception:
         pass
 
@@ -594,13 +606,17 @@ def get_system_stats(use_cache: bool = True) -> SystemStats:
     return _cached_stats
 
 
-def is_system_under_load(cpu_threshold: float = 80.0, ram_threshold: float = 85.0) -> bool:
+def is_system_under_load(
+    cpu_threshold: float = 80.0, ram_threshold: float = 85.0
+) -> bool:
     """Check if system is under high load."""
     stats = get_system_stats()
     return stats.cpu_percent >= cpu_threshold or stats.ram_percent >= ram_threshold
 
 
-def get_optimal_worker_count(reserve_cpu_pct: float = 10.0, reserve_ram_pct: float = 15.0) -> int:
+def get_optimal_worker_count(
+    reserve_cpu_pct: float = 10.0, reserve_ram_pct: float = 15.0
+) -> int:
     """Calculate optimal worker count based on current system load."""
     stats = get_system_stats()
     cpu_available = max(0, 100 - stats.cpu_percent - reserve_cpu_pct)
@@ -620,7 +636,7 @@ class SystemMonitor:
         self._running = False
         self._stats_history: list[SystemStats] = []
 
-    def __enter__(self) -> "SystemMonitor":
+    def __enter__(self) -> SystemMonitor:
         self._running = True
         return self
 
@@ -649,13 +665,10 @@ class SystemMonitor:
             load_avg_5m=sum(s.load_avg_5m for s in recent) / n,
             load_avg_15m=sum(s.load_avg_15m for s in recent) / n,
         )
-import json
-import shutil
-import subprocess
-import time
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
+
+import time
+from typing import List
 
 _BATTERY_CACHE: Dict[str, Tuple[float, str]] = {}
 _CACHE_TTL = 2.0
@@ -722,7 +735,9 @@ def _get_linux_batteries(p_path: Path) -> List[Dict[str, object]]:
             except OSError:
                 pass
         if batt_type.lower() == "battery" or "BAT" in supply.name.upper():
-            batteries.append({"capacity": capacity, "status": status, "name": supply.name})
+            batteries.append(
+                {"capacity": capacity, "status": status, "name": supply.name}
+            )
     return batteries
 
 
@@ -748,15 +763,14 @@ def _get_cached_battery_status() -> str:
     status = _get_battery_status()
     _BATTERY_CACHE["default"] = (now, status)
     return status
-import shutil
-import subprocess
+
+
 import sys
-from typing import Any, Dict, List, Optional
 
 if sys.version_info >= (3, 9):
-    from typing import Annotated
+    pass
 else:
-    from typing_extensions import Annotated
+    pass
 
 
 def _get_heavy_processes(
@@ -781,7 +795,9 @@ def _get_heavy_processes(
     if _has_psutil():
         heavy = _get_heavy_processes_psutil(cpu_threshold, mem_threshold, filter_names)
     elif shutil.which("ps"):
-        heavy = _get_heavy_processes_ps(cpu_threshold, mem_threshold, timeout, filter_names)
+        heavy = _get_heavy_processes_ps(
+            cpu_threshold, mem_threshold, timeout, filter_names
+        )
 
     return sorted(heavy, key=lambda x: x["cpu"], reverse=True)
 
@@ -789,6 +805,7 @@ def _get_heavy_processes(
 def _has_psutil() -> bool:
     try:
         import psutil  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -816,7 +833,9 @@ def _get_heavy_processes_psutil(
             if cpu_f < cpu_threshold and mem_f < mem_threshold:
                 continue
 
-            if filter_names and not any(f.lower() in name.lower() for f in filter_names):
+            if filter_names and not any(
+                f.lower() in name.lower() for f in filter_names
+            ):
                 continue
 
             heavy.append({"pid": pid, "cpu": cpu_f, "mem": mem_f, "name": name})
@@ -862,14 +881,18 @@ def _get_heavy_processes_ps(
                 mem_f = float(mem_str)
                 if cpu_f < cpu_threshold and mem_f < mem_threshold:
                     continue
-                if filter_names and not any(f.lower() in comm.lower() for f in filter_names):
+                if filter_names and not any(
+                    f.lower() in comm.lower() for f in filter_names
+                ):
                     continue
-                heavy.append({
-                    "pid": int(pid_str),
-                    "cpu": cpu_f,
-                    "mem": mem_f,
-                    "name": comm.strip(),
-                })
+                heavy.append(
+                    {
+                        "pid": int(pid_str),
+                        "cpu": cpu_f,
+                        "mem": mem_f,
+                        "name": comm.strip(),
+                    }
+                )
             except ValueError:
                 continue
     except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError):
@@ -882,6 +905,7 @@ def get_process_details(pid: int) -> Optional[Dict[str, Any]]:
     """Return detailed info for a specific PID using psutil if available."""
     if _has_psutil():
         import psutil
+
         try:
             proc = psutil.Process(pid)
             return {
@@ -907,6 +931,7 @@ def kill_process_tree(pid: int, sig: int = 15, timeout: float = 3.0) -> bool:
     if not _has_psutil():
         return False
     import psutil
+
     try:
         parent = psutil.Process(pid)
         children = parent.children(recursive=True)
@@ -932,6 +957,7 @@ def get_heavy_processes_cached(
 ) -> List[Dict[str, Any]]:
     """Cached wrapper around _get_heavy_processes."""
     import time
+
     global _process_cache, _cache_ttl
     _cache_ttl = ttl
     key = f"{cpu_threshold}:{mem_threshold}"
@@ -943,6 +969,8 @@ def get_heavy_processes_cached(
     result = _get_heavy_processes(cpu_threshold, mem_threshold)
     _process_cache[key] = (result, now)
     return result
+
+
 def execute_tool(
     target: str = "/",
     interval: int = 5,
@@ -973,16 +1001,26 @@ def execute_tool(
         # Generate optimization rituals
         rituals = []
         if ram_usage > 75.0:
-            rituals.append("Memory Reclaim Ritual: Purge cache using 'sync && sysctl -w vm.drop_caches=3' or restart heavy daemons.")
+            rituals.append(
+                "Memory Reclaim Ritual: Purge cache using 'sync && sysctl -w vm.drop_caches=3' or restart heavy daemons."
+            )
         if storage_pct > 85.0:
-            rituals.append("Storage Liberation Ritual: Clean package cache ('apt clean' or 'pkg clean') & remove stale temp files.")
+            rituals.append(
+                "Storage Liberation Ritual: Clean package cache ('apt clean' or 'pkg clean') & remove stale temp files."
+            )
         if cpu_load > cpu_threshold:
-            rituals.append(f"CPU Banishing Ritual: High CPU detected ({cpu_load}%). Consider terminating top PID targets.")
+            rituals.append(
+                f"CPU Banishing Ritual: High CPU detected ({cpu_load}%). Consider terminating top PID targets."
+            )
         if "Discharging" in battery_status:
-            rituals.append("Life Force Preservation: Battery discharging. Lower background refresh intervals & turn off debug logs.")
+            rituals.append(
+                "Life Force Preservation: Battery discharging. Lower background refresh intervals & turn off debug logs."
+            )
 
         if not rituals:
-            rituals.append("Harmonic Resonance Achieved: All system life metrics are operating at optimal levels.")
+            rituals.append(
+                "Harmonic Resonance Achieved: All system life metrics are operating at optimal levels."
+            )
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
@@ -996,14 +1034,14 @@ def execute_tool(
             "heavy_processes": heavy_procs,
             "optimization_rituals": rituals,
             "duration_ms": duration_ms,
-            "exit_code": 0
+            "exit_code": 0,
         }
 
     except Exception as exc:
         return {
             "success": False,
             "error": f"Life Force Optimizer execution failed: {exc}",
-            "exit_code": 1
+            "exit_code": 1,
         }
 
 
@@ -1011,12 +1049,8 @@ def execute_tool(
 # SECTION 3: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
-import os
 import sys
-import json
 import tempfile
-from pathlib import Path
-from typing import Any, TextIO
 
 
 def write_llm_output(data: dict[str, Any]) -> None:
@@ -1041,7 +1075,9 @@ def write_llm_output(data: dict[str, Any]) -> None:
 
 def _write_to_stream(payload: str, target: str) -> None:
     """Write payload to stdout or stderr based on target."""
-    stream: TextIO = sys.stdout if target in {"/dev/stdout", "/dev/fd/1", "-"} else sys.stderr
+    stream: TextIO = (
+        sys.stdout if target in {"/dev/stdout", "/dev/fd/1", "-"} else sys.stderr
+    )
     stream.write(payload)
     stream.flush()
 
@@ -1089,7 +1125,9 @@ def write_llm_output_safe(data: Any) -> None:
 # SECTION 4: Function Entry Point for AIChat
 # ==============================================================================
 
-__all__ = ["write_llm_output", "write_llm_output_safe", "validate_llm_output"]
+__all__ = ["validate_llm_output", "write_llm_output", "write_llm_output_safe"]
+
+
 def run(
     target: str = "/",
     interval: int = 5,
@@ -1140,10 +1178,8 @@ def run(
 # SECTION 5: CLI Argument Parser
 # ==============================================================================
 
-import argparse
 import sys
-from pathlib import Path
-from typing import Optional, Sequence
+from typing import Sequence
 
 __version__ = "18.0.0"
 
@@ -1163,13 +1199,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     general = parser.add_argument_group("General Options")
     general.add_argument(
-        "--target", "-t",
+        "--target",
+        "-t",
         default="/",
         metavar="PATH",
         help="Target storage path to inspect (default: /)",
     )
     general.add_argument(
-        "--version", "-V",
+        "--version",
+        "-V",
         action="version",
         version=f"%(prog)s {__version__}",
         help="Show program version and exit",
@@ -1177,7 +1215,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     monitoring = parser.add_argument_group("Monitoring Options")
     monitoring.add_argument(
-        "--interval", "-i",
+        "--interval",
+        "-i",
         type=_positive_int,
         default=5,
         metavar="SECONDS",
@@ -1192,7 +1231,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="CPU load percentage threshold to flag heavy processes (default: 80.0)",
     )
     monitoring.add_argument(
-        "--watch", "-w",
+        "--watch",
+        "-w",
         action="store_true",
         default=False,
         help="Run as a continuous monitoring daemon",
@@ -1223,7 +1263,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     output.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",
@@ -1296,7 +1337,7 @@ if __name__ == "__main__":
     sys.exit(main())
 if __name__ == "__main__":
     args = _build_parser().parse_args()
-    
+
     if args.watch:
         try:
             while True:

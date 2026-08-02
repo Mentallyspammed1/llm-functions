@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -41,17 +40,33 @@ from typing import Any, Dict, Optional, Tuple
 
 WEATHER_CODES = {
     0: "Sunny/Clear",
-    1: "Mainly Clear", 2: "Partly Cloudy", 3: "Overcast",
-    45: "Foggy", 48: "Depositing Rime Fog",
-    51: "Light Drizzle", 53: "Moderate Drizzle", 55: "Dense Drizzle",
-    56: "Light Freezing Drizzle", 57: "Dense Freezing Drizzle",
-    61: "Slight Rain", 63: "Moderate Rain", 65: "Heavy Rain",
-    66: "Light Freezing Rain", 67: "Heavy Freezing Rain",
-    71: "Slight Snowfall", 73: "Moderate Snowfall", 75: "Heavy Snowfall",
+    1: "Mainly Clear",
+    2: "Partly Cloudy",
+    3: "Overcast",
+    45: "Foggy",
+    48: "Depositing Rime Fog",
+    51: "Light Drizzle",
+    53: "Moderate Drizzle",
+    55: "Dense Drizzle",
+    56: "Light Freezing Drizzle",
+    57: "Dense Freezing Drizzle",
+    61: "Slight Rain",
+    63: "Moderate Rain",
+    65: "Heavy Rain",
+    66: "Light Freezing Rain",
+    67: "Heavy Freezing Rain",
+    71: "Slight Snowfall",
+    73: "Moderate Snowfall",
+    75: "Heavy Snowfall",
     77: "Snow Grains",
-    80: "Slight Rain Showers", 81: "Moderate Rain Showers", 82: "Violent Rain Showers",
-    85: "Slight Snow Showers", 86: "Heavy Snow Showers",
-    95: "Thunderstorm", 96: "Thunderstorm with Slight Hail", 99: "Thunderstorm with Heavy Hail"
+    80: "Slight Rain Showers",
+    81: "Moderate Rain Showers",
+    82: "Violent Rain Showers",
+    85: "Slight Snow Showers",
+    86: "Heavy Snow Showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm with Slight Hail",
+    99: "Thunderstorm with Heavy Hail",
 }
 
 _verbose: bool = False
@@ -83,7 +98,9 @@ def _validate_sandbox(path: Path) -> bool:
 
 def _get_location_raw(provider: str = "gps", timeout: int = 15) -> dict:
     if not shutil.which("termux-location"):
-        raise RuntimeError("termux-location command not found on PATH. Make sure Termux:API is installed.")
+        raise RuntimeError(
+            "termux-location command not found on PATH. Make sure Termux:API is installed."
+        )
     cmd = ["termux-location", "-p", provider, "-r", "once"]
     _debug(f"Executing: {' '.join(cmd)}")
     result = subprocess.check_output(cmd, text=True, timeout=timeout)
@@ -130,23 +147,23 @@ def _reverse_geocode(
     try:
         url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&addressdetails=1"
         ua = user_agent or "TermuxLocationScript/5.0"
-        req = urllib.request.Request(url, headers={'User-Agent': ua})
-        
+        req = urllib.request.Request(url, headers={"User-Agent": ua})
+
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            geo_data = json.loads(response.read().decode('utf-8'))
+            geo_data = json.loads(response.read().decode("utf-8"))
             addr = geo_data.get("address", {})
             if addr:
                 house_number = addr.get("house_number", "")
                 road = addr.get("road", addr.get("pedestrian", ""))
                 city = addr.get("city", addr.get("town", addr.get("village", "")))
                 state = addr.get("state", "")
-                
+
                 if road:
                     street = f"{house_number} {road}".strip()
                     clean_address = f"{street}, {city}, {state}".strip(", ")
                     return clean_address, geo_data
                 else:
-                    return geo_data.get('display_name', 'Unknown Address'), geo_data
+                    return geo_data.get("display_name", "Unknown Address"), geo_data
             return "Could not resolve to a known street address.", geo_data
     except Exception as e:
         _warn(f"Address reverse geocode failed: {e}")
@@ -164,10 +181,10 @@ def _get_weather(
         temp_unit = "fahrenheit" if unit.lower() == "fahrenheit" else "celsius"
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&temperature_unit={temp_unit}"
         ua = user_agent or "TermuxLocationScript/5.0"
-        req = urllib.request.Request(url, headers={'User-Agent': ua})
-        
+        req = urllib.request.Request(url, headers={"User-Agent": ua})
+
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            weather_data = json.loads(response.read().decode('utf-8'))
+            weather_data = json.loads(response.read().decode("utf-8"))
             current = weather_data.get("current_weather", {})
             if current:
                 temp = current.get("temperature")
@@ -254,8 +271,8 @@ def query_location_report(
         "raw_responses": {
             "location": data,
             "geocoding": geo_raw,
-            "weather": weather_raw
-        }
+            "weather": weather_raw,
+        },
     }
     return report_data
 
@@ -263,7 +280,7 @@ def query_location_report(
 def _format_text_report(report: Dict[str, Any]) -> str:
     if not report.get("success"):
         return f"Error: {report.get('error')}"
-    
+
     out = f"🕒 Time: {report['timestamp']}\n"
     coords = report["coordinates"]
     out += f"📍 Coordinates: {coords['latitude']}, {coords['longitude']}\n"
@@ -283,8 +300,12 @@ def _cli() -> int:
     p.add_argument("--provider", default="gps")
     p.add_argument("--fallbacks", default="network")
     p.add_argument("--unit", choices=("celsius", "fahrenheit"), default="celsius")
-    p.add_argument("--speed-unit", choices=("ms", "kmh", "mph"), default="ms", dest="speed_unit")
-    p.add_argument("--alt-unit", choices=("meters", "feet"), default="meters", dest="alt_unit")
+    p.add_argument(
+        "--speed-unit", choices=("ms", "kmh", "mph"), default="ms", dest="speed_unit"
+    )
+    p.add_argument(
+        "--alt-unit", choices=("meters", "feet"), default="meters", dest="alt_unit"
+    )
     p.add_argument("--precision", type=int, default=6)
     p.add_argument("--user-agent", default=None, dest="user_agent")
     p.add_argument("--timeout", type=int, default=15)
@@ -313,7 +334,7 @@ def _cli() -> int:
             timeout=args.timeout,
             lat_override=args.lat,
             lon_override=args.lon,
-            dry_run=args.dry_run
+            dry_run=args.dry_run,
         )
         text_rep = _format_text_report(report)
         return report, text_rep
@@ -334,14 +355,17 @@ def _cli() -> int:
             return 0
     else:
         report, text_rep = run_once()
-        
+
         # Output handling
         output_str = json.dumps(report, indent=2) if args.json else text_rep
-        
+
         if args.output:
             out_path = Path(args.output).expanduser().resolve()
             if not _validate_sandbox(out_path):
-                print(f"Error: Output destination '{out_path}' lies outside allowed sandbox.", file=sys.stderr)
+                print(
+                    f"Error: Output destination '{out_path}' lies outside allowed sandbox.",
+                    file=sys.stderr,
+                )
                 return 1
             with open(out_path, "w", encoding="utf-8") as f:
                 f.write(output_str + "\n")
@@ -357,7 +381,9 @@ def _cli() -> int:
         # Share via Termux Share
         if args.share and report.get("success") and shutil.which("termux-share"):
             # Temporary file write to feed into termux-share stdin/command
-            with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as tmpf:
+            with tempfile.NamedTemporaryFile(
+                suffix=".txt", delete=False, mode="w", encoding="utf-8"
+            ) as tmpf:
                 tmpf.write(text_rep)
                 tmp_name = tmpf.name
             try:
@@ -386,7 +412,7 @@ def run(
     json_mode: bool = True,
 ) -> str:
     """Query coordinates and weather metrics.
-    
+
     Args:
         provider: Location provider: gps, network, cell (default: gps)
         fallbacks: Comma-separated fallback providers (default: network)
@@ -412,7 +438,7 @@ def run(
         timeout=timeout,
         lat_override=lat,
         lon_override=lon,
-        dry_run=dry_run
+        dry_run=dry_run,
     )
     if json_mode:
         return json.dumps(report, indent=2)

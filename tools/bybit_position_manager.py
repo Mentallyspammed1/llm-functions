@@ -45,6 +45,7 @@ except ImportError:
 
 try:
     import proxy_utils
+
     proxy_utils.set_proxy_environment()
 except ImportError:
     proxy_utils = None
@@ -91,15 +92,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -109,10 +110,15 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -133,19 +139,29 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [BYBIT POSITION MANAGER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [BYBIT POSITION MANAGER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Symbol:{RESET}      {BOLD}{data.get('symbol', 'N/A')}{RESET}  |  {NEON_CYAN}Action:{RESET} {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Symbol:{RESET}      {BOLD}{data.get('symbol', 'N/A')}{RESET}  |  {NEON_CYAN}Action:{RESET} {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}"
+    )
 
     if "net_profit" in data:
         np_col = NEON_GREEN if data.get("net_profit", 0) >= 0 else NEON_RED
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Net Profit:{RESET}  {np_col}${data.get('net_profit', 0.0):.2f} USDT{RESET}  (Target: ${data.get('threshold', 0)} USDT)")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Net Profit:{RESET}  {np_col}${data.get('net_profit', 0.0):.2f} USDT{RESET}  (Target: ${data.get('threshold', 0)} USDT)"
+        )
 
     if "new_stop_loss" in data:
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_GREEN}New Stop Loss:{RESET} {data.get('new_stop_loss')}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_GREEN}New Stop Loss:{RESET} {data.get('new_stop_loss')}"
+        )
 
     if "message" in data:
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Message:{RESET}     {data.get('message')}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Message:{RESET}     {data.get('message')}"
+        )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -157,6 +173,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: PRECISION & LONG/SHORT HELPERS
 # ==============================================================================
+
 
 def format_precision(value: Any, step: Any, rounding_mode=ROUND_HALF_UP) -> str:
     """Round a numeric value to an exact decimal step string without binary float drift."""
@@ -173,10 +190,14 @@ def format_precision(value: Any, step: Any, rounding_mode=ROUND_HALF_UP) -> str:
         return str(value)
 
 
-def calculate_breakeven_price(side: str, entry_price: float, fee_rate: float = 0.0006) -> float:
+def calculate_breakeven_price(
+    side: str, entry_price: float, fee_rate: float = 0.0006
+) -> float:
     """Calculate fee-adjusted breakeven price covering entry and exit trading fees."""
     side_clean = side.capitalize()
-    if side_clean == "Buy":  # Long position requires higher price to cover roundtrip fees
+    if (
+        side_clean == "Buy"
+    ):  # Long position requires higher price to cover roundtrip fees
         return entry_price * (1.0 + 2.0 * fee_rate)
     # Short position requires lower price to cover roundtrip fees
     return entry_price * (1.0 - 2.0 * fee_rate)
@@ -186,7 +207,10 @@ def calculate_breakeven_price(side: str, entry_price: float, fee_rate: float = 0
 # SECTION 4: API REQUEST WRAPPERS
 # ==============================================================================
 
-def _safe_api(method: str, path: str, params: dict | None = None, signed: bool = False) -> dict:
+
+def _safe_api(
+    method: str, path: str, params: dict | None = None, signed: bool = False
+) -> dict:
     """Resilient API wrapper using bybit_core or falling back to direct HTTP requests."""
     if bybit_core and hasattr(bybit_core, "api_request"):
         try:
@@ -209,10 +233,17 @@ def _safe_api(method: str, path: str, params: dict | None = None, signed: bool =
         return {"retCode": -1, "retMsg": f"Request exception: {exc}", "result": {}}
 
 
-def get_instrument_precision(symbol: str, category: str = "linear") -> tuple[float, float]:
+def get_instrument_precision(
+    symbol: str, category: str = "linear"
+) -> tuple[float, float]:
     """Fetch tickSize and qtyStep for exact string formatting."""
     tick_size, qty_step = 0.01, 0.001
-    data = _safe_api("GET", "/v5/market/instruments-info", params={"category": category, "symbol": symbol}, signed=False)
+    data = _safe_api(
+        "GET",
+        "/v5/market/instruments-info",
+        params={"category": category, "symbol": symbol},
+        signed=False,
+    )
     if data.get("retCode") == 0:
         lst = data.get("result", {}).get("list", [])
         if lst:
@@ -228,6 +259,7 @@ def get_instrument_precision(symbol: str, category: str = "linear") -> tuple[flo
 # SECTION 5: CORE POSITION MANAGEMENT ENGINE
 # ==============================================================================
 
+
 def execute_manage_position(
     symbol: str = "BTCUSDT",
     action: str = "be",
@@ -242,15 +274,32 @@ def execute_manage_position(
 
     if verbose:
         logging.basicConfig(level=logging.DEBUG, format="[DEBUG] %(message)s")
-        logging.debug(f"Managing position for {symbol} | Action: {action} | Target Profit: ${profit_usdt}")
+        logging.debug(
+            f"Managing position for {symbol} | Action: {action} | Target Profit: ${profit_usdt}"
+        )
 
     # 1. Fetch Open Position
-    pos_data = _safe_api("GET", "/v5/position/list", params={"category": category, "symbol": symbol}, signed=True)
+    pos_data = _safe_api(
+        "GET",
+        "/v5/position/list",
+        params={"category": category, "symbol": symbol},
+        signed=True,
+    )
     if pos_data.get("retCode") != 0:
-        return {"success": False, "error": f"Failed to fetch position: {pos_data.get('retMsg')}"}
+        return {
+            "success": False,
+            "error": f"Failed to fetch position: {pos_data.get('retMsg')}",
+        }
 
     positions = pos_data.get("result", {}).get("list", [])
-    position = next((p for p in positions if float(p.get("size", 0)) > 0 and p.get("symbol") == symbol), None)
+    position = next(
+        (
+            p
+            for p in positions
+            if float(p.get("size", 0)) > 0 and p.get("symbol") == symbol
+        ),
+        None,
+    )
 
     if not position:
         return {"success": False, "error": f"No open position found for {symbol}"}
@@ -259,16 +308,25 @@ def execute_manage_position(
     entry_price = float(position.get("avgPrice", 0) or position.get("entryPrice", 0))
     side = position.get("side", "Buy").capitalize()
     pos_idx = int(position.get("positionIdx", 0))
-    unrealized_pnl = float(position.get("unrealisedPnl", position.get("unrealizedPnl", 0)))
+    unrealized_pnl = float(
+        position.get("unrealisedPnl", position.get("unrealizedPnl", 0))
+    )
 
     # 2. Fetch Precision Specs & Market Price
     tick_size, qty_step = get_instrument_precision(symbol, category)
 
-    ticker_data = _safe_api("GET", "/v5/market/tickers", params={"category": category, "symbol": symbol}, signed=False)
+    ticker_data = _safe_api(
+        "GET",
+        "/v5/market/tickers",
+        params={"category": category, "symbol": symbol},
+        signed=False,
+    )
     if ticker_data.get("retCode") != 0 or not ticker_data.get("result", {}).get("list"):
         return {"success": False, "error": "Failed to retrieve current market price"}
 
-    current_price = float(ticker_data.get("result", {}).get("list", [{}])[0].get("lastPrice", 0))
+    current_price = float(
+        ticker_data.get("result", {}).get("list", [{}])[0].get("lastPrice", 0)
+    )
     if current_price <= 0:
         return {"success": False, "error": "Invalid market price returned from ticker"}
 
@@ -303,7 +361,10 @@ def execute_manage_position(
                 "fee_adjusted": True,
                 "message": f"Stop loss moved to fee-adjusted breakeven ({be_price_str})",
             }
-        return {"success": False, "error": f"Failed to set breakeven SL: {res.get('retMsg')}"}
+        return {
+            "success": False,
+            "error": f"Failed to set breakeven SL: {res.get('retMsg')}",
+        }
 
     # 5. Action: Close Position if Profit Threshold Reached (close)
     elif action == "close":
@@ -348,18 +409,27 @@ def execute_manage_position(
                 "order_id": res.get("result", {}).get("orderId"),
                 "message": f"Closed position for {symbol} with net profit of ${net_profit:.2f} USDT",
             }
-        return {"success": False, "error": f"Failed to submit close order: {res.get('retMsg')}"}
+        return {
+            "success": False,
+            "error": f"Failed to submit close order: {res.get('retMsg')}",
+        }
 
-    return {"success": False, "error": f"Invalid action '{action}'. Use 'be' or 'close'."}
+    return {
+        "success": False,
+        "error": f"Invalid action '{action}'. Use 'be' or 'close'.",
+    }
 
 
 # ==============================================================================
 # SECTION 6: OUTPUT ROUTING (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     if out_path in ("/dev/stdout", "/dev/fd/1", "-"):
         sys.stdout.write(json_payload)
@@ -378,6 +448,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 7: PROGRAMMATIC ENTRY POINT FOR AICHAT
 # ==============================================================================
+
 
 def run(
     symbol: str = "BTCUSDT",
@@ -407,27 +478,59 @@ def run(
 # SECTION 8: CLI ARGUMENT PARSER
 # ==============================================================================
 
+
 def _coerce(val: str) -> Any:
-    if val == "": return None
+    if val == "":
+        return None
     low = val.lower()
-    if low in ("true", "yes", "1"): return True
-    if low in ("false", "no", "0"): return False
-    try: return int(val)
-    except ValueError: pass
-    try: return float(val)
-    except ValueError: pass
+    if low in ("true", "yes", "1"):
+        return True
+    if low in ("false", "no", "0"):
+        return False
+    try:
+        return int(val)
+    except ValueError:
+        pass
+    try:
+        return float(val)
+    except ValueError:
+        pass
     return val
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="bybit_position_manager.py", description=f"Bybit Position Manager Tool v{__version__}")
-    parser.add_argument("--symbol", default="BTCUSDT", help="Trading pair symbol (e.g., BTCUSDT)")
-    parser.add_argument("--action", default="be", choices=["be", "close"], help="Action: 'be' (breakeven) or 'close'")
-    parser.add_argument("--profit-usdt", type=float, default=50.0, help="Target USDT net profit threshold")
-    parser.add_argument("--fee-rate", type=float, default=0.0006, help="Taker fee rate for roundtrip calculation")
+    parser = argparse.ArgumentParser(
+        prog="bybit_position_manager.py",
+        description=f"Bybit Position Manager Tool v{__version__}",
+    )
+    parser.add_argument(
+        "--symbol", default="BTCUSDT", help="Trading pair symbol (e.g., BTCUSDT)"
+    )
+    parser.add_argument(
+        "--action",
+        default="be",
+        choices=["be", "close"],
+        help="Action: 'be' (breakeven) or 'close'",
+    )
+    parser.add_argument(
+        "--profit-usdt",
+        type=float,
+        default=50.0,
+        help="Target USDT net profit threshold",
+    )
+    parser.add_argument(
+        "--fee-rate",
+        type=float,
+        default=0.0006,
+        help="Taker fee rate for roundtrip calculation",
+    )
     parser.add_argument("--category", default="linear", choices=["linear", "inverse"])
-    parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument(
+        "--no-color", action="store_true", help="Disable ANSI color output"
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable verbose debug logging"
+    )
     return parser
 
 

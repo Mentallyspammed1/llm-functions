@@ -8,8 +8,10 @@ in the entire file‑editor implementation.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List
+
 
 # ----------------------------------------------------------------------
 # Option definitions – mirrors the CLI arguments in edit2.py
@@ -17,6 +19,7 @@ from typing import Any, Dict, List, Optional, Union
 @dataclass
 class EditOptions:
     """Container for parsed command‑line options."""
+
     action: str = field(default="edit")
     file_path: str = field(default="")
     target_path: str = field(default="")
@@ -69,12 +72,14 @@ class EditOptions:
     verbose: bool = field(default=False)
     dry_run: bool = field(default=False)
 
+
 # ----------------------------------------------------------------------
 # Helper functions for parsing and validation
 # ----------------------------------------------------------------------
 def _dict_to_namespace(data: Dict[str, Any]) -> EditOptions:
     """Convert a raw argument dictionary into a typed EditOptions instance."""
     return EditOptions(**{k: v for k, v in data.items() if hasattr(EditOptions, k)})
+
 
 def build_edit_options_from_dict(arg_dict: Dict[str, Any]) -> EditOptions:
     """
@@ -92,6 +97,7 @@ def build_edit_options_from_dict(arg_dict: Dict[str, Any]) -> EditOptions:
     # Filter unknown keys
     filtered = {k: v for k, v in arg_dict.items() if hasattr(EditOptions, k)}
     return _dict_to_namespace(filtered)
+
 
 # ----------------------------------------------------------------------
 # Example usage (can be removed or expanded)

@@ -50,15 +50,14 @@ import hashlib
 import json
 import time
 
+
 def generate_signature(api_secret, timestamp, api_key, recv_window, payload):
     """
     Generate HMAC-SHA256 signature for Bybit API
     """
     query_string = f"{timestamp}{api_key}{recv_window}{payload}"
     signature = hmac.new(
-        api_secret.encode(),
-        query_string.encode(),
-        hashlib.sha256
+        api_secret.encode(), query_string.encode(), hashlib.sha256
     ).hexdigest()
     return signature
 ```
@@ -279,92 +278,91 @@ import hashlib
 import json
 import time
 
+
 class BybitTrader:
     def __init__(self, api_key, api_secret, testnet=True):
         self.api_key = api_key
         self.api_secret = api_secret
-        self.base_url = "https://api-testnet.bybit.com" if testnet else "https://api.bybit.com"
+        self.base_url = (
+            "https://api-testnet.bybit.com" if testnet else "https://api.bybit.com"
+        )
         self.recv_window = "5000"
-    
+
     def _generate_signature(self, payload):
         timestamp = str(int(time.time() * 1000))
         query_string = f"{timestamp}{self.api_key}{self.recv_window}{payload}"
         signature = hmac.new(
-            self.api_secret.encode(),
-            query_string.encode(),
-            hashlib.sha256
+            self.api_secret.encode(), query_string.encode(), hashlib.sha256
         ).hexdigest()
         return timestamp, signature
-    
+
     def _make_request(self, method, endpoint, payload=""):
         timestamp, signature = self._generate_signature(payload)
-        
+
         headers = {
             "X-BAPI-API-KEY": self.api_key,
             "X-BAPI-TIMESTAMP": timestamp,
             "X-BAPI-SIGN": signature,
             "X-BAPI-RECV-WINDOW": self.recv_window,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-        
+
         url = f"{self.base_url}{endpoint}"
-        
+
         if method == "GET":
             response = requests.get(url, headers=headers, params=payload)
         else:
             response = requests.post(url, headers=headers, data=payload)
-        
+
         return response.json()
-    
+
     def place_order(self, symbol, side, order_type, qty, price=None, **kwargs):
         """Place a trading order"""
         endpoint = "/v5/order/create"
-        
+
         order_data = {
             "category": "linear",
             "symbol": symbol,
             "side": side,
             "orderType": order_type,
             "qty": str(qty),
-            **kwargs
+            **kwargs,
         }
-        
+
         if price:
             order_data["price"] = str(price)
-        
+
         payload = json.dumps(order_data, separators=(",", ":"))
         return self._make_request("POST", endpoint, payload)
-    
+
     def get_positions(self):
         """Get current positions"""
         endpoint = "/v5/position/list"
         payload = {"category": "linear"}
         return self._make_request("GET", endpoint, payload)
-    
+
     def get_balance(self):
         """Get wallet balance"""
         endpoint = "/v5/account/wallet-balance"
         payload = {"accountType": "UNIFIED"}
         return self._make_request("GET", endpoint, payload)
-    
+
     def cancel_order(self, symbol, order_id):
         """Cancel an order"""
         endpoint = "/v5/order/cancel"
-        payload = json.dumps({
-            "category": "linear",
-            "symbol": symbol,
-            "orderId": order_id
-        }, separators=(",", ":"))
+        payload = json.dumps(
+            {"category": "linear", "symbol": symbol, "orderId": order_id},
+            separators=(",", ":"),
+        )
         return self._make_request("POST", endpoint, payload)
+
 
 # Usage Example
 if __name__ == "__main__":
     trader = BybitTrader(
-        api_key="your_api_key",
-        api_secret="your_api_secret",
-        testnet=True
+        api_key="your_api_key", api_secret="your_api_secret", testnet=True
     )
-    
+
     # Place a limit order
     order = trader.place_order(
         symbol="BTCUSDT",
@@ -373,15 +371,15 @@ if __name__ == "__main__":
         qty=0.001,
         price=42000,
         stopLoss=41000,
-        takeProfit=43000
+        takeProfit=43000,
     )
-    
+
     print("Order Response:", order)
-    
+
     # Get positions
     positions = trader.get_positions()
     print("Positions:", positions)
-    
+
     # Get balance
     balance = trader.get_balance()
     print("Balance:", balance)
@@ -486,10 +484,10 @@ trader.placeOrder('BTCUSDT', 'Buy', 'Limit', 0.001, 42000, {
 ### 2. Error Handling
 ```python
 def handle_api_response(response):
-    if response.get('retCode') != 0:
-        error_code = response.get('retCode')
-        error_msg = response.get('retMsg')
-        
+    if response.get("retCode") != 0:
+        error_code = response.get("retCode")
+        error_msg = response.get("retMsg")
+
         if error_code == 10002:  # Rate limit
             time.sleep(1)
             return "retry"
@@ -500,8 +498,8 @@ def handle_api_response(response):
         else:
             print(f"Error {error_code}: {error_msg}")
             return "error"
-    
-    return response.get('result')
+
+    return response.get("result")
 ```
 
 ### 3. Position Management
@@ -660,9 +658,9 @@ conditional_order = {
     "qty": "0.001",
     "price": "42000",
     "triggerPrice": "42500",  # Trigger condition
-    "orderFilter": "Order",   # Order type filter
+    "orderFilter": "Order",  # Order type filter
     "triggerDirection": "1",  # 1=above, 2=below
-    "triggerBy": "LastPrice"  # Trigger by last price
+    "triggerBy": "LastPrice",  # Trigger by last price
 }
 ```
 
@@ -676,7 +674,7 @@ iceberg_order = {
     "side": "Buy",
     "qty": "0.1",
     "price": "42000",
-    "icebergQty": "0.01"  # Display quantity
+    "icebergQty": "0.01",  # Display quantity
 }
 ```
 
@@ -692,22 +690,22 @@ class GridTrader:
         self.grid_size = grid_size
         self.grid_count = grid_count
         self.orders = []
-    
+
     def create_grid(self, center_price):
         """Create grid orders around center price"""
-        for i in range(-self.grid_count//2, self.grid_count//2 + 1):
+        for i in range(-self.grid_count // 2, self.grid_count // 2 + 1):
             if i == 0:
                 continue
-            
+
             price = center_price + (i * self.grid_size)
             side = "Buy" if i < 0 else "Sell"
-            
+
             order = self.place_order(
                 symbol=self.symbol,
                 side=side,
                 order_type="Limit",
                 qty=0.001,
-                price=price
+                price=price,
             )
             self.orders.append(order)
 ```
@@ -719,7 +717,7 @@ class Scalper:
         self.symbol = symbol
         self.profit_target = profit_target
         self.stop_loss = stop_loss
-    
+
     def scalp_trade(self, entry_price, side):
         """Execute scalp trade with tight risk management"""
         if side == "Buy":
@@ -728,14 +726,14 @@ class Scalper:
         else:
             stop_price = entry_price + self.stop_loss
             profit_price = entry_price - self.profit_target
-        
+
         return self.place_order(
             symbol=self.symbol,
             side=side,
             order_type="Market",
             qty=0.001,
             stopLoss=stop_price,
-            takeProfit=profit_price
+            takeProfit=profit_price,
         )
 ```
 
@@ -750,12 +748,13 @@ def calculate_position_size(account_balance, risk_percent, entry_price, stop_pri
     risk_amount = account_balance * (risk_percent / 100)
     price_diff = abs(entry_price - stop_price)
     position_size = risk_amount / price_diff
-    
+
     return {
         "position_size": position_size,
         "risk_amount": risk_amount,
-        "price_diff": price_diff
+        "price_diff": price_diff,
     }
+
 
 # Example usage
 account_balance = 10000  # USDT
@@ -763,7 +762,9 @@ risk_percent = 2  # 2% risk
 entry_price = 42000
 stop_price = 41000
 
-position_info = calculate_position_size(account_balance, risk_percent, entry_price, stop_price)
+position_info = calculate_position_size(
+    account_balance, risk_percent, entry_price, stop_price
+)
 print(f"Position size: {position_info['position_size']:.6f} BTC")
 ```
 
@@ -803,32 +804,30 @@ class RiskMonitor:
 def test_api_endpoints(trader):
     """Test all major API endpoints"""
     results = {}
-    
+
     # Test market data
     try:
         klines = trader.get_klines("BTCUSDT", "1", limit=10)
-        results['market_data'] = "✅ Working"
+        results["market_data"] = "✅ Working"
     except Exception as e:
-        results['market_data'] = f"❌ Error: {e}"
-    
+        results["market_data"] = f"❌ Error: {e}"
+
     # Test account info
     try:
         balance = trader.get_balance()
-        results['account'] = "✅ Working"
+        results["account"] = "✅ Working"
     except Exception as e:
-        results['account'] = f"❌ Error: {e}"
-    
+        results["account"] = f"❌ Error: {e}"
+
     # Test order placement (small test order)
     try:
-        test_order = trader.place_order(
-            "BTCUSDT", "Buy", "Limit", 0.001, 30000
-        )
-        results['order'] = "✅ Working"
+        test_order = trader.place_order("BTCUSDT", "Buy", "Limit", 0.001, 30000)
+        results["order"] = "✅ Working"
         # Cancel test order
-        trader.cancel_order("BTCUSDT", test_order['result']['orderId'])
+        trader.cancel_order("BTCUSDT", test_order["result"]["orderId"])
     except Exception as e:
-        results['order'] = f"❌ Error: {e}"
-    
+        results["order"] = f"❌ Error: {e}"
+
     return results
 ```
 
@@ -837,40 +836,43 @@ def test_api_endpoints(trader):
 import time
 from collections import deque
 
+
 class PerformanceMonitor:
     def __init__(self, window_size=100):
         self.response_times = deque(maxlen=window_size)
         self.error_count = 0
         self.success_count = 0
-    
+
     def log_request(self, start_time, success=True):
         """Log API request performance"""
         response_time = time.time() - start_time
         self.response_times.append(response_time)
-        
+
         if success:
             self.success_count += 1
         else:
             self.error_count += 1
-    
+
     def get_stats(self):
         """Get performance statistics"""
         if not self.response_times:
             return {}
-        
+
         avg_time = sum(self.response_times) / len(self.response_times)
         max_time = max(self.response_times)
         min_time = min(self.response_times)
         total_requests = self.success_count + self.error_count
-        error_rate = (self.error_count / total_requests) * 100 if total_requests > 0 else 0
-        
+        error_rate = (
+            (self.error_count / total_requests) * 100 if total_requests > 0 else 0
+        )
+
         return {
             "avg_response_time": avg_time,
             "max_response_time": max_time,
             "min_response_time": min_time,
             "total_requests": total_requests,
             "success_rate": 100 - error_rate,
-            "error_rate": error_rate
+            "error_rate": error_rate,
         }
 ```
 

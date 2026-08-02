@@ -30,26 +30,23 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import fnmatch
 import hashlib
 import ipaddress
 import json
 import logging
 import os
 import re
-import select
 import signal
 import socket
 import ssl
-import struct
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Literal, Optional
 
 # ==============================================================================
 # SECTION 0: COLORAMA & PIP DEPENDENCY RITUALS
@@ -58,13 +55,16 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 try:
     import colorama
     from colorama import Back, Fore, Style
+
     colorama.init(autoreset=True)
     COLORAMA_AVAILABLE = True
 except ImportError:
     COLORAMA_AVAILABLE = False
+
     class _DummyColor:
         def __getattr__(self, name: str) -> str:
             return ""
+
     Fore = Back = Style = _DummyColor()
 
 SCAPY_AVAILABLE = False
@@ -79,6 +79,7 @@ try:
     sys.stderr, sys.stdout = _null_fd, _null_fd
     try:
         import scapy.all as scapy
+
         logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
         SCAPY_AVAILABLE = True
     finally:
@@ -89,32 +90,35 @@ except Exception:
 
 try:
     import psutil
+
     PSUTIL_AVAILABLE = True
 except ImportError:
     psutil = None
 
 try:
     import requests
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     requests = None
 
 try:
     import dns.resolver
+
     DNSPYTHON_AVAILABLE = True
 except ImportError:
     dns = None
 
 __version__ = "3.0.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 # ==============================================================================
@@ -131,14 +135,24 @@ EXIT_INTERRUPTED = 130
 
 
 class ToolError(Exception):
-    def __init__(self, message: str, exit_code: int = EXIT_ERROR, details: Optional[dict[str, Any]] = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        exit_code: int = EXIT_ERROR,
+        details: Optional[dict[str, Any]] = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.exit_code = exit_code
         self.details = details or {}
 
     def to_dict(self) -> dict[str, Any]:
-        return {"success": False, "error": self.message, "exit_code": self.exit_code, **self.details}
+        return {
+            "success": False,
+            "error": self.message,
+            "exit_code": self.exit_code,
+            **self.details,
+        }
 
 
 class ToolJSONEncoder(json.JSONEncoder):
@@ -162,11 +176,17 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Colorama Box UI & Terminal Helpers
 # ==============================================================================
 
+
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
@@ -181,7 +201,9 @@ def format_bytes(size: float) -> str:
     return f"{size:.2f} PB"
 
 
-def print_progress(current: int, total: int, message: str = "", no_color: bool = False) -> None:
+def print_progress(
+    current: int, total: int, message: str = "", no_color: bool = False
+) -> None:
     if not _is_tty() or no_color:
         return
     percent = (current / total) * 100.0 if total > 0 else 100.0
@@ -211,43 +233,71 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{Fore.MAGENTA}╭{border}╮{Style.RESET_ALL}")
-    _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.LIGHTMAGENTA_EX}⚡ [DEEP NET & TERMUX GRIMOIRE v{__version__}]{Style.RESET_ALL} {status_color}{Style.BRIGHT}{status_symbol} {status_text}{Style.RESET_ALL}")
+    _cprint(
+        f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.LIGHTMAGENTA_EX}⚡ [DEEP NET & TERMUX GRIMOIRE v{__version__}]{Style.RESET_ALL} {status_color}{Style.BRIGHT}{status_symbol} {status_text}{Style.RESET_ALL}"
+    )
     _cprint(f"{Fore.MAGENTA}├{border}┤{Style.RESET_ALL}")
-    _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Target:{Style.RESET_ALL}      {data.get('target', 'N/A')}")
-    _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Mode:{Style.RESET_ALL}        {data.get('mode', 'N/A')}")
-    _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Pip Status:{Style.RESET_ALL}  Scapy:{'✓' if SCAPY_AVAILABLE else '✗'} | Psutil:{'✓' if PSUTIL_AVAILABLE else '✗'} | Req:{'✓' if REQUESTS_AVAILABLE else '✗'} | DNS:{'✓' if DNSPYTHON_AVAILABLE else '✗'}")
-    _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Duration:{Style.RESET_ALL}    {Style.DIM}{data.get('duration_ms', 0)}ms{Style.RESET_ALL}")
+    _cprint(
+        f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Target:{Style.RESET_ALL}      {data.get('target', 'N/A')}"
+    )
+    _cprint(
+        f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Mode:{Style.RESET_ALL}        {data.get('mode', 'N/A')}"
+    )
+    _cprint(
+        f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Pip Status:{Style.RESET_ALL}  Scapy:{'✓' if SCAPY_AVAILABLE else '✗'} | Psutil:{'✓' if PSUTIL_AVAILABLE else '✗'} | Req:{'✓' if REQUESTS_AVAILABLE else '✗'} | DNS:{'✓' if DNSPYTHON_AVAILABLE else '✗'}"
+    )
+    _cprint(
+        f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Duration:{Style.RESET_ALL}    {Style.DIM}{data.get('duration_ms', 0)}ms{Style.RESET_ALL}"
+    )
 
     # Render specific result payloads
-    if "dns_records" in data and data["dns_records"]:
+    if data.get("dns_records"):
         _cprint(f"{Fore.MAGENTA}├{border}┤{Style.RESET_ALL}")
-        _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Style.BRIGHT}🌐 DNS Records Enumerated:{Style.RESET_ALL}")
+        _cprint(
+            f"{Fore.MAGENTA}│{Style.RESET_ALL} {Style.BRIGHT}🌐 DNS Records Enumerated:{Style.RESET_ALL}"
+        )
         for rtype, records in data["dns_records"].items():
-            _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL}   {Fore.YELLOW}{rtype}{Style.RESET_ALL}: {', '.join(records[:4])}")
+            _cprint(
+                f"{Fore.MAGENTA}│{Style.RESET_ALL}   {Fore.YELLOW}{rtype}{Style.RESET_ALL}: {', '.join(records[:4])}"
+            )
 
-    if "open_ports" in data and data["open_ports"]:
+    if data.get("open_ports"):
         _cprint(f"{Fore.MAGENTA}├{border}┤{Style.RESET_ALL}")
-        _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Style.BRIGHT}🔓 Open Ports Discovered:{Style.RESET_ALL}")
+        _cprint(
+            f"{Fore.MAGENTA}│{Style.RESET_ALL} {Style.BRIGHT}🔓 Open Ports Discovered:{Style.RESET_ALL}"
+        )
         for p in data["open_ports"]:
-            _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL}   {Fore.GREEN}›{Style.RESET_ALL} Port {Fore.YELLOW}{p.get('port')}{Style.RESET_ALL} ({p.get('service','unknown')}) - {p.get('state')}")
+            _cprint(
+                f"{Fore.MAGENTA}│{Style.RESET_ALL}   {Fore.GREEN}›{Style.RESET_ALL} Port {Fore.YELLOW}{p.get('port')}{Style.RESET_ALL} ({p.get('service', 'unknown')}) - {p.get('state')}"
+            )
 
-    if "lan_hosts" in data and data["lan_hosts"]:
+    if data.get("lan_hosts"):
         _cprint(f"{Fore.MAGENTA}├{border}┤{Style.RESET_ALL}")
-        _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Style.BRIGHT}🌐 Local LAN Hosts Discovered ({len(data['lan_hosts'])}):{Style.RESET_ALL}")
+        _cprint(
+            f"{Fore.MAGENTA}│{Style.RESET_ALL} {Style.BRIGHT}🌐 Local LAN Hosts Discovered ({len(data['lan_hosts'])}):{Style.RESET_ALL}"
+        )
         for h in data["lan_hosts"][:10]:
-            _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL}   {Fore.GREEN}›{Style.RESET_ALL} IP: {Fore.CYAN}{h.get('ip')}{Style.RESET_ALL} | MAC: {h.get('mac')} | Iface: {h.get('interface')}")
+            _cprint(
+                f"{Fore.MAGENTA}│{Style.RESET_ALL}   {Fore.GREEN}›{Style.RESET_ALL} IP: {Fore.CYAN}{h.get('ip')}{Style.RESET_ALL} | MAC: {h.get('mac')} | Iface: {h.get('interface')}"
+            )
 
-    if "traffic_stats" in data and data["traffic_stats"]:
+    if data.get("traffic_stats"):
         _cprint(f"{Fore.MAGENTA}├{border}┤{Style.RESET_ALL}")
-        _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Style.BRIGHT}📊 Interface Traffic Metrics:{Style.RESET_ALL}")
+        _cprint(
+            f"{Fore.MAGENTA}│{Style.RESET_ALL} {Style.BRIGHT}📊 Interface Traffic Metrics:{Style.RESET_ALL}"
+        )
         for iface, st in list(data["traffic_stats"].items())[:8]:
             rx_str = format_bytes(st.get("rx_bytes", 0))
             tx_str = format_bytes(st.get("tx_bytes", 0))
-            _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL}   {Fore.CYAN}›{Style.RESET_ALL} {Style.BRIGHT}{iface}{Style.RESET_ALL}: Rx: {Fore.GREEN}{rx_str}{Style.RESET_ALL} | Tx: {Fore.YELLOW}{tx_str}{Style.RESET_ALL}")
+            _cprint(
+                f"{Fore.MAGENTA}│{Style.RESET_ALL}   {Fore.CYAN}›{Style.RESET_ALL} {Style.BRIGHT}{iface}{Style.RESET_ALL}: Rx: {Fore.GREEN}{rx_str}{Style.RESET_ALL} | Tx: {Fore.YELLOW}{tx_str}{Style.RESET_ALL}"
+            )
 
     if not success and "error" in data:
         _cprint(f"{Fore.MAGENTA}├{border}┤{Style.RESET_ALL}")
-        _cprint(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.RED}Error:{Style.RESET_ALL} {data['error']}")
+        _cprint(
+            f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.RED}Error:{Style.RESET_ALL} {data['error']}"
+        )
 
     _cprint(f"{Fore.MAGENTA}╰{border}╯{Style.RESET_ALL}")
 
@@ -277,18 +327,25 @@ def print_modes_table() -> None:
         ("check-deps", "User", "Diagnose environment, Termux, and Pip packages"),
     ]
 
-    _cprint(f"\n{Fore.MAGENTA}{Style.BRIGHT}📜 Network Tools v{__version__} Mode Registry:{Style.RESET_ALL}")
-    _cprint(f"{Fore.CYAN}{'Mode Name':<15} {'Privilege':<10} {'Description'}{Style.RESET_ALL}")
-    _cprint(f"{Style.DIM}{'─'*68}{Style.RESET_ALL}")
+    _cprint(
+        f"\n{Fore.MAGENTA}{Style.BRIGHT}📜 Network Tools v{__version__} Mode Registry:{Style.RESET_ALL}"
+    )
+    _cprint(
+        f"{Fore.CYAN}{'Mode Name':<15} {'Privilege':<10} {'Description'}{Style.RESET_ALL}"
+    )
+    _cprint(f"{Style.DIM}{'─' * 68}{Style.RESET_ALL}")
     for name, priv, desc in modes_info:
         p_col = Fore.GREEN if priv == "User" else Fore.RED
-        _cprint(f"{Fore.YELLOW}{name:<15}{Style.RESET_ALL} {p_col}{priv:<10}{Style.RESET_ALL} {desc}")
+        _cprint(
+            f"{Fore.YELLOW}{name:<15}{Style.RESET_ALL} {p_col}{priv:<10}{Style.RESET_ALL} {desc}"
+        )
     _cprint("")
 
 
 # ==============================================================================
 # SECTION 3: Context & Root Verification
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     return os.environ.get(f"LLM_AGENT_VAR_{name.upper()}", default)
@@ -306,7 +363,8 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "is_root": os.geteuid() == 0 if hasattr(os, "geteuid") else False,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
         "pips_installed": {
             "colorama": COLORAMA_AVAILABLE,
             "scapy": SCAPY_AVAILABLE,
@@ -322,7 +380,7 @@ def verify_root_privileges(mode: str) -> None:
     if mode in root_modes and os.geteuid() != 0:
         raise ToolError(
             f"Mode '{mode}' requires elevated root privileges (su/Magisk).",
-            exit_code=EXIT_PERMISSION_DENIED
+            exit_code=EXIT_PERMISSION_DENIED,
         )
 
 
@@ -331,11 +389,12 @@ def verify_root_privileges(mode: str) -> None:
 # ==============================================================================
 
 MODE_TTLS = {
-    "dns-lookup": 3600,   # 1 hour
-    "net-stats": 60,      # 1 minute
-    "interfaces": 300,    # 5 minutes
-    "default": 300
+    "dns-lookup": 3600,  # 1 hour
+    "net-stats": 60,  # 1 minute
+    "interfaces": 300,  # 5 minutes
+    "default": 300,
 }
+
 
 class ToolCache:
     def __init__(self, cache_dir: Optional[Path] = None) -> None:
@@ -358,13 +417,13 @@ class ToolCache:
             return None
         try:
             if ttl_seconds is None:
-                mode = key_data.split(':')[1] if ':' in key_data else 'default'
-                ttl_seconds = MODE_TTLS.get(mode, MODE_TTLS['default'])
+                mode = key_data.split(":")[1] if ":" in key_data else "default"
+                ttl_seconds = MODE_TTLS.get(mode, MODE_TTLS["default"])
 
             if time.time() - cache_file.stat().st_mtime > ttl_seconds:
                 cache_file.unlink(missing_ok=True)
                 return None
-            with open(cache_file, "r", encoding="utf-8") as fp:
+            with open(cache_file, encoding="utf-8") as fp:
                 return json.load(fp)
         except Exception:
             return None
@@ -409,9 +468,21 @@ class GracefulShutdown:
 # ==============================================================================
 
 COMMON_PORTS = {
-    21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS",
-    80: "HTTP", 110: "POP3", 139: "NetBIOS", 143: "IMAP", 443: "HTTPS",
-    445: "SMB", 1433: "MSSQL", 3306: "MySQL", 3389: "RDP", 8080: "HTTP-Alt"
+    21: "FTP",
+    22: "SSH",
+    23: "Telnet",
+    25: "SMTP",
+    53: "DNS",
+    80: "HTTP",
+    110: "POP3",
+    139: "NetBIOS",
+    143: "IMAP",
+    443: "HTTPS",
+    445: "SMB",
+    1433: "MSSQL",
+    3306: "MySQL",
+    3389: "RDP",
+    8080: "HTTP-Alt",
 }
 
 OUI_OFFLINE_DB = {
@@ -464,6 +535,7 @@ def _parse_ports(ports_str: Optional[str]) -> list[int]:
 
 # --- Mode Handlers ---
 
+
 def mode_dns_lookup(target: str, **kwargs) -> dict[str, Any]:
     domain = "google.com" if not target or target.lower() == "all" else target
     records: dict[str, list[str]] = {}
@@ -481,10 +553,16 @@ def mode_dns_lookup(target: str, **kwargs) -> dict[str, Any]:
     if not records.get("A") and not records.get("AAAA"):
         try:
             addr_info = socket.getaddrinfo(domain, None)
-            a_recs = list({item[4][0] for item in addr_info if item[0] == socket.AF_INET})
-            aaaa_recs = list({item[4][0] for item in addr_info if item[0] == socket.AF_INET6})
-            if a_recs: records["A"] = a_recs
-            if aaaa_recs: records["AAAA"] = aaaa_recs
+            a_recs = list(
+                {item[4][0] for item in addr_info if item[0] == socket.AF_INET}
+            )
+            aaaa_recs = list(
+                {item[4][0] for item in addr_info if item[0] == socket.AF_INET6}
+            )
+            if a_recs:
+                records["A"] = a_recs
+            if aaaa_recs:
+                records["AAAA"] = aaaa_recs
         except socket.gaierror:
             pass
 
@@ -501,11 +579,14 @@ async def _probe_port_async(target_ip, port):
     except:
         return port, "closed"
 
-def mode_port_scan(target: str, ports_str: Optional[str] = None, **kwargs) -> dict[str, Any]:
+
+def mode_port_scan(
+    target: str, ports_str: Optional[str] = None, **kwargs
+) -> dict[str, Any]:
     target_ip = resolve_target_ips(target)[0]
     ports = _parse_ports(ports_str)
     open_ports = []
-    timeout = kwargs.get('timeout', 10)
+    timeout = kwargs.get("timeout", 10)
 
     async def scan():
         tasks = [_probe_port_async(target_ip, p) for p in ports]
@@ -513,7 +594,13 @@ def mode_port_scan(target: str, ports_str: Optional[str] = None, **kwargs) -> di
             results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
             for port, state in results:
                 if state == "open":
-                    open_ports.append({"port": port, "state": "open", "service": COMMON_PORTS.get(port, "unknown")})
+                    open_ports.append(
+                        {
+                            "port": port,
+                            "state": "open",
+                            "service": COMMON_PORTS.get(port, "unknown"),
+                        }
+                    )
         except asyncio.TimeoutError:
             return {"error": "Port scan timed out"}
 
@@ -527,26 +614,43 @@ def mode_port_scan(target: str, ports_str: Optional[str] = None, **kwargs) -> di
 
 def mode_ping_sweep(target: str, **kwargs) -> dict[str, Any]:
     target_ips = resolve_target_ips(target)
-    
+
     def ping(ip):
-        res = subprocess.run(['ping', '-c', '1', '-W', '1', ip], capture_output=True)
+        res = subprocess.run(["ping", "-c", "1", "-W", "1", ip], capture_output=True)
         return ip if res.returncode == 0 else None
 
     with ThreadPoolExecutor(max_workers=20) as executor:
         results = list(executor.map(ping, target_ips))
-        
+
     return {"alive_hosts": [ip for ip in results if ip]}
 
-def mode_syn_scan(target: str, ports_str: Optional[str] = None, **kwargs) -> dict[str, Any]:
+
+def mode_syn_scan(
+    target: str, ports_str: Optional[str] = None, **kwargs
+) -> dict[str, Any]:
     if not SCAPY_AVAILABLE:
         raise ToolError("Scapy not installed", exit_code=EXIT_ERROR)
     target_ip = resolve_target_ips(target)[0]
     ports = _parse_ports(ports_str)
-    ans, unans = scapy.sr(scapy.IP(dst=target_ip)/scapy.TCP(dport=ports, flags='S'), timeout=2, verbose=0)
-    open_ports = [p.dport for p in ans if p.haslayer(scapy.TCP) and p[scapy.TCP].flags == 0x12]
-    return {"open_ports": [{"port": p, "state": "open", "service": COMMON_PORTS.get(p, "unknown")} for p in open_ports]}
+    ans, unans = scapy.sr(
+        scapy.IP(dst=target_ip) / scapy.TCP(dport=ports, flags="S"),
+        timeout=2,
+        verbose=0,
+    )
+    open_ports = [
+        p.dport for p in ans if p.haslayer(scapy.TCP) and p[scapy.TCP].flags == 0x12
+    ]
+    return {
+        "open_ports": [
+            {"port": p, "state": "open", "service": COMMON_PORTS.get(p, "unknown")}
+            for p in open_ports
+        ]
+    }
 
-def mode_banner_grab(target: str, ports_str: Optional[str] = None, **kwargs) -> dict[str, Any]:
+
+def mode_banner_grab(
+    target: str, ports_str: Optional[str] = None, **kwargs
+) -> dict[str, Any]:
     target_ip = resolve_target_ips(target)[0]
     ports = _parse_ports(ports_str)[:10]
     banners = []
@@ -558,11 +662,15 @@ def mode_banner_grab(target: str, ports_str: Optional[str] = None, **kwargs) -> 
             s.settimeout(1.5)
             s.connect((target_ip, port))
             if port in (80, 8080):
-                s.sendall(b"HEAD / HTTP/1.1\r\nHost: " + target_ip.encode() + b"\r\n\r\n")
+                s.sendall(
+                    b"HEAD / HTTP/1.1\r\nHost: " + target_ip.encode() + b"\r\n\r\n"
+                )
             data = s.recv(512)
             s.close()
             if data:
-                banner_str = data.decode("utf-8", errors="replace").strip().splitlines()[0]
+                banner_str = (
+                    data.decode("utf-8", errors="replace").strip().splitlines()[0]
+                )
         except Exception as err:
             banner_str = f"Connection failed: {err}"
         banners.append({"port": port, "banner": banner_str})
@@ -592,7 +700,14 @@ def mode_arp_scan(target: str, **kwargs) -> dict[str, Any]:
             for line in proc_arp.read_text().splitlines()[1:]:
                 parts = line.split()
                 if len(parts) >= 6 and parts[3] != "00:00:00:00:00:00":
-                    hosts.append({"ip": parts[0], "mac": parts[3], "interface": parts[5], "type": "ARP Table"})
+                    hosts.append(
+                        {
+                            "ip": parts[0],
+                            "mac": parts[3],
+                            "interface": parts[5],
+                            "type": "ARP Table",
+                        }
+                    )
         except OSError:
             pass
 
@@ -604,7 +719,11 @@ def mode_net_stats(**kwargs) -> dict[str, Any]:
     if PSUTIL_AVAILABLE:
         try:
             for iface, counter in psutil.net_io_counters(pernic=True).items():
-                stats[iface] = {"rx_bytes": counter.bytes_recv, "tx_bytes": counter.bytes_sent, "source": "psutil"}
+                stats[iface] = {
+                    "rx_bytes": counter.bytes_recv,
+                    "tx_bytes": counter.bytes_sent,
+                    "source": "psutil",
+                }
             return {"traffic_stats": stats}
         except Exception:
             pass
@@ -617,7 +736,11 @@ def mode_net_stats(**kwargs) -> dict[str, Any]:
                 if len(parts) == 2:
                     fields = parts[1].split()
                     if len(fields) >= 9:
-                        stats[parts[0].strip()] = {"rx_bytes": int(fields[0]), "tx_bytes": int(fields[8]), "source": "/proc/net/dev"}
+                        stats[parts[0].strip()] = {
+                            "rx_bytes": int(fields[0]),
+                            "tx_bytes": int(fields[8]),
+                            "source": "/proc/net/dev",
+                        }
         except OSError:
             pass
 
@@ -631,7 +754,9 @@ def mode_interfaces(**kwargs) -> dict[str, Any]:
             ifaces.append({"id": idx, "name": name, "state": "active"})
     except AttributeError:
         pass
-    return {"interfaces": ifaces if ifaces else [{"id": 1, "name": "lo", "state": "active"}]}
+    return {
+        "interfaces": ifaces if ifaces else [{"id": 1, "name": "lo", "state": "active"}]
+    }
 
 
 def mode_mac_vendor(target: str, **kwargs) -> dict[str, Any]:
@@ -658,20 +783,33 @@ def mode_ssl_inspect(target: str, **kwargs) -> dict[str, Any]:
         with socket.create_connection((target, 443), timeout=3.0) as sock:
             with ctx.wrap_socket(sock, server_hostname=target) as ssock:
                 cert = ssock.getpeercert(binary_form=False) or {}
-                return {"target": target, "subject": cert.get("subject"), "issuer": cert.get("issuer"), "expires": cert.get("notAfter")}
+                return {
+                    "target": target,
+                    "subject": cert.get("subject"),
+                    "issuer": cert.get("issuer"),
+                    "expires": cert.get("notAfter"),
+                }
     except Exception as err:
         return {"target": target, "error": f"TLS inspection failed: {err}"}
 
 
 def mode_http_headers(target: str, **kwargs) -> dict[str, Any]:
     url = target if target.startswith(("http://", "https://")) else f"https://{target}"
-    sec_headers = ["Strict-Transport-Security", "Content-Security-Policy", "X-Frame-Options", "X-Content-Type-Options"]
+    sec_headers = [
+        "Strict-Transport-Security",
+        "Content-Security-Policy",
+        "X-Frame-Options",
+        "X-Content-Type-Options",
+    ]
     audit = {}
     try:
         if REQUESTS_AVAILABLE:
             resp = requests.head(url, timeout=3, allow_redirects=True)
             for h in sec_headers:
-                audit[h] = {"present": h in resp.headers, "value": resp.headers.get(h, "N/A")}
+                audit[h] = {
+                    "present": h in resp.headers,
+                    "value": resp.headers.get(h, "N/A"),
+                }
     except Exception as err:
         return {"url": url, "error": f"HTTP audit failed: {err}"}
     return {"security_headers": audit}
@@ -682,7 +820,10 @@ def mode_lte_info(**kwargs) -> dict[str, Any]:
     try:
         out = subprocess.check_output(["getprop"], stderr=subprocess.DEVNULL, text=True)
         for line in out.splitlines():
-            if any(k in line for k in ["gsm.operator.alpha", "gsm.network.type", "gsm.sim.state"]):
+            if any(
+                k in line
+                for k in ["gsm.operator.alpha", "gsm.network.type", "gsm.sim.state"]
+            ):
                 telephony_info.append(line.strip())
     except Exception:
         pass
@@ -697,15 +838,21 @@ def mode_check_deps(**kwargs) -> dict[str, Any]:
 
 
 def mode_generic_shell(target: str, **kwargs) -> dict[str, Any]:
-    mode = kwargs.get('mode', 'unknown')
+    mode = kwargs.get("mode", "unknown")
     cmd = [mode, target]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=kwargs.get('timeout', 10))
+        res = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=kwargs.get("timeout", 10)
+        )
         return {"success": True, "output": res.stdout, "stderr": res.stderr}
     except subprocess.TimeoutExpired:
-        return {"success": False, "error": f"Command '{mode}' timed out after {kwargs.get('timeout')}s"}
+        return {
+            "success": False,
+            "error": f"Command '{mode}' timed out after {kwargs.get('timeout')}s",
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 # Handler Registry Dispatch Map
 MODE_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
@@ -727,6 +874,7 @@ MODE_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
 # ==============================================================================
 # SECTION 6: CORE EXECUTION ROUTER
 # ==============================================================================
+
 
 def execute_tool(
     target: str,
@@ -764,13 +912,24 @@ def execute_tool(
     handler = MODE_HANDLERS.get(mode)
     if handler:
         try:
-            res_payload.update(handler(target=target, ports_str=ports_str, limit=limit_val, force=force, mode=mode, timeout=timeout))
+            res_payload.update(
+                handler(
+                    target=target,
+                    ports_str=ports_str,
+                    limit=limit_val,
+                    force=force,
+                    mode=mode,
+                    timeout=timeout,
+                )
+            )
         except Exception as err:
             res_payload.update({"success": False, "error": str(err)})
     else:
         # Fallback to generic shell for modes without a Python handler
         try:
-            res_payload.update(mode_generic_shell(target=target, mode=mode, timeout=timeout))
+            res_payload.update(
+                mode_generic_shell(target=target, mode=mode, timeout=timeout)
+            )
         except Exception as err:
             res_payload.update({"success": False, "error": f"Fallback failed: {err}"})
 
@@ -788,9 +947,12 @@ def execute_tool(
 # SECTION 7: Output Router
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
@@ -810,13 +972,30 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # SECTION 8: Function Entry Point for AIChat
 # ==============================================================================
 
+
 def run(
     target: str,
     mode: Literal[
-        "sniff", "wifi-scan", "wifi-mon", "port-scan", "banner-grab", "arp-scan",
-        "lte-info", "interfaces", "parse-pcap", "dns-lookup", "ping-sweep",
-        "traceroute", "mac-vendor", "ssl-inspect", "http-headers", "net-stats",
-        "syn-scan", "eapol-detect", "dhcp-detect", "check-deps"
+        "sniff",
+        "wifi-scan",
+        "wifi-mon",
+        "port-scan",
+        "banner-grab",
+        "arp-scan",
+        "lte-info",
+        "interfaces",
+        "parse-pcap",
+        "dns-lookup",
+        "ping-sweep",
+        "traceroute",
+        "mac-vendor",
+        "ssl-inspect",
+        "http-headers",
+        "net-stats",
+        "syn-scan",
+        "eapol-detect",
+        "dhcp-detect",
+        "check-deps",
     ] = "dns-lookup",
     ports: Optional[str] = None,
     limit: Optional[int] = None,
@@ -862,13 +1041,15 @@ def run(
 # SECTION 9: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="network_tools.py",
         description=f"Deep Net & Termux Network Grimoire v{__version__}",
     )
     parser.add_argument(
-        "--target", "-t",
+        "--target",
+        "-t",
         required=False,
         default="google.com",
         metavar="TARGET",
@@ -877,27 +1058,97 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mode",
         choices=[
-            "sniff", "wifi-scan", "wifi-mon", "port-scan", "banner-grab", "arp-scan",
-            "lte-info", "interfaces", "parse-pcap", "dns-lookup", "ping-sweep",
-            "traceroute", "mac-vendor", "ssl-inspect", "http-headers", "net-stats",
-            "syn-scan", "eapol-detect", "dhcp-detect", "check-deps"
+            "sniff",
+            "wifi-scan",
+            "wifi-mon",
+            "port-scan",
+            "banner-grab",
+            "arp-scan",
+            "lte-info",
+            "interfaces",
+            "parse-pcap",
+            "dns-lookup",
+            "ping-sweep",
+            "traceroute",
+            "mac-vendor",
+            "ssl-inspect",
+            "http-headers",
+            "net-stats",
+            "syn-scan",
+            "eapol-detect",
+            "dhcp-detect",
+            "check-deps",
         ],
         default="dns-lookup",
         help="Execution mode (default: dns-lookup)",
     )
-    parser.add_argument("--ports", metavar="PORTS", help="Target ports or ranges (e.g. 22,80,443 or 1-1024)")
-    parser.add_argument("--limit", type=int, default=50, help="Maximum items/hops/packets to process")
-    parser.add_argument("--filter", metavar="FILTER", help="Protocol/keyword filter string")
+    parser.add_argument(
+        "--ports",
+        metavar="PORTS",
+        help="Target ports or ranges (e.g. 22,80,443 or 1-1024)",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=50, help="Maximum items/hops/packets to process"
+    )
+    parser.add_argument(
+        "--filter", metavar="FILTER", help="Protocol/keyword filter string"
+    )
     parser.add_argument("--timeout", type=int, default=10, help="Timeout in seconds")
-    parser.add_argument("--output-pcap", dest="output_pcap", metavar="PATH", help="Export raw packets to PCAP")
-    parser.add_argument("--env-var", action="append", dest="env_var", metavar="KEY=VALUE", help="Custom env var")
-    parser.add_argument("--force", action="store_true", default=False, help="Override CIDR safety guard")
-    parser.add_argument("--json-only", action="store_true", default=False, help="Suppress UI box and print raw JSON")
-    parser.add_argument("--list-modes", action="store_true", default=False, help="Print all available modes table")
-    parser.add_argument("--root-check", action="store_true", default=False, help="Validate elevated root privileges")
-    parser.add_argument("--use-cache", action="store_true", default=False, dest="use_cache", help="Enable result caching")
-    parser.add_argument("--no-color", action="store_true", default=False, dest="no_color", help="Disable color output")
-    parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Enable detailed debug logging")
+    parser.add_argument(
+        "--output-pcap",
+        dest="output_pcap",
+        metavar="PATH",
+        help="Export raw packets to PCAP",
+    )
+    parser.add_argument(
+        "--env-var",
+        action="append",
+        dest="env_var",
+        metavar="KEY=VALUE",
+        help="Custom env var",
+    )
+    parser.add_argument(
+        "--force", action="store_true", default=False, help="Override CIDR safety guard"
+    )
+    parser.add_argument(
+        "--json-only",
+        action="store_true",
+        default=False,
+        help="Suppress UI box and print raw JSON",
+    )
+    parser.add_argument(
+        "--list-modes",
+        action="store_true",
+        default=False,
+        help="Print all available modes table",
+    )
+    parser.add_argument(
+        "--root-check",
+        action="store_true",
+        default=False,
+        help="Validate elevated root privileges",
+    )
+    parser.add_argument(
+        "--use-cache",
+        action="store_true",
+        default=False,
+        dest="use_cache",
+        help="Enable result caching",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        default=False,
+        dest="no_color",
+        help="Disable color output",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        default=False,
+        help="Enable detailed debug logging",
+    )
     return parser
 
 

@@ -52,7 +52,9 @@ def run(
         return f"valid: true\nsource: {label}"
 
     if act == "minify":
-        body = json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=sort_keys)
+        body = json.dumps(
+            data, ensure_ascii=False, separators=(",", ":"), sort_keys=sort_keys
+        )
     else:
         body = json.dumps(
             data,
@@ -67,7 +69,9 @@ def run(
 def _cli() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--input", required=True)
-    p.add_argument("--action", default="format", choices=("format", "minify", "validate"))
+    p.add_argument(
+        "--action", default="format", choices=("format", "minify", "validate")
+    )
     p.add_argument("--indent", type=int, default=2)
     p.add_argument("--sort-keys", action="store_true")
     args = p.parse_args()

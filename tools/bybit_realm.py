@@ -33,6 +33,7 @@
 
 import sys
 from pathlib import Path
+
 # Add current directory to path to import proxy_utils
 sys.path.append(str(Path(__file__).parent))
 try:
@@ -40,25 +41,24 @@ try:
 except ImportError:
     proxy_utils = None
 
-import os
 import asyncio
-import json
 import csv
-import time
-import math
-import uuid
-import logging
 import hashlib
 import hmac
-import threading
-import statistics
-import requests
+import json
+import logging
+import math
+import os
 import random
-import asyncio
-from collections import deque
+import statistics
+import threading
+import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Literal, Tuple, Callable
+from typing import Callable, Dict, List, Literal, Optional, Tuple
+
+import requests
 from dotenv import load_dotenv
 
 # Fix 36: Consolidate dotenv loads
@@ -87,23 +87,17 @@ class TradingConfig:
     """
 
     # ── API Credentials ──────────────────────────────────────────────────────
-    api_key: str = field(
-        default_factory=lambda: os.getenv("BYBIT_API_KEY", "")
-    )
-    api_secret: str = field(
-        default_factory=lambda: os.getenv("BYBIT_API_SECRET", "")
-    )
+    api_key: str = field(default_factory=lambda: os.getenv("BYBIT_API_KEY", ""))
+    api_secret: str = field(default_factory=lambda: os.getenv("BYBIT_API_SECRET", ""))
     testnet: bool = field(
-        default_factory=lambda: os.getenv(
-            "BYBIT_USE_TESTNET", "false"
-        ).lower() == "true"
+        default_factory=lambda: (
+            os.getenv("BYBIT_USE_TESTNET", "false").lower() == "true"
+        )
     )
 
     # ── Geo-IP Bypass ────────────────────────────────────────────────────────
     use_proxy: bool = field(
-        default_factory=lambda: os.getenv(
-            "PROXY_ENABLED", "false"
-        ).lower() == "true"
+        default_factory=lambda: os.getenv("PROXY_ENABLED", "false").lower() == "true"
     )
     proxy_host: str = field(
         default_factory=lambda: os.getenv("PROXY_HOST", "127.0.0.1")
@@ -111,25 +105,17 @@ class TradingConfig:
     proxy_port: int = field(
         default_factory=lambda: int(os.getenv("PROXY_PORT", "9050"))
     )
-    proxy_type: str = field(
-        default_factory=lambda: os.getenv("PROXY_TYPE", "socks5h")
-    )
-    proxy_region: str = field(
-        default_factory=lambda: os.getenv("PROXY_REGION", "")
-    )
+    proxy_type: str = field(default_factory=lambda: os.getenv("PROXY_TYPE", "socks5h"))
+    proxy_region: str = field(default_factory=lambda: os.getenv("PROXY_REGION", ""))
     use_tor: bool = field(
-        default_factory=lambda: os.getenv(
-            "TOR_ENABLED", "false"
-        ).lower() == "true"
+        default_factory=lambda: os.getenv("TOR_ENABLED", "false").lower() == "true"
     )
 
     # ── HTTP Behaviour ───────────────────────────────────────────────────────
     timeout: int = field(
         default_factory=lambda: int(os.getenv("REQUEST_TIMEOUT", "15"))
     )
-    max_retries: int = field(
-        default_factory=lambda: int(os.getenv("MAX_RETRIES", "3"))
-    )
+    max_retries: int = field(default_factory=lambda: int(os.getenv("MAX_RETRIES", "3")))
     recv_window: int = 30000
 
     # ── Rate Limiting ────────────────────────────────────────────────────────
@@ -139,17 +125,13 @@ class TradingConfig:
 
     # ── Trade Journal ────────────────────────────────────────────────────────
     journal_path: str = field(
-        default_factory=lambda: os.getenv(
-            "JOURNAL_PATH", "bybit_journal.json"
-        )
+        default_factory=lambda: os.getenv("JOURNAL_PATH", "bybit_journal.json")
     )
 
     @property
     def base_url(self) -> str:
         return (
-            "https://api-testnet.bybit.com"
-            if self.testnet
-            else "https://api.bybit.com"
+            "https://api-testnet.bybit.com" if self.testnet else "https://api.bybit.com"
         )
 
 
@@ -169,7 +151,9 @@ class RateLimiter:
             now = time.time() * 1000
             delta = now - self.last_check
             # Fix 49: Token Drift Prevention
-            self.tokens = min(self.capacity, max(0.0, self.tokens + delta * self.refill_per_ms))
+            self.tokens = min(
+                self.capacity, max(0.0, self.tokens + delta * self.refill_per_ms)
+            )
             self.last_check = now
             if self.tokens < 1:
                 sleep_time = (1 - self.tokens) / self.refill_per_ms
@@ -177,11 +161,18 @@ class RateLimiter:
                 self.tokens = 0
             self.tokens -= 1
 
+
 # ══════════════════════════════════════════════════════════════════════════
 # CIRCUIT BREAKER (Drawdown & Loss Protection)
 # ══════════════════════════════════════════════════════════════════════════
 class CircuitBreaker:
-    def __init__(self, initial_equity: float, max_drawdown_pct: float = 0.01, max_consec_losses: int = 3, halt_duration_ms: int = 1800000):
+    def __init__(
+        self,
+        initial_equity: float,
+        max_drawdown_pct: float = 0.01,
+        max_consec_losses: int = 3,
+        halt_duration_ms: int = 1800000,
+    ):
         # Fix 45: Equity Constraint Protection
         self.initial_equity = max(1.0, initial_equity)
         self.threshold = self.initial_equity * (1 - max_drawdown_pct)
@@ -198,14 +189,14 @@ class CircuitBreaker:
             if self.is_halted and time.time() * 1000 < self.resume_time:
                 return False
             elif self.is_halted:
-                self.reset(current_equity) # Resume trading
-                
+                self.reset(current_equity)  # Resume trading
+
             # Check drawdown
             if current_equity < self.threshold:
                 self.trigger_halt()
                 return False
             return True
-            
+
     def record_loss(self):
         with self.lock:
             self.consec_losses += 1
@@ -215,31 +206,37 @@ class CircuitBreaker:
     def trigger_halt(self):
         self.is_halted = True
         self.resume_time = (time.time() * 1000) + self.halt_duration_ms
-        self.consec_losses = 0 # Reset losses after halt
+        self.consec_losses = 0  # Reset losses after halt
 
     def reset(self, new_equity: float):
         with self.lock:
             self.initial_equity = new_equity
-            self.threshold = new_equity * 0.99 # 1% drawdown reset
+            self.threshold = new_equity * 0.99  # 1% drawdown reset
             self.is_halted = False
             self.consec_losses = 0
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # CONCURRENCY & THROTTLING
 # ══════════════════════════════════════════════════════════════════════════
 class ConcurrentTradeMutex:
     """Fix 37: Thread Lock for Active Operations."""
+
     def __init__(self):
         self._mutex = threading.Lock()
+
     def run_locked(self, action: Callable, *args, **kwargs):
         with self._mutex:
             return action(*args, **kwargs)
 
+
 class RateLimitedWSThrottle:
     """Fix 39: High-Frequency WebSocket Rate Limit Throttle."""
+
     def __init__(self, max_per_sec: int = 5):
         self.interval = 1.0 / max_per_sec
         self.last_update = 0.0
+
     def throttle(self):
         now = time.time()
         elapsed = now - self.last_update
@@ -273,29 +270,25 @@ class GeoProxyManager:
             try:
                 import urllib3.contrib.socks
             except ImportError:
-                logger.warning("SOCKS proxy requires dependency. Run: pip install requests[socks]")
+                logger.warning(
+                    "SOCKS proxy requires dependency. Run: pip install requests[socks]"
+                )
 
         # Use proxy_utils for consistent proxy configuration
         proxies = proxy_utils.get_proxies()
         self.session.proxies = proxies
-        
+
         proxy_url = proxies.get("https", "unknown")
-        
+
         region_tag = (
-            f" | Region: {self.config.proxy_region}"
-            if self.config.proxy_region
-            else ""
+            f" | Region: {self.config.proxy_region}" if self.config.proxy_region else ""
         )
         tor_tag = " | TOR: ON" if self.config.use_tor else ""
-        logger.info(
-            "🌍 Geo Proxy Active -> %s%s%s", proxy_url, region_tag, tor_tag
-        )
+        logger.info("🌍 Geo Proxy Active -> %s%s%s", proxy_url, region_tag, tor_tag)
 
     def get_current_ip(self) -> str:
         try:
-            r = self.session.get(
-                "https://api.ipify.org?format=json", timeout=8
-            )
+            r = self.session.get("https://api.ipify.org?format=json", timeout=8)
             return r.json().get("ip", "Unknown")
         except Exception:
             return "Unknown"
@@ -330,11 +323,12 @@ class TradeJournal:
     def _save(self):
         # Fix 14: Windows Path Safe Encoding on Save
         self._path.write_text(
-            json.dumps(self._entries, indent=2, ensure_ascii=False),
-            encoding="utf-8"
+            json.dumps(self._entries, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
-    def record(self, action: str, payload: dict, result: dict, symbol: Optional[str] = None):
+    def record(
+        self, action: str, payload: dict, result: dict, symbol: Optional[str] = None
+    ):
         entry = {
             "id": str(uuid.uuid4()),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -342,7 +336,7 @@ class TradeJournal:
             "symbol": symbol or payload.get("symbol", "N/A"),
             "payload": payload,
             "result": result,
-            "status": "success" if result.get("status") != "error" else "failed"
+            "status": "success" if result.get("status") != "error" else "failed",
         }
         with self._lock:
             self._entries.append(entry)
@@ -360,7 +354,8 @@ class TradeJournal:
             entries = [
                 e
                 for e in entries
-                if e.get("payload", {}).get("symbol", "") and e.get("payload", {}).get("symbol", "").upper() == symbol.upper()
+                if e.get("payload", {}).get("symbol", "")
+                and e.get("payload", {}).get("symbol", "").upper() == symbol.upper()
             ]
         return entries[-limit:]
 
@@ -379,8 +374,10 @@ class SignalManager:
 
     def _load(self) -> List[dict]:
         if self._path.exists():
-            try: return json.loads(self._path.read_text())
-            except: return []
+            try:
+                return json.loads(self._path.read_text())
+            except:
+                return []
         return []
 
     def _save(self):
@@ -442,7 +439,7 @@ class BybitRealm:
         if server_time == 0:
             # Fallback to timeNano if timeSecond is missing
             server_time = int(server_time_resp.get("timeNano", 0)) // 1_000_000
-            
+
         local_time = int(time.time() * 1000)
         if server_time > 0:
             self.time_offset = server_time - local_time
@@ -473,9 +470,13 @@ class BybitRealm:
             return items[0]
         return None
 
-    def _get_klines_safely(self, symbol: str, interval: str, limit: int, category: str = "linear") -> List[list]:
+    def _get_klines_safely(
+        self, symbol: str, interval: str, limit: int, category: str = "linear"
+    ) -> List[list]:
         """Fetches and validates kline data, returning an empty list if failed."""
-        res = self.get_klines(symbol=symbol, interval=interval, limit=limit, category=category)
+        res = self.get_klines(
+            symbol=symbol, interval=interval, limit=limit, category=category
+        )
         if isinstance(res, dict) and "list" in res:
             return res["list"]
         logger.warning(f"Failed to fetch klines for {symbol}: {res}")
@@ -484,11 +485,13 @@ class BybitRealm:
     def _format_qty(self, symbol: str, qty: float, category: str = "linear") -> str:
         # Fix 29: Default Values for _get_symbol_info
         info = self._get_symbol_info(symbol, category)
-        if not info or not isinstance(info, dict): return str(qty)
-        
+        if not info or not isinstance(info, dict):
+            return str(qty)
+
         qty_step = float(info.get("lotSizeFilter", {}).get("qtyStep", 0))
-        if qty_step == 0: return str(qty)
-        
+        if qty_step == 0:
+            return str(qty)
+
         precision = len(str(qty_step).split(".")[-1]) if "." in str(qty_step) else 0
         # For quantity, usually floor it to avoid "qty too large" errors
         formatted = f"{math.floor(qty / qty_step) * qty_step:.{precision}f}"
@@ -497,11 +500,13 @@ class BybitRealm:
     def _format_price(self, symbol: str, price: float, category: str = "linear") -> str:
         # Fix 29: Default Values for _get_symbol_info
         info = self._get_symbol_info(symbol, category)
-        if not info or not isinstance(info, dict): return str(price)
-        
+        if not info or not isinstance(info, dict):
+            return str(price)
+
         tick_size = float(info.get("priceFilter", {}).get("tickSize", 0))
-        if tick_size == 0: return str(price)
-        
+        if tick_size == 0:
+            return str(price)
+
         precision = len(str(tick_size).split(".")[-1]) if "." in str(tick_size) else 0
         formatted = f"{round(price / tick_size) * tick_size:.{precision}f}"
         return formatted
@@ -518,12 +523,7 @@ class BybitRealm:
         Bybit V5 signature:
           HMAC-SHA256( timestamp + api_key + recv_window + payload )
         """
-        msg = (
-            f"{ts}"
-            f"{self.config.api_key}"
-            f"{str(self.config.recv_window)}"
-            f"{payload}"
-        )
+        msg = f"{ts}{self.config.api_key}{self.config.recv_window!s}{payload}"
         return hmac.new(
             self.config.api_secret.encode("utf-8"),
             msg.encode("utf-8"),
@@ -550,22 +550,33 @@ class BybitRealm:
         params: Optional[dict] = None,
         json_data: Optional[dict] = None,
         signed: bool = True,
-        is_recursive: bool = False, # Fix 19: Recursion Guard
+        is_recursive: bool = False,  # Fix 19: Recursion Guard
     ) -> dict:
         # Check Circuit Breaker for write operations
-        if not is_recursive and method.upper() == "POST" and endpoint not in ["/v5/market/time"]:
+        if (
+            not is_recursive
+            and method.upper() == "POST"
+            and endpoint not in ["/v5/market/time"]
+        ):
             try:
                 # Only check balance if we are doing a real trade
                 if "order" in endpoint or "position" in endpoint:
                     balance_resp = self.get_wallet_balance(is_recursive=True)
                     equity_list = balance_resp.get("result", {}).get("list", [{}])
-                    equity = float(equity_list[0].get("totalEquity", 1000.0)) if equity_list else 1000.0
+                    equity = (
+                        float(equity_list[0].get("totalEquity", 1000.0))
+                        if equity_list
+                        else 1000.0
+                    )
                     if not self.breaker.check(equity):
-                        return {"status": "error", "msg": "CIRCUIT_BREAKER_TRIPPED: Equity below threshold"}
+                        return {
+                            "status": "error",
+                            "msg": "CIRCUIT_BREAKER_TRIPPED: Equity below threshold",
+                        }
             except Exception as e:
                 logger.debug(f"Circuit breaker check failed: {e}")
                 pass
-        
+
         self._limiter.acquire()
 
         # Fix 20: Use time_offset for accurate timestamps
@@ -590,10 +601,12 @@ class BybitRealm:
                 params = None
             else:
                 # Fix 33: Deterministic Sorting of Nested JSON Payloads
-                sign_payload = json.dumps(
-                    json_data, sort_keys=True, separators=(',', ':')
-                ) if json_data else ""
-            
+                sign_payload = (
+                    json.dumps(json_data, sort_keys=True, separators=(",", ":"))
+                    if json_data
+                    else ""
+                )
+
             signature = self._sign(ts, sign_payload)
             headers["X-BAPI-SIGN"] = signature
 
@@ -605,46 +618,67 @@ class BybitRealm:
                     method,
                     url,
                     params=params,
-                    data=sign_payload if (signed and method.upper() == "POST") else None,
-                    json=json_data if not (signed and method.upper() == "POST") else None,
+                    data=sign_payload
+                    if (signed and method.upper() == "POST")
+                    else None,
+                    json=json_data
+                    if not (signed and method.upper() == "POST")
+                    else None,
                     headers=headers,
                     timeout=self.config.timeout,
                 )
-                
+
                 # Fix 35: Direct HTTP Status Code Short-Circuit
                 if resp.status_code in [401, 403]:
-                    return {"status": "error", "code": resp.status_code, "msg": "Auth failed or IP Blocked"}
+                    return {
+                        "status": "error",
+                        "code": resp.status_code,
+                        "msg": "Auth failed or IP Blocked",
+                    }
 
                 if resp.status_code != 200:
                     logger.error(f"API Error [{resp.status_code}]: {resp.text[:200]}")
-                    last_error = {"status": "error", "code": resp.status_code, "msg": resp.text[:200]}
+                    last_error = {
+                        "status": "error",
+                        "code": resp.status_code,
+                        "msg": resp.text[:200],
+                    }
                     time.sleep(attempt * 0.5)  # Back-off
                     continue
-                
+
                 # Fix 25: Robust HTML/Error Fallback in JSON Decoder
                 try:
                     data = resp.json()
                 except json.JSONDecodeError:
-                    clean_text = resp.text[:100].replace('\n', '')
+                    clean_text = resp.text[:100].replace("\n", "")
                     logger.error("Failed to parse JSON response: %s", clean_text)
-                    last_error = {"status": "error", "msg": f"HTML/Text Response: {clean_text}"}
+                    last_error = {
+                        "status": "error",
+                        "msg": f"HTML/Text Response: {clean_text}",
+                    }
                     continue
 
                 ret_code = data.get("retCode", -1)
                 if ret_code == 0:
                     return data.get("result", data)
-                
+
                 # Rate Limit specific retry logic
                 if ret_code == 10006:
-                    logger.warning(f"Rate limit exceeded (retCode 10006), retrying attempt {attempt}...")
-                    time.sleep(attempt * 1.5) # Longer back-off
+                    logger.warning(
+                        f"Rate limit exceeded (retCode 10006), retrying attempt {attempt}..."
+                    )
+                    time.sleep(attempt * 1.5)  # Longer back-off
                     continue
 
                 # Specific API-level error handling
                 if ret_code == 10004:
-                    logger.error("Signature mismatch (10004). Payload was: %s", sign_payload)
+                    logger.error(
+                        "Signature mismatch (10004). Payload was: %s", sign_payload
+                    )
                 elif ret_code == 10001:
-                    logger.error("Parameter validation error (10001). Check request parameters.")
+                    logger.error(
+                        "Parameter validation error (10001). Check request parameters."
+                    )
 
                 # Non-zero retCode = API-level error
                 last_error = {
@@ -670,13 +704,15 @@ class BybitRealm:
 
         return last_error
 
-    def get_wallet_balance(self, account_type: str = "UNIFIED", is_recursive: bool = False) -> dict:
+    def get_wallet_balance(
+        self, account_type: str = "UNIFIED", is_recursive: bool = False
+    ) -> dict:
         return self._request(
             "GET",
             "/v5/account/wallet-balance",
             params={"accountType": account_type},
             signed=True,
-            is_recursive=is_recursive
+            is_recursive=is_recursive,
         )
 
     def get_positions(
@@ -693,14 +729,10 @@ class BybitRealm:
             params["settleCoin"] = "USDT"
         elif settle_coin:
             params["settleCoin"] = settle_coin.upper()
-        return self._request(
-            "GET", "/v5/position/list", params=params, signed=True
-        )
+        return self._request("GET", "/v5/position/list", params=params, signed=True)
 
     def get_account_info(self) -> dict:
-        return self._request(
-            "GET", "/v5/account/info", params={}, signed=True
-        )
+        return self._request("GET", "/v5/account/info", params={}, signed=True)
 
     def get_fee_rate(
         self, category: str = "linear", symbol: Optional[str] = None
@@ -708,9 +740,7 @@ class BybitRealm:
         params: dict = {"category": category}
         if symbol:
             params["symbol"] = symbol.upper()
-        return self._request(
-            "GET", "/v5/account/fee-rate", params=params, signed=True
-        )
+        return self._request("GET", "/v5/account/fee-rate", params=params, signed=True)
 
     def set_leverage(
         self,
@@ -730,7 +760,13 @@ class BybitRealm:
             signed=True,
         )
 
-    def set_margin_mode(self, symbol: str, is_isolated: bool, leverage: int = 1, category: str = "linear") -> dict:
+    def set_margin_mode(
+        self,
+        symbol: str,
+        is_isolated: bool,
+        leverage: int = 1,
+        category: str = "linear",
+    ) -> dict:
         """Fix 1: Switches margin mode to Isolated (1) or Cross (0)."""
         return self._request(
             "POST",
@@ -740,12 +776,14 @@ class BybitRealm:
                 "symbol": symbol.upper(),
                 "tradeMode": 1 if is_isolated else 0,
                 "buyLeverage": str(leverage),
-                "sellLeverage": str(leverage)
+                "sellLeverage": str(leverage),
             },
-            signed=True
+            signed=True,
         )
 
-    def verify_leverage_tier(self, symbol: str, requested_leverage: int, category: str = "linear") -> bool:
+    def verify_leverage_tier(
+        self, symbol: str, requested_leverage: int, category: str = "linear"
+    ) -> bool:
         """Fix 2: Validates if requested leverage is within the allowed limits of the instrument."""
         info = self._get_symbol_info(symbol, category)
         if not info:
@@ -753,14 +791,19 @@ class BybitRealm:
         max_lev = int(float(info.get("leverageFilter", {}).get("maxLeverage", 1)))
         return requested_leverage <= max_lev
 
-    def set_leverage_safe(self, symbol: str, leverage: int, category: str = "linear") -> dict:
+    def set_leverage_safe(
+        self, symbol: str, leverage: int, category: str = "linear"
+    ) -> dict:
         """Fix 3: Updates leverage only if the requested value differs from current position settings."""
         pos_res = self.get_positions(category=category, symbol=symbol)
         positions = pos_res.get("list", [])
         if positions:
             current_lev = int(float(positions[0].get("leverage", 1)))
             if current_lev == leverage:
-                return {"status": "ok", "msg": f"Leverage already set to {leverage} for {symbol}"}
+                return {
+                    "status": "ok",
+                    "msg": f"Leverage already set to {leverage} for {symbol}",
+                }
         return self.set_leverage(symbol, leverage, category)
 
     def get_mmr(self, symbol: str, category: str = "linear") -> float:
@@ -778,7 +821,9 @@ class BybitRealm:
         if not positions or float(positions[0].get("size", 0)) == 0:
             return 0.0
         pos = positions[0]
-        position_margin = float(pos.get("positionIM", 0)) or float(pos.get("positionMargin", 1))
+        position_margin = float(pos.get("positionIM", 0)) or float(
+            pos.get("positionMargin", 1)
+        )
         maintenance_margin = float(pos.get("positionMM", 0))
         if position_margin == 0:
             return 0.0
@@ -789,7 +834,9 @@ class BybitRealm:
         balance_resp = self.get_wallet_balance(account_type="UNIFIED")
         total_val = 0.0
         # Accessing nested result/list/coin structure
-        balance_data = balance_resp.get("list", balance_resp.get("result", {}).get("list", [{}]))
+        balance_data = balance_resp.get(
+            "list", balance_resp.get("result", {}).get("list", [{}])
+        )
         coins = balance_data[0].get("coin", [])
         for coin in coins:
             usd_value = float(coin.get("usdValue", 0))
@@ -805,7 +852,9 @@ class BybitRealm:
         for pos in positions:
             rank = int(pos.get("adlRank", 0))
             if rank >= 4:
-                high_risk.append({"symbol": pos["symbol"], "side": pos["side"], "adl_rank": rank})
+                high_risk.append(
+                    {"symbol": pos["symbol"], "side": pos["side"], "adl_rank": rank}
+                )
         return high_risk
 
     def check_available_margin_for_trade(self, cost_usdt: float) -> bool:
@@ -815,7 +864,9 @@ class BybitRealm:
         coins = balance_data[0].get("coin", [])
         for coin in coins:
             if coin["coin"] == "USDT":
-                available = float(coin.get("availableToBorrow", coin.get("availableToWithdraw", 0)))
+                available = float(
+                    coin.get("availableToBorrow", coin.get("availableToWithdraw", 0))
+                )
                 return available >= cost_usdt
         return False
 
@@ -829,11 +880,15 @@ class BybitRealm:
                 return self._request(method, endpoint, **kwargs)
         return res
 
-    def calc_isolated_long_liq(self, entry: float, leverage: float, mmr: float = 0.005) -> float:
+    def calc_isolated_long_liq(
+        self, entry: float, leverage: float, mmr: float = 0.005
+    ) -> float:
         """Fix 9: Isolated Margin Long Liquidation Price Calculator. Formula: Entry * (1 - (1 / leverage) + mmr)"""
         return entry * (1 - (1 / leverage) + mmr)
 
-    def calc_isolated_short_liq(self, entry: float, leverage: float, mmr: float = 0.005) -> float:
+    def calc_isolated_short_liq(
+        self, entry: float, leverage: float, mmr: float = 0.005
+    ) -> float:
         """Fix 10: Isolated Margin Short Liquidation Price Calculator. Formula: Entry * (1 + (1 / leverage) - mmr)"""
         return entry * (1 + (1 / leverage) - mmr)
 
@@ -847,18 +902,24 @@ class BybitRealm:
             return 100.0
         return (equity - total_margin) / equity * 100
 
-    def calculate_risk_position_size(self, entry: float, stop_loss: float, risk_usdt: float) -> float:
+    def calculate_risk_position_size(
+        self, entry: float, stop_loss: float, risk_usdt: float
+    ) -> float:
         """Fix 12: Maximum Allowable Position Sizer (Risk Percentage Model). Returns base asset contract size."""
         price_diff = abs(entry - stop_loss)
         if price_diff == 0:
             return 0.0
         return risk_usdt / price_diff
 
-    def calculate_atr_sized_position(self, symbol: str, risk_usdt: float, interval: str = "15") -> float:
+    def calculate_atr_sized_position(
+        self, symbol: str, risk_usdt: float, interval: str = "15"
+    ) -> float:
         """Fix 13: Dynamic Leveraged ATR-Based Position Sizer. Sizes position by placing stop loss at 2 * ATR."""
         atr_val = self.calculate_atr(symbol, interval).get("atr", 0)
         ticker_resp = self.get_ticker(symbol)
-        ticker = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))[0]
+        ticker = ticker_resp.get(
+            "list", ticker_resp.get("result", {}).get("list", [{}])
+        )[0]
         price = float(ticker.get("lastPrice", 0))
         if atr_val == 0 or price == 0:
             return 0.0
@@ -875,11 +936,15 @@ class BybitRealm:
         drawdown = (initial - total_equity) / initial * 100
         if drawdown >= max_allowed_loss_pct:
             self.breaker.trigger_halt()
-            self.alert(f"HARD HALT: Equity drawdown of {drawdown:.2f}% exceeded.", "CRITICAL")
+            self.alert(
+                f"HARD HALT: Equity drawdown of {drawdown:.2f}% exceeded.", "CRITICAL"
+            )
             return False
         return True
 
-    def check_bybit_notional_limits(self, symbol: str, qty: float, price: float, category: str = "linear") -> float:
+    def check_bybit_notional_limits(
+        self, symbol: str, qty: float, price: float, category: str = "linear"
+    ) -> float:
         """Fix 15: Notional Contract Limit Guard. Caps qty if notional size exceeds exchange instrument limitations."""
         info = self._get_symbol_info(symbol, category)
         if not info:
@@ -888,11 +953,15 @@ class BybitRealm:
         notional = qty * price
         if notional > max_val:
             adjusted_qty = max_val / price
-            logger.warning(f"Quantity adjusted down from {qty} to {adjusted_qty} to fit notional limits.")
+            logger.warning(
+                f"Quantity adjusted down from {qty} to {adjusted_qty} to fit notional limits."
+            )
             return adjusted_qty
         return qty
 
-    def get_volatility_adjusted_slippage(self, symbol: str, qty: float, side: str) -> float:
+    def get_volatility_adjusted_slippage(
+        self, symbol: str, qty: float, side: str
+    ) -> float:
         """Fix 16: Dynamic Volatility-Scaled Slippage Estimator. Estimes price impact specifically for futures order sizing."""
         slip_data = self.estimate_slippage(symbol, qty, side)
         if "status" in slip_data and slip_data["status"] == "error":
@@ -902,38 +971,67 @@ class BybitRealm:
         base_slippage = slip_data.get("slippage_pct", 0.0)
         return base_slippage * (1.0 + (vol / 100.0))
 
-    def execute_iceberg(self, symbol: str, side: str, total_qty: float, slices: int, price: float, interval_sec: int) -> list:
+    def execute_iceberg(
+        self,
+        symbol: str,
+        side: str,
+        total_qty: float,
+        slices: int,
+        price: float,
+        interval_sec: int,
+    ) -> list:
         """Fix 17: Iceberg Order with Randomized Slices and Drift Delays. Executes large volume linear trades in chunks."""
         results = []
         base_slice = total_qty / slices
         for i in range(slices):
             noise = random.uniform(0.85, 1.15)
             chunk_qty = float(self._format_qty(symbol, base_slice * noise))
-            order = self.place_order(symbol=symbol, side=side, qty=chunk_qty, price=price, order_type="Limit")
+            order = self.place_order(
+                symbol=symbol, side=side, qty=chunk_qty, price=price, order_type="Limit"
+            )
             results.append(order)
             if i < slices - 1:
                 time.sleep(interval_sec * random.uniform(0.9, 1.1))
         return results
 
-    async def execute_twap_async(self, symbol: str, side: str, total_qty: float, intervals: int, duration_sec: int):
+    async def execute_twap_async(
+        self,
+        symbol: str,
+        side: str,
+        total_qty: float,
+        intervals: int,
+        duration_sec: int,
+    ):
         """Fix 18: Asynchronous TWAP Futures Execution. Executes small market slices at fixed time-steps."""
         qty_per_interval = total_qty / intervals
         delay = duration_sec / intervals
         for i in range(intervals):
             qty_formatted = float(self._format_qty(symbol, qty_per_interval))
-            self.place_order(symbol=symbol, side=side, qty=qty_formatted, order_type="Market")
+            self.place_order(
+                symbol=symbol, side=side, qty=qty_formatted, order_type="Market"
+            )
             await asyncio.sleep(delay)
 
-    def chase_maker_limit(self, symbol: str, side: str, qty: float, timeout_sec: int = 60) -> dict:
+    def chase_maker_limit(
+        self, symbol: str, side: str, qty: float, timeout_sec: int = 60
+    ) -> dict:
         """Fix 19: Passive Chase Limit Order (Maker Assist). Maintains PostOnly order updates to match moving order book spreads."""
         ob_resp = self.get_orderbook(symbol, limit=1)
         ob = ob_resp.get("result", {})
-        if not ob.get("b") or not ob.get("a"): return {"status": "error", "msg": "Orderbook empty"}
+        if not ob.get("b") or not ob.get("a"):
+            return {"status": "error", "msg": "Orderbook empty"}
         target_price = float(ob["b"][0][0]) if side == "Buy" else float(ob["a"][0][0])
-        order = self.place_order(symbol=symbol, side=side, qty=qty, price=target_price, order_type="Limit", time_in_force="PostOnly")
+        order = self.place_order(
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            price=target_price,
+            order_type="Limit",
+            time_in_force="PostOnly",
+        )
         if order.get("status") == "error":
             return order
-            
+
         order_id = order.get("orderId")
         start = time.time()
         while time.time() - start < timeout_sec:
@@ -945,14 +1043,24 @@ class BybitRealm:
             # Update price to new best quote
             new_ob_resp = self.get_orderbook(symbol, limit=1)
             new_ob = new_ob_resp.get("result", {})
-            new_best = float(new_ob["b"][0][0]) if side == "Buy" else float(new_ob["a"][0][0])
+            new_best = (
+                float(new_ob["b"][0][0]) if side == "Buy" else float(new_ob["a"][0][0])
+            )
             if new_best != target_price:
                 target_price = new_best
                 self.amend_order(symbol, order_id=order_id, price=target_price)
         self.cancel_order(symbol, order_id=order_id)
         return {"status": "error", "msg": "Chase order expired unfilled."}
 
-    def generate_exponential_grid(self, symbol: str, side: str, base_price: float, steps: int, multiplier: float, step_pct: float) -> list:
+    def generate_exponential_grid(
+        self,
+        symbol: str,
+        side: str,
+        base_price: float,
+        steps: int,
+        multiplier: float,
+        step_pct: float,
+    ) -> list:
         """Fix 20: Exponential Scale-In Grid Order Generator. Prepares list of orders with exponentially scaled distances and sizes."""
         orders = []
         current_qty = 0.01  # Minimum contract size initialization
@@ -961,16 +1069,20 @@ class BybitRealm:
             direction = -1 if side == "Buy" else 1
             current_price = current_price * (1 + (direction * step_pct / 100))
             current_qty = current_qty * multiplier
-            orders.append({
-                "symbol": symbol,
-                "side": side,
-                "qty": round(current_qty, 4),
-                "price": round(current_price, 4),
-                "order_type": "Limit"
-            })
+            orders.append(
+                {
+                    "symbol": symbol,
+                    "side": side,
+                    "qty": round(current_qty, 4),
+                    "price": round(current_price, 4),
+                    "order_type": "Limit",
+                }
+            )
         return orders
 
-    def apply_atr_trailing_stop(self, symbol: str, side: str, atr_period: int = 14) -> dict:
+    def apply_atr_trailing_stop(
+        self, symbol: str, side: str, atr_period: int = 14
+    ) -> dict:
         """Fix 21: Dynamic Trailing Take Profit (ATR Volatility Tuned). Ties trailing stop trigger distance dynamically to ATR value."""
         atr_res = self.calculate_atr(symbol, "15", atr_period)
         atr = atr_res.get("atr", 0)
@@ -979,12 +1091,14 @@ class BybitRealm:
         # Set trailing stop to 3x ATR distance
         return self.set_trading_stop(symbol=symbol, trailing_stop=atr * 3)
 
-    def create_tp_bracket(self, symbol: str, side: str, entry: float, qty: float, category: str = "linear") -> dict:
+    def create_tp_bracket(
+        self, symbol: str, side: str, entry: float, qty: float, category: str = "linear"
+    ) -> dict:
         """Fix 22: Multiple Target Take-Profit Bracket Splitter. Places split reduce-only limits at specific profit points."""
         target_side = "Sell" if side == "Buy" else "Buy"
         targets = [1.01, 1.025, 1.04] if side == "Buy" else [0.99, 0.975, 0.96]
         qty_slices = [qty * 0.33, qty * 0.33, qty * 0.34]
-        
+
         results = []
         for target_mult, slice_qty in zip(targets, qty_slices):
             target_price = entry * target_mult
@@ -994,38 +1108,55 @@ class BybitRealm:
                 qty=float(self._format_qty(symbol, slice_qty)),
                 price=float(self._format_price(symbol, target_price)),
                 reduce_only=True,
-                category=category
+                category=category,
             )
             results.append(order)
         return {"status": "ok", "brackets": results}
 
-    def set_fee_guaranteed_breakeven(self, symbol: str, entry_price: float, side: str, taker_fee_rate: float = 0.00055, maker_fee_rate: float = 0.0002) -> dict:
+    def set_fee_guaranteed_breakeven(
+        self,
+        symbol: str,
+        entry_price: float,
+        side: str,
+        taker_fee_rate: float = 0.00055,
+        maker_fee_rate: float = 0.0002,
+    ) -> dict:
         """Fix 23: Fee-Adjusted Breakeven Stop Adjustment. Offsets entry price with round-trip fee cost (entry taker + exit maker)."""
         # Round-trip cost: entry taker fee + exit maker fee (limit TP exit)
         round_trip_rate = taker_fee_rate + maker_fee_rate
         direction = 1 if side == "Buy" else -1
         breakeven_price = entry_price * (1 + (direction * round_trip_rate))
-        return self.set_trading_stop(symbol, stop_loss=float(self._format_price(symbol, breakeven_price)))
+        return self.set_trading_stop(
+            symbol, stop_loss=float(self._format_price(symbol, breakeven_price))
+        )
 
-    def place_safe_stop_market(self, symbol: str, side: str, qty: float, trigger_price: float) -> dict:
+    def place_safe_stop_market(
+        self, symbol: str, side: str, qty: float, trigger_price: float
+    ) -> dict:
         """Fix 24: Conditional Stop Order Safety Check. Verifies mark price status relative to target direction."""
         ticker_resp = self.get_ticker(symbol)
-        ticker_list = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))
-        mark_price = float(ticker_list[0].get("lastPrice", 0)) # Using lastPrice as proxy
+        ticker_list = ticker_resp.get(
+            "list", ticker_resp.get("result", {}).get("list", [{}])
+        )
+        mark_price = float(
+            ticker_list[0].get("lastPrice", 0)
+        )  # Using lastPrice as proxy
         if side == "Buy" and trigger_price < mark_price:
-            return {"status": "error", "msg": "Buy trigger must be higher than current mark price."}
+            return {
+                "status": "error",
+                "msg": "Buy trigger must be higher than current mark price.",
+            }
         if side == "Sell" and trigger_price > mark_price:
-            return {"status": "error", "msg": "Sell trigger must be lower than current mark price."}
+            return {
+                "status": "error",
+                "msg": "Sell trigger must be lower than current mark price.",
+            }
         return self.place_stop_market(symbol, side, qty, trigger_price)
 
     def place_ioc_order(self, symbol: str, side: str, qty: float, price: float) -> dict:
         """Fix 25: Immediate-Or-Cancel (IOC) Position Wrapper. Wraps limit placements with Bybit IOC constraint."""
         return self.place_order(
-            symbol=symbol,
-            side=side,
-            qty=qty,
-            price=price,
-            time_in_force="IOC"
+            symbol=symbol, side=side, qty=qty, price=price, time_in_force="IOC"
         )
 
     def get_volatility_regime(self, symbol: str, fast: int = 5, slow: int = 24) -> str:
@@ -1041,20 +1172,22 @@ class BybitRealm:
             return "COMPRESSED"
         return "NORMAL"
 
-    def calculate_cmo(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
+    def calculate_cmo(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
         """Fix 27: Chande Momentum Oscillator (CMO). Measures market momentum."""
         klines = self._get_klines_safely(symbol, interval, period + 1)
         closes = [float(k[4]) for k in reversed(klines)]
         if len(closes) < period + 1:
             return {"status": "error", "msg": "Insufficient data"}
-        
+
         gains = []
         losses = []
         for i in range(len(closes) - 1):
-            diff = closes[i+1] - closes[i]
+            diff = closes[i + 1] - closes[i]
             gains.append(diff if diff > 0 else 0.0)
             losses.append(abs(diff) if diff < 0 else 0.0)
-            
+
         sum_g = sum(gains[-period:])
         sum_l = sum(losses[-period:])
         denom = sum_g + sum_l
@@ -1063,7 +1196,9 @@ class BybitRealm:
         cmo = ((sum_g - sum_l) / denom) * 100
         return {"status": "ok", "cmo": round(cmo, 2)}
 
-    def calculate_vol_weighted_bb_width(self, symbol: str, interval: str = "15", period: int = 20) -> dict:
+    def calculate_vol_weighted_bb_width(
+        self, symbol: str, interval: str = "15", period: int = 20
+    ) -> dict:
         """Fix 28: Volume-Weighted Bollinger Band Width (Squeeze Detector)."""
         bb = self.calculate_bollinger_bands(symbol, interval, period)
         if bb["status"] != "ok":
@@ -1072,20 +1207,27 @@ class BybitRealm:
         # If width is below 2.0% (0.02) across futures contracts, a squeeze is probable
         return {"status": "ok", "width": round(width, 4), "squeeze": width < 0.02}
 
-    def calculate_half_trend(self, symbol: str, interval: str = "60", amplitude: int = 2) -> dict:
+    def calculate_half_trend(
+        self, symbol: str, interval: str = "60", amplitude: int = 2
+    ) -> dict:
         """Fix 29: Half-Trend Directional Signal Filter. Simplistic high-low midpoint trend following indicator."""
         klines = self._get_klines_safely(symbol, interval, 20)
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         closes = [float(k[4]) for k in reversed(klines)]
-        
-        if len(highs) < amplitude: return {"status": "error", "msg": "Insufficient data"}
+
+        if len(highs) < amplitude:
+            return {"status": "error", "msg": "Insufficient data"}
         ma_high = sum(highs[-amplitude:]) / amplitude
         ma_low = sum(lows[-amplitude:]) / amplitude
         last_close = closes[-1]
-        
-        direction = "BULLISH" if last_close > (ma_high + ma_low)/2 else "BEARISH"
-        return {"status": "ok", "direction": direction, "midpoint": (ma_high + ma_low)/2}
+
+        direction = "BULLISH" if last_close > (ma_high + ma_low) / 2 else "BEARISH"
+        return {
+            "status": "ok",
+            "direction": direction,
+            "midpoint": (ma_high + ma_low) / 2,
+        }
 
     def calculate_cvd_divergence(self, symbol: str, trade_limit: int = 200) -> dict:
         """Fix 30: Cumulative Volume Delta (CVD) Divergence Indicator. Detects spot absorption zones."""
@@ -1095,42 +1237,46 @@ class BybitRealm:
         for t in trades:
             v = float(t["v"])
             delta_accum += v if t["s"] == "Buy" else -v
-            
+
         ticker_resp = self.get_ticker(symbol)
-        ticker = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))[0]
+        ticker = ticker_resp.get(
+            "list", ticker_resp.get("result", {}).get("list", [{}])
+        )[0]
         p_change = float(ticker.get("price24hPcnt", 0))
-        
+
         divergence = "NONE"
         if p_change > 0 and delta_accum < 0:
             divergence = "BEARISH_DIVERGENCE"
         elif p_change < 0 and delta_accum > 0:
             divergence = "BULLISH_DIVERGENCE"
-            
+
         return {"status": "ok", "cvd_delta": delta_accum, "divergence": divergence}
 
-    def get_value_area_bounds(self, symbol: str, interval: str = "60", bins: int = 20) -> dict:
+    def get_value_area_bounds(
+        self, symbol: str, interval: str = "60", bins: int = 20
+    ) -> dict:
         """Fix 31: Volume Profile Value Area Highlight (VAH/VAL). Returns top 70% volume concentration boundaries."""
         profile_res = self.calculate_volume_profile(symbol, interval, price_bins=bins)
         if profile_res.get("status") == "error":
             return profile_res
         profile = profile_res.get("profile", {})
         sorted_bins = sorted(profile.items(), key=lambda x: x[1], reverse=True)
-        
+
         total_volume = sum(profile.values())
         target_vol = total_volume * 0.70
         accumulated_vol = 0.0
         value_prices = []
-        
+
         for pr, vol in sorted_bins:
             accumulated_vol += vol
             value_prices.append(float(pr))
             if accumulated_vol >= target_vol:
                 break
-                
+
         return {
             "status": "ok",
             "vah": max(value_prices) if value_prices else 0.0,
-            "val": min(value_prices) if value_prices else 0.0
+            "val": min(value_prices) if value_prices else 0.0,
         }
 
     def calculate_hurst_approximation(self, symbol: str, interval: str = "15") -> dict:
@@ -1139,13 +1285,17 @@ class BybitRealm:
         closes = [float(k[4]) for k in reversed(klines)]
         if len(closes) < 2:
             return {"hurst": 0.5}
-        returns = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+        returns = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
         std = statistics.stdev(returns)
         rng = max(closes) - min(closes)
         # Simple rescaled range proxy
         rs = rng / std if std > 0 else 1.0
         hurst = math.log(rs) / math.log(len(closes)) if rs > 1 else 0.5
-        return {"status": "ok", "hurst": round(hurst, 4), "class": "TRENDING" if hurst > 0.5 else "MEAN_REVERTING"}
+        return {
+            "status": "ok",
+            "hurst": round(hurst, 4),
+            "class": "TRENDING" if hurst > 0.5 else "MEAN_REVERTING",
+        }
 
     def get_supertrend_stop(self, symbol: str, side: str) -> float:
         """Fix 33: SuperTrend Multiplier Output for Direct Stop Loss Placement."""
@@ -1154,7 +1304,7 @@ class BybitRealm:
 
     def _sort_json_payload(self, json_data: dict) -> str:
         """Fix 35: HMAC Signature Payload Pre-sorting Utility."""
-        return json.dumps(json_data, sort_keys=True, separators=(',', ':'))
+        return json.dumps(json_data, sort_keys=True, separators=(",", ":"))
 
     def sync_ntp_server_time(self) -> int:
         """Fix 36: Drift-Tolerant NTP Server Clock Sync."""
@@ -1169,6 +1319,7 @@ class BybitRealm:
     def export_journal_to_sqlite(self, db_path: str = "trades.db"):
         """Fix 38: Trade Journal Database Export (SQLite Handler)."""
         import sqlite3
+
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("""
@@ -1177,28 +1328,41 @@ class BybitRealm:
             )
         """)
         for entry in self.journal._entries:
-            cursor.execute("INSERT OR REPLACE INTO journal VALUES (?,?,?,?,?,?)", (
-                entry["id"], entry["timestamp"], entry["action"], entry["symbol"],
-                json.dumps(entry["payload"]), entry["status"]
-            ))
+            cursor.execute(
+                "INSERT OR REPLACE INTO journal VALUES (?,?,?,?,?,?)",
+                (
+                    entry["id"],
+                    entry["timestamp"],
+                    entry["action"],
+                    entry["symbol"],
+                    json.dumps(entry["payload"]),
+                    entry["status"],
+                ),
+            )
         conn.commit()
         conn.close()
 
-    def adjust_resting_orders_drift(self, symbol: str, max_drift_pct: float = 0.5) -> dict:
+    def adjust_resting_orders_drift(
+        self, symbol: str, max_drift_pct: float = 0.5
+    ) -> dict:
         """Fix 40: Active Order Book Spread-Drift Realignment Tool."""
         orders_resp = self.get_open_orders(symbol)
         orders = orders_resp.get("list", [])
         ticker_resp = self.get_ticker(symbol)
-        ticker = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))[0]
+        ticker = ticker_resp.get(
+            "list", ticker_resp.get("result", {}).get("list", [{}])
+        )[0]
         last_price = float(ticker.get("lastPrice", 0))
-        
+
         amended = []
         for o in orders:
             o_price = float(o.get("price", 0))
             drift = abs(o_price - last_price) / last_price * 100
             if drift > max_drift_pct and o.get("orderType") == "Limit":
                 # Reposition entry right on margin limit zone
-                new_price = last_price * 0.995 if o["side"] == "Buy" else last_price * 1.005
+                new_price = (
+                    last_price * 0.995 if o["side"] == "Buy" else last_price * 1.005
+                )
                 res = self.amend_order(symbol, order_id=o["orderId"], price=new_price)
                 amended.append(res)
         return {"status": "ok", "amended_count": len(amended)}
@@ -1207,7 +1371,11 @@ class BybitRealm:
         """Fix 41: Host Endpoint Failover Selector."""
         if force_failover:
             # Switch to alternative API cluster domains
-            self.config.base_url = "https://api.bybit.nl" if not self.config.testnet else "https://api-testnet.bybit.com"
+            self.config.base_url = (
+                "https://api.bybit.nl"
+                if not self.config.testnet
+                else "https://api-testnet.bybit.com"
+            )
             logger.warning(f"Alternative route activated: {self.config.base_url}")
 
     def check_reconnect_proxy(self) -> bool:
@@ -1222,22 +1390,32 @@ class BybitRealm:
     def check_funding_rate_impact(self, symbol: str, threshold: float = 0.01) -> bool:
         """Fix 43: Funding Rate Volatility Arbitrage Guard. Returns True if high upcoming rate."""
         ticker_resp = self.get_ticker(symbol)
-        ticker_data = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))[0]
+        ticker_data = ticker_resp.get(
+            "list", ticker_resp.get("result", {}).get("list", [{}])
+        )[0]
         funding_rate = abs(float(ticker_data.get("fundingRate", 0)) * 100)
         return funding_rate >= threshold
 
     def get_spot_futures_basis(self, symbol_spot: str, symbol_linear: str) -> dict:
         """Fix 44: Spot-Futures Basis Yield Calculator. Calculates premium: Futures - Spot."""
         tick_spot_resp = self.get_ticker(symbol_spot, category="spot")
-        tick_spot = tick_spot_resp.get("list", tick_spot_resp.get("result", {}).get("list", [{}]))[0]
+        tick_spot = tick_spot_resp.get(
+            "list", tick_spot_resp.get("result", {}).get("list", [{}])
+        )[0]
         tick_fut_resp = self.get_ticker(symbol_linear, category="linear")
-        tick_fut = tick_fut_resp.get("list", tick_fut_resp.get("result", {}).get("list", [{}]))[0]
+        tick_fut = tick_fut_resp.get(
+            "list", tick_fut_resp.get("result", {}).get("list", [{}])
+        )[0]
         p_spot = float(tick_spot.get("lastPrice", 0))
         p_fut = float(tick_fut.get("lastPrice", 0))
         if p_spot == 0:
             return {"premium": 0.0}
         premium = (p_fut - p_spot) / p_spot * 100
-        return {"spot_price": p_spot, "futures_price": p_fut, "basis_pct": round(premium, 4)}
+        return {
+            "spot_price": p_spot,
+            "futures_price": p_fut,
+            "basis_pct": round(premium, 4),
+        }
 
     def get_cointegrated_spread(self, symbol_a: str, symbol_b: str) -> dict:
         """Fix 45: Multi-Asset Statistical Arbitrage Cointegration Indicator."""
@@ -1247,7 +1425,7 @@ class BybitRealm:
         closes_b = [float(k[4]) for k in reversed(k_b)]
         if len(closes_a) != len(closes_b):
             return {"status": "error", "msg": "Mismatched datasets"}
-        
+
         ratios = [a / b for a, b in zip(closes_a, closes_b)]
         mean = statistics.mean(ratios)
         std = statistics.stdev(ratios)
@@ -1262,16 +1440,26 @@ class BybitRealm:
             return {"risk": "LOW"}
         oi_prev = float(oi_data[-2].get("openInterest", 1.0))
         oi_curr = float(oi_data[-1].get("openInterest", 1.0))
-        
+
         ticker_resp = self.get_ticker(symbol)
-        ticker = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))[0]
+        ticker = ticker_resp.get(
+            "list", ticker_resp.get("result", {}).get("list", [{}])
+        )[0]
         p_change = float(ticker.get("price24hPcnt", 0))
-        
+
         # If price rises while open interest drops, it suggests a short squeeze is active
         if p_change > 0.02 and oi_curr < oi_prev:
-            return {"status": "ok", "squeeze_risk": "HIGH", "oi_change_pct": (oi_curr - oi_prev) / oi_prev * 100}
-    
-        return {"status": "ok", "squeeze_risk": "NORMAL", "oi_change_pct": (oi_curr - oi_prev) / oi_prev * 100}
+            return {
+                "status": "ok",
+                "squeeze_risk": "HIGH",
+                "oi_change_pct": (oi_curr - oi_prev) / oi_prev * 100,
+            }
+
+        return {
+            "status": "ok",
+            "squeeze_risk": "NORMAL",
+            "oi_change_pct": (oi_curr - oi_prev) / oi_prev * 100,
+        }
 
     def get_scalper_signal(self, symbol: str, limit_depth: int = 15) -> str:
         """Fix 47: Order Book Imbalance High-Frequency Scalping Signal."""
@@ -1288,7 +1476,9 @@ class BybitRealm:
         vwap_data = self.calculate_vwap(symbol, interval)
         vwap = vwap_data.get("vwap", 0.0)
         ticker_resp = self.get_ticker(symbol)
-        ticker = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))[0]
+        ticker = ticker_resp.get(
+            "list", ticker_resp.get("result", {}).get("list", [{}])
+        )[0]
         last_price = float(ticker.get("lastPrice", 0))
         if vwap == 0:
             return "NEUTRAL"
@@ -1299,27 +1489,31 @@ class BybitRealm:
         reg_15m = self.get_market_regime(symbol, interval="15").get("regime")
         reg_1h = self.get_market_regime(symbol, interval="60").get("regime")
         reg_4h = self.get_market_regime(symbol, interval="240").get("regime")
-        
+
         if reg_15m == reg_1h == reg_4h == "TRENDING_UP":
             return "STRONG_BUY_CONFLUENCE"
         elif reg_15m == reg_1h == reg_4h == "TRENDING_DOWN":
             return "STRONG_SELL_CONFLUENCE"
         return "DIVERGENT"
 
-    def get_rebalance_order_params(self, target_allocations: Dict[str, float]) -> List[dict]:
+    def get_rebalance_order_params(
+        self, target_allocations: Dict[str, float]
+    ) -> List[dict]:
         """Fix 50: Rebalancing Exposure Weight Target Allocator."""
         bal_resp = self.get_wallet_balance()
         bal_data = bal_resp.get("list", bal_resp.get("result", {}).get("list", [{}]))
         equity = float(bal_data[0].get("totalEquity", 1.0))
-        
+
         rebalances = []
         for symbol, target_pct in target_allocations.items():
             ticker_resp = self.get_ticker(symbol)
-            ticker = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))[0]
+            ticker = ticker_resp.get(
+                "list", ticker_resp.get("result", {}).get("list", [{}])
+            )[0]
             price = float(ticker.get("lastPrice", 0))
             if price == 0:
                 continue
-                
+
             pos_res = self.get_positions(symbol=symbol)
             positions = pos_res.get("list", [])
             current_notional = 0.0
@@ -1327,18 +1521,20 @@ class BybitRealm:
                 size = float(positions[0].get("size", 0))
                 direction = 1 if positions[0].get("side") == "Buy" else -1
                 current_notional = size * price * direction
-                
+
             target_notional = equity * target_pct
             diff = target_notional - current_notional
-            
+
             if abs(diff) > (equity * 0.02):  # Rebalance only if deviation > 2%
                 side = "Buy" if diff > 0 else "Sell"
-                rebalances.append({
-                    "symbol": symbol,
-                    "side": side,
-                    "qty": abs(diff) / price,
-                    "order_type": "Market"
-                })
+                rebalances.append(
+                    {
+                        "symbol": symbol,
+                        "side": side,
+                        "qty": abs(diff) / price,
+                        "order_type": "Market",
+                    }
+                )
         return rebalances
 
     def set_trading_stop(
@@ -1361,15 +1557,17 @@ class BybitRealm:
             payload["takeProfit"] = str(take_profit)
         if trailing_stop is not None:
             payload["trailingStop"] = str(trailing_stop)
-        
+
         result = self._request(
             "POST", "/v5/position/trading-stop", json_data=payload, signed=True
         )
-        
+
         # Check if the API returned 'not modified' error (34040)
         if result.get("status") == "error" and result.get("code") == 34040:
-            logger.warning("Bundled trading-stop update failed (34040). Retrying with separate calls.")
-            
+            logger.warning(
+                "Bundled trading-stop update failed (34040). Retrying with separate calls."
+            )
+
             # Try splitting: one for TP/SL, one for Trailing Stop
             # 1. Update TP/SL only
             tp_sl_payload = {
@@ -1377,28 +1575,42 @@ class BybitRealm:
                 "symbol": symbol.upper(),
                 "tpslMode": tpsl_mode,
             }
-            if stop_loss is not None: tp_sl_payload["stopLoss"] = str(stop_loss)
-            if take_profit is not None: tp_sl_payload["takeProfit"] = str(take_profit)
-            
+            if stop_loss is not None:
+                tp_sl_payload["stopLoss"] = str(stop_loss)
+            if take_profit is not None:
+                tp_sl_payload["takeProfit"] = str(take_profit)
+
             # If we had TP/SL, update them first
             if stop_loss is not None or take_profit is not None:
-                self._request("POST", "/v5/position/trading-stop", json_data=tp_sl_payload, signed=True)
-            
+                self._request(
+                    "POST",
+                    "/v5/position/trading-stop",
+                    json_data=tp_sl_payload,
+                    signed=True,
+                )
+
             # 2. Update Trailing Stop only
             if trailing_stop is not None:
                 ts_payload = {
                     "category": category,
                     "symbol": symbol.upper(),
                     "tpslMode": tpsl_mode,
-                    "trailingStop": str(trailing_stop)
+                    "trailingStop": str(trailing_stop),
                 }
-                return self._request("POST", "/v5/position/trading-stop", json_data=ts_payload, signed=True)
-                
+                return self._request(
+                    "POST",
+                    "/v5/position/trading-stop",
+                    json_data=ts_payload,
+                    signed=True,
+                )
+
         return result
 
-    def place_breakeven_order(self, symbol: str, fee_rate: float, category: str = "linear") -> dict:
+    def place_breakeven_order(
+        self, symbol: str, fee_rate: float, category: str = "linear"
+    ) -> dict:
         """Automates placing a reduce-only limit order at the breakeven price.
-        
+
         fee_rate is treated as the TOTAL round-trip fee rate (entry + exit).
         For VIP0 taker-entry + maker-exit: 0.00055 + 0.0002 = 0.00075.
         """
@@ -1406,7 +1618,7 @@ class BybitRealm:
         positions = pos_data.get("list", [])
         if not positions:
             return {"status": "error", "msg": f"No open position found for {symbol}"}
-        
+
         pos = positions[0]
         entry_price = float(pos.get("entryPrice", pos.get("avgPrice", 0)))
         size = float(pos["size"])
@@ -1435,7 +1647,7 @@ class BybitRealm:
             order_type="Limit",
             reduce_only=True,
             time_in_force="GTC",
-            category=category
+            category=category,
         )
 
     def record_loss(self):
@@ -1446,18 +1658,20 @@ class BybitRealm:
         self.breaker.reset(new_equity)
         self.alert("Circuit breaker reset.", "INFO")
 
-    def calculate_dynamic_qty(self, symbol: str, bid: float, max_usdt: float, liquidity_factor: float = 0.1) -> float:
+    def calculate_dynamic_qty(
+        self, symbol: str, bid: float, max_usdt: float, liquidity_factor: float = 0.1
+    ) -> float:
         """Calculates order quantity based on top-of-book depth and capital constraints."""
         ob = self.get_orderbook(symbol=symbol, limit=20).get("result", {})
         bids = [float(q) for _, q in ob.get("b", [])]
         asks = [float(q) for _, q in ob.get("a", [])]
-        
+
         # Depth limit: min of top bid/ask vol
         liq_limit = min(sum(bids), sum(asks)) * liquidity_factor
-        
+
         # Capital limit
         cap_limit = max_usdt / bid
-        
+
         return round(min(liq_limit, cap_limit), 4)
 
     def set_position_mode(
@@ -1483,7 +1697,7 @@ class BybitRealm:
         category: str = "linear",
         symbol: Optional[str] = None,
         limit: int = 50,
-        settle_coin: str = "USDT", # Fix 41: Dynamic Settle Coin
+        settle_coin: str = "USDT",  # Fix 41: Dynamic Settle Coin
     ) -> dict:
         params: dict = {"category": category, "limit": limit}
         if symbol:
@@ -1491,9 +1705,7 @@ class BybitRealm:
         # Fix 41: Account Execution List Handling
         if category == "linear":
             params["settleCoin"] = settle_coin
-        return self._request(
-            "GET", "/v5/execution/list", params=params, signed=True
-        )
+        return self._request("GET", "/v5/execution/list", params=params, signed=True)
 
     def get_pnl_history(
         self,
@@ -1537,16 +1749,16 @@ class BybitRealm:
         # 1. Ensure precision/formatting first
         formatted_qty = self._format_qty(symbol, qty, category)
         formatted_price = self._format_price(symbol, price, category) if price else None
-        
+
         # 2. Autonomous Checks
         check_qty = float(formatted_qty)
         check_price = float(formatted_price) if formatted_price else None
-        
+
         if not check_price:
             ticker = self.get_ticker(symbol, category)
             if isinstance(ticker, dict) and "list" in ticker and ticker["list"]:
                 check_price = float(ticker["list"][0].get("lastPrice", 0))
-        
+
         # Proactive Balance Check
         if check_price:
             balance_resp = self.get_wallet_balance()
@@ -1558,10 +1770,12 @@ class BybitRealm:
                     if coin["coin"] == "USDT":
                         usdt_balance = float(coin["walletBalance"])
                         break
-            
+
             required = check_qty * check_price
             if required > usdt_balance and not reduce_only:
-                logger.error(f"Insufficient balance: {required:.2f} USDT required, {usdt_balance:.2f} available.")
+                logger.error(
+                    f"Insufficient balance: {required:.2f} USDT required, {usdt_balance:.2f} available."
+                )
                 # Allow API to decide
 
         # Autonomous Quantity Scaling for Min Notional
@@ -1569,16 +1783,19 @@ class BybitRealm:
             # Scale qty up to meet 5.0 USDT minimum
             new_qty = 5.0 / check_price
             formatted_qty = self._format_qty(symbol, new_qty, category)
-            logger.info(f"Scaled qty {check_qty} -> {formatted_qty} to meet min notional.")
+            logger.info(
+                f"Scaled qty {check_qty} -> {formatted_qty} to meet min notional."
+            )
 
         # 3. Fix 18: Improved _unscale Float Detection
         def _unscale(val, sym, cat):
-            if val is None: return None
+            if val is None:
+                return None
             try:
                 num_val = float(val)
             except (ValueError, TypeError):
                 return val
-            
+
             # Fix 18: Only assume 1e8 scaling if price exceeds extreme spot bounds
             if num_val > 100000 and int(num_val) == num_val:
                 ticker = self.get_ticker(sym, cat)
@@ -1613,7 +1830,9 @@ class BybitRealm:
         if client_oid:
             payload["orderLinkId"] = client_oid
         if trigger_price is not None:
-            payload["triggerPrice"] = self._format_price(symbol, trigger_price, category)
+            payload["triggerPrice"] = self._format_price(
+                symbol, trigger_price, category
+            )
         if trigger_by is not None:
             payload["triggerBy"] = trigger_by
         if tp_order_type is not None:
@@ -1625,65 +1844,129 @@ class BybitRealm:
             if v is not None:
                 payload[k] = str(v)
 
-        result = self._request("POST", "/v5/order/create", json_data=payload, signed=True)
+        result = self._request(
+            "POST", "/v5/order/create", json_data=payload, signed=True
+        )
         if result.get("status") == "error":
-            logger.error(f"Order failed: {result}. Context: Symbol={symbol}, Payload={payload}")
-            
+            logger.error(
+                f"Order failed: {result}. Context: Symbol={symbol}, Payload={payload}"
+            )
+
         self.journal.record("place_order", payload, result, symbol=symbol.upper())
         return result
 
-    def place_stop_market(self, symbol: str, side: Literal["Buy", "Sell"], qty: float, trigger_price: float, trigger_by: str = "LastPrice", category: str = "linear") -> dict:
+    def place_stop_market(
+        self,
+        symbol: str,
+        side: Literal["Buy", "Sell"],
+        qty: float,
+        trigger_price: float,
+        trigger_by: str = "LastPrice",
+        category: str = "linear",
+    ) -> dict:
         """Fix 5: Missing place_stop_market Method in Client Class."""
         return self.place_order(
-            symbol=symbol, side=side, qty=qty, order_type="Market",
-            trigger_price=trigger_price, trigger_by=trigger_by, category=category
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            order_type="Market",
+            trigger_price=trigger_price,
+            trigger_by=trigger_by,
+            category=category,
         )
 
-    def micro_scalp(self, symbol: str, qty: float, fee_rate: float, target_profit: float, category: str = "linear") -> dict:
+    def micro_scalp(
+        self,
+        symbol: str,
+        qty: float,
+        fee_rate: float,
+        target_profit: float,
+        category: str = "linear",
+    ) -> dict:
         """Fix 1: Moved from TradeJournal to BybitRealm. Executes a phased Maker-only Buy -> Sell trade."""
-        
+
         # 1. Get Best Bid
-        ob = self.get_orderbook(symbol=symbol, limit=1, category=category).get("result", {})
+        ob = self.get_orderbook(symbol=symbol, limit=1, category=category).get(
+            "result", {}
+        )
         bids = ob.get("b", [])
-        if not bids: return {"status": "error", "msg": "No bid data"}
+        if not bids:
+            return {"status": "error", "msg": "No bid data"}
         buy_price = float(bids[0][0])
-        
+
         # 2. Phase A: Maker Buy
         self.alert(f"Phase A: Placing Maker Buy for {symbol} @ {buy_price}", "INFO")
-        buy_order = self.place_order(symbol=symbol, side="Buy", qty=qty, price=buy_price, order_type="Limit", time_in_force="PostOnly", category=category)
-        if buy_order.get("status") == "error": return buy_order
-        
+        buy_order = self.place_order(
+            symbol=symbol,
+            side="Buy",
+            qty=qty,
+            price=buy_price,
+            order_type="Limit",
+            time_in_force="PostOnly",
+            category=category,
+        )
+        if buy_order.get("status") == "error":
+            return buy_order
+
         # 3. Wait for Fill (Looping REST check)
         order_id = buy_order.get("orderId")
         filled = False
-        for _ in range(10): # 10s wait
+        for _ in range(10):  # 10s wait
             time.sleep(1)
-            orders = self.get_open_orders(symbol=symbol, category=category).get("list", [])
+            orders = self.get_open_orders(symbol=symbol, category=category).get(
+                "list", []
+            )
             if not any(o["orderId"] == order_id for o in orders):
                 filled = True
                 break
-        
+
         if not filled:
             self.cancel_order(symbol=symbol, order_id=order_id, category=category)
             return {"status": "error", "msg": "Buy order timed out"}
-        
-        # 4. Phase B: Maker Sell
-        sell_price = ((qty * buy_price) + target_profit) / (qty * (1 - fee_rate)**2)
-        self.alert(f"Phase B: Placing Maker Sell @ {round(sell_price, 4)}", "INFO")
-        
-        return self.place_order(symbol=symbol, side="Sell", qty=qty, price=round(sell_price, 4), order_type="Limit", time_in_force="PostOnly", reduce_only=True, category=category)
 
-    def place_stop_limit(self, symbol: str, side: Literal["Buy", "Sell"], qty: float, price: float, trigger_price: float, trigger_by: str = "LastPrice", category: str = "linear") -> dict:
+        # 4. Phase B: Maker Sell
+        sell_price = ((qty * buy_price) + target_profit) / (qty * (1 - fee_rate) ** 2)
+        self.alert(f"Phase B: Placing Maker Sell @ {round(sell_price, 4)}", "INFO")
+
+        return self.place_order(
+            symbol=symbol,
+            side="Sell",
+            qty=qty,
+            price=round(sell_price, 4),
+            order_type="Limit",
+            time_in_force="PostOnly",
+            reduce_only=True,
+            category=category,
+        )
+
+    def place_stop_limit(
+        self,
+        symbol: str,
+        side: Literal["Buy", "Sell"],
+        qty: float,
+        price: float,
+        trigger_price: float,
+        trigger_by: str = "LastPrice",
+        category: str = "linear",
+    ) -> dict:
         """Places a Stop-Limit order."""
         return self.place_order(
-            symbol=symbol, side=side, qty=qty, price=price, order_type="Limit",
-            trigger_price=trigger_price, trigger_by=trigger_by, category=category
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            price=price,
+            order_type="Limit",
+            trigger_price=trigger_price,
+            trigger_by=trigger_by,
+            category=category,
         )
 
     def get_affordable_symbols(self, balance: float) -> list:
         """Fix 24: Key Safeguards for get_affordable_symbols."""
         resp = self.get_instruments_info(category="spot")
-        instruments = resp.get("result", {}).get("list", []) if isinstance(resp, dict) else []
+        instruments = (
+            resp.get("result", {}).get("list", []) if isinstance(resp, dict) else []
+        )
         affordable = []
         for inst in instruments:
             min_notional = float(inst.get("lotSizeFilter", {}).get("minOrderAmt", 5.0))
@@ -1691,42 +1974,83 @@ class BybitRealm:
                 affordable.append(inst["symbol"])
         return affordable
 
-    def place_spot_with_triggers(self, symbol: str, side: str, qty: float, entry: float, tp: float, sl: float) -> dict:
+    def place_spot_with_triggers(
+        self, symbol: str, side: str, qty: float, entry: float, tp: float, sl: float
+    ) -> dict:
         """Places a limit entry and sets up exit triggers for spot."""
         # 1. Place Entry
-        entry_order = self.place_order(symbol=symbol, side=side, qty=qty, price=entry, category="spot", order_type="Limit")
+        entry_order = self.place_order(
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            price=entry,
+            category="spot",
+            order_type="Limit",
+        )
         if entry_order.get("status") == "error":
-            return {"status": "error", "msg": f"Entry order failed: {entry_order.get('msg')}"}
-        
+            return {
+                "status": "error",
+                "msg": f"Entry order failed: {entry_order.get('msg')}",
+            }
+
         # 2. Place Exit Triggers (Spot requires separate conditional orders)
         exit_side = "Sell" if side == "Buy" else "Buy"
-        tp_order = self.place_stop_limit(symbol=symbol, side=exit_side, qty=qty, price=tp, trigger_price=tp, category="spot")
-        sl_order = self.place_stop_market(symbol=symbol, side=exit_side, qty=qty, trigger_price=sl, category="spot")
-        
+        tp_order = self.place_stop_limit(
+            symbol=symbol,
+            side=exit_side,
+            qty=qty,
+            price=tp,
+            trigger_price=tp,
+            category="spot",
+        )
+        sl_order = self.place_stop_market(
+            symbol=symbol, side=exit_side, qty=qty, trigger_price=sl, category="spot"
+        )
+
         return {
             "status": "ok",
             "entry_order": entry_order,
             "tp_order": tp_order,
-            "sl_order": sl_order
+            "sl_order": sl_order,
         }
 
-    def place_spot_market(self, symbol: str, side: Literal["Buy", "Sell"], qty: float) -> dict:
+    def place_spot_market(
+        self, symbol: str, side: Literal["Buy", "Sell"], qty: float
+    ) -> dict:
         """Places a Market order for Spot."""
         return self.place_order(
             symbol=symbol, side=side, qty=qty, order_type="Market", category="spot"
         )
 
-    def run_micro_profit(self, symbol: str, side: str, qty: float, target: float = 0.05, entry: Optional[float] = None, maker_fee: float = 0.0002, risk_reward: float = 1.5, depth: int = 40, execute: bool = False, category: str = "linear") -> dict:
+    def run_micro_profit(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        target: float = 0.05,
+        entry: Optional[float] = None,
+        maker_fee: float = 0.0002,
+        risk_reward: float = 1.5,
+        depth: int = 40,
+        execute: bool = False,
+        category: str = "linear",
+    ) -> dict:
         """Internalized micro-profit calculator that fetches its own orderbook data."""
         from tools.micro_profit import run
-        
+
         # 1. Fetch Orderbook with correct category
-        ob = self.get_orderbook(symbol=symbol, limit=depth, category=category).get("result", {})
-        if not ob: return {"status": "error", "msg": f"Could not fetch orderbook for {symbol} ({category})"}
-        
+        ob = self.get_orderbook(symbol=symbol, limit=depth, category=category).get(
+            "result", {}
+        )
+        if not ob:
+            return {
+                "status": "error",
+                "msg": f"Could not fetch orderbook for {symbol} ({category})",
+            }
+
         bids = ob.get("b", [])
         asks = ob.get("a", [])
-        
+
         # 2. Run Analysis
         return run(
             symbol=symbol,
@@ -1740,7 +2064,7 @@ class BybitRealm:
             risk_reward=risk_reward,
             depth=depth,
             analyze=False,
-            execute=execute
+            execute=execute,
         )
 
     def amend_order(
@@ -1762,7 +2086,7 @@ class BybitRealm:
             payload["orderId"] = order_id
         elif client_oid:
             payload["orderLinkId"] = client_oid
-            
+
         if qty is not None:
             payload["qty"] = self._format_qty(symbol, qty, category)
         if price is not None:
@@ -1771,10 +2095,8 @@ class BybitRealm:
             payload["stopLoss"] = self._format_price(symbol, stop_loss, category)
         if take_profit is not None:
             payload["takeProfit"] = self._format_price(symbol, take_profit, category)
-            
-        return self._request(
-            "POST", "/v5/order/amend", json_data=payload, signed=True
-        )
+
+        return self._request("POST", "/v5/order/amend", json_data=payload, signed=True)
 
     def cancel_order(
         self,
@@ -1791,15 +2113,13 @@ class BybitRealm:
             payload["orderId"] = order_id
         elif client_oid:
             payload["orderLinkId"] = client_oid
-        return self._request(
-            "POST", "/v5/order/cancel", json_data=payload, signed=True
-        )
+        return self._request("POST", "/v5/order/cancel", json_data=payload, signed=True)
 
     def cancel_all_orders(
         self,
         symbol: Optional[str] = None,
         category: str = "linear",
-        settle_coin: str = "USDT", # Fix 21: Dynamic Settle Coin Configuration
+        settle_coin: str = "USDT",  # Fix 21: Dynamic Settle Coin Configuration
     ) -> dict:
         payload: dict = {"category": category, "settleCoin": settle_coin}
         if symbol:
@@ -1817,9 +2137,7 @@ class BybitRealm:
         params: dict = {"category": category, "limit": limit}
         if symbol:
             params["symbol"] = symbol.upper()
-        return self._request(
-            "GET", "/v5/order/realtime", params=params, signed=True
-        )
+        return self._request("GET", "/v5/order/realtime", params=params, signed=True)
 
     def get_order_history(
         self,
@@ -1830,9 +2148,7 @@ class BybitRealm:
         params: dict = {"category": category, "limit": limit}
         if symbol:
             params["symbol"] = symbol.upper()
-        return self._request(
-            "GET", "/v5/order/history", params=params, signed=True
-        )
+        return self._request("GET", "/v5/order/history", params=params, signed=True)
 
     def place_smart_trade(
         self,
@@ -1852,9 +2168,9 @@ class BybitRealm:
         regime_data = self.get_market_regime(symbol=symbol, category=category)
         if regime_data.get("status") != "ok":
             return {"status": "error", "msg": "Failed to fetch trend analysis"}
-        
+
         regime = regime_data["regime"]
-        
+
         # 2. Validate Trend
         if side == "Buy" and regime == "TRENDING_DOWN":
             return {"status": "error", "msg": f"Refusing Buy: Market is {regime}"}
@@ -1862,9 +2178,21 @@ class BybitRealm:
             return {"status": "error", "msg": f"Refusing Sell: Market is {regime}"}
 
         # 3. Calculate TP/SL
-        tp_price = price * (1 + tp_pct/100) if side == "Buy" else price * (1 - tp_pct/100) if tp_pct else None
-        sl_price = price * (1 - sl_pct/100) if side == "Buy" else price * (1 + sl_pct/100) if sl_pct else None
-        
+        tp_price = (
+            price * (1 + tp_pct / 100)
+            if side == "Buy"
+            else price * (1 - tp_pct / 100)
+            if tp_pct
+            else None
+        )
+        sl_price = (
+            price * (1 - sl_pct / 100)
+            if side == "Buy"
+            else price * (1 + sl_pct / 100)
+            if sl_pct
+            else None
+        )
+
         # 4. Place Order
         return self.place_order(
             symbol=symbol,
@@ -1874,7 +2202,7 @@ class BybitRealm:
             take_profit=tp_price,
             stop_loss=sl_price,
             trailing_stop=trailing_stop_pct,
-            category=category
+            category=category,
         )
 
     def batch_place_orders(
@@ -1901,7 +2229,9 @@ class BybitRealm:
             if o.get("stop_loss") is not None:
                 item["stopLoss"] = self._format_price(symbol, o["stop_loss"], category)
             if o.get("take_profit") is not None:
-                item["takeProfit"] = self._format_price(symbol, o["take_profit"], category)
+                item["takeProfit"] = self._format_price(
+                    symbol, o["take_profit"], category
+                )
             formatted.append(item)
 
         payload = {"category": category, "request": formatted}
@@ -1963,9 +2293,7 @@ class BybitRealm:
             params["start"] = start
         if end:
             params["end"] = end
-        return self._request(
-            "GET", "/v5/market/kline", params=params, signed=False
-        )
+        return self._request("GET", "/v5/market/kline", params=params, signed=False)
 
     def get_recent_trades(
         self,
@@ -2060,7 +2388,7 @@ class BybitRealm:
             "red": "\033[91m",
             "yellow": "\033[93m",
             "magenta": "\033[95m",
-            "reset": "\033[0m"
+            "reset": "\033[0m",
         }
         return f"{colors.get(color, colors['cyan'])}{text}{colors['reset']}"
 
@@ -2072,17 +2400,31 @@ class BybitRealm:
         raw = self.get_orderbook(symbol=symbol, limit=depth).get("result", {})
         bids = [{"price": float(p), "volume": float(q)} for p, q in raw.get("b", [])]
         asks = [{"price": float(p), "volume": float(q)} for p, q in raw.get("a", [])]
-        
+
         # Find price levels with top 20% of total volume
         total_vol = sum(b["volume"] for b in bids) + sum(a["volume"] for a in asks)
         threshold = total_vol * 0.2
-        
-        concentrated = [b for b in bids if b["volume"] > (sum(b["volume"] for b in bids)/len(bids))*2] + \
-                       [a for a in asks if a["volume"] > (sum(a["volume"] for a in asks)/len(asks))*2]
-        
+
+        concentrated = [
+            b
+            for b in bids
+            if b["volume"] > (sum(b["volume"] for b in bids) / len(bids)) * 2
+        ] + [
+            a
+            for a in asks
+            if a["volume"] > (sum(a["volume"] for a in asks) / len(asks)) * 2
+        ]
+
         return {"status": "ok", "concentrated_levels": concentrated}
 
-    def calculate_support_resistance_levels(self, symbol: str, interval: str = "60", depth: int = 200, lookback: int = 500, wall_multiplier: float = 3.0) -> dict:
+    def calculate_support_resistance_levels(
+        self,
+        symbol: str,
+        interval: str = "60",
+        depth: int = 200,
+        lookback: int = 500,
+        wall_multiplier: float = 3.0,
+    ) -> dict:
         """Identifies support/resistance based on liquidity walls and swing highs/lows."""
         # 1. Get Orderbook
         raw_ob = self.get_orderbook(symbol=symbol, limit=depth).get("result", {})
@@ -2090,13 +2432,29 @@ class BybitRealm:
         asks = [{"price": float(p), "volume": float(q)} for p, q in raw_ob.get("a", [])]
 
         # 2. Get Historical Price Action for Swing Detection
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=lookback).get("list", [])
+        klines = self.get_klines(symbol=symbol, interval=interval, limit=lookback).get(
+            "list", []
+        )
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
-        
+
         # Detect swing highs/lows
-        swing_highs = [highs[i] for i in range(2, len(highs)-2) if highs[i] > highs[i-1] and highs[i] > highs[i+1] and highs[i] > highs[i-2] and highs[i] > highs[i+2]]
-        swing_lows = [lows[i] for i in range(2, len(lows)-2) if lows[i] < lows[i-1] and lows[i] < lows[i+1] and lows[i] < lows[i-2] and lows[i] < lows[i+2]]
+        swing_highs = [
+            highs[i]
+            for i in range(2, len(highs) - 2)
+            if highs[i] > highs[i - 1]
+            and highs[i] > highs[i + 1]
+            and highs[i] > highs[i - 2]
+            and highs[i] > highs[i + 2]
+        ]
+        swing_lows = [
+            lows[i]
+            for i in range(2, len(lows) - 2)
+            if lows[i] < lows[i - 1]
+            and lows[i] < lows[i + 1]
+            and lows[i] < lows[i - 2]
+            and lows[i] < lows[i + 2]
+        ]
 
         # 3. Detect Liquidity Walls
         bid_vol = sum(b["volume"] for b in bids)
@@ -2104,160 +2462,239 @@ class BybitRealm:
         bid_avg = bid_vol / depth if depth > 0 else 0
         ask_avg = ask_vol / depth if depth > 0 else 0
 
-        walls_sup = [b["price"] for b in bids if b["volume"] > bid_avg * wall_multiplier]
-        walls_res = [a["price"] for a in asks if a["volume"] > ask_avg * wall_multiplier]
+        walls_sup = [
+            b["price"] for b in bids if b["volume"] > bid_avg * wall_multiplier
+        ]
+        walls_res = [
+            a["price"] for a in asks if a["volume"] > ask_avg * wall_multiplier
+        ]
 
         return {
             "status": "ok",
             "symbol": symbol.upper(),
             "support": sorted(list(set(walls_sup + swing_lows))),
-            "resistance": sorted(list(set(walls_res + swing_highs)))
+            "resistance": sorted(list(set(walls_res + swing_highs))),
         }
-    def calculate_fibonacci_levels(self, symbol: str, interval: str = "60", lookback: int = 50, trend: str = "bullish") -> dict:
+
+    def calculate_fibonacci_levels(
+        self,
+        symbol: str,
+        interval: str = "60",
+        lookback: int = 50,
+        trend: str = "bullish",
+    ) -> dict:
         """Calculate Fibonacci retracement and extension levels based on recent high/low."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=lookback).get("list", [])
-        if not klines: return {"status": "error", "msg": "No kline data"}
+        klines = self.get_klines(symbol=symbol, interval=interval, limit=lookback).get(
+            "list", []
+        )
+        if not klines:
+            return {"status": "error", "msg": "No kline data"}
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         high_price, low_price = max(highs), min(lows)
         diff = high_price - low_price
-        
+
         if trend == "bullish":
             levels = {
-                '0.0%': high_price,
-                '23.6%': high_price - 0.236 * diff,
-                '38.2%': high_price - 0.382 * diff,
-                '50.0%': high_price - 0.5 * diff,
-                '61.8%': high_price - 0.618 * diff,
-                '78.6%': high_price - 0.786 * diff,
-                '100.0%': low_price,
-                'Ext 127.2%': low_price - 0.272 * diff,
-                'Ext 161.8%': low_price - 0.618 * diff
+                "0.0%": high_price,
+                "23.6%": high_price - 0.236 * diff,
+                "38.2%": high_price - 0.382 * diff,
+                "50.0%": high_price - 0.5 * diff,
+                "61.8%": high_price - 0.618 * diff,
+                "78.6%": high_price - 0.786 * diff,
+                "100.0%": low_price,
+                "Ext 127.2%": low_price - 0.272 * diff,
+                "Ext 161.8%": low_price - 0.618 * diff,
             }
-        else: # bearish
+        else:  # bearish
             levels = {
-                '0.0%': low_price,
-                '23.6%': low_price + 0.236 * diff,
-                '38.2%': low_price + 0.382 * diff,
-                '50.0%': low_price + 0.5 * diff,
-                '61.8%': low_price + 0.618 * diff,
-                '78.6%': low_price + 0.786 * diff,
-                '100.0%': high_price,
-                'Ext 127.2%': high_price + 0.272 * diff,
-                'Ext 161.8%': high_price + 0.618 * diff
+                "0.0%": low_price,
+                "23.6%": low_price + 0.236 * diff,
+                "38.2%": low_price + 0.382 * diff,
+                "50.0%": low_price + 0.5 * diff,
+                "61.8%": low_price + 0.618 * diff,
+                "78.6%": low_price + 0.786 * diff,
+                "100.0%": high_price,
+                "Ext 127.2%": high_price + 0.272 * diff,
+                "Ext 161.8%": high_price + 0.618 * diff,
             }
-        return {"status": "ok", "trend": trend, "levels": {k: round(v, 4) for k, v in levels.items()}}
+        return {
+            "status": "ok",
+            "trend": trend,
+            "levels": {k: round(v, 4) for k, v in levels.items()},
+        }
 
-    def calculate_volume_profile(self, symbol: str, interval: str = "60", limit: int = 100, price_bins: int = 20) -> dict:
+    def calculate_volume_profile(
+        self, symbol: str, interval: str = "60", limit: int = 100, price_bins: int = 20
+    ) -> dict:
         """Fix 3 & 40: Consolidate and fix volume profile logic with flat market check."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=limit).get("list", [])
-        if not klines: return {"status": "error", "msg": "No kline data"}
+        klines = self.get_klines(symbol=symbol, interval=interval, limit=limit).get(
+            "list", []
+        )
+        if not klines:
+            return {"status": "error", "msg": "No kline data"}
         closes = [float(k[4]) for k in reversed(klines)]
         volumes = [float(k[5]) for k in reversed(klines)]
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
-        
+
         high, low = max(highs), min(lows)
         # Fix 40: Flat Market Check inside Volume Profile
         bin_size = (high - low) / price_bins if high != low else 1.0
-        profile = {i: 0.0 for i in range(price_bins)}
-        
+        profile = dict.fromkeys(range(price_bins), 0.0)
+
         for c, v in zip(closes, volumes):
             idx = int((c - low) / bin_size) if bin_size > 0 else 0
             idx = min(max(idx, 0), price_bins - 1)
             profile[idx] += v
-            
-        return {"status": "ok", "profile": {round(low + i * bin_size, 4): round(vol, 2) for i, vol in profile.items()}}
 
-    def calculate_order_flow_imbalance(self, symbol: str, interval: str = "60", window: int = 10) -> dict:
+        return {
+            "status": "ok",
+            "profile": {
+                round(low + i * bin_size, 4): round(vol, 2)
+                for i, vol in profile.items()
+            },
+        }
+
+    def calculate_order_flow_imbalance(
+        self, symbol: str, interval: str = "60", window: int = 10
+    ) -> dict:
         """Calculate order flow imbalance."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=window + 1).get("list", [])
-        if not klines: return {"status": "error", "msg": "No kline data"}
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=window + 1
+        ).get("list", [])
+        if not klines:
+            return {"status": "error", "msg": "No kline data"}
         opens = [float(k[1]) for k in reversed(klines)]
         closes = [float(k[4]) for k in reversed(klines)]
         volumes = [float(k[5]) for k in reversed(klines)]
-        
+
         imbalance = sum((c - o) * v for o, c, v in zip(opens, closes, volumes))
         return {"status": "ok", "imbalance": round(imbalance, 4)}
 
-    def calculate_market_regime_new(self, symbol: str, interval: str = "60", window: int = 20) -> dict:
+    def calculate_market_regime_new(
+        self, symbol: str, interval: str = "60", window: int = 20
+    ) -> dict:
         """Calculate market regime."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=window + 20).get("list", [])
-        if not klines: return {"status": "error", "msg": "No kline data"}
-        atr = self.calculate_atr(symbol=symbol, interval=interval, period=14).get("atr", 1.0)
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=window + 20
+        ).get("list", [])
+        if not klines:
+            return {"status": "error", "msg": "No kline data"}
+        atr = self.calculate_atr(symbol=symbol, interval=interval, period=14).get(
+            "atr", 1.0
+        )
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
-        
+
         high_low_range = max(highs[-window:]) - min(lows[-window:])
         regime = high_low_range / atr
-        return {"status": "ok", "regime_score": round(regime, 4), "trend": "Trending" if regime > 2 else "Ranging"}
+        return {
+            "status": "ok",
+            "regime_score": round(regime, 4),
+            "trend": "Trending" if regime > 2 else "Ranging",
+        }
 
-    def calculate_liquidity_pools(self, symbol: str, interval: str = "60", threshold: float = 0.05) -> dict:
+    def calculate_liquidity_pools(
+        self, symbol: str, interval: str = "60", threshold: float = 0.05
+    ) -> dict:
         """Calculate liquidity pools."""
         vp_res = self.calculate_volume_profile(symbol=symbol, interval=interval)
-        if vp_res.get("status") == "error": return vp_res
+        if vp_res.get("status") == "error":
+            return vp_res
         vp = vp_res.get("profile", {})
-        
+
         max_vol = max(vp.values()) if vp else 0
         pools = {price: vol for price, vol in vp.items() if vol > threshold * max_vol}
         return {"status": "ok", "pools": pools}
 
-    def calculate_orderflow_delta(self, symbol: str, interval: str = "60", limit: int = 100) -> dict:
+    def calculate_orderflow_delta(
+        self, symbol: str, interval: str = "60", limit: int = 100
+    ) -> dict:
         """Calculates net orderflow (Aggressive Buy Vol - Aggressive Sell Vol)."""
-        trades = self.get_recent_trades(symbol=symbol, limit=limit).get("result", {}).get("list", [])
+        trades = (
+            self.get_recent_trades(symbol=symbol, limit=limit)
+            .get("result", {})
+            .get("list", [])
+        )
         delta = 0.0
         for t in trades:
             # Bybit side: Buy = Taker Buy (Aggressive Buy), Sell = Taker Sell
             vol = float(t["v"])
-            if t["s"] == "Buy": delta += vol
-            else: delta -= vol
+            if t["s"] == "Buy":
+                delta += vol
+            else:
+                delta -= vol
         return {"status": "ok", "symbol": symbol, "delta": round(delta, 2)}
 
-    def calculate_market_depth_profile(self, symbol: str, depth: int = 200, order_sizes: List[float] = None, distance_pcts: List[float] = None) -> dict:
+    def calculate_market_depth_profile(
+        self,
+        symbol: str,
+        depth: int = 200,
+        order_sizes: List[float] = None,
+        distance_pcts: List[float] = None,
+    ) -> dict:
         """Aggregates orderbook volume at specific percentage distances from mid-price."""
-        if order_sizes is None: order_sizes = [100.0, 500.0, 1000.0]
-        if distance_pcts is None: distance_pcts = [0.1, 0.5, 1.0]
+        if order_sizes is None:
+            order_sizes = [100.0, 500.0, 1000.0]
+        if distance_pcts is None:
+            distance_pcts = [0.1, 0.5, 1.0]
 
         ob = self.get_orderbook(symbol=symbol, limit=depth).get("result", {})
         bids = [{"p": float(p), "v": float(q)} for p, q in ob.get("b", [])]
         asks = [{"p": float(p), "v": float(q)} for p, q in ob.get("a", [])]
-        
+
         mid = (bids[0]["p"] + asks[0]["p"]) / 2 if bids and asks else 0
-        if mid == 0: return {"status": "error", "msg": "Invalid price"}
-        
+        if mid == 0:
+            return {"status": "error", "msg": "Invalid price"}
+
         profile = {}
         for pct in distance_pcts:
-            bid_vol = sum(b["v"] for b in bids if b["p"] >= mid * (1 - pct/100))
-            ask_vol = sum(a["v"] for a in asks if a["p"] <= mid * (1 + pct/100))
-            profile[f"{pct}%"] = {"bid_vol": round(bid_vol, 2), "ask_vol": round(ask_vol, 2)}
-            
+            bid_vol = sum(b["v"] for b in bids if b["p"] >= mid * (1 - pct / 100))
+            ask_vol = sum(a["v"] for a in asks if a["p"] <= mid * (1 + pct / 100))
+            profile[f"{pct}%"] = {
+                "bid_vol": round(bid_vol, 2),
+                "ask_vol": round(ask_vol, 2),
+            }
+
         return {"status": "ok", "symbol": symbol, "mid_price": mid, "profile": profile}
 
-    def detect_high_confluence_levels(self, symbol: str, interval: str = "60", depth: int = 50) -> dict:
+    def detect_high_confluence_levels(
+        self, symbol: str, interval: str = "60", depth: int = 50
+    ) -> dict:
         """Identifies strong S/R zones by finding price levels with multi-method confluence."""
         # Get all S/R indicators
-        sr_data = self.calculate_support_resistance_levels(symbol=symbol, interval=interval, depth=depth)
-        
+        sr_data = self.calculate_support_resistance_levels(
+            symbol=symbol, interval=interval, depth=depth
+        )
+
         all_levels = []
         # Add support and resistance levels with their confluence scores
         for s in sr_data.get("support", []):
-            all_levels.append({"price": s["price"], "score": s["confluence"], "type": "Support"})
+            all_levels.append(
+                {"price": s["price"], "score": s["confluence"], "type": "Support"}
+            )
         for r in sr_data.get("resistance", []):
-            all_levels.append({"price": r["price"], "score": r["confluence"], "type": "Resistance"})
-            
+            all_levels.append(
+                {"price": r["price"], "score": r["confluence"], "type": "Resistance"}
+            )
+
         # Sort by confluence score
         confluence_zones = sorted(all_levels, key=lambda x: x["score"], reverse=True)
-        
+
         return {
             "status": "ok",
             "symbol": symbol,
-            "high_confluence_zones": confluence_zones[:5] # Top 5 strongest
+            "high_confluence_zones": confluence_zones[:5],  # Top 5 strongest
         }
 
-    def deep_level_sort(self, symbol: str, level_cnt: int = 10, vol_thresh: float = 0.5) -> dict:
+    def deep_level_sort(
+        self, symbol: str, level_cnt: int = 10, vol_thresh: float = 0.5
+    ) -> dict:
         """Groups orderbook volume into levels based on a threshold."""
         orderbook = self.get_orderbook(symbol=symbol).get("result", {})
-        if not orderbook: return {"status": "error", "msg": "Empty orderbook"}
+        if not orderbook:
+            return {"status": "error", "msg": "Empty orderbook"}
         bids = [[float(p), float(q)] for p, q in orderbook.get("b", [])]
         asks = [[float(p), float(q)] for p, q in orderbook.get("a", [])]
 
@@ -2284,16 +2721,19 @@ class BybitRealm:
             "status": "ok",
             "symbol": symbol,
             "bid_levels": bid_buckets,
-            "ask_levels": ask_buckets
+            "ask_levels": ask_buckets,
         }
 
-    def calculate_sr_levels(self, symbol: str, top_n: int = 7, vol_cut: float = 0.4) -> dict:
+    def calculate_sr_levels(
+        self, symbol: str, top_n: int = 7, vol_cut: float = 0.4
+    ) -> dict:
         """
         Detects support and resistance zones from the order book and sorts them by volume-weighted price.
         """
         # Step 1: Fetch order book
         orderbook = self.get_orderbook(symbol=symbol).get("result", {})
-        if not orderbook: return {"status": "error", "msg": "Empty orderbook"}
+        if not orderbook:
+            return {"status": "error", "msg": "Empty orderbook"}
         bids = [[float(p), float(q)] for p, q in orderbook.get("b", [])]
         asks = [[float(p), float(q)] for p, q in orderbook.get("a", [])]
 
@@ -2319,14 +2759,14 @@ class BybitRealm:
             # Sort by volume (index 2) descending
             weighted.sort(key=lambda x: x[2], reverse=True)
             return [(p, q) for p, q, _ in weighted[:top_n]]
-        
+
         return {
             "status": "success",
             "support_levels": support,
             "resistance_levels": resistance,
             "sorted_bids": weight_sort(bids),
             "sorted_asks": weight_sort(asks),
-            "note": "Support and resistance levels detected and sorted by volume-weighted price."
+            "note": "Support and resistance levels detected and sorted by volume-weighted price.",
         }
 
     def _build_price_ladder(self, levels: list, weight: str = "volume") -> list:
@@ -2342,7 +2782,9 @@ class BybitRealm:
         ladder.sort(key=lambda x: x[2], reverse=True)
         return ladder[:15]
 
-    def _cluster_levels(self, levels: list, direction: int, delta: float = 0.003) -> list:
+    def _cluster_levels(
+        self, levels: list, direction: int, delta: float = 0.003
+    ) -> list:
         """Clusters price levels into support/resistance zones."""
         levels = sorted(levels, key=lambda x: x[0], reverse=(direction > 0))
         clusters = []
@@ -2361,8 +2803,16 @@ class BybitRealm:
         total_vol = sum(v for _, v in clusters)
         return [p for p, v in clusters if v >= thresh * total_vol]
 
-    def _sort_depth(self, bids: list, asks: list, support_zones: list, resistance_zones: list, top: int = 12) -> dict:
+    def _sort_depth(
+        self,
+        bids: list,
+        asks: list,
+        support_zones: list,
+        resistance_zones: list,
+        top: int = 12,
+    ) -> dict:
         """Sorts bids and asks by volume-weighted criteria."""
+
         def score(level: tuple, zones: list) -> float:
             price, qty = level[0], level[1]
             weight = price * qty
@@ -2371,7 +2821,7 @@ class BybitRealm:
 
         bid_scores = [(p, q, score((p, q), support_zones)) for p, q in bids]
         ask_scores = [(p, q, score((p, q), resistance_zones)) for p, q in asks]
-        
+
         bid_sorted = sorted(bid_scores, key=lambda x: (-x[2], -x[1], -x[0]))[:top]
         ask_sorted = sorted(ask_scores, key=lambda x: (-x[2], -x[1], x[0]))[:top]
         return {"bids": bid_sorted, "asks": ask_sorted}
@@ -2379,105 +2829,159 @@ class BybitRealm:
     def generate_market_depth_report(self, symbol: str) -> dict:
         """Generates a professional market depth analysis report."""
         depth = self.get_orderbook(symbol=symbol).get("result", {})
-        if not depth: return {"status": "error", "msg": "Empty orderbook"}
+        if not depth:
+            return {"status": "error", "msg": "Empty orderbook"}
         bids = [[float(p), float(q)] for p, q in depth.get("b", [])]
         asks = [[float(p), float(q)] for p, q in depth.get("a", [])]
 
         bid_ladder = self._build_price_ladder(bids, weight="price*volume")
         ask_ladder = self._build_price_ladder(asks, weight="price*volume")
-        
+
         sup_clusters = self._cluster_levels(bid_ladder, direction=1, delta=0.004)
         res_clusters = self._cluster_levels(ask_ladder, direction=-1, delta=0.004)
-        
+
         support_zones = self._identify_liquidity_zones(sup_clusters, thresh=0.38)
         resistance_zones = self._identify_liquidity_zones(res_clusters, thresh=0.38)
-        
-        sorted_depth = self._sort_depth(bids, asks, support_zones, resistance_zones, top=10)
-        
+
+        sorted_depth = self._sort_depth(
+            bids, asks, support_zones, resistance_zones, top=10
+        )
+
         return {
             "status": "success",
             "symbol": symbol,
             "support_zones": [round(x, 4) for x in support_zones],
             "resistance_zones": [round(x, 4) for x in resistance_zones],
-            "sorted_bids": [(round(p, 4), round(q, 2)) for p, q, _ in sorted_depth["bids"]],
-            "sorted_asks": [(round(p, 4), round(q, 2)) for p, q, _ in sorted_depth["asks"]],
-            "note": "Market depth analysis completed."
+            "sorted_bids": [
+                (round(p, 4), round(q, 2)) for p, q, _ in sorted_depth["bids"]
+            ],
+            "sorted_asks": [
+                (round(p, 4), round(q, 2)) for p, q, _ in sorted_depth["asks"]
+            ],
+            "note": "Market depth analysis completed.",
         }
 
-    def calculate_limit_micro_profit(self, entry_price: float, limit_price: float, side: str, qty: float, fee_rate: float = 0.001) -> dict:
+    def calculate_limit_micro_profit(
+        self,
+        entry_price: float,
+        limit_price: float,
+        side: str,
+        qty: float,
+        fee_rate: float = 0.001,
+    ) -> dict:
         """Calculates net profit for a limit order."""
-        if side.lower() == "buy": raw_pnl = (limit_price - entry_price) * qty
-        else: raw_pnl = (entry_price - limit_price) * qty
+        if side.lower() == "buy":
+            raw_pnl = (limit_price - entry_price) * qty
+        else:
+            raw_pnl = (entry_price - limit_price) * qty
         fee = abs(limit_price * qty) * fee_rate
         net_pnl = raw_pnl - fee
-        pct_return = (net_pnl / (entry_price * qty)) * 100 if entry_price * qty != 0 else 0
-        return {"status": "success", "net_pnl": round(net_pnl, 4), "fee_applied": round(fee, 4), "pct_return": round(pct_return, 2)}
+        pct_return = (
+            (net_pnl / (entry_price * qty)) * 100 if entry_price * qty != 0 else 0
+        )
+        return {
+            "status": "success",
+            "net_pnl": round(net_pnl, 4),
+            "fee_applied": round(fee, 4),
+            "pct_return": round(pct_return, 2),
+        }
 
-    def calculate_target_pnl(self, side: str, entry_price: float, qty: float, target_usdt: float, fee_rate: float = 0.0002) -> dict:
+    def calculate_target_pnl(
+        self,
+        side: str,
+        entry_price: float,
+        qty: float,
+        target_usdt: float,
+        fee_rate: float = 0.0002,
+    ) -> dict:
         """Calculates the price required to achieve a target USDT profit."""
         direction = 1 if side.lower() == "buy" else -1
         # Fix 37: Margin/Zero Safety Check on Target PnL Algebra
-        denom = (qty * direction - (qty * fee_rate))
+        denom = qty * direction - (qty * fee_rate)
         if denom == 0:
-            return {"status": "error", "msg": "Invalid calculation parameters: Denominator is zero"}
-            
+            return {
+                "status": "error",
+                "msg": "Invalid calculation parameters: Denominator is zero",
+            }
+
         exit_price = (target_usdt + (entry_price * qty * direction)) / denom
-        
+
         return {
             "status": "ok",
             "entry_price": entry_price,
             "target_usdt": target_usdt,
-            "required_exit_price": round(exit_price, 4)
+            "required_exit_price": round(exit_price, 4),
         }
 
-    def calculate_depth_weighted_profit(self, symbol: str, entry_price: float, limit_price: float, side: str, qty: float) -> dict:
+    def calculate_depth_weighted_profit(
+        self, symbol: str, entry_price: float, limit_price: float, side: str, qty: float
+    ) -> dict:
         """Calculates profit based on weighted average fill price across orderbook depth."""
         orderbook = self.get_orderbook(symbol=symbol).get("result", {})
-        if not orderbook: return {"status": "error", "msg": "Empty orderbook"}
+        if not orderbook:
+            return {"status": "error", "msg": "Empty orderbook"}
         bids = [[float(p), float(q)] for p, q in orderbook.get("b", [])]
         asks = [[float(p), float(q)] for p, q in orderbook.get("a", [])]
         levels = asks if side.lower() == "buy" else bids
         total_vol, weighted_sum = 0.0, 0.0
         for p, q in levels:
-            if (side.lower() == "buy" and p <= limit_price) or (side.lower() == "sell" and p >= limit_price):
+            if (side.lower() == "buy" and p <= limit_price) or (
+                side.lower() == "sell" and p >= limit_price
+            ):
                 take = min(q, qty - total_vol)
                 weighted_sum += p * take
                 total_vol += take
-                if total_vol >= qty: break
-        if total_vol < qty: return {"status": "error", "msg": "Insufficient liquidity"}
-        return self.calculate_limit_micro_profit(entry_price, weighted_sum / total_vol, side, qty)
+                if total_vol >= qty:
+                    break
+        if total_vol < qty:
+            return {"status": "error", "msg": "Insufficient liquidity"}
+        return self.calculate_limit_micro_profit(
+            entry_price, weighted_sum / total_vol, side, qty
+        )
 
-    def get_orderbook_analysis(self, symbol: str, category: str = "linear", depth: int = 50, wall_multiplier: float = 3.5) -> dict:
+    def get_orderbook_analysis(
+        self,
+        symbol: str,
+        category: str = "linear",
+        depth: int = 50,
+        wall_multiplier: float = 3.5,
+    ) -> dict:
         """
         Analyzes orderbook for imbalance, liquidity, and walls.
         """
-        raw = self.get_orderbook(symbol=symbol, category=category, limit=depth).get("result", {})
-        
-        bids: List[Tuple[float, float]] = [(float(p), float(q)) for p, q in raw.get("b", [])]
-        asks: List[Tuple[float, float]] = [(float(p), float(q)) for p, q in raw.get("a", [])]
+        raw = self.get_orderbook(symbol=symbol, category=category, limit=depth).get(
+            "result", {}
+        )
+
+        bids: List[Tuple[float, float]] = [
+            (float(p), float(q)) for p, q in raw.get("b", [])
+        ]
+        asks: List[Tuple[float, float]] = [
+            (float(p), float(q)) for p, q in raw.get("a", [])
+        ]
 
         if not bids or not asks:
             return {"status": "error", "msg": "Empty orderbook"}
 
         bid_vol = sum(q for _, q in bids)
         ask_vol = sum(q for _, q in asks)
-        
+
         # Order Book Imbalance (OBI)
         total_vol = bid_vol + ask_vol
         obi = (bid_vol - ask_vol) / total_vol if total_vol > 0 else 0
-        
+
         # Wall detection
         bid_avg = bid_vol / depth if depth > 0 else 0
         ask_avg = ask_vol / depth if depth > 0 else 0
         bid_walls = [b for b in bids if b[1] > bid_avg * wall_multiplier]
         ask_walls = [a for a in asks if a[1] > ask_avg * wall_multiplier]
-        
+
         # Volume Profile (top 5 tiers)
         volume_profile = {
             "bid_tiers": [{"price": b[0], "volume": b[1]} for b in bids[:5]],
-            "ask_tiers": [{"price": a[0], "volume": a[1]} for a in asks[:5]]
+            "ask_tiers": [{"price": a[0], "volume": a[1]} for a in asks[:5]],
         }
-        
+
         return {
             "status": "ok",
             "symbol": symbol,
@@ -2486,7 +2990,7 @@ class BybitRealm:
             "ask_vol": round(ask_vol, 2),
             "bid_walls": bid_walls,
             "ask_walls": ask_walls,
-            "volume_profile": volume_profile
+            "volume_profile": volume_profile,
         }
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -2538,13 +3042,17 @@ class BybitRealm:
             else:
                 heat = "LOW"
 
-            enriched.append({
-                **pos,
-                "notional_usd": round(notional, 2),
-                "pnl_pct": round(pnl_pct, 3),
-                "liq_dist_pct": round(liq_dist_pct, 3) if liq_dist_pct is not None else None,
-                "position_heat": heat,
-            })
+            enriched.append(
+                {
+                    **pos,
+                    "notional_usd": round(notional, 2),
+                    "pnl_pct": round(pnl_pct, 3),
+                    "liq_dist_pct": round(liq_dist_pct, 3)
+                    if liq_dist_pct is not None
+                    else None,
+                    "position_heat": heat,
+                }
+            )
 
         return {
             "status": "ok",
@@ -2562,27 +3070,33 @@ class BybitRealm:
         for pos in positions:
             if float(pos.get("size", 0)) > 0:
                 side = "Sell" if pos["side"] == "Buy" else "Buy"
-                closures.append(self.place_order(
-                    symbol=pos["symbol"],
-                    side=side,
-                    qty=float(pos["size"]),
-                    order_type="Market",
-                    category=category
-                ))
+                closures.append(
+                    self.place_order(
+                        symbol=pos["symbol"],
+                        side=side,
+                        qty=float(pos["size"]),
+                        order_type="Market",
+                        category=category,
+                    )
+                )
         return {"status": "ok", "cancellations": cancel_res, "closures": closures}
 
-    def bulk_update_tp_sl(self, category: str = "linear", tp: float = None, sl: float = None) -> dict:
+    def bulk_update_tp_sl(
+        self, category: str = "linear", tp: float = None, sl: float = None
+    ) -> dict:
         """Applies TP/SL to all open positions."""
         positions = self.get_positions(category=category).get("list", [])
         updates = []
         for pos in positions:
             if float(pos.get("size", 0)) > 0:
-                updates.append(self.set_trading_stop(
-                    symbol=pos["symbol"],
-                    take_profit=tp,
-                    stop_loss=sl,
-                    category=category
-                ))
+                updates.append(
+                    self.set_trading_stop(
+                        symbol=pos["symbol"],
+                        take_profit=tp,
+                        stop_loss=sl,
+                        category=category,
+                    )
+                )
         return {"status": "ok", "updates": updates}
 
     def close_position(self, symbol: str, category: str = "linear") -> dict:
@@ -2596,7 +3110,7 @@ class BybitRealm:
                     side=side,
                     qty=float(pos["size"]),
                     order_type="Market",
-                    category=category
+                    category=category,
                 )
         return {"status": "error", "msg": f"No open position found for {symbol}"}
 
@@ -2605,10 +3119,19 @@ class BybitRealm:
         return {
             "balance": self.get_wallet_balance(),
             "positions": self.get_positions(),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    def add_signal(self, symbol: str, side: str, entry: float, tp: float, sl: float, confidence: float, reasoning: str) -> dict:
+    def add_signal(
+        self,
+        symbol: str,
+        side: str,
+        entry: float,
+        tp: float,
+        sl: float,
+        confidence: float,
+        reasoning: str,
+    ) -> dict:
         signal = {
             "symbol": symbol,
             "side": side,
@@ -2616,7 +3139,7 @@ class BybitRealm:
             "tp": tp,
             "sl": sl,
             "confidence": confidence,
-            "reasoning": reasoning
+            "reasoning": reasoning,
         }
         signal_id = self.signals.add(signal)
         return {"status": "ok", "signal_id": signal_id}
@@ -2640,16 +3163,21 @@ class BybitRealm:
         log_func(f"[ALERT] {message}")
         return True
 
-    def export_trade_history(self, symbol: str, filename: str = "trade_history.csv") -> dict:
+    def export_trade_history(
+        self, symbol: str, filename: str = "trade_history.csv"
+    ) -> dict:
         """Exports trade history to CSV."""
         history = self.get_order_history(symbol=symbol, limit=100).get("list", [])
-        
+
         try:
-            with open(filename, mode='w', newline='') as f:
+            with open(filename, mode="w", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=history[0].keys())
                 writer.writeheader()
                 writer.writerows(history)
-            return {"status": "ok", "msg": f"Exported {len(history)} entries to {filename}"}
+            return {
+                "status": "ok",
+                "msg": f"Exported {len(history)} entries to {filename}",
+            }
         except Exception as e:
             return {"status": "error", "msg": f"Export failed: {e}"}
 
@@ -2659,112 +3187,165 @@ class BybitRealm:
         summary = []
         for pos in positions:
             if float(pos.get("size", 0)) > 0:
-                summary.append({
-                    "symbol": pos["symbol"],
-                    "side": pos["side"],
-                    "size": pos["size"],
-                    "avgPrice": pos["avgPrice"],
-                    "markPrice": pos["markPrice"],
-                    "unrealisedPnl": pos["unrealisedPnl"]
-                })
+                summary.append(
+                    {
+                        "symbol": pos["symbol"],
+                        "side": pos["side"],
+                        "size": pos["size"],
+                        "avgPrice": pos["avgPrice"],
+                        "markPrice": pos["markPrice"],
+                        "unrealisedPnl": pos["unrealisedPnl"],
+                    }
+                )
 
-# ... (rest of file)
+    # ... (rest of file)
 
-
-# ... (rest of file)
+    # ... (rest of file)
 
     # ... existing methods ...
-    def set_tp_sl(self, symbol: str, tp: Optional[float] = None, sl: Optional[float] = None, category: str = "linear") -> dict:
+    def set_tp_sl(
+        self,
+        symbol: str,
+        tp: Optional[float] = None,
+        sl: Optional[float] = None,
+        category: str = "linear",
+    ) -> dict:
         """Sets TP/SL for a specific position."""
-        return self.set_trading_stop(symbol=symbol, take_profit=tp, stop_loss=sl, category=category)
+        return self.set_trading_stop(
+            symbol=symbol, take_profit=tp, stop_loss=sl, category=category
+        )
 
     # ══════════════════════════════════════════════════════════════════════════
     # TECHNICAL ANALYSIS INDICATORS
     # ══════════════════════════════════════════════════════════════════════════
-    def calculate_macd(self, symbol: str, interval: str = "60", fast: int = 12, slow: int = 26, signal: int = 9) -> dict:
+    def calculate_macd(
+        self,
+        symbol: str,
+        interval: str = "60",
+        fast: int = 12,
+        slow: int = 26,
+        signal: int = 9,
+    ) -> dict:
         klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=100)
-        if not klines or len(klines) < slow: return {"status": "error", "msg": "Insufficient data"}
+        if not klines or len(klines) < slow:
+            return {"status": "error", "msg": "Insufficient data"}
         closes = [float(k[4]) for k in reversed(klines)]
+
         def get_ema(data, p):
-            if not data: return 0
+            if not data:
+                return 0
             k = 2 / (p + 1)
             ema = data[0]
-            for val in data[1:]: ema = val * k + ema * (1 - k)
+            for val in data[1:]:
+                ema = val * k + ema * (1 - k)
             return ema
-        
+
         ema_fast = get_ema(closes, fast)
         ema_slow = get_ema(closes, slow)
         macd_val = ema_fast - ema_slow
-        
-        # For signal line, we'd need historical MACD values. 
+
+        # For signal line, we'd need historical MACD values.
         # For brevity in this fix, we return the current MACD and a placeholder signal or simple calc if data permits.
         # Fix 47: Comprehensive MACD Signal Line Output
-        return {"status": "ok", "macd": round(macd_val, 4), "signal": round(macd_val * 0.9, 4)} # Simplified signal for now
+        return {
+            "status": "ok",
+            "macd": round(macd_val, 4),
+            "signal": round(macd_val * 0.9, 4),
+        }  # Simplified signal for now
 
-    def calculate_rsi(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
+    def calculate_rsi(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
         """Calculates RSI for the given symbol."""
-        klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=period + 50)
+        klines = self._get_klines_safely(
+            symbol=symbol, interval=interval, limit=period + 50
+        )
         closes = [float(k[4]) for k in reversed(klines)]
-        if len(closes) < period + 1: return {"status": "error", "msg": "Insufficient data"}
-        
-        deltas = [closes[i+1] - closes[i] for i in range(len(closes)-1)]
+        if len(closes) < period + 1:
+            return {"status": "error", "msg": "Insufficient data"}
+
+        deltas = [closes[i + 1] - closes[i] for i in range(len(closes) - 1)]
         gains = [d if d > 0 else 0 for d in deltas]
         losses = [-d if d < 0 else 0 for d in deltas]
         avg_gain = sum(gains[-period:]) / period
         avg_loss = sum(losses[-period:]) / period
-        
+
         # Fix 22: Float Precision Guard in calculate_rsi
-        if avg_loss < 1e-9: return {"status": "ok", "rsi": 100.0}
-        
+        if avg_loss < 1e-9:
+            return {"status": "ok", "rsi": 100.0}
+
         rs = avg_gain / avg_loss
         return {"status": "ok", "rsi": round(100 - (100 / (1 + rs)), 2)}
 
-    def calculate_sma(self, symbol: str, interval: str = "60", period: int = 20) -> dict:
+    def calculate_sma(
+        self, symbol: str, interval: str = "60", period: int = 20
+    ) -> dict:
         """Calculates SMA."""
-        klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=period + 50)
+        klines = self._get_klines_safely(
+            symbol=symbol, interval=interval, limit=period + 50
+        )
         closes = [float(k[4]) for k in reversed(klines)]
-        if len(closes) < period: return {"status": "error", "msg": "Insufficient data"}
+        if len(closes) < period:
+            return {"status": "error", "msg": "Insufficient data"}
         return {"status": "ok", "sma": round(sum(closes[-period:]) / period, 2)}
 
-    def calculate_ema(self, symbol: str, interval: str = "60", period: int = 20) -> dict:
+    def calculate_ema(
+        self, symbol: str, interval: str = "60", period: int = 20
+    ) -> dict:
         """Calculates EMA for the given symbol."""
-        klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=period + 50)
+        klines = self._get_klines_safely(
+            symbol=symbol, interval=interval, limit=period + 50
+        )
         closes = [float(k[4]) for k in reversed(klines)]
-        if len(closes) < period: return {"status": "error", "msg": "Insufficient data"}
-        
+        if len(closes) < period:
+            return {"status": "error", "msg": "Insufficient data"}
+
         k = 2 / (period + 1)
         ema = closes[0]
         for p in closes[1:]:
             ema = p * k + ema * (1 - k)
         return {"status": "ok", "ema": round(ema, 2)}
 
-    def calculate_atr(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
+    def calculate_atr(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
         """Calculates ATR for the given symbol."""
-        klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=period + 50)
-        if len(klines) < period + 1: return {"status": "error", "msg": "Insufficient data"}
-        
+        klines = self._get_klines_safely(
+            symbol=symbol, interval=interval, limit=period + 50
+        )
+        if len(klines) < period + 1:
+            return {"status": "error", "msg": "Insufficient data"}
+
         tr_list = []
         for i in range(1, len(klines)):
             high = float(klines[i][2])
             low = float(klines[i][3])
-            prev_close = float(klines[i-1][4])
+            prev_close = float(klines[i - 1][4])
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             tr_list.append(tr)
-        
+
         atr = sum(tr_list[-period:]) / period
         return {"status": "ok", "atr": round(atr, 4)}
 
-    def calculate_adx(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
-        klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=period + 50)
+    def calculate_adx(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
+        klines = self._get_klines_safely(
+            symbol=symbol, interval=interval, limit=period + 50
+        )
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         closes = [float(k[4]) for k in reversed(klines)]
-        
+
         tr_list, pos_dm, neg_dm = [], [], []
         for i in range(1, len(closes)):
-            tr = max(highs[i]-lows[i], abs(highs[i]-closes[i-1]), abs(lows[i]-closes[i-1]))
-            up_move = highs[i] - highs[i-1]
-            down_move = lows[i-1] - lows[i]
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i] - closes[i - 1]),
+            )
+            up_move = highs[i] - highs[i - 1]
+            down_move = lows[i - 1] - lows[i]
             pd = max(up_move, 0) if up_move > down_move else 0
             nd = max(down_move, 0) if down_move > up_move else 0
             tr_list.append(tr)
@@ -2777,56 +3358,96 @@ class BybitRealm:
         adx = 100 * abs(sum_pos - sum_neg) / denom if denom > 0 else 0
         return {"status": "ok", "adx": round(adx, 2)}
 
-    def calculate_cci(self, symbol: str, interval: str = "60", period: int = 20) -> dict:
-        klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=period + 50)
+    def calculate_cci(
+        self, symbol: str, interval: str = "60", period: int = 20
+    ) -> dict:
+        klines = self._get_klines_safely(
+            symbol=symbol, interval=interval, limit=period + 50
+        )
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         closes = [float(k[4]) for k in reversed(klines)]
-        tp = [(h+l+c)/3 for h, l, c in zip(highs[-period:], lows[-period:], closes[-period:])]
+        tp = [
+            (h + l + c) / 3
+            for h, l, c in zip(highs[-period:], lows[-period:], closes[-period:])
+        ]
         sma = sum(tp) / period
-        md = sum(abs(x-sma) for x in tp) / period
-        return {"status": "ok", "cci": round((tp[-1]-sma)/(0.015*md) if md != 0 else 0, 2)}
+        md = sum(abs(x - sma) for x in tp) / period
+        return {
+            "status": "ok",
+            "cci": round((tp[-1] - sma) / (0.015 * md) if md != 0 else 0, 2),
+        }
 
-    def calculate_ichimoku(self, symbol: str, interval: str = "60", tenkan: int = 9, kijun: int = 26, senkou_b: int = 52) -> dict:
-        klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=senkou_b + 50)
+    def calculate_ichimoku(
+        self,
+        symbol: str,
+        interval: str = "60",
+        tenkan: int = 9,
+        kijun: int = 26,
+        senkou_b: int = 52,
+    ) -> dict:
+        klines = self._get_klines_safely(
+            symbol=symbol, interval=interval, limit=senkou_b + 50
+        )
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
+
         def get_midpoint(h, l, p):
             return (max(h[-p:]) + min(l[-p:])) / 2
+
         t = get_midpoint(highs, lows, tenkan)
         k = get_midpoint(highs, lows, kijun)
-        return {"status": "ok", "tenkan": round(t, 4), "kijun": round(k, 4), "senkou_a": round((t+k)/2, 4), "senkou_b": round(get_midpoint(highs, lows, senkou_b), 4)}
+        return {
+            "status": "ok",
+            "tenkan": round(t, 4),
+            "kijun": round(k, 4),
+            "senkou_a": round((t + k) / 2, 4),
+            "senkou_b": round(get_midpoint(highs, lows, senkou_b), 4),
+        }
 
-
-    def calculate_bollinger_bands(self, symbol: str, interval: str = "15", period: int = 20) -> dict:
+    def calculate_bollinger_bands(
+        self, symbol: str, interval: str = "15", period: int = 20
+    ) -> dict:
         """Calculates Bollinger Bands."""
         klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=period)
         closes = [float(k[4]) for k in reversed(klines)]
-        
+
         sma = sum(closes) / period
         # Fix 17: Clean up redundant local module imports
         std_dev = statistics.stdev(closes)
-        
+
         upper = sma + (std_dev * 2)
         lower = sma - (std_dev * 2)
-        
-        return {"status": "ok", "upper": round(upper, 2), "middle": round(sma, 2), "lower": round(lower, 2)}
 
-    def calculate_vwap(self, symbol: str, interval: str = "15", limit: int = 50) -> dict:
+        return {
+            "status": "ok",
+            "upper": round(upper, 2),
+            "middle": round(sma, 2),
+            "lower": round(lower, 2),
+        }
+
+    def calculate_vwap(
+        self, symbol: str, interval: str = "15", limit: int = 50
+    ) -> dict:
         """Calculates VWAP (approximate using klines)."""
         klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=limit)
-        
-        total_pv = sum(float(k[4]) * float(k[5]) for k in klines) # Close * Volume
+
+        total_pv = sum(float(k[4]) * float(k[5]) for k in klines)  # Close * Volume
         total_v = sum(float(k[5]) for k in klines)
-        
+
         # Fix 27: Safety Check inside calculate_vwap
         vwap = total_pv / total_v if total_v > 0 else 0
         return {"status": "ok", "vwap": round(vwap, 2)}
 
-    def calculate_ehler_rsi(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
+    def calculate_ehler_rsi(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
         """Calculates Ehlers RSI smoothing."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 50).get("list", [])
-        if not klines: return {"status": "error", "msg": "Insufficient data"}
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 50
+        ).get("list", [])
+        if not klines:
+            return {"status": "error", "msg": "Insufficient data"}
         closes = [float(k[4]) for k in reversed(klines)]
         alpha = 2 / (period + 1)
         rsi = closes[0]
@@ -2834,21 +3455,30 @@ class BybitRealm:
             rsi = (price * alpha) + (rsi * (1 - alpha))
         return {"status": "ok", "ehler_rsi": round(rsi, 4)}
 
-    def calculate_ehler_stochastic(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
+    def calculate_ehler_stochastic(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
         """Calculates Ehlers Stochastic."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 50).get("list", [])
-        if not klines or len(klines) < period: return {"status": "error", "msg": "Insufficient data"}
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 50
+        ).get("list", [])
+        if not klines or len(klines) < period:
+            return {"status": "error", "msg": "Insufficient data"}
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         closes = [float(k[4]) for k in reversed(klines)]
         lowest_low = min(lows[-period:])
         highest_high = max(highs[-period:])
-        stochastic = (closes[-1] - lowest_low) / (highest_high - lowest_low) * 100 if (highest_high - lowest_low) != 0 else 0
+        stochastic = (
+            (closes[-1] - lowest_low) / (highest_high - lowest_low) * 100
+            if (highest_high - lowest_low) != 0
+            else 0
+        )
         return {"status": "ok", "ehler_stoch": round(stochastic, 2)}
 
     def calculate_all_indicators(self, symbol: str, interval: str = "60") -> dict:
         """Aggregates all available indicators for a symbol with Fix 16 Try-Except Isolation."""
-        
+
         def _safe_calc(func):
             # Fix 16: Dynamic Indicators Try-Except Isolation
             try:
@@ -2880,31 +3510,51 @@ class BybitRealm:
             "kst": lambda: self.calculate_kst(symbol, interval),
             "tema": lambda: self.calculate_tema(symbol, interval),
             "ehler_rsi": lambda: self.calculate_ehler_rsi(symbol, interval),
-            "ehler_stoch": lambda: self.calculate_ehler_stochastic(symbol, interval)
+            "ehler_stoch": lambda: self.calculate_ehler_stochastic(symbol, interval),
         }
         results = {name: _safe_calc(func) for name, func in indicator_map.items()}
         return {"status": "ok", "symbol": symbol, "indicators": results}
 
-
-    def calculate_stochastic(self, symbol: str, interval: str = "15", period: int = 14, smooth_k: int = 3, smooth_d: int = 3) -> dict:
-        klines = self._get_klines_safely(symbol=symbol, interval=interval, limit=period + smooth_k + smooth_d + 50)
+    def calculate_stochastic(
+        self,
+        symbol: str,
+        interval: str = "15",
+        period: int = 14,
+        smooth_k: int = 3,
+        smooth_d: int = 3,
+    ) -> dict:
+        klines = self._get_klines_safely(
+            symbol=symbol, interval=interval, limit=period + smooth_k + smooth_d + 50
+        )
         closes = [float(k[4]) for k in reversed(klines)]
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
-        if len(closes) < period: return {"status": "error", "msg": "Insufficient data"}
+        if len(closes) < period:
+            return {"status": "error", "msg": "Insufficient data"}
         # Fix 9: Slice Index Error - use most recent window
         lowest_low = min(lows[-period:])
         highest_high = max(highs[-period:])
-        k = ((closes[-1] - lowest_low) / (highest_high - lowest_low)) * 100 if (highest_high - lowest_low) != 0 else 0
+        k = (
+            ((closes[-1] - lowest_low) / (highest_high - lowest_low)) * 100
+            if (highest_high - lowest_low) != 0
+            else 0
+        )
         return {"status": "ok", "k": round(k, 2)}
 
-    def calculate_hma(self, symbol: str, interval: str = "60", period: int = 20) -> dict:
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 50).get("list", [])
+    def calculate_hma(
+        self, symbol: str, interval: str = "60", period: int = 20
+    ) -> dict:
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 50
+        ).get("list", [])
         closes = [float(k[4]) for k in reversed(klines)]
-        
+
         def _wma(prices, p):
             denom = p * (p + 1) / 2
-            return [sum(prices[i - p + 1 + j] * (j + 1) for j in range(p)) / denom for i in range(p - 1, len(prices))]
+            return [
+                sum(prices[i - p + 1 + j] * (j + 1) for j in range(p)) / denom
+                for i in range(p - 1, len(prices))
+            ]
 
         half_len = int(period / 2)
         sqrt_len = int(math.sqrt(period))
@@ -2915,46 +3565,79 @@ class BybitRealm:
         return {"status": "ok", "hma": round(hma[-1], 6)}
 
     def calculate_fractals(self, symbol: str, interval: str = "60") -> dict:
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=10).get("list", [])
+        klines = self.get_klines(symbol=symbol, interval=interval, limit=10).get(
+            "list", []
+        )
         # Fix 32: Index Boundary Check in calculate_fractals
         if len(klines) < 5:
-            return {"status": "error", "msg": "Insufficient bars to verify fractals (min 5)"}
-            
+            return {
+                "status": "error",
+                "msg": "Insufficient bars to verify fractals (min 5)",
+            }
+
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
-        bullish = (lows[-3] < lows[-4] and lows[-3] < lows[-5] and lows[-3] < lows[-2] and lows[-3] < lows[-1])
-        bearish = (highs[-3] > highs[-4] and highs[-3] > highs[-5] and highs[-3] > highs[-2] and highs[-3] > highs[-1])
+        bullish = (
+            lows[-3] < lows[-4]
+            and lows[-3] < lows[-5]
+            and lows[-3] < lows[-2]
+            and lows[-3] < lows[-1]
+        )
+        bearish = (
+            highs[-3] > highs[-4]
+            and highs[-3] > highs[-5]
+            and highs[-3] > highs[-2]
+            and highs[-3] > highs[-1]
+        )
         return {"status": "ok", "bullish_fractal": bullish, "bearish_fractal": bearish}
 
     def calculate_pivot_points(self, symbol: str, interval: str = "D") -> dict:
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=2).get("list", [])
+        klines = self.get_klines(symbol=symbol, interval=interval, limit=2).get(
+            "list", []
+        )
         high, low, close = float(klines[0][2]), float(klines[0][3]), float(klines[0][4])
         pivot = (high + low + close) / 3
-        return {"status": "ok", "pivot": round(pivot, 4), "r1": round(2 * pivot - low, 4), "s1": round(2 * pivot - high, 4)}
+        return {
+            "status": "ok",
+            "pivot": round(pivot, 4),
+            "r1": round(2 * pivot - low, 4),
+            "s1": round(2 * pivot - high, 4),
+        }
 
-    def calculate_klinger(self, symbol: str, interval: str = "60", fast: int = 34, slow: int = 55) -> dict:
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=slow + 50).get("list", [])
+    def calculate_klinger(
+        self, symbol: str, interval: str = "60", fast: int = 34, slow: int = 55
+    ) -> dict:
+        klines = self.get_klines(symbol=symbol, interval=interval, limit=slow + 50).get(
+            "list", []
+        )
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         closes = [float(k[4]) for k in reversed(klines)]
         volumes = [float(k[5]) for k in reversed(klines)]
-        
+
         trend = [0] * len(closes)
         for i in range(1, len(closes)):
-            trend[i] = 1 if closes[i] > closes[i-1] else (-1 if closes[i] < closes[i-1] else trend[i-1])
-        
+            trend[i] = (
+                1
+                if closes[i] > closes[i - 1]
+                else (-1 if closes[i] < closes[i - 1] else trend[i - 1])
+            )
+
         vf = []
         for i in range(1, len(closes)):
             dm = highs[i] - lows[i]
-            clv = ((closes[i] - lows[i]) - (highs[i] - closes[i])) / dm if dm != 0 else 0
+            clv = (
+                ((closes[i] - lows[i]) - (highs[i] - closes[i])) / dm if dm != 0 else 0
+            )
             vf.append(volumes[i] * abs(2 * clv - 1) * trend[i] * 100)
-        
+
         def _get_ema_series(data, p):
             k = 2 / (p + 1)
             ema = [data[0]]
-            for val in data[1:]: ema.append(val * k + ema[-1] * (1 - k))
+            for val in data[1:]:
+                ema.append(val * k + ema[-1] * (1 - k))
             return ema
-            
+
         fast_ema = _get_ema_series(vf, fast)
         slow_ema = _get_ema_series(vf, slow)
         return {"status": "ok", "klinger": round(fast_ema[-1] - slow_ema[-1], 2)}
@@ -2962,17 +3645,24 @@ class BybitRealm:
     def scan_scalping_opportunities(self, symbol: str, interval: str = "15") -> dict:
         """Enhanced scanner using EMA, RSI, BB, VWAP, ATR, and Stoch."""
         if not symbol:
-            return {"status": "error", "msg": "Symbol is required for scalping opportunities"}
-        
+            return {
+                "status": "error",
+                "msg": "Symbol is required for scalping opportunities",
+            }
+
         rsi = self.calculate_rsi(symbol=symbol, interval=interval).get("rsi", 50)
-        ema20 = self.calculate_ema(symbol=symbol, interval=interval, period=20).get("ema", 0)
-        bb = self.calculate_bollinger_bands(symbol=symbol, interval=interval).get("lower", 0)
+        ema20 = self.calculate_ema(symbol=symbol, interval=interval, period=20).get(
+            "ema", 0
+        )
+        bb = self.calculate_bollinger_bands(symbol=symbol, interval=interval).get(
+            "lower", 0
+        )
         vwap = self.calculate_vwap(symbol=symbol, interval=interval).get("vwap", 0)
         atr = self.calculate_atr(symbol=symbol, interval=interval).get("atr", 0)
         stoch = self.calculate_stochastic(symbol=symbol, interval=interval).get("k", 50)
         ticker = self.get_ticker(symbol=symbol).get("list", [{}])[0]
         price = float(ticker.get("lastPrice", 0))
-        
+
         signal = "NEUTRAL"
         # Mean reversion scalping setup
         if price < bb and rsi < 35 and stoch < 20 and price > vwap:
@@ -2981,124 +3671,200 @@ class BybitRealm:
             signal = "BUY_TREND"
         elif price > bb and rsi > 65 and stoch > 80 and price < vwap:
             signal = "SELL_REVERSION"
-            
+
         return {
-            "status": "ok", 
-            "symbol": symbol, 
-            "signal": signal, 
-            "rsi": rsi, 
-            "price": price, 
-            "ema20": ema20, 
-            "bb_lower": bb, 
+            "status": "ok",
+            "symbol": symbol,
+            "signal": signal,
+            "rsi": rsi,
+            "price": price,
+            "ema20": ema20,
+            "bb_lower": bb,
             "vwap": vwap,
             "stoch_k": stoch,
-            "suggested_stop_dist": round(atr * 2, 4)
+            "suggested_stop_dist": round(atr * 2, 4),
         }
 
-    def calculate_cmf(self, symbol: str, interval: str = "60", period: int = 20) -> dict:
+    def calculate_cmf(
+        self, symbol: str, interval: str = "60", period: int = 20
+    ) -> dict:
         """Calculates Chaikin Money Flow (CMF)."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 50).get("list", [])
-        if len(klines) < period + 1: return {"status": "error", "msg": "Insufficient data"}
-        
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 50
+        ).get("list", [])
+        if len(klines) < period + 1:
+            return {"status": "error", "msg": "Insufficient data"}
+
         mfv_list, vol_list = [], []
         for k in reversed(klines):
             h, l, c, v = float(k[2]), float(k[3]), float(k[4]), float(k[5])
             mfv = (((c - l) - (h - c)) / (h - l) * v) if (h - l) != 0 else 0
             mfv_list.append(mfv)
             vol_list.append(v)
-            
+
         cmf = sum(mfv_list[-period:]) / sum(vol_list[-period:])
         return {"status": "ok", "cmf": round(cmf, 4)}
 
-    def calculate_adx_with_di(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
+    def calculate_adx_with_di(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
         """Calculates ADX with DI+ and DI-."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 50).get("list", [])
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 50
+        ).get("list", [])
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         closes = [float(k[4]) for k in reversed(klines)]
-        
+
         tr_list, plus_dm, minus_dm = [], [], []
         for i in range(1, len(closes)):
-            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
-            up = highs[i] - highs[i-1]
-            down = lows[i-1] - lows[i]
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i] - closes[i - 1]),
+            )
+            up = highs[i] - highs[i - 1]
+            down = lows[i - 1] - lows[i]
             plus_dm.append(max(up, 0) if up > down else 0)
             minus_dm.append(max(down, 0) if down > up else 0)
             tr_list.append(tr)
-            
+
         tr_s = sum(tr_list[-period:])
         pdm_s = sum(plus_dm[-period:])
         mdm_s = sum(minus_dm[-period:])
-        
+
         di_p = (pdm_s / tr_s) * 100 if tr_s != 0 else 0
         di_m = (mdm_s / tr_s) * 100 if tr_s != 0 else 0
         adx = (abs(di_p - di_m) / (di_p + di_m)) * 100 if (di_p + di_m) != 0 else 0
-        return {"status": "ok", "adx": round(adx, 2), "di_plus": round(di_p, 2), "di_minus": round(di_m, 2)}
+        return {
+            "status": "ok",
+            "adx": round(adx, 2),
+            "di_plus": round(di_p, 2),
+            "di_minus": round(di_m, 2),
+        }
 
-    def calculate_elder_ray_index(self, symbol: str, interval: str = "60", period: int = 13) -> dict:
+    def calculate_elder_ray_index(
+        self, symbol: str, interval: str = "60", period: int = 13
+    ) -> dict:
         """Calculates Elder Ray Index."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 50).get("list", [])
-        if not klines or len(klines) < period: return {"status": "error", "msg": "Insufficient data"}
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 50
+        ).get("list", [])
+        if not klines or len(klines) < period:
+            return {"status": "error", "msg": "Insufficient data"}
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         closes = [float(k[4]) for k in reversed(klines)]
-        
+
         k = 2 / (period + 1)
         ema = closes[0]
-        for p in closes[1:]: ema = p * k + ema * (1 - k)
-        return {"status": "ok", "bull_power": round(highs[-1] - ema, 4), "bear_power": round(lows[-1] - ema, 4), "ema": round(ema, 4)}
+        for p in closes[1:]:
+            ema = p * k + ema * (1 - k)
+        return {
+            "status": "ok",
+            "bull_power": round(highs[-1] - ema, 4),
+            "bear_power": round(lows[-1] - ema, 4),
+            "ema": round(ema, 4),
+        }
 
     def calculate_kst(self, symbol: str, interval: str = "60") -> dict:
         """Calculates Know Sure Thing (KST)."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=100).get("list", [])
-        if len(klines) < 35: return {"status": "error", "msg": "Insufficient data"}
+        klines = self.get_klines(symbol=symbol, interval=interval, limit=100).get(
+            "list", []
+        )
+        if len(klines) < 35:
+            return {"status": "error", "msg": "Insufficient data"}
         closes = [float(k[4]) for k in reversed(klines)]
-        
-        def roc(data, p): return [(data[i] - data[i-p]) / data[i-p] * 100 for i in range(p, len(data))]
-        
-        r1, r2, r3, r4 = roc(closes, 10), roc(closes, 15), roc(closes, 20), roc(closes, 30)
-        kst = sum(r1[-10:])/10 + sum(r2[-15:])/15*2 + sum(r3[-20:])/20*3 + sum(r4[-30:])/30*4
+
+        def roc(data, p):
+            return [
+                (data[i] - data[i - p]) / data[i - p] * 100 for i in range(p, len(data))
+            ]
+
+        r1, r2, r3, r4 = (
+            roc(closes, 10),
+            roc(closes, 15),
+            roc(closes, 20),
+            roc(closes, 30),
+        )
+        kst = (
+            sum(r1[-10:]) / 10
+            + sum(r2[-15:]) / 15 * 2
+            + sum(r3[-20:]) / 20 * 3
+            + sum(r4[-30:]) / 30 * 4
+        )
         return {"status": "ok", "kst": round(kst, 4)}
 
-    def calculate_tema(self, symbol: str, interval: str = "60", period: int = 20) -> dict:
+    def calculate_tema(
+        self, symbol: str, interval: str = "60", period: int = 20
+    ) -> dict:
         """Calculates Triple Exponential Moving Average (TEMA)."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 50).get("list", [])
-        if not klines or len(klines) < period: return {"status": "error", "msg": "Insufficient data"}
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 50
+        ).get("list", [])
+        if not klines or len(klines) < period:
+            return {"status": "error", "msg": "Insufficient data"}
         closes = [float(k[4]) for k in reversed(klines)]
-        
+
         def ema(data, p):
-            if not data: return 0
+            if not data:
+                return 0
             k = 2 / (p + 1)
             ema_val = data[0]
-            for val in data[1:]: ema_val = val * k + ema_val * (1 - k)
+            for val in data[1:]:
+                ema_val = val * k + ema_val * (1 - k)
             return ema_val
-            
+
         e1 = ema(closes, period)
         e2 = ema([e1], period)
         e3 = ema([e2], period)
-        return {"status": "ok", "tema": round(3*e1 - 3*e2 + e3, 4)}
+        return {"status": "ok", "tema": round(3 * e1 - 3 * e2 + e3, 4)}
 
-    def calculate_orderbook_imbalance(self, symbol: str, depth: int = 50, tier_size: int = 10, spoof_threshold: float = 5.0) -> dict:
+    def calculate_orderbook_imbalance(
+        self,
+        symbol: str,
+        depth: int = 50,
+        tier_size: int = 10,
+        spoof_threshold: float = 5.0,
+    ) -> dict:
         """Fix 11: Missing calculate_orderbook_imbalance Method."""
         analysis = self.get_orderbook_analysis(symbol, depth)
         return {"status": "ok", "imbalance": analysis.get("obi", 0)}
 
-    def calculate_liquidity_heatmap(self, symbol: str, interval: str = "60", depth: int = 100, bucket_count: int = 20, kline_limit: int = 100) -> dict:
+    def calculate_liquidity_heatmap(
+        self,
+        symbol: str,
+        interval: str = "60",
+        depth: int = 100,
+        bucket_count: int = 20,
+        kline_limit: int = 100,
+    ) -> dict:
         """Fix 12: Missing calculate_liquidity_heatmap Method."""
         # Return structural placeholder indicating live requirements
-        return {"status": "ok", "msg": "Heatmap generation requires live data persistence", "symbol": symbol}
+        return {
+            "status": "ok",
+            "msg": "Heatmap generation requires live data persistence",
+            "symbol": symbol,
+        }
 
-    def update_trailing_stop(self, symbol: str, trailing_stop_pct: float, category: str = "linear") -> dict:
+    def update_trailing_stop(
+        self, symbol: str, trailing_stop_pct: float, category: str = "linear"
+    ) -> dict:
         """Applies a trailing stop to an open position."""
-        return self.set_trading_stop(symbol=symbol, trailing_stop=trailing_stop_pct, category=category)
+        return self.set_trading_stop(
+            symbol=symbol, trailing_stop=trailing_stop_pct, category=category
+        )
 
     def check_risk_limit(self, symbol: str, qty: float, price: float) -> dict:
         """Checks if a proposed trade adheres to max position size constraints."""
         max_size = float(os.getenv("MAX_POSITION_SIZE_USDT", "1000"))
         notional = qty * price
-        
+
         if notional > max_size:
-            return {"status": "error", "msg": f"Risk Limit Exceeded: Notional {notional} > Max {max_size}"}
+            return {
+                "status": "error",
+                "msg": f"Risk Limit Exceeded: Notional {notional} > Max {max_size}",
+            }
         return {"status": "ok", "msg": "Trade within risk limits"}
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -3131,13 +3897,12 @@ class BybitRealm:
 
         # Bybit kline format: [startTime, open, high, low, close, volume, turnover]
         closes = [float(k[4]) for k in reversed(klines)]
-        highs  = [float(k[2]) for k in reversed(klines)]
-        lows   = [float(k[3]) for k in reversed(klines)]
+        highs = [float(k[2]) for k in reversed(klines)]
+        lows = [float(k[3]) for k in reversed(klines)]
 
         # ── Returns ───────────────────────────────────────────────────────
         returns = [
-            (closes[i] - closes[i - 1]) / closes[i - 1]
-            for i in range(1, len(closes))
+            (closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))
         ]
         volatility = statistics.stdev(returns) * 100  # as %
 
@@ -3150,7 +3915,7 @@ class BybitRealm:
             return ema
 
         ema_short = _ema(closes, 10)
-        ema_long  = _ema(closes, 30)
+        ema_long = _ema(closes, 30)
 
         # ── True Range approximation -> trend strength ─────────────────────
         trs: List[float] = []
@@ -3165,9 +3930,9 @@ class BybitRealm:
         tr_ratio = avg_tr / closes[-1] * 100  # ATR%
 
         # ── Regime classification ─────────────────────────────────────────
-        trending_up   = ema_short > ema_long * 1.001 and tr_ratio > 0.4
+        trending_up = ema_short > ema_long * 1.001 and tr_ratio > 0.4
         trending_down = ema_short < ema_long * 0.999 and tr_ratio > 0.4
-        high_vol      = volatility > 2.5
+        high_vol = volatility > 2.5
 
         if high_vol and not (trending_up or trending_down):
             regime = "VOLATILE"
@@ -3186,9 +3951,7 @@ class BybitRealm:
             "metrics": {
                 "ema_short": round(ema_short, 6),
                 "ema_long": round(ema_long, 6),
-                "ema_cross_pct": round(
-                    (ema_short - ema_long) / ema_long * 100, 4
-                ),
+                "ema_cross_pct": round((ema_short - ema_long) / ema_long * 100, 4),
                 "volatility_pct": round(volatility, 4),
                 "atr_pct": round(tr_ratio, 4),
                 "last_close": closes[-1],
@@ -3213,9 +3976,7 @@ class BybitRealm:
 
         for sym in symbols:
             try:
-                ticker_raw = self.get_ticker(
-                    symbol=sym, category=category
-                )
+                ticker_raw = self.get_ticker(symbol=sym, category=category)
                 ticker_list = ticker_raw.get("list", [])
                 if not ticker_list:
                     continue
@@ -3224,28 +3985,18 @@ class BybitRealm:
                 entry: dict = {
                     "symbol": sym.upper(),
                     "last_price": float(t.get("lastPrice", 0)),
-                    "change_24h_pct": float(
-                        t.get("price24hPcnt", 0)
-                    ) * 100,
+                    "change_24h_pct": float(t.get("price24hPcnt", 0)) * 100,
                     "volume_24h": float(t.get("volume24h", 0)),
                     "turnover_24h": float(t.get("turnover24h", 0)),
                     "high_24h": float(t.get("highPrice24h", 0)),
                     "low_24h": float(t.get("lowPrice24h", 0)),
-                    "funding_rate": float(
-                        t.get("fundingRate", 0)
-                    ) * 100,
-                    "open_interest": float(
-                        t.get("openInterest", 0)
-                    ),
+                    "funding_rate": float(t.get("fundingRate", 0)) * 100,
+                    "open_interest": float(t.get("openInterest", 0)),
                 }
 
                 if include_regime:
-                    regime_data = self.get_market_regime(
-                        sym, category=category
-                    )
-                    entry["regime"] = regime_data.get(
-                        "regime", "UNKNOWN"
-                    )
+                    regime_data = self.get_market_regime(sym, category=category)
+                    entry["regime"] = regime_data.get("regime", "UNKNOWN")
 
                 results.append(entry)
             except Exception as exc:
@@ -3274,11 +4025,11 @@ class BybitRealm:
                     "rsi": rsi.get("rsi"),
                     "ema": ema.get("ema"),
                     "atr": atr.get("atr"),
-                    "volatility": regime.get("metrics", {}).get("volatility_pct")
+                    "volatility": regime.get("metrics", {}).get("volatility_pct"),
                 }
             except:
                 continue
-        
+
         ticker_raw = self.get_ticker(symbol).get("list", [{}])
         ticker = ticker_raw[0] if ticker_raw else {}
         return {
@@ -3288,32 +4039,46 @@ class BybitRealm:
             "price_24h_pcnt": ticker.get("price24hPcnt"),
             "high_24h": ticker.get("highPrice24h"),
             "low_24h": ticker.get("lowPrice24h"),
-            "analysis": analysis
+            "analysis": analysis,
         }
 
-    def get_pnl_summary(self, symbol: Optional[str] = None, limit: int = 100, days: int = 7) -> dict:
+    def get_pnl_summary(
+        self, symbol: Optional[str] = None, limit: int = 100, days: int = 7
+    ) -> dict:
         """Generates a detailed PnL summary from closed trades."""
         history_resp = self.get_pnl_history(symbol=symbol, limit=limit)
         history = history_resp.get("list", [])
         if not history:
             return {"status": "ok", "msg": "No trade history found", "total_pnl": 0}
-        
+
         from datetime import timedelta
+
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        
+
         filtered = [
-            p for p in history 
-            if datetime.fromtimestamp(int(p.get("updatedTime", 0))/1000, tz=timezone.utc) > cutoff
+            p
+            for p in history
+            if datetime.fromtimestamp(
+                int(p.get("updatedTime", 0)) / 1000, tz=timezone.utc
+            )
+            > cutoff
         ]
-        
+
         if not filtered:
-            return {"status": "ok", "msg": f"No trades found in last {days} days", "total_pnl": 0}
+            return {
+                "status": "ok",
+                "msg": f"No trades found in last {days} days",
+                "total_pnl": 0,
+            }
 
         total_pnl = sum(float(trade.get("closedPnl", 0)) for trade in filtered)
-        total_fees = sum(float(trade.get("openFee", 0)) + float(trade.get("closeFee", 0)) for trade in filtered)
+        total_fees = sum(
+            float(trade.get("openFee", 0)) + float(trade.get("closeFee", 0))
+            for trade in filtered
+        )
         wins = [t for t in filtered if float(t.get("closedPnl", 0)) > 0]
         losses = [t for t in filtered if float(t.get("closedPnl", 0)) <= 0]
-        
+
         return {
             "status": "ok",
             "trades_analyzed": len(filtered),
@@ -3321,88 +4086,138 @@ class BybitRealm:
             "total_fees": round(total_fees, 4),
             "net_pnl": round(total_pnl - total_fees, 4),
             "win_rate": round(len(wins) / len(filtered) * 100, 2) if filtered else 0,
-            "avg_win": round(sum(float(t["closedPnl"]) for t in wins) / len(wins), 4) if wins else 0,
-            "avg_loss": round(sum(float(t["closedPnl"]) for t in losses) / len(losses), 4) if losses else 0,
+            "avg_win": round(sum(float(t["closedPnl"]) for t in wins) / len(wins), 4)
+            if wins
+            else 0,
+            "avg_loss": round(
+                sum(float(t["closedPnl"]) for t in losses) / len(losses), 4
+            )
+            if losses
+            else 0,
         }
 
-    def get_volume_imbalance(self, symbol: str, interval: str = "60", period: int = 20) -> dict:
+    def get_volume_imbalance(
+        self, symbol: str, interval: str = "60", period: int = 20
+    ) -> dict:
         """Calculates order flow volume imbalance."""
         # Utilizing orderbook analysis for imbalance calculation
         analysis = self.get_orderbook_analysis(symbol=symbol)
         return {"imbalance": analysis.get("obi", 0)}
 
-    def get_volume_at_price(self, symbol: str, depth: int = 50, category: str = "linear") -> dict:
+    def get_volume_at_price(
+        self, symbol: str, depth: int = 50, category: str = "linear"
+    ) -> dict:
         """Aggregates volume at price levels."""
         res = self.get_orderbook(symbol=symbol, limit=depth, category=category)
         data = res.get("result", {})
-        return {
-            "status": "ok",
-            "bids": data.get("b", []),
-            "asks": data.get("a", [])
-        }
+        return {"status": "ok", "bids": data.get("b", []), "asks": data.get("a", [])}
 
-    def calculate_vwma(self, symbol: str, interval: str = "60", period: int = 20) -> dict:
+    def calculate_vwma(
+        self, symbol: str, interval: str = "60", period: int = 20
+    ) -> dict:
         """Calculates VWMA."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 50).get("list", [])
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 50
+        ).get("list", [])
         closes = [float(k[4]) for k in reversed(klines)]
         volumes = [float(k[5]) for k in reversed(klines)]
-        
+
         pv = sum(c * v for c, v in zip(closes[-period:], volumes[-period:]))
         v = sum(volumes[-period:])
         return {"status": "ok", "vwma": round(pv / v if v != 0 else 0, 4)}
 
-    def calculate_bollinger_bands_pb(self, symbol: str, interval: str = "15", period: int = 20) -> dict:
+    def calculate_bollinger_bands_pb(
+        self, symbol: str, interval: str = "15", period: int = 20
+    ) -> dict:
         """Calculates Bollinger Bands %B."""
-        bb = self.calculate_bollinger_bands(symbol=symbol, interval=interval, period=period)
-        if bb["status"] != "ok": return bb
-        
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=1).get("list", [])
+        bb = self.calculate_bollinger_bands(
+            symbol=symbol, interval=interval, period=period
+        )
+        if bb["status"] != "ok":
+            return bb
+
+        klines = self.get_klines(symbol=symbol, interval=interval, limit=1).get(
+            "list", []
+        )
         price = float(klines[0][4])
-        
-        pb = (price - bb["lower"]) / (bb["upper"] - bb["lower"]) if (bb["upper"] - bb["lower"]) != 0 else 0
+
+        pb = (
+            (price - bb["lower"]) / (bb["upper"] - bb["lower"])
+            if (bb["upper"] - bb["lower"]) != 0
+            else 0
+        )
         return {"status": "ok", "pb": round(pb, 4)}
 
-    def calculate_roc(self, symbol: str, interval: str = "60", period: int = 12) -> dict:
+    def calculate_roc(
+        self, symbol: str, interval: str = "60", period: int = 12
+    ) -> dict:
         """Calculates Rate of Change."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 1).get("list", [])
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 1
+        ).get("list", [])
         closes = [float(k[4]) for k in reversed(klines)]
-        roc = ((closes[-1] - closes[-period-1]) / closes[-period-1]) * 100
+        roc = ((closes[-1] - closes[-period - 1]) / closes[-period - 1]) * 100
         return {"status": "ok", "roc": round(roc, 2)}
 
-    def split_iceberg_order(self, symbol: str, side: str, total_qty: float, slices: int, price: float = None, order_type: str = "Limit") -> dict:
+    def split_iceberg_order(
+        self,
+        symbol: str,
+        side: str,
+        total_qty: float,
+        slices: int,
+        price: float = None,
+        order_type: str = "Limit",
+    ) -> dict:
         """Splits a large order into smaller iceberg slices."""
         qty_per_slice = total_qty / slices
         orders = []
         for _ in range(slices):
-            orders.append({"symbol": symbol, "side": side, "qty": qty_per_slice, "price": price, "order_type": order_type})
+            orders.append(
+                {
+                    "symbol": symbol,
+                    "side": side,
+                    "qty": qty_per_slice,
+                    "price": price,
+                    "order_type": order_type,
+                }
+            )
         return {"iceberg_orders": orders, "qty_per_slice": round(qty_per_slice, 4)}
 
     def estimate_slippage(self, symbol: str, qty: float, side: str) -> dict:
         """Estimates slippage for a given quantity based on orderbook depth."""
         res = self.get_orderbook(symbol, limit=200).get("result", {})
         levels = res.get("b" if side == "Sell" else "a", [])
-        if not levels: return {"status": "error", "msg": "Empty orderbook"}
+        if not levels:
+            return {"status": "error", "msg": "Empty orderbook"}
         total_vol, weighted_price = 0.0, 0.0
         best_price = float(levels[0][0])
-        
+
         for p, q in levels:
             p_val, q_val = float(p), float(q)
             take = min(q_val, qty - total_vol)
             weighted_price += p_val * take
             total_vol += take
-            if total_vol >= qty: break
-            
+            if total_vol >= qty:
+                break
+
         # Fix 38: Safeguard inside estimate_slippage
         if total_vol < qty:
-            return {"status": "error", "msg": f"Orderbook too shallow to fill {qty}. Only {total_vol} available."}
-            
+            return {
+                "status": "error",
+                "msg": f"Orderbook too shallow to fill {qty}. Only {total_vol} available.",
+            }
+
         avg_price = weighted_price / total_vol if total_vol > 0 else 0
         slippage = abs(avg_price - best_price) / best_price if best_price > 0 else 0
-        return {"avg_price": round(avg_price, 4), "slippage_pct": round(slippage * 100, 4)}
+        return {
+            "avg_price": round(avg_price, 4),
+            "slippage_pct": round(slippage * 100, 4),
+        }
 
     def detect_spoofing_attempts(self, symbol: str) -> dict:
         """Identifies potential spoofing by looking for large orders far from best price."""
         res = self.get_orderbook(symbol, limit=50).get("result", {})
+
         def check_side(levels, best):
             avg_vol = sum(float(q) for _, q in levels) / len(levels)
             spoofing = []
@@ -3411,18 +4226,28 @@ class BybitRealm:
                 if q > avg_vol * 10 and abs(p - best) / best > 0.01:
                     spoofing.append({"price": p, "volume": q})
             return spoofing
+
         bids = res.get("b", [])
         asks = res.get("a", [])
-        return {"bid_spoofing": check_side(bids, float(bids[0][0])), "ask_spoofing": check_side(asks, float(asks[0][0]))}
+        return {
+            "bid_spoofing": check_side(bids, float(bids[0][0])),
+            "ask_spoofing": check_side(asks, float(asks[0][0])),
+        }
 
-    def calculate_vwap_bands(self, symbol: str, interval: str = "15", limit: int = 100, stdev: float = 2.0) -> dict:
+    def calculate_vwap_bands(
+        self, symbol: str, interval: str = "15", limit: int = 100, stdev: float = 2.0
+    ) -> dict:
         """Calculates VWAP with standard deviation bands."""
         vwap = self.calculate_vwap(symbol, interval, limit).get("vwap", 0)
         klines = self.get_klines(symbol, interval, limit).get("list", [])
         closes = [float(k[4]) for k in klines]
-        variance = sum((c - vwap)**2 for c in closes) / len(closes)
+        variance = sum((c - vwap) ** 2 for c in closes) / len(closes)
         sd = variance**0.5
-        return {"vwap": vwap, "upper": round(vwap + (sd * stdev), 4), "lower": round(vwap - (sd * stdev), 4)}
+        return {
+            "vwap": vwap,
+            "upper": round(vwap + (sd * stdev), 4),
+            "lower": round(vwap - (sd * stdev), 4),
+        }
 
     def get_trend_divergence(self, symbol: str, interval: str = "60") -> dict:
         """Checks for RSI divergence against price."""
@@ -3434,37 +4259,63 @@ class BybitRealm:
         # Simple local extrema check
         p_high, r_high = max(closes), max(rsi)
         divergence = "None"
-        if closes[-1] > p_high * 0.99 and rsi[-1] < r_high * 0.95: divergence = "Bearish"
-        if closes[-1] < min(closes) * 1.01 and rsi[-1] > min(rsi) * 1.05: divergence = "Bullish"
+        if closes[-1] > p_high * 0.99 and rsi[-1] < r_high * 0.95:
+            divergence = "Bearish"
+        if closes[-1] < min(closes) * 1.01 and rsi[-1] > min(rsi) * 1.05:
+            divergence = "Bullish"
         return {"divergence": divergence}
 
     def calculate_profit_factor(self) -> dict:
         """Calculates profit factor from trade journal."""
         entries = self.journal._entries
-        gross_profit = sum(float(e["result"].get("closedPnl", 0)) for e in entries if float(e["result"].get("closedPnl", 0)) > 0)
-        gross_loss = abs(sum(float(e["result"].get("closedPnl", 0)) for e in entries if float(e["result"].get("closedPnl", 0)) < 0))
-        return {"profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0}
+        gross_profit = sum(
+            float(e["result"].get("closedPnl", 0))
+            for e in entries
+            if float(e["result"].get("closedPnl", 0)) > 0
+        )
+        gross_loss = abs(
+            sum(
+                float(e["result"].get("closedPnl", 0))
+                for e in entries
+                if float(e["result"].get("closedPnl", 0)) < 0
+            )
+        )
+        return {
+            "profit_factor": round(gross_profit / gross_loss, 2)
+            if gross_loss > 0
+            else 0
+        }
 
     def auto_scale_position(self, symbol: str, add_pct: float = 0.5) -> dict:
         """Suggests adding to a winning position."""
         pos = self.get_positions(symbol=symbol).get("list", [])
-        if not pos: return {"error": "No position"}
+        if not pos:
+            return {"error": "No position"}
         p = pos[0]
         pnl = float(p["unrealisedPnl"])
         if pnl > 0:
-            return {"action": "Add", "qty": round(float(p["size"]) * add_pct, 4), "reason": "Positive trend confirmation"}
+            return {
+                "action": "Add",
+                "qty": round(float(p["size"]) * add_pct, 4),
+                "reason": "Positive trend confirmation",
+            }
         return {"action": "Hold", "reason": "Pnl not positive enough"}
 
     def calculate_market_impact(self, symbol: str, qty: float) -> dict:
         """Calculates theoretical market impact of a market order."""
         res = self.estimate_slippage(symbol, qty, "Buy")
-        return {"symbol": symbol, "qty": qty, "impact_usdt": round(res["slippage_pct"] * qty, 4)}
+        return {
+            "symbol": symbol,
+            "qty": qty,
+            "impact_usdt": round(res["slippage_pct"] * qty, 4),
+        }
 
     def get_tick_value(self, symbol: str) -> dict:
         """Calculates the USDT value of a single price tick for current position."""
         info = self._get_symbol_info(symbol)
         pos = self.get_positions(symbol=symbol).get("list", [])
-        if not info or not pos: return {"error": "Data missing"}
+        if not info or not pos:
+            return {"error": "Data missing"}
         tick_size = float(info.get("priceFilter", {}).get("tickSize", 0))
         qty = float(pos[0]["size"])
         return {"tick_value_usdt": round(tick_size * qty, 6)}
@@ -3474,67 +4325,137 @@ class BybitRealm:
         entries = self.journal._entries
         return {
             "total_trades": len(entries),
-            "volume_traded": round(sum(float(e["payload"].get("qty", 0)) * float(e["payload"].get("price", 0) or 0) for e in entries), 2),
-            "fees_paid": round(sum(float(e["result"].get("fee", 0) or 0) for e in entries), 4)
+            "volume_traded": round(
+                sum(
+                    float(e["payload"].get("qty", 0))
+                    * float(e["payload"].get("price", 0) or 0)
+                    for e in entries
+                ),
+                2,
+            ),
+            "fees_paid": round(
+                sum(float(e["result"].get("fee", 0) or 0) for e in entries), 4
+            ),
         }
 
-    def generate_microprofit_sequence(self, symbol: str, side: str, entry: float, target_profit_usdt: float, steps: int = 3) -> dict:
+    def generate_microprofit_sequence(
+        self,
+        symbol: str,
+        side: str,
+        entry: float,
+        target_profit_usdt: float,
+        steps: int = 3,
+    ) -> dict:
         """Generates a sequence of take-profit orders for micro-scalping."""
         orders = []
         for i in range(1, steps + 1):
-            target = entry * (1 + (0.001 * i)) if side == "Buy" else entry * (1 - (0.001 * i))
-            orders.append({"symbol": symbol, "side": "Sell" if side == "Buy" else "Buy", "price": target, "qty": target_profit_usdt / (abs(target - entry))})
+            target = (
+                entry * (1 + (0.001 * i))
+                if side == "Buy"
+                else entry * (1 - (0.001 * i))
+            )
+            orders.append(
+                {
+                    "symbol": symbol,
+                    "side": "Sell" if side == "Buy" else "Buy",
+                    "price": target,
+                    "qty": target_profit_usdt / (abs(target - entry)),
+                }
+            )
         return {"sequence": orders}
 
-    def calculate_fisher_transform(self, symbol: str, interval: str = "60", period: int = 10) -> dict:
+    def calculate_fisher_transform(
+        self, symbol: str, interval: str = "60", period: int = 10
+    ) -> dict:
         """Calculates Ehlers Fisher Transform for trend turning points."""
         klines = self.get_klines(symbol, interval, limit=period + 50).get("list", [])
-        if len(klines) < period: return {"error": "Insufficient data"}
+        if len(klines) < period:
+            return {"error": "Insufficient data"}
         prices = [(float(k[2]) + float(k[3])) / 2 for k in reversed(klines)]
         # Normalize prices to -1, 1
         mx, mn = max(prices[-period:]), min(prices[-period:])
+
         def fisher(p):
             val = 0.66 * ((p - mn) / (mx - mn) - 0.5) if mx != mn else 0
             return 0.5 * math.log((1 + val) / (1 - val)) if abs(val) < 1 else 0
-        f_list = [fisher(p) for p in prices[-period:]]
-        return {"fisher": round(f_list[-1], 4), "signal": "Bullish" if f_list[-1] > 0 else "Bearish"}
 
-    def calculate_fractal_dimension(self, symbol: str, interval: str = "60", period: int = 30) -> dict:
+        f_list = [fisher(p) for p in prices[-period:]]
+        return {
+            "fisher": round(f_list[-1], 4),
+            "signal": "Bullish" if f_list[-1] > 0 else "Bearish",
+        }
+
+    def calculate_fractal_dimension(
+        self, symbol: str, interval: str = "60", period: int = 30
+    ) -> dict:
         """Calculates Fractal Dimension (Hurst Exponent proxy) for market efficiency."""
         klines = self.get_klines(symbol, interval, limit=period).get("list", [])
         highs = [float(k[2]) for k in klines]
         lows = [float(k[3]) for k in klines]
         rng = max(highs) - min(lows)
-        sum_dist = sum(abs(float(klines[i][4]) - float(klines[i-1][4])) for i in range(1, len(klines)))
+        sum_dist = sum(
+            abs(float(klines[i][4]) - float(klines[i - 1][4]))
+            for i in range(1, len(klines))
+        )
         dimension = math.log(sum_dist / rng) / math.log(period) if rng > 0 else 1.5
-        return {"dimension": round(dimension, 4), "state": "Trending" if dimension < 1.4 else "Ranging"}
+        return {
+            "dimension": round(dimension, 4),
+            "state": "Trending" if dimension < 1.4 else "Ranging",
+        }
 
-    def calculate_supertrend(self, symbol: str, interval: str = "60", period: int = 10, multiplier: float = 3.0) -> dict:
+    def calculate_supertrend(
+        self,
+        symbol: str,
+        interval: str = "60",
+        period: int = 10,
+        multiplier: float = 3.0,
+    ) -> dict:
         """Calculates SuperTrend indicator."""
         atr = self.calculate_atr(symbol, interval, period).get("atr", 0)
         ticker = self.get_ticker(symbol).get("list", [{}])[0]
         price = float(ticker.get("lastPrice", 0))
         upper = price + (multiplier * atr)
         lower = price - (multiplier * atr)
-        return {"upper": round(upper, 4), "lower": round(lower, 4), "trend": "Up" if price > lower else "Down"}
+        return {
+            "upper": round(upper, 4),
+            "lower": round(lower, 4),
+            "trend": "Up" if price > lower else "Down",
+        }
 
-    def calculate_choppiness_index(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
+    def calculate_choppiness_index(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
         """Calculates Choppiness Index (0-100). >61 is ranging, <38 is trending."""
         klines = self.get_klines(symbol, interval, limit=period).get("list", [])
-        if len(klines) < period: return {"status": "error", "msg": "Insufficient data"}
-        atr_sum = sum(max(float(k[2])-float(k[3]), abs(float(k[2])-float(klines[i-1][4])), abs(float(k[3])-float(klines[i-1][4]))) for i, k in enumerate(klines) if i > 0)
+        if len(klines) < period:
+            return {"status": "error", "msg": "Insufficient data"}
+        atr_sum = sum(
+            max(
+                float(k[2]) - float(k[3]),
+                abs(float(k[2]) - float(klines[i - 1][4])),
+                abs(float(k[3]) - float(klines[i - 1][4])),
+            )
+            for i, k in enumerate(klines)
+            if i > 0
+        )
         hi, lo = max(float(k[2]) for k in klines), min(float(k[3]) for k in klines)
-        
+
         # Fix 46: Price Volatility Guard on Choppiness Math
         hi_lo_diff = hi - lo
-        chop = 100 * math.log10(atr_sum / hi_lo_diff) / math.log10(period) if hi_lo_diff > 1e-9 else 50.0
+        chop = (
+            100 * math.log10(atr_sum / hi_lo_diff) / math.log10(period)
+            if hi_lo_diff > 1e-9
+            else 50.0
+        )
         return {"chop": round(chop, 2)}
 
-    def calculate_volume_rsi(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
+    def calculate_volume_rsi(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
         """Calculates RSI based on Volume instead of Price."""
         klines = self.get_klines(symbol, interval, limit=period + 1).get("list", [])
         vols = [float(k[5]) for k in reversed(klines)]
-        deltas = [vols[i] - vols[i-1] for i in range(1, len(vols))]
+        deltas = [vols[i] - vols[i - 1] for i in range(1, len(vols))]
         ups = sum(d for d in deltas if d > 0) / period
         downs = abs(sum(d for d in deltas if d < 0)) / period
         rs = ups / downs if downs != 0 else 100
@@ -3545,38 +4466,59 @@ class BybitRealm:
         vwap = self.calculate_vwap(symbol, interval).get("vwap", 0)
         price = float(self.get_ticker(symbol).get("list", [{}])[0].get("lastPrice", 0))
         div = (price - vwap) / vwap * 100 if vwap != 0 else 0
-        return {"divergence_pct": round(div, 4), "state": "Overbought" if div > 2 else "Oversold" if div < -2 else "Neutral"}
+        return {
+            "divergence_pct": round(div, 4),
+            "state": "Overbought" if div > 2 else "Oversold" if div < -2 else "Neutral",
+        }
 
     def detect_absorption_zones(self, symbol: str, depth: int = 100) -> dict:
         """Detects price levels where aggressive orders are being absorbed by limit orders."""
         ob = self.get_orderbook(symbol, limit=depth).get("result", {})
-        trades = self.get_recent_trades(symbol, limit=100).get("result", {}).get("list", [])
+        trades = (
+            self.get_recent_trades(symbol, limit=100).get("result", {}).get("list", [])
+        )
         # Simplified: Check if high volume trades happen without moving best price
-        return {"absorption_detected": len(trades) > 50, "note": "Requires live stream for high precision"}
+        return {
+            "absorption_detected": len(trades) > 50,
+            "note": "Requires live stream for high precision",
+        }
 
     def whale_shadowing_detector(self, symbol: str) -> dict:
         """Finds unusually large limit orders (Whales) in the book."""
         res = self.get_orderbook(symbol, limit=200).get("result", {})
+
         def find_whales(levels):
             vols = [float(q) for _, q in levels]
             avg = sum(vols) / len(vols) if vols else 1
             return [{"p": p, "v": q} for p, q in levels if float(q) > avg * 15]
-        return {"bid_whales": find_whales(res.get("b", [])), "ask_whales": find_whales(res.get("a", []))}
+
+        return {
+            "bid_whales": find_whales(res.get("b", [])),
+            "ask_whales": find_whales(res.get("a", [])),
+        }
 
     def liquidity_hunt_analyzer(self, symbol: str) -> dict:
         """Identifies clusters of stop-loss liquidity below recent lows / above highs."""
         klines = self.get_klines(symbol, "15", limit=50).get("list", [])
         highs = [float(k[2]) for k in klines]
         lows = [float(k[3]) for k in klines]
-        return {"liquidity_high": max(highs), "liquidity_low": min(lows), "hunt_bias": "Short" if highs[-1] > max(highs[:-1]) else "Long"}
+        return {
+            "liquidity_high": max(highs),
+            "liquidity_low": min(lows),
+            "hunt_bias": "Short" if highs[-1] > max(highs[:-1]) else "Long",
+        }
 
     def calculate_market_efficiency_ratio(self, symbol: str, period: int = 20) -> dict:
         """Kaufman Efficiency Ratio. 1.0 is perfectly efficient/trending, 0.0 is noise."""
         klines = self.get_klines(symbol, "60", limit=period).get("list", [])
-        if not klines or len(klines) < period: return {"status": "error", "msg": "Insufficient data"}
+        if not klines or len(klines) < period:
+            return {"status": "error", "msg": "Insufficient data"}
         net_chg = abs(float(klines[-1][4]) - float(klines[0][4]))
-        noise = sum(abs(float(klines[i][4]) - float(klines[i-1][4])) for i in range(1, len(klines)))
-        
+        noise = sum(
+            abs(float(klines[i][4]) - float(klines[i - 1][4]))
+            for i in range(1, len(klines))
+        )
+
         # Fix 28: Noise Guard for Kaufman Efficiency Ratio
         er = net_chg / noise if noise > 0 else 1.0
         return {"efficiency_ratio": round(er, 4)}
@@ -3586,20 +4528,36 @@ class BybitRealm:
         adx = self.calculate_adx(symbol).get("adx", 0)
         rsi = self.calculate_rsi(symbol).get("rsi", 50)
         chop = self.calculate_choppiness_index(symbol).get("chop", 50)
-        score = (adx + (100-chop) + abs(rsi-50)*2) / 3
-        return {"tsi_score": round(score, 2), "regime": "Strong" if score > 60 else "Weak"}
+        score = (adx + (100 - chop) + abs(rsi - 50) * 2) / 3
+        return {
+            "tsi_score": round(score, 2),
+            "regime": "Strong" if score > 60 else "Weak",
+        }
 
     def get_session_volume_profile(self, symbol: str) -> dict:
         """Calculates volume profile for the current daily session."""
         return self.calculate_volume_profile(symbol, interval="60", limit=24)
 
-    def generate_twap_orders(self, symbol: str, side: str, total_qty: float, duration_minutes: int, intervals: int = 10) -> dict:
+    def generate_twap_orders(
+        self,
+        symbol: str,
+        side: str,
+        total_qty: float,
+        duration_minutes: int,
+        intervals: int = 10,
+    ) -> dict:
         """Generates parameters for a Time-Weighted Average Price execution."""
         qty_per = total_qty / intervals
         delay = (duration_minutes * 60) / intervals
-        return {"qty_per_interval": round(qty_per, 4), "interval_seconds": round(delay, 2), "total_intervals": intervals}
+        return {
+            "qty_per_interval": round(qty_per, 4),
+            "interval_seconds": round(delay, 2),
+            "total_intervals": intervals,
+        }
 
-    def generate_pv_orders(self, symbol: str, side: str, target_qty: float, volume_pct: float = 0.05) -> dict:
+    def generate_pv_orders(
+        self, symbol: str, side: str, target_qty: float, volume_pct: float = 0.05
+    ) -> dict:
         """Generates order sizing based on Percentage of Volume strategy."""
         ticker = self.get_ticker(symbol).get("list", [{}])[0]
         v24 = float(ticker.get("volume24h", 0))
@@ -3607,76 +4565,109 @@ class BybitRealm:
         suggested_qty = hourly_v * volume_pct
         return {"suggested_interval_qty": round(min(suggested_qty, target_qty), 4)}
 
-    def dynamic_trailing_stop_atr(self, symbol: str, side: str, entry_price: float, atr_mult: float = 2.0) -> dict:
+    def dynamic_trailing_stop_atr(
+        self, symbol: str, side: str, entry_price: float, atr_mult: float = 2.0
+    ) -> dict:
         """Calculates a trailing stop distance that tightens as volatility decreases."""
         atr = self.calculate_atr(symbol, "15").get("atr", 0)
         dist = atr * atr_mult
         stop = entry_price - dist if side == "Buy" else entry_price + dist
         return {"trailing_stop_price": round(stop, 4), "distance_usdt": round(dist, 4)}
 
-    def calculate_range_breakout_levels(self, symbol: str, lookback_bars: int = 20) -> dict:
+    def calculate_range_breakout_levels(
+        self, symbol: str, lookback_bars: int = 20
+    ) -> dict:
         """Finds support/resistance of the recent N-bar range."""
         klines = self.get_klines(symbol, "15", limit=lookback_bars).get("list", [])
         hi = max(float(k[2]) for k in klines)
         lo = min(float(k[3]) for k in klines)
-        return {"range_high": hi, "range_low": lo, "midpoint": round((hi+lo)/2, 4)}
+        return {"range_high": hi, "range_low": lo, "midpoint": round((hi + lo) / 2, 4)}
 
     def volatility_scaler(self, base_qty: float, symbol: str) -> dict:
         """Scales position size inversely to volatility (Kelly-lite)."""
         regime = self.get_market_regime(symbol).get("metrics", {})
         vol = regime.get("volatility_pct", 1.0)
         scaler = 1.0 / (vol + 0.1)
-        return {"scaled_qty": round(base_qty * scaler, 4), "vol_multiplier": round(scaler, 2)}
+        return {
+            "scaled_qty": round(base_qty * scaler, 4),
+            "vol_multiplier": round(scaler, 2),
+        }
 
     def funding_arbitrage_calc(self, symbol: str, qty: float) -> dict:
         """Calculates potential hourly profit from holding a position for funding."""
         rate = float(self.get_ticker(symbol).get("list", [{}])[0].get("fundingRate", 0))
         price = float(self.get_ticker(symbol).get("list", [{}])[0].get("lastPrice", 0))
         hourly = (qty * price) * rate
-        return {"hourly_funding_usdt": round(hourly, 4), "daily_est": round(hourly * 24, 2)}
+        return {
+            "hourly_funding_usdt": round(hourly, 4),
+            "daily_est": round(hourly * 24, 2),
+        }
 
     def get_micro_momentum_score(self, symbol: str) -> dict:
         """High-speed momentum check using recent 1m klines."""
         k = self.get_klines(symbol, "1", limit=5).get("list", [])
         closes = [float(x[4]) for x in k]
-        m = (closes[-1] - closes[0]) / closes[0] * 10000 # pips
+        m = (closes[-1] - closes[0]) / closes[0] * 10000  # pips
         return {"momentum_bps": round(m, 2), "direction": "Up" if m > 0 else "Down"}
 
     def get_orderbook_velocity(self, symbol: str) -> dict:
         """Calculates the speed of orderbook updates (requires live context)."""
-        return {"velocity_score": random.randint(1, 100), "note": "Proxy for high-frequency activity"}
+        return {
+            "velocity_score": random.randint(1, 100),
+            "note": "Proxy for high-frequency activity",
+        }
 
-    def calculate_mfi(self, symbol: str, interval: str = "60", period: int = 14) -> dict:
+    def calculate_mfi(
+        self, symbol: str, interval: str = "60", period: int = 14
+    ) -> dict:
         """Calculates Money Flow Index."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 1).get("list", [])
-        data = [{"h": float(k[2]), "l": float(k[3]), "c": float(k[4]), "v": float(k[5])} for k in reversed(klines)]
-        
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 1
+        ).get("list", [])
+        data = [
+            {"h": float(k[2]), "l": float(k[3]), "c": float(k[4]), "v": float(k[5])}
+            for k in reversed(klines)
+        ]
+
         tp = [(d["h"] + d["l"] + d["c"]) / 3 for d in data]
         mf = [t * d["v"] for t, d in zip(tp, data)]
-        
-        pos_mf = sum(m for m, prev in zip(mf[1:], tp) if tp[tp.index(prev)+1] > prev)
-        neg_mf = sum(abs(m) for m, prev in zip(mf[1:], tp) if tp[tp.index(prev)+1] < prev)
-        
+
+        pos_mf = sum(m for m, prev in zip(mf[1:], tp) if tp[tp.index(prev) + 1] > prev)
+        neg_mf = sum(
+            abs(m) for m, prev in zip(mf[1:], tp) if tp[tp.index(prev) + 1] < prev
+        )
+
         mfi = 100 - (100 / (1 + (pos_mf / neg_mf))) if neg_mf != 0 else 100
         return {"status": "ok", "mfi": round(mfi, 2)}
 
-    def calculate_volatility_bands(self, symbol: str, interval: str = "60", period: int = 20, multiplier: float = 2.0) -> dict:
+    def calculate_volatility_bands(
+        self,
+        symbol: str,
+        interval: str = "60",
+        period: int = 20,
+        multiplier: float = 2.0,
+    ) -> dict:
         """Calculates ATR-based volatility bands around EMA."""
         ema = self.calculate_ema(symbol, interval, period).get("ema", 0)
         atr = self.calculate_atr(symbol, interval, 14).get("atr", 0)
         return {
             "upper": round(ema + (atr * multiplier), 4),
             "middle": round(ema, 4),
-            "lower": round(ema - (atr * multiplier), 4)
+            "lower": round(ema - (atr * multiplier), 4),
         }
 
     def get_funding_prediction(self, symbol: str) -> dict:
         """Predicts next funding rate based on current premium and trend."""
         history = self.get_funding_rate(symbol, limit=3).get("list", [])
-        if not history: return {"error": "No history"}
+        if not history:
+            return {"error": "No history"}
         rates = [float(h["fundingRate"]) for h in history]
         avg = sum(rates) / len(rates)
-        return {"current": rates[0], "predicted_next": round(rates[0] + (rates[0] - rates[1]), 6), "avg_recent": round(avg, 6)}
+        return {
+            "current": rates[0],
+            "predicted_next": round(rates[0] + (rates[0] - rates[1]), 6),
+            "avg_recent": round(avg, 6),
+        }
 
     def get_market_imbalance_score(self, symbol: str, depth: int = 50) -> dict:
         """Calculates a normalized imbalance score (-1 to 1) from orderbook."""
@@ -3684,54 +4675,111 @@ class BybitRealm:
         bids = sum(float(q) for _, q in res.get("result", {}).get("b", []))
         asks = sum(float(q) for _, q in res.get("result", {}).get("a", []))
         score = (bids - asks) / (bids + asks) if (bids + asks) > 0 else 0
-        return {"score": round(score, 4), "bias": "Bullish" if score > 0.1 else "Bearish" if score < -0.1 else "Neutral"}
+        return {
+            "score": round(score, 4),
+            "bias": "Bullish"
+            if score > 0.1
+            else "Bearish"
+            if score < -0.1
+            else "Neutral",
+        }
 
-    def calculate_correlation_score(self, symbol_a: str, symbol_b: str, interval: str = "60") -> dict:
+    def calculate_correlation_score(
+        self, symbol_a: str, symbol_b: str, interval: str = "60"
+    ) -> dict:
         """Calculates Pearson correlation between two symbols."""
         k1 = self.get_klines(symbol_a, interval, limit=50).get("list", [])
         k2 = self.get_klines(symbol_b, interval, limit=50).get("list", [])
         c1 = [float(k[4]) for k in reversed(k1)]
         c2 = [float(k[4]) for k in reversed(k2)]
-        if len(c1) != len(c2): return {"error": "Mismatched data"}
+        if len(c1) != len(c2):
+            return {"error": "Mismatched data"}
+
         def corr(x, y):
-            mx, my = sum(x)/len(x), sum(y)/len(y)
-            num = sum((a-mx)*(b-my) for a,b in zip(x,y))
-            den = (sum((a-mx)**2 for a in x) * sum((b-my)**2 for b in y))**0.5
-            return num/den if den != 0 else 0
+            mx, my = sum(x) / len(x), sum(y) / len(y)
+            num = sum((a - mx) * (b - my) for a, b in zip(x, y))
+            den = (sum((a - mx) ** 2 for a in x) * sum((b - my) ** 2 for b in y)) ** 0.5
+            return num / den if den != 0 else 0
+
         return {"correlation": round(corr(c1, c2), 4)}
 
-    def calculate_position_sizing_atr(self, symbol: str, risk_usdt: float, interval: str = "60") -> dict:
+    def calculate_position_sizing_atr(
+        self, symbol: str, risk_usdt: float, interval: str = "60"
+    ) -> dict:
         """Calculates qty based on ATR-based stop distance."""
         atr = self.calculate_atr(symbol, interval).get("atr", 0)
         ticker = self.get_ticker(symbol).get("list", [{}])[0]
         price = float(ticker.get("lastPrice", 0))
-        if atr == 0 or price == 0: return {"error": "Invalid data"}
+        if atr == 0 or price == 0:
+            return {"error": "Invalid data"}
         stop_dist = atr * 2
         qty = risk_usdt / stop_dist
-        return {"qty": round(qty, 4), "notional": round(qty * price, 2), "stop_dist": round(stop_dist, 4)}
+        return {
+            "qty": round(qty, 4),
+            "notional": round(qty * price, 2),
+            "stop_dist": round(stop_dist, 4),
+        }
 
-    def generate_grid_orders(self, symbol: str, range_low: float, range_high: float, grids: int, qty_per_grid: float, side: str = "Both") -> dict:
+    def generate_grid_orders(
+        self,
+        symbol: str,
+        range_low: float,
+        range_high: float,
+        grids: int,
+        qty_per_grid: float,
+        side: str = "Both",
+    ) -> dict:
         """Generates parameters for a grid strategy."""
         step = (range_high - range_low) / (grids - 1)
         orders = []
         for i in range(grids):
             price = range_low + (i * step)
-            if side in ["Buy", "Both"]: orders.append({"symbol": symbol, "side": "Buy", "price": price, "qty": qty_per_grid})
-            if side in ["Sell", "Both"]: orders.append({"symbol": symbol, "side": "Sell", "price": price, "qty": qty_per_grid})
+            if side in ["Buy", "Both"]:
+                orders.append(
+                    {
+                        "symbol": symbol,
+                        "side": "Buy",
+                        "price": price,
+                        "qty": qty_per_grid,
+                    }
+                )
+            if side in ["Sell", "Both"]:
+                orders.append(
+                    {
+                        "symbol": symbol,
+                        "side": "Sell",
+                        "price": price,
+                        "qty": qty_per_grid,
+                    }
+                )
         return {"orders": orders, "step": round(step, 4)}
 
-    def amend_batch_tp_sl(self, symbol: str, category: str = "linear", tp: float = None, sl: float = None) -> dict:
+    def amend_batch_tp_sl(
+        self, symbol: str, category: str = "linear", tp: float = None, sl: float = None
+    ) -> dict:
         """Amends TP/SL for all open orders of a symbol."""
         orders = self.get_open_orders(symbol, category).get("list", [])
         results = []
         for o in orders:
-            results.append(self.amend_order(symbol, order_id=o["orderId"], take_profit=tp, stop_loss=sl, category=category))
+            results.append(
+                self.amend_order(
+                    symbol,
+                    order_id=o["orderId"],
+                    take_profit=tp,
+                    stop_loss=sl,
+                    category=category,
+                )
+            )
         return {"results": results}
 
     def get_adl_info(self, symbol: str, category: str = "linear") -> dict:
         """Checks Auto-Deleverage rank for current positions."""
         pos = self.get_positions(category, symbol).get("list", [])
-        return {"adl_ranks": [{"symbol": p["symbol"], "rank": p.get("adlRank", 0)} for p in pos]}
+        return {
+            "adl_ranks": [
+                {"symbol": p["symbol"], "rank": p.get("adlRank", 0)} for p in pos
+            ]
+        }
 
     def get_risk_exposure(self) -> dict:
         """Calculates total account exposure and margin usage."""
@@ -3742,12 +4790,16 @@ class BybitRealm:
         return {
             "total_exposure": round(total_notional, 2),
             "leverage_effective": round(total_notional / equity, 2),
-            "margin_usage_pct": round(float(balance.get("totalMarginBalance", 0)) / equity * 100, 2)
+            "margin_usage_pct": round(
+                float(balance.get("totalMarginBalance", 0)) / equity * 100, 2
+            ),
         }
 
-    def smart_breakeven(self, symbol: str, buffer_pct: float = 0.0, category: str = "linear") -> dict:
+    def smart_breakeven(
+        self, symbol: str, buffer_pct: float = 0.0, category: str = "linear"
+    ) -> dict:
         """Adjusts SL to breakeven + round-trip fees + optional buffer.
-        
+
         Queries actual fee rates from the API so the breakeven price always
         covers the real cost of the trade rather than a hardcoded guess.
         """
@@ -3773,64 +4825,100 @@ class BybitRealm:
             be_price = entry * (1 - round_trip_rate)
 
         return self.set_trading_stop(
-            symbol, stop_loss=float(self._format_price(symbol, be_price)), category=category
+            symbol,
+            stop_loss=float(self._format_price(symbol, be_price)),
+            category=category,
         )
 
-    def calculate_williams_r(self, symbol: str, interval: str = "15", period: int = 14) -> dict:
+    def calculate_williams_r(
+        self, symbol: str, interval: str = "15", period: int = 14
+    ) -> dict:
         """Calculates Williams %R."""
-        klines = self.get_klines(symbol=symbol, interval=interval, limit=period + 1).get("list", [])
+        klines = self.get_klines(
+            symbol=symbol, interval=interval, limit=period + 1
+        ).get("list", [])
         highs = [float(k[2]) for k in reversed(klines)]
         lows = [float(k[3]) for k in reversed(klines)]
         close = float(klines[0][4])
-        
+
         h_max = max(highs[-period:])
         l_min = min(lows[-period:])
-        
+
         wr = (h_max - close) / (h_max - l_min) * -100 if h_max != l_min else 0
         return {"status": "ok", "williams_r": round(wr, 2)}
 
     # ══════════════════════════════════════════════════════════════════════════
     # MICROSTRUCTURAL & EXECUTION ENHANCEMENTS
     # ══════════════════════════════════════════════════════════════════════════
-    def cancel_order_safe(self, symbol: str, order_id: Optional[str] = None, category: str = "linear") -> dict:
+    def cancel_order_safe(
+        self, symbol: str, order_id: Optional[str] = None, category: str = "linear"
+    ) -> dict:
         """Fix 1: Prevents rapid re-submission by scaling cancel delay with volatility."""
         regime_res = self.get_market_regime(symbol, category=category)
         vol = regime_res.get("metrics", {}).get("volatility_pct", 1.0)
-        
-        # Scale safety sleep up to 250ms based on historical price volatility 
+
+        # Scale safety sleep up to 250ms based on historical price volatility
         if vol > 1.5:
             time.sleep(min(0.250, vol * 0.1))
-            
+
         return self.cancel_order(symbol=symbol, order_id=order_id, category=category)
 
-    def place_adaptive_limit_order(self, symbol: str, side: str, qty: float, target_price: float, category: str = "linear") -> dict:
+    def place_adaptive_limit_order(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        target_price: float,
+        category: str = "linear",
+    ) -> dict:
         """Fix 2: Automatically switches from PostOnly to GTC if spread is extremely tight."""
-        ob_res = self.get_orderbook(symbol, limit=1, category=category).get("result", {})
+        ob_res = self.get_orderbook(symbol, limit=1, category=category).get(
+            "result", {}
+        )
         bids = ob_res.get("b", [])
         asks = ob_res.get("a", [])
         if not bids or not asks:
-            return self.place_order(symbol=symbol, side=side, qty=qty, price=target_price, order_type="Limit", category=category)
-            
+            return self.place_order(
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                price=target_price,
+                order_type="Limit",
+                category=category,
+            )
+
         best_bid, best_ask = float(bids[0][0]), float(asks[0][0])
         spread_pct = (best_ask - best_bid) / best_bid * 100
-        
+
         # If spread is less than maker-taker fee difference (approx 0.03%), use direct Limit
         time_in_force = "PostOnly" if spread_pct > 0.03 else "GTC"
         return self.place_order(
-            symbol=symbol, side=side, qty=qty, price=target_price, 
-            order_type="Limit", time_in_force=time_in_force, category=category
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            price=target_price,
+            order_type="Limit",
+            time_in_force=time_in_force,
+            category=category,
         )
 
-    def calculate_funding_adjusted_target(self, symbol: str, entry_price: float, side: str, position_size: float) -> float:
+    def calculate_funding_adjusted_target(
+        self, symbol: str, entry_price: float, side: str, position_size: float
+    ) -> float:
         """Fix 3: Adjusts target profit to offset upcoming funding fee accrual."""
         ticker_resp = self.get_ticker(symbol)
-        ticker_data = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))[0]
+        ticker_data = ticker_resp.get(
+            "list", ticker_resp.get("result", {}).get("list", [{}])
+        )[0]
         funding_rate = float(ticker_data.get("fundingRate", 0))
         next_funding_time = float(ticker_data.get("nextFundingTime", 0)) / 1000
         time_to_funding = next_funding_time - time.time()
-        
+
         # If within 30 minutes of funding and holding a position that pays the fee
-        if 0 < time_to_funding < 1800 and ((side == "Buy" and funding_rate > 0) or (side == "Sell" and funding_rate < 0)):
+        if 0 < time_to_funding < 1800 and (
+            (side == "Buy" and funding_rate > 0)
+            or (side == "Sell" and funding_rate < 0)
+        ):
             fee_cost = abs(position_size * entry_price * funding_rate)
             # Shift target price to offset expected funding loss
             shift = fee_cost / position_size
@@ -3840,35 +4928,48 @@ class BybitRealm:
     def warm_http_pool(self, symbols: List[str], category: str = "linear"):
         """Fix 4: Warms up the HTTP socket pool to reduce first-trade latency."""
         threads = []
+
         def ping_endpoint(sym):
-            try: self.get_ticker(sym, category=category)
-            except: pass
-                
+            try:
+                self.get_ticker(sym, category=category)
+            except:
+                pass
+
         for sym in symbols[:10]:
             t = threading.Thread(target=ping_endpoint, args=(sym,), daemon=True)
             t.start()
             threads.append(t)
-            
+
         for t in threads:
             t.join(timeout=1.0)
 
-    def generate_bb_adapted_tp_ladder(self, symbol: str, entry_price: float, side: str, qty: float) -> List[dict]:
+    def generate_bb_adapted_tp_ladder(
+        self, symbol: str, entry_price: float, side: str, qty: float
+    ) -> List[dict]:
         """Fix 5: Scales split take-profit target widths dynamically based on Bollinger Band expansion."""
         bb = self.calculate_bollinger_bands(symbol, interval="15", period=20)
         if bb.get("status") != "ok":
             return [{"price": entry_price * 1.01, "qty": qty}]
-            
-        width = (bb["upper"] - bb["lower"]) / bb["middle"] if bb.get("middle", 0) != 0 else 0.02
+
+        width = (
+            (bb["upper"] - bb["lower"]) / bb["middle"]
+            if bb.get("middle", 0) != 0
+            else 0.02
+        )
         steps = [0.25 * width, 0.5 * width, 1.0 * width]
-        
+
         orders = []
         qty_slice = qty / len(steps)
         for step in steps:
-            target_price = entry_price * (1 + step) if side == "Buy" else entry_price * (1 - step)
-            orders.append({
-                "price": float(self._format_price(symbol, target_price)),
-                "qty": float(self._format_qty(symbol, qty_slice))
-            })
+            target_price = (
+                entry_price * (1 + step) if side == "Buy" else entry_price * (1 - step)
+            )
+            orders.append(
+                {
+                    "price": float(self._format_price(symbol, target_price)),
+                    "qty": float(self._format_qty(symbol, qty_slice)),
+                }
+            )
         return orders
 
     def check_liquidity_sweep_and_wait(self, symbol: str, interval: str = "5") -> bool:
@@ -3876,24 +4977,31 @@ class BybitRealm:
         klines = self._get_klines_safely(symbol, interval, limit=2)
         if len(klines) < 2:
             return False
-            
+
         # Check if prior bar is a long-wicked candle (shadow > body * 3)
-        o, h, l, c = float(klines[0][1]), float(klines[0][2]), float(klines[0][3]), float(klines[0][4])
+        o, h, l, c = (
+            float(klines[0][1]),
+            float(klines[0][2]),
+            float(klines[0][3]),
+            float(klines[0][4]),
+        )
         body = abs(c - o)
         lower_wick = min(o, c) - l
-        
+
         if body > 0 and lower_wick > body * 3:
             # Pause execution to allow orderbook reconstitution
             time.sleep(1.5)
             return True
         return False
 
-    def get_slippage_optimized_qty(self, symbol: str, target_qty: float, side: str, expected_gain_pct: float) -> float:
+    def get_slippage_optimized_qty(
+        self, symbol: str, target_qty: float, side: str, expected_gain_pct: float
+    ) -> float:
         """Fix 7: Reduces quantity if estimated slippage exceeds 10% of predicted profit."""
         slip_res = self.estimate_slippage(symbol, target_qty, side)
         if "status" in slip_res and slip_res["status"] == "error":
             return target_qty
-            
+
         est_slip_pct = slip_res.get("slippage_pct", 0.0)
         if est_slip_pct >= (expected_gain_pct * 0.1):
             # Reduce quantity proportionally to lower transaction slippage
@@ -3906,7 +5014,7 @@ class BybitRealm:
         """Fix 8: Restricts entries if Cumulative Volume Delta (CVD) opposes price direction."""
         cvd_data = self.calculate_cvd_divergence(symbol)
         divergence = cvd_data.get("divergence", "NONE")
-        
+
         if action_side == "Buy" and divergence == "BEARISH_DIVERGENCE":
             return False  # Block buy: price is rising but aggressive selling volume is dominant
         if action_side == "Sell" and divergence == "BULLISH_DIVERGENCE":
@@ -3919,10 +5027,10 @@ class BybitRealm:
         bids, asks = ob_res.get("b", []), ob_res.get("a", [])
         if not bids or not asks:
             return False
-            
+
         best_bid, best_ask = float(bids[0][0]), float(asks[0][0])
         spread_ratio = (best_ask - best_bid) / best_bid
-        
+
         # Must clear double maker fee + buffer
         return spread_ratio > (maker_fee * 2.5)
 
@@ -3930,7 +5038,7 @@ class BybitRealm:
         """Fix 10: Prevents momentum entries if High Timeframe (4h) RSI is extreme."""
         # rsi_15m = self.calculate_rsi(symbol, "15").get("rsi", 50)
         rsi_4h = self.calculate_rsi(symbol, "240").get("rsi", 50)
-        
+
         if side == "Buy" and rsi_4h > 75:
             return False  # Do not buy if HTF is extremely overbought
         if side == "Sell" and rsi_4h < 25:
@@ -3946,13 +5054,13 @@ class BybitRealm:
         closes = [float(k[4]) for k in reversed(klines)]
         if len(closes) < 5:
             return "NEUTRAL"
-            
+
         # Kalman dynamic recursion parameters
         q_process_noise = 1e-4
         r_measurement_noise = 1e-2
         x_est = closes[0]
         p_err = 1.0
-        
+
         smoothed = []
         for measurement in closes:
             p_temp = p_err + q_process_noise
@@ -3960,7 +5068,7 @@ class BybitRealm:
             x_est = x_est + k_gain * (measurement - x_est)
             p_err = (1.0 - k_gain) * p_temp
             smoothed.append(x_est)
-            
+
         return "UP" if smoothed[-1] > smoothed[-2] else "DOWN"
 
     def get_volume_profile_poc_signal(self, symbol: str) -> str:
@@ -3968,14 +5076,16 @@ class BybitRealm:
         vp_res = self.calculate_volume_profile(symbol, interval="60", price_bins=20)
         if vp_res.get("status") == "error":
             return "NEUTRAL"
-            
+
         profile = vp_res.get("profile", {})
         poc_price = max(profile, key=profile.get)
-        
+
         ticker_resp = self.get_ticker(symbol)
-        ticker_data = ticker_resp.get("list", ticker_resp.get("result", {}).get("list", [{}]))[0]
+        ticker_data = ticker_resp.get(
+            "list", ticker_resp.get("result", {}).get("list", [{}])
+        )[0]
         last_price = float(ticker_data.get("lastPrice", 0))
-        
+
         # 0.5% breakout bounds from POC
         if last_price > poc_price * 1.005:
             return "BULLISH_BREAKOUT"
@@ -3987,7 +5097,7 @@ class BybitRealm:
         """Fix 13: Dynamic Hurst Exponent Strategy Router. Trend-Following vs Mean-Reversion."""
         hurst_res = self.calculate_hurst_approximation(symbol, interval="15")
         hurst = hurst_res.get("hurst", 0.5)
-        
+
         if hurst > 0.55:
             return "TREND_FOLLOWING_BREAKOUT"
         elif hurst < 0.45:
@@ -3998,7 +5108,7 @@ class BybitRealm:
         """Fix 14: ADX-Weighted Grid Order Spacing. Widens spacing when trend is strengthening."""
         adx_res = self.calculate_adx(symbol, interval="15")
         adx = adx_res.get("adx", 20.0)
-        
+
         # Scale grid spacing up to 3x wider when ADX trend strength is high
         multiplier = max(1.0, adx / 20.0)
         return base_pct * multiplier
@@ -4008,20 +5118,17 @@ class BybitRealm:
         bounds = self.get_value_area_bounds(symbol, interval="15", bins=20)
         if bounds.get("status") == "error":
             return {}
-            
+
         val = bounds["val"]
         vah = bounds["vah"]
-        return {
-            "buy_limit_support": val,
-            "sell_limit_resistance": vah
-        }
+        return {"buy_limit_support": val, "sell_limit_resistance": vah}
 
     def check_cmo_exhaustion(self, symbol: str) -> str:
         """Fix 16: Chande Momentum (CMO) Exhaustion Reversal Filter."""
         cmo_res = self.calculate_cmo(symbol, interval="15", period=14)
         if cmo_res.get("status") != "ok":
             return "NEUTRAL"
-            
+
         cmo = cmo_res["cmo"]
         if cmo > 50:
             return "EXHAUSTED_BUYERS"
@@ -4034,36 +5141,42 @@ class BybitRealm:
         bb = self.calculate_bollinger_bands(symbol, interval="15", period=20)
         atr_data = self.calculate_atr(symbol, interval="15", period=20)
         sma_data = self.calculate_sma(symbol, interval="15", period=20)
-        
-        if "error" in [bb.get("status"), atr_data.get("status"), sma_data.get("status")]:
+
+        if "error" in [
+            bb.get("status"),
+            atr_data.get("status"),
+            sma_data.get("status"),
+        ]:
             return False
-            
+
         atr = atr_data["atr"]
         sma = sma_data["sma"]
-        
+
         # Keltner Channel boundaries
         kc_upper = sma + (1.5 * atr)
         kc_lower = sma - (1.5 * atr)
-        
+
         # Check if Bollinger Bands are nested inside Keltner Channels
         return bb["upper"] < kc_upper and bb["lower"] > kc_lower
 
-    def calculate_trend_slope(self, symbol: str, interval: str = "60", length: int = 14) -> float:
+    def calculate_trend_slope(
+        self, symbol: str, interval: str = "60", length: int = 14
+    ) -> float:
         """Fix 18: Linear Regression Trend Slope Indicator. Confirms momentum velocity."""
         klines = self._get_klines_safely(symbol, interval, limit=length)
         closes = [float(k[4]) for k in reversed(klines)]
         if len(closes) < length:
             return 0.0
-            
+
         x = list(range(length))
         y = closes
-        
+
         mean_x = sum(x) / length
         mean_y = sum(y) / length
-        
+
         num = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(length))
         den = sum((x[i] - mean_x) ** 2 for i in range(length))
-        
+
         slope = num / den if den > 0 else 0.0
         return slope / mean_y * 100  # Normalize to % slope
 
@@ -4071,7 +5184,7 @@ class BybitRealm:
         """Fix 19: Kaufman Efficiency Ratio Sizer. Scales allocations down in noisy markets."""
         er_res = self.calculate_market_efficiency_ratio(symbol, period=20)
         er = er_res.get("efficiency_ratio", 0.5)
-        
+
         # Scale order quantity down to 20% of default if efficiency is very low (market noise)
         scaled_qty = default_qty * max(0.2, float(er))
         return float(self._format_qty(symbol, scaled_qty))
@@ -4080,14 +5193,14 @@ class BybitRealm:
         """Fix 20: Choppiness-Compensated Moving Average Cross. Dynamically speeds up or slows down MAs."""
         chop_res = self.calculate_choppiness_index(symbol, "15", 14)
         chop = chop_res.get("chop", 50.0)
-        
+
         # If market is choppy (> 61.8), increase moving average length to filter noise
         short_len = 10 if chop < 40.0 else 20
         long_len = 30 if chop < 40.0 else 60
-        
+
         ema_short = self.calculate_ema(symbol, "15", short_len).get("ema", 0)
         ema_long = self.calculate_ema(symbol, "15", long_len).get("ema", 0)
-        
+
         if ema_short > ema_long * 1.001:
             return "BUY"
         elif ema_short < ema_long * 0.999:
@@ -4103,9 +5216,9 @@ class BybitRealm:
         bal_data = bal_res.get("list", bal_res.get("result", {}).get("list", [{}]))[0]
         total_equity = float(bal_data.get("totalEquity", 1.0))
         initial = self.breaker.initial_equity
-        
+
         drawdown = (initial - total_equity) / initial * 100
-        
+
         if drawdown >= 4.0:
             # Tier 3: Panic Liquidation
             self.panic_close()
@@ -4118,19 +5231,21 @@ class BybitRealm:
             # Tier 1: Cancel open orders to limit risk
             self.cancel_all_orders(symbol=symbol)
             return {"status": "hedged", "tier": 1}
-            
+
         return {"status": "safe", "drawdown_pct": drawdown}
 
     def get_haircut_adjusted_available_balance(self) -> float:
         """Fix 22: Spot Asset Haircut Balance Guard. Protects against liquidation on alternative asset volatility."""
         bal_res = self.get_wallet_balance(account_type="UNIFIED")
-        balance_data = bal_res.get("list", bal_res.get("result", {}).get("list", [{}]))[0]
-        
+        balance_data = bal_res.get("list", bal_res.get("result", {}).get("list", [{}]))[
+            0
+        ]
+
         total_equity = 0.0
         for coin in balance_data.get("coin", []):
             usd_val = float(coin.get("usdValue", 0))
             coin_name = coin.get("coin", "")
-            
+
             # Risk haircuts: BTC 90%, ETH 85%, others 60%, Stablecoins 100%
             haircut = 1.0
             if coin_name in ["BTC", "WBTC"]:
@@ -4139,9 +5254,9 @@ class BybitRealm:
                 haircut = 0.85
             elif coin_name not in ["USDT", "USDC"]:
                 haircut = 0.60
-                
+
             total_equity += usd_val * haircut
-            
+
         return total_equity
 
     def monitor_and_scale_adl(self, symbol: str, category: str = "linear") -> dict:
@@ -4149,69 +5264,93 @@ class BybitRealm:
         adl_info = self.get_adl_info(symbol, category)
         # Assuming get_adl_info returns ranks in a specific way, standardizing check
         rank = int(adl_info.get("adlRank", 0))
-        
+
         if rank >= 4:
-            self.alert(f"ADL risk detected on {symbol}, executing 50% risk mitigation reduction.", "WARNING")
-            pos_res = self.get_positions(symbol=symbol, category=category).get("list", [])
+            self.alert(
+                f"ADL risk detected on {symbol}, executing 50% risk mitigation reduction.",
+                "WARNING",
+            )
+            pos_res = self.get_positions(symbol=symbol, category=category).get(
+                "list", []
+            )
             if pos_res:
                 current_size = float(pos_res[0].get("size", 0))
                 exit_side = "Sell" if pos_res[0]["side"] == "Buy" else "Buy"
                 reduction_qty = float(self._format_qty(symbol, current_size * 0.5))
                 return self.place_order(
-                    symbol=symbol, side=exit_side, qty=reduction_qty, 
-                    order_type="Market", reduce_only=True, category=category
+                    symbol=symbol,
+                    side=exit_side,
+                    qty=reduction_qty,
+                    order_type="Market",
+                    reduce_only=True,
+                    category=category,
                 )
         return {"status": "normal", "rank": rank}
 
-    def place_atr_bracketed_order(self, symbol: str, side: str, qty: float, price: float, category: str = "linear") -> dict:
+    def place_atr_bracketed_order(
+        self, symbol: str, side: str, qty: float, price: float, category: str = "linear"
+    ) -> dict:
         """Fix 24: ATR-Based Dynamic TP/SL Placement. Exits scale with volatility."""
         atr_val = self.calculate_atr(symbol, interval="15", period=14).get("atr", 0.0)
         if atr_val == 0:
-            return self.place_order(symbol=symbol, side=side, qty=qty, price=price, category=category)
-            
+            return self.place_order(
+                symbol=symbol, side=side, qty=qty, price=price, category=category
+            )
+
         # Standard 1.5x SL and 3.0x TP multiples
         tp_distance = atr_val * 3.0
         sl_distance = atr_val * 1.5
-        
+
         tp_price = price + tp_distance if side == "Buy" else price - tp_distance
         sl_price = price - sl_distance if side == "Buy" else price + sl_distance
-        
+
         return self.place_order(
-            symbol=symbol, side=side, qty=qty, price=price,
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            price=price,
             take_profit=float(self._format_price(symbol, tp_price)),
             stop_loss=float(self._format_price(symbol, sl_price)),
-            category=category
+            category=category,
         )
 
-    def apply_strict_breakeven_stop(self, symbol: str, category: str = "linear") -> dict:
+    def apply_strict_breakeven_stop(
+        self, symbol: str, category: str = "linear"
+    ) -> dict:
         """Fix 25: Fee-Accrual Breakeven Offset. Ensures all round-trip costs are covered."""
         pos_res = self.get_positions(symbol=symbol, category=category).get("list", [])
         if not pos_res:
             return {"status": "error", "msg": "No position found"}
-            
+
         pos = pos_res[0]
         entry = float(pos["avgPrice"])
         side = pos["side"]
-        
+
         # Query actual fee rates — use both legs for precise round-trip cost
         fee_resp = self.get_fee_rate(category=category, symbol=symbol)
         fee_data = fee_resp.get("list", [{}])[0]
         taker_fee = float(fee_data.get("takerFeeRate", 0.00055))
         maker_fee = float(fee_data.get("makerFeeRate", 0.0002))
-        
+
         # Round-trip: taker entry + maker exit (conservative: taker exit adds more buffer)
         round_trip_rate = taker_fee + maker_fee
         offset = entry * round_trip_rate
         be_price = entry + offset if side == "Buy" else entry - offset
-        
-        return self.set_trading_stop(symbol=symbol, stop_loss=float(self._format_price(symbol, be_price)), category=category)
 
-    def check_orderbook_wall_obstruction(self, symbol: str, side: str, depth_limit: int = 10) -> bool:
+        return self.set_trading_stop(
+            symbol=symbol,
+            stop_loss=float(self._format_price(symbol, be_price)),
+            category=category,
+        )
+
+    def check_orderbook_wall_obstruction(
+        self, symbol: str, side: str, depth_limit: int = 10
+    ) -> bool:
         """Fix 26: Bid-Ask Depth Ratio Order Guard. Aborts if heavy resistance wall is detected."""
         anal = self.get_orderbook_analysis(symbol, depth=depth_limit)
         bid_vol = float(anal.get("bid_vol", 1))
         ask_vol = float(anal.get("ask_vol", 1))
-        
+
         # Abort if target entry is blocked by heavy order book wall resistance
         if side == "Buy" and ask_vol > bid_vol * 2.5:
             return False
@@ -4219,25 +5358,35 @@ class BybitRealm:
             return False
         return True
 
-    def place_liquidity_hunt_limit(self, symbol: str, qty: float, category: str = "linear") -> dict:
+    def place_liquidity_hunt_limit(
+        self, symbol: str, qty: float, category: str = "linear"
+    ) -> dict:
         """Fix 27: Liquidity Sweep Hunt Detector. Buys directly under recent swing-low pools."""
         range_data = self.calculate_range_breakout_levels(symbol, lookback_bars=30)
         support = float(range_data.get("range_low", 0.0))
-        
+
         # Place limit buy 0.2% under support to catch trailing stop sweeps
         hunt_price = support * 0.998
         return self.place_order(
-            symbol=symbol, side="Buy", qty=qty, price=hunt_price, 
-            order_type="Limit", time_in_force="PostOnly", category=category
+            symbol=symbol,
+            side="Buy",
+            qty=qty,
+            price=hunt_price,
+            order_type="Limit",
+            time_in_force="PostOnly",
+            category=category,
         )
 
     def monitor_cross_margin_liquidation(self) -> dict:
         """Fix 28: Cross-Margin Portfolio Liquidation Distance Monitor. Scales down on risk."""
         buffer_pct = self.estimate_cross_liq_buffer()
-        
+
         # If margin buffer falls below critical 15% threshold
         if buffer_pct < 15.0:
-            self.alert("Portfolio margin buffer critical. Executing safety scaling on largest position.", "CRITICAL")
+            self.alert(
+                "Portfolio margin buffer critical. Executing safety scaling on largest position.",
+                "CRITICAL",
+            )
             positions = self.get_positions(category="linear").get("list", [])
             if positions:
                 # Find largest open position by size
@@ -4246,21 +5395,32 @@ class BybitRealm:
                 qty = float(largest["size"]) * 0.25  # 25% Reduction
                 exit_side = "Sell" if largest["side"] == "Buy" else "Buy"
                 return self.place_order(
-                    symbol=symbol, side=exit_side, qty=float(self._format_qty(symbol, qty)), 
-                    order_type="Market", reduce_only=True
+                    symbol=symbol,
+                    side=exit_side,
+                    qty=float(self._format_qty(symbol, qty)),
+                    order_type="Market",
+                    reduce_only=True,
                 )
         return {"status": "safe", "buffer_pct": buffer_pct}
 
-    def set_leverage_validated(self, symbol: str, requested_leverage: int, category: str = "linear") -> dict:
+    def set_leverage_validated(
+        self, symbol: str, requested_leverage: int, category: str = "linear"
+    ) -> dict:
         """Fix 29: Leverage Range Validation Guard. Prevents API errors from out-of-bounds leverage."""
         if not self.verify_leverage_tier(symbol, requested_leverage, category):
             # Fallback to maximum allowable leverage tier
             info = self._get_symbol_info(symbol, category)
-            if not info: return self.set_leverage(symbol, requested_leverage, category)
-            max_leverage = int(float(info.get("leverageFilter", {}).get("maxLeverage", 1)))
+            if not info:
+                return self.set_leverage(symbol, requested_leverage, category)
+            max_leverage = int(
+                float(info.get("leverageFilter", {}).get("maxLeverage", 1))
+            )
             requested_leverage = max_leverage
-            self.alert(f"Requested leverage outside safety bounds. Defaulting to maximum: {max_leverage}", "WARNING")
-            
+            self.alert(
+                f"Requested leverage outside safety bounds. Defaulting to maximum: {max_leverage}",
+                "WARNING",
+            )
+
         return self.set_leverage(symbol, requested_leverage, category)
 
     def check_portfolio_risk_allowance(self, candidate_notional: float) -> bool:
@@ -4271,65 +5431,90 @@ class BybitRealm:
             size = float(pos.get("size", 0))
             price = float(pos.get("markPrice", 0))
             current_portfolio_notional += size * price
-            
-        max_portfolio_exposure = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_USDT", "5000.0"))
-        return (current_portfolio_notional + candidate_notional) <= max_portfolio_exposure
 
-    def place_split_exit_bracket(self, symbol: str, side: str, qty: float, entry_price: float) -> dict:
+        max_portfolio_exposure = float(
+            os.getenv("MAX_PORTFOLIO_EXPOSURE_USDT", "5000.0")
+        )
+        return (
+            current_portfolio_notional + candidate_notional
+        ) <= max_portfolio_exposure
+
+    def place_split_exit_bracket(
+        self, symbol: str, side: str, qty: float, entry_price: float
+    ) -> dict:
         """Fix 31: Multi-Bracket TP/SL Placer. Divided into three tranches."""
         # 3-step exit tranches
         tp_mults = [1.01, 1.025, 1.04] if side == "Buy" else [0.99, 0.975, 0.96]
         sl_mults = [0.99, 0.985, 0.98] if side == "Buy" else [1.01, 1.015, 1.02]
-        
+
         slices = [qty * 0.33, qty * 0.33, qty * 0.34]
         results = []
-        
+
         for tp_m, sl_m, sz in zip(tp_mults, sl_mults, slices):
             tp_p = float(self._format_price(symbol, entry_price * tp_m))
             sl_p = float(self._format_price(symbol, entry_price * sl_m))
             sz_f = float(self._format_qty(symbol, sz))
-            
+
             res = self.place_order(
-                symbol=symbol, side="Sell" if side == "Buy" else "Buy", qty=sz_f,
-                take_profit=tp_p, stop_loss=sl_p, reduce_only=True, category="linear"
+                symbol=symbol,
+                side="Sell" if side == "Buy" else "Buy",
+                qty=sz_f,
+                take_profit=tp_p,
+                stop_loss=sl_p,
+                reduce_only=True,
+                category="linear",
             )
             results.append(res)
         return {"status": "ok", "brackets": results}
 
-    def update_dynamic_profit_trail(self, symbol: str, category: str = "linear") -> dict:
+    def update_dynamic_profit_trail(
+        self, symbol: str, category: str = "linear"
+    ) -> dict:
         """Fix 32: Auto-Trailing Stop Loss Adjustment. Shifts SL to lock-in profit milestones."""
         pos_res = self.get_positions(symbol=symbol, category=category).get("list", [])
         if not pos_res:
             return {"status": "none"}
-            
+
         pos = pos_res[0]
         # pnl = float(pos.get("unrealisedPnl", 0))
         entry = float(pos.get("avgPrice", 0))
         mark = float(pos.get("markPrice", 0))
         side = pos["side"]
-        
+
         # If position has generated more than 2% in profit, trail SL to lock in +1% profit
         if side == "Buy" and (mark - entry) / entry > 0.02:
             target_sl = entry * 1.01
-            return self.set_trading_stop(symbol=symbol, stop_loss=float(self._format_price(symbol, target_sl)), category=category)
+            return self.set_trading_stop(
+                symbol=symbol,
+                stop_loss=float(self._format_price(symbol, target_sl)),
+                category=category,
+            )
         elif side == "Sell" and (entry - mark) / entry > 0.02:
             target_sl = entry * 0.99
-            return self.set_trading_stop(symbol=symbol, stop_loss=float(self._format_price(symbol, target_sl)), category=category)
-            
+            return self.set_trading_stop(
+                symbol=symbol,
+                stop_loss=float(self._format_price(symbol, target_sl)),
+                category=category,
+            )
+
         return {"status": "awaiting_threshold"}
 
-    def check_spot_capital_and_scale(self, symbol: str, qty: float, price: float) -> float:
+    def check_spot_capital_and_scale(
+        self, symbol: str, qty: float, price: float
+    ) -> float:
         """Fix 33: Spot Order Capital Sizer Guard. Auto-scales orders to wallet limits."""
         bal = self.get_wallet_balance(account_type="UNIFIED")
         balance_data = bal.get("list", bal.get("result", {}).get("list", [{}]))[0]
         coins = balance_data.get("coin", [])
-        
+
         usdt_bal = 0.0
         for coin in coins:
             if coin["coin"] == "USDT":
-                usdt_bal = float(coin.get("availableToWithdraw", coin.get("walletBalance", 0)))
+                usdt_bal = float(
+                    coin.get("availableToWithdraw", coin.get("walletBalance", 0))
+                )
                 break
-                
+
         required = qty * price
         if required > usdt_bal:
             # Scale down quantity to utilize 95% of available balance
@@ -4341,10 +5526,13 @@ class BybitRealm:
         """Fix 34: Correlation Spread Arbitrage Margin Protection. Halts on correlation breakdown."""
         corr_data = self.calculate_correlation_score(symbol_a, symbol_b, interval="60")
         correlation = float(corr_data.get("correlation", 1.0))
-        
+
         # Terminate spread entry if historical correlation weakens below critical baseline
         if correlation < 0.70:
-            self.alert(f"Correlation weakening between {symbol_a} and {symbol_b}: {correlation:.2f}. Halting hedge entry.", "WARNING")
+            self.alert(
+                f"Correlation weakening between {symbol_a} and {symbol_b}: {correlation:.2f}. Halting hedge entry.",
+                "WARNING",
+            )
             return False
         return True
 
@@ -4353,13 +5541,14 @@ class BybitRealm:
         # 21:55 to 22:15 UTC (typical daily session reset on major crypto exchanges)
         now = datetime.now(timezone.utc)
         current_time = now.time()
-        
+
         start_block = datetime.strptime("21:55", "%H:%M").time()
         end_block = datetime.strptime("22:15", "%H:%M").time()
-        
+
         if start_block <= current_time <= end_block:
             return True
         return False
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # REAL-TIME WEBSOCKET MANAGER
@@ -4372,18 +5561,26 @@ class BybitWebSocketManager:
         try:
             import websockets
         except ImportError:
-            raise ImportError("Websocket features require the 'websockets' library. Install it using 'pip install websockets'.")
+            raise ImportError(
+                "Websocket features require the 'websockets' library. Install it using 'pip install websockets'."
+            )
 
     async def stream_orderbook(self, symbol: str, duration: int = 10):
         try:
-            import asyncio, websockets
+            import asyncio
+
+            import websockets
+
             async with websockets.connect(self.public_url) as ws:
-                await ws.send(json.dumps({"op": "subscribe", "args": [f"orderbook.1.{symbol}"]}))
+                await ws.send(
+                    json.dumps({"op": "subscribe", "args": [f"orderbook.1.{symbol}"]})
+                )
                 end_time = time.time() + duration
                 while time.time() < end_time:
                     msg = await ws.recv()
                     data = json.loads(msg)
-                    if "data" in data: print(data["data"])
+                    if "data" in data:
+                        print(data["data"])
                     await asyncio.sleep(0.01)
         except ImportError:
             print("Error: 'websockets' library not installed.")
@@ -4415,7 +5612,7 @@ def run(**kwargs) -> dict:
         return {"status": "error", "msg": "Missing required 'action' argument"}
 
     bot = BybitRealm()
-    
+
     symbol = kwargs.get("symbol")
     side = kwargs.get("side")
     # Fix 30: Strictly Cast Numeric Types on CLI Entry Point
@@ -4426,18 +5623,28 @@ def run(**kwargs) -> dict:
     interval = kwargs.get("interval", "60")
     limit = int(kwargs.get("limit", 50))
     stop_loss = float(kwargs.get("stop_loss", 0)) if kwargs.get("stop_loss") else None
-    take_profit = float(kwargs.get("take_profit", 0)) if kwargs.get("take_profit") else None
-    trailing_stop = float(kwargs.get("trailing_stop", 0)) if kwargs.get("trailing_stop") else None
+    take_profit = (
+        float(kwargs.get("take_profit", 0)) if kwargs.get("take_profit") else None
+    )
+    trailing_stop = (
+        float(kwargs.get("trailing_stop", 0)) if kwargs.get("trailing_stop") else None
+    )
     reduce_only = str(kwargs.get("reduce_only", "false")).lower() == "true"
     time_in_force = kwargs.get("time_in_force", "GTC")
     client_oid = kwargs.get("client_oid")
-    trigger_price = float(kwargs.get("trigger_price", 0)) if kwargs.get("trigger_price") else None
+    trigger_price = (
+        float(kwargs.get("trigger_price", 0)) if kwargs.get("trigger_price") else None
+    )
     trigger_by = kwargs.get("trigger_by")
     tp_order_type = kwargs.get("tp_order_type")
     sl_order_type = kwargs.get("sl_order_type")
     tp_pct = float(kwargs.get("tp_pct", 0)) if kwargs.get("tp_pct") else None
     sl_pct = float(kwargs.get("sl_pct", 0)) if kwargs.get("sl_pct") else None
-    trailing_stop_pct = float(kwargs.get("trailing_stop_pct", 0)) if kwargs.get("trailing_stop_pct") else None
+    trailing_stop_pct = (
+        float(kwargs.get("trailing_stop_pct", 0))
+        if kwargs.get("trailing_stop_pct")
+        else None
+    )
     leverage = int(kwargs.get("leverage", 1)) if kwargs.get("leverage") else None
     order_id = kwargs.get("order_id")
     depth = int(kwargs.get("depth", 50))
@@ -4450,86 +5657,128 @@ def run(**kwargs) -> dict:
     orders = kwargs.get("orders")
     journal_symbol = kwargs.get("journal_symbol")
     journal_limit = int(kwargs.get("journal_limit", 50))
-    
+
     # Fix 48: Safely Parse Dynamic Kwargs
-    for key in ["qty", "price", "stop_loss", "take_profit", "trigger_price", "tp_pct", "sl_pct", "trailing_stop_pct"]:
+    for key in [
+        "qty",
+        "price",
+        "stop_loss",
+        "take_profit",
+        "trigger_price",
+        "tp_pct",
+        "sl_pct",
+        "trailing_stop_pct",
+    ]:
         if key in kwargs and kwargs[key] is not None:
             try:
                 kwargs[key] = float(kwargs[key])
             except:
                 pass
 
-    logger.info(f"Executing Action: {action} | Symbol: {symbol} | Qty: {qty} | Price: {price}")
+    logger.info(
+        f"Executing Action: {action} | Symbol: {symbol} | Qty: {qty} | Price: {price}"
+    )
 
     try:
         # ── Health ───────────────────────────────────────────────────────────
         if action == "health_check":
             return bot.health_check()
-        
+
         # ... (rest of action mappings)
-        
+
         elif action == "calculate_volatility_bands":
-            return bot.calculate_volatility_bands(symbol, interval, int(kwargs.get("period", 20)), float(kwargs.get("multiplier", 2.0)))
-        
+            return bot.calculate_volatility_bands(
+                symbol,
+                interval,
+                int(kwargs.get("period", 20)),
+                float(kwargs.get("multiplier", 2.0)),
+            )
+
         elif action == "get_funding_prediction":
             return bot.get_funding_prediction(symbol)
-            
+
         elif action == "get_market_imbalance_score":
             return bot.get_market_imbalance_score(symbol, depth)
-            
+
         elif action == "calculate_correlation_score":
-            return bot.calculate_correlation_score(kwargs.get("symbol_a"), kwargs.get("symbol_b"), interval)
-            
+            return bot.calculate_correlation_score(
+                kwargs.get("symbol_a"), kwargs.get("symbol_b"), interval
+            )
+
         elif action == "calculate_position_sizing_atr":
-            return bot.calculate_position_sizing_atr(symbol, float(kwargs.get("risk_usdt", 10.0)), interval)
-            
+            return bot.calculate_position_sizing_atr(
+                symbol, float(kwargs.get("risk_usdt", 10.0)), interval
+            )
+
         elif action == "generate_grid_orders":
-            return bot.generate_grid_orders(symbol, float(kwargs.get("range_low")), float(kwargs.get("range_high")), int(kwargs.get("grids", 5)), float(kwargs.get("qty_per_grid", 0.1)), kwargs.get("side", "Both"))
-            
+            return bot.generate_grid_orders(
+                symbol,
+                float(kwargs.get("range_low")),
+                float(kwargs.get("range_high")),
+                int(kwargs.get("grids", 5)),
+                float(kwargs.get("qty_per_grid", 0.1)),
+                kwargs.get("side", "Both"),
+            )
+
         elif action == "amend_batch_tp_sl":
             return bot.amend_batch_tp_sl(symbol, category, take_profit, stop_loss)
-            
+
         elif action == "get_adl_info":
             return bot.get_adl_info(symbol, category)
-            
+
         elif action == "get_risk_exposure":
             return bot.get_risk_exposure()
-            
+
         elif action == "smart_breakeven":
             return bot.smart_breakeven(symbol, float(kwargs.get("buffer_pct", 0.001)))
-            
+
         elif action == "split_iceberg_order":
-            return bot.split_iceberg_order(symbol, side, float(kwargs.get("total_qty")), int(kwargs.get("slices", 5)), price, order_type)
-            
+            return bot.split_iceberg_order(
+                symbol,
+                side,
+                float(kwargs.get("total_qty")),
+                int(kwargs.get("slices", 5)),
+                price,
+                order_type,
+            )
+
         elif action == "estimate_slippage":
             return bot.estimate_slippage(symbol, qty, side)
-            
+
         elif action == "detect_spoofing_attempts":
             return bot.detect_spoofing_attempts(symbol)
-            
+
         elif action == "calculate_vwap_bands":
-            return bot.calculate_vwap_bands(symbol, interval, limit, float(kwargs.get("stdev", 2.0)))
-            
+            return bot.calculate_vwap_bands(
+                symbol, interval, limit, float(kwargs.get("stdev", 2.0))
+            )
+
         elif action == "get_trend_divergence":
             return bot.get_trend_divergence(symbol, interval)
-            
+
         elif action == "calculate_profit_factor":
             return bot.calculate_profit_factor()
-            
+
         elif action == "auto_scale_position":
             return bot.auto_scale_position(symbol, float(kwargs.get("add_pct", 0.5)))
-            
+
         elif action == "calculate_market_impact":
             return bot.calculate_market_impact(symbol, qty)
-            
+
         elif action == "get_tick_value":
             return bot.get_tick_value(symbol)
-            
+
         elif action == "get_trading_session_report":
             return bot.get_trading_session_report()
-            
+
         elif action == "generate_microprofit_sequence":
-            return bot.generate_microprofit_sequence(symbol, side, float(kwargs.get("entry")), float(kwargs.get("target_profit_usdt")), int(kwargs.get("steps", 3)))
+            return bot.generate_microprofit_sequence(
+                symbol,
+                side,
+                float(kwargs.get("entry")),
+                float(kwargs.get("target_profit_usdt")),
+                int(kwargs.get("steps", 3)),
+            )
 
         # ── Leverage & Margin ──────────────────────────────────────────────
         elif action == "set_margin_mode":
@@ -4537,101 +5786,193 @@ def run(**kwargs) -> dict:
                 symbol=symbol,
                 is_isolated=str(kwargs.get("is_isolated", "false")).lower() == "true",
                 leverage=int(kwargs.get("leverage", 1)),
-                category=category
+                category=category,
             )
-        
+
         elif action == "set_leverage_safe":
-            return bot.set_leverage_safe(symbol, int(kwargs.get("leverage", 1)), category)
-            
+            return bot.set_leverage_safe(
+                symbol, int(kwargs.get("leverage", 1)), category
+            )
+
         elif action == "get_mmr":
             return {"status": "ok", "mmr": bot.get_mmr(symbol, category)}
-            
+
         elif action == "get_position_margin_ratio":
-            return {"status": "ok", "margin_ratio": bot.get_position_margin_ratio(symbol, category)}
-            
+            return {
+                "status": "ok",
+                "margin_ratio": bot.get_position_margin_ratio(symbol, category),
+            }
+
         elif action == "calculate_collateral_value":
-            return {"status": "ok", "collateral_value": bot.calculate_collateral_value()}
-            
+            return {
+                "status": "ok",
+                "collateral_value": bot.calculate_collateral_value(),
+            }
+
         elif action == "check_adl_risk":
             return {"status": "ok", "high_risk_positions": bot.check_adl_risk(category)}
-            
+
         elif action == "check_available_margin":
-            return {"status": "ok", "is_sufficient": bot.check_available_margin_for_trade(float(kwargs.get("cost_usdt", 0)))}
+            return {
+                "status": "ok",
+                "is_sufficient": bot.check_available_margin_for_trade(
+                    float(kwargs.get("cost_usdt", 0))
+                ),
+            }
 
         # ── Risk Math ──────────────────────────────────────────────────────
         elif action == "calc_isolated_long_liq":
-            return {"status": "ok", "liq_price": bot.calc_isolated_long_liq(float(kwargs["entry"]), float(kwargs["leverage"]), float(kwargs.get("mmr", 0.005)))}
-            
+            return {
+                "status": "ok",
+                "liq_price": bot.calc_isolated_long_liq(
+                    float(kwargs["entry"]),
+                    float(kwargs["leverage"]),
+                    float(kwargs.get("mmr", 0.005)),
+                ),
+            }
+
         elif action == "calc_isolated_short_liq":
-            return {"status": "ok", "liq_price": bot.calc_isolated_short_liq(float(kwargs["entry"]), float(kwargs["leverage"]), float(kwargs.get("mmr", 0.005)))}
-            
+            return {
+                "status": "ok",
+                "liq_price": bot.calc_isolated_short_liq(
+                    float(kwargs["entry"]),
+                    float(kwargs["leverage"]),
+                    float(kwargs.get("mmr", 0.005)),
+                ),
+            }
+
         elif action == "estimate_cross_liq_buffer":
             return {"status": "ok", "buffer_pct": bot.estimate_cross_liq_buffer()}
-            
+
         elif action == "calculate_risk_position_size":
-            return {"status": "ok", "qty": bot.calculate_risk_position_size(float(kwargs["entry"]), float(kwargs["stop_loss"]), float(kwargs.get("risk_usdt", 10.0)))}
-            
+            return {
+                "status": "ok",
+                "qty": bot.calculate_risk_position_size(
+                    float(kwargs["entry"]),
+                    float(kwargs["stop_loss"]),
+                    float(kwargs.get("risk_usdt", 10.0)),
+                ),
+            }
+
         elif action == "calculate_atr_sized_position":
-            return {"status": "ok", "qty": bot.calculate_atr_sized_position(symbol, float(kwargs.get("risk_usdt", 10.0)), interval)}
-            
+            return {
+                "status": "ok",
+                "qty": bot.calculate_atr_sized_position(
+                    symbol, float(kwargs.get("risk_usdt", 10.0)), interval
+                ),
+            }
+
         elif action == "monitor_hard_drawdown":
-            return {"status": "ok", "is_safe": bot.monitor_hard_drawdown(float(kwargs.get("max_loss_pct", 5.0)))}
-            
+            return {
+                "status": "ok",
+                "is_safe": bot.monitor_hard_drawdown(
+                    float(kwargs.get("max_loss_pct", 5.0))
+                ),
+            }
+
         elif action == "get_volatility_adjusted_slippage":
-            return {"status": "ok", "adjusted_slippage": bot.get_volatility_adjusted_slippage(symbol, float(qty), side)}
+            return {
+                "status": "ok",
+                "adjusted_slippage": bot.get_volatility_adjusted_slippage(
+                    symbol, float(qty), side
+                ),
+            }
 
         # ── Execution Logic ───────────────────────────────────────────────
         elif action == "execute_iceberg":
-            return bot.execute_iceberg(symbol, side, float(qty), int(kwargs.get("slices", 5)), float(price), int(kwargs.get("interval_sec", 10)))
-            
+            return bot.execute_iceberg(
+                symbol,
+                side,
+                float(qty),
+                int(kwargs.get("slices", 5)),
+                float(price),
+                int(kwargs.get("interval_sec", 10)),
+            )
+
         elif action == "execute_twap":
             # This is async, we call it via asyncio.run for CLI simplicity
-            asyncio.run(bot.execute_twap_async(symbol, side, float(qty), int(kwargs.get("intervals", 5)), int(kwargs.get("duration_sec", 60))))
+            asyncio.run(
+                bot.execute_twap_async(
+                    symbol,
+                    side,
+                    float(qty),
+                    int(kwargs.get("intervals", 5)),
+                    int(kwargs.get("duration_sec", 60)),
+                )
+            )
             return {"status": "ok", "msg": "TWAP complete"}
-            
+
         elif action == "chase_maker_limit":
-            return bot.chase_maker_limit(symbol, side, float(qty), int(kwargs.get("timeout_sec", 60)))
-            
+            return bot.chase_maker_limit(
+                symbol, side, float(qty), int(kwargs.get("timeout_sec", 60))
+            )
+
         elif action == "generate_exponential_grid":
-            return {"status": "ok", "orders": bot.generate_exponential_grid(symbol, side, float(price), int(kwargs.get("steps", 5)), float(kwargs.get("multiplier", 1.5)), float(kwargs.get("step_pct", 1.0)))}
-            
+            return {
+                "status": "ok",
+                "orders": bot.generate_exponential_grid(
+                    symbol,
+                    side,
+                    float(price),
+                    int(kwargs.get("steps", 5)),
+                    float(kwargs.get("multiplier", 1.5)),
+                    float(kwargs.get("step_pct", 1.0)),
+                ),
+            }
+
         elif action == "apply_atr_trailing_stop":
-            return bot.apply_atr_trailing_stop(symbol, side, int(kwargs.get("atr_period", 14)))
-            
+            return bot.apply_atr_trailing_stop(
+                symbol, side, int(kwargs.get("atr_period", 14))
+            )
+
         elif action == "create_tp_bracket":
-            return bot.create_tp_bracket(symbol, side, float(price), float(qty), category)
-            
+            return bot.create_tp_bracket(
+                symbol, side, float(price), float(qty), category
+            )
+
         elif action == "set_fee_guaranteed_breakeven":
-            return bot.set_fee_guaranteed_breakeven(symbol, float(price), side, float(kwargs.get("fee_rate", 0.00055)))
-            
+            return bot.set_fee_guaranteed_breakeven(
+                symbol, float(price), side, float(kwargs.get("fee_rate", 0.00055))
+            )
+
         elif action == "place_safe_stop_market":
-            return bot.place_safe_stop_market(symbol, side, float(qty), float(kwargs["trigger_price"]))
-            
+            return bot.place_safe_stop_market(
+                symbol, side, float(qty), float(kwargs["trigger_price"])
+            )
+
         elif action == "place_ioc_order":
             return bot.place_ioc_order(symbol, side, float(qty), float(price))
 
         # ── Indicators & Regimes ─────────────────────────────────────────
         elif action == "get_volatility_regime":
             return {"status": "ok", "regime": bot.get_volatility_regime(symbol)}
-            
+
         elif action == "calculate_cmo":
             return bot.calculate_cmo(symbol, interval, int(kwargs.get("period", 14)))
-            
+
         elif action == "calculate_vol_weighted_bb_width":
-            return bot.calculate_vol_weighted_bb_width(symbol, interval, int(kwargs.get("period", 20)))
-            
+            return bot.calculate_vol_weighted_bb_width(
+                symbol, interval, int(kwargs.get("period", 20))
+            )
+
         elif action == "calculate_half_trend":
-            return bot.calculate_half_trend(symbol, interval, int(kwargs.get("amplitude", 2)))
-            
+            return bot.calculate_half_trend(
+                symbol, interval, int(kwargs.get("amplitude", 2))
+            )
+
         elif action == "calculate_cvd_divergence":
-            return bot.calculate_cvd_divergence(symbol, int(kwargs.get("trade_limit", 200)))
-            
+            return bot.calculate_cvd_divergence(
+                symbol, int(kwargs.get("trade_limit", 200))
+            )
+
         elif action == "get_value_area_bounds":
-            return bot.get_value_area_bounds(symbol, interval, int(kwargs.get("bins", 20)))
-            
+            return bot.get_value_area_bounds(
+                symbol, interval, int(kwargs.get("bins", 20))
+            )
+
         elif action == "calculate_hurst_approximation":
             return bot.calculate_hurst_approximation(symbol, interval)
-            
+
         elif action == "get_supertrend_stop":
             return {"status": "ok", "stop_level": bot.get_supertrend_stop(symbol, side)}
 
@@ -4639,97 +5980,148 @@ def run(**kwargs) -> dict:
         elif action == "export_journal_sqlite":
             bot.export_journal_to_sqlite(kwargs.get("db_path", "trades.db"))
             return {"status": "ok", "msg": "Journal exported to SQLite"}
-            
+
         elif action == "adjust_resting_orders":
-            return bot.adjust_resting_orders_drift(symbol, float(kwargs.get("max_drift_pct", 0.5)))
-            
+            return bot.adjust_resting_orders_drift(
+                symbol, float(kwargs.get("max_drift_pct", 0.5))
+            )
+
         elif action == "check_proxy_reconnect":
             return {"status": "ok", "is_connected": bot.check_reconnect_proxy()}
-            
+
         elif action == "check_funding_rate_impact":
-            return {"status": "ok", "high_impact": bot.check_funding_rate_impact(symbol, float(kwargs.get("threshold", 0.01)))}
-            
+            return {
+                "status": "ok",
+                "high_impact": bot.check_funding_rate_impact(
+                    symbol, float(kwargs.get("threshold", 0.01))
+                ),
+            }
+
         elif action == "get_spot_futures_basis":
-            return bot.get_spot_futures_basis(kwargs["symbol_spot"], kwargs["symbol_linear"])
-            
+            return bot.get_spot_futures_basis(
+                kwargs["symbol_spot"], kwargs["symbol_linear"]
+            )
+
         elif action == "get_cointegrated_spread":
             return bot.get_cointegrated_spread(kwargs["symbol_a"], kwargs["symbol_b"])
-            
+
         elif action == "calculate_short_squeeze_risk":
             return bot.calculate_short_squeeze_risk(symbol)
-            
+
         elif action == "get_scalper_signal":
-            return {"status": "ok", "signal": bot.get_scalper_signal(symbol, int(kwargs.get("limit_depth", 15)))}
-            
+            return {
+                "status": "ok",
+                "signal": bot.get_scalper_signal(
+                    symbol, int(kwargs.get("limit_depth", 15))
+                ),
+            }
+
         elif action == "get_vwap_cross_state":
             return {"status": "ok", "state": bot.get_vwap_cross_state(symbol, interval)}
-            
+
         elif action == "check_trend_confluence":
             return {"status": "ok", "confluence": bot.check_trend_confluence(symbol)}
-            
+
         elif action == "get_rebalance_params":
             # Expects target_allocations as JSON string or dict
             targets = kwargs.get("target_allocations")
-            if isinstance(targets, str): targets = json.loads(targets)
-            return {"status": "ok", "rebalance_orders": bot.get_rebalance_order_params(targets)}
+            if isinstance(targets, str):
+                targets = json.loads(targets)
+            return {
+                "status": "ok",
+                "rebalance_orders": bot.get_rebalance_order_params(targets),
+            }
 
         elif action == "calculate_fisher_transform":
-            return bot.calculate_fisher_transform(symbol, interval, int(kwargs.get("period", 10)))
-        
+            return bot.calculate_fisher_transform(
+                symbol, interval, int(kwargs.get("period", 10))
+            )
+
         elif action == "calculate_fractal_dimension":
-            return bot.calculate_fractal_dimension(symbol, interval, int(kwargs.get("period", 30)))
-            
+            return bot.calculate_fractal_dimension(
+                symbol, interval, int(kwargs.get("period", 30))
+            )
+
         elif action == "calculate_supertrend":
-            return bot.calculate_supertrend(symbol, interval, int(kwargs.get("period", 10)), float(kwargs.get("multiplier", 3.0)))
-            
+            return bot.calculate_supertrend(
+                symbol,
+                interval,
+                int(kwargs.get("period", 10)),
+                float(kwargs.get("multiplier", 3.0)),
+            )
+
         elif action == "calculate_choppiness_index":
-            return bot.calculate_choppiness_index(symbol, interval, int(kwargs.get("period", 14)))
-            
+            return bot.calculate_choppiness_index(
+                symbol, interval, int(kwargs.get("period", 14))
+            )
+
         elif action == "calculate_volume_rsi":
-            return bot.calculate_volume_rsi(symbol, interval, int(kwargs.get("period", 14)))
-            
+            return bot.calculate_volume_rsi(
+                symbol, interval, int(kwargs.get("period", 14))
+            )
+
         elif action == "get_vwap_divergence":
             return bot.get_vwap_divergence(symbol, interval)
-            
+
         elif action == "detect_absorption_zones":
             return bot.detect_absorption_zones(symbol, depth)
-            
+
         elif action == "whale_shadowing_detector":
             return bot.whale_shadowing_detector(symbol)
-            
+
         elif action == "liquidity_hunt_analyzer":
             return bot.liquidity_hunt_analyzer(symbol)
-            
+
         elif action == "calculate_market_efficiency_ratio":
-            return bot.calculate_market_efficiency_ratio(symbol, int(kwargs.get("period", 20)))
-            
+            return bot.calculate_market_efficiency_ratio(
+                symbol, int(kwargs.get("period", 20))
+            )
+
         elif action == "get_trend_strength_index":
             return bot.get_trend_strength_index(symbol)
-            
+
         elif action == "get_session_volume_profile":
             return bot.get_session_volume_profile(symbol)
-            
+
         elif action == "generate_twap_orders":
-            return bot.generate_twap_orders(symbol, side, float(kwargs.get("total_qty")), int(kwargs.get("duration_minutes")), int(kwargs.get("intervals", 10)))
-            
+            return bot.generate_twap_orders(
+                symbol,
+                side,
+                float(kwargs.get("total_qty")),
+                int(kwargs.get("duration_minutes")),
+                int(kwargs.get("intervals", 10)),
+            )
+
         elif action == "generate_pv_orders":
-            return bot.generate_pv_orders(symbol, side, float(kwargs.get("target_qty")), float(kwargs.get("volume_pct", 0.05)))
-            
+            return bot.generate_pv_orders(
+                symbol,
+                side,
+                float(kwargs.get("target_qty")),
+                float(kwargs.get("volume_pct", 0.05)),
+            )
+
         elif action == "dynamic_trailing_stop_atr":
-            return bot.dynamic_trailing_stop_atr(symbol, side, float(kwargs.get("entry_price")), float(kwargs.get("atr_mult", 2.0)))
-            
+            return bot.dynamic_trailing_stop_atr(
+                symbol,
+                side,
+                float(kwargs.get("entry_price")),
+                float(kwargs.get("atr_mult", 2.0)),
+            )
+
         elif action == "calculate_range_breakout_levels":
-            return bot.calculate_range_breakout_levels(symbol, int(kwargs.get("lookback_bars", 20)))
-            
+            return bot.calculate_range_breakout_levels(
+                symbol, int(kwargs.get("lookback_bars", 20))
+            )
+
         elif action == "volatility_scaler":
             return bot.volatility_scaler(float(kwargs.get("base_qty", 0.1)), symbol)
-            
+
         elif action == "funding_arbitrage_calc":
             return bot.funding_arbitrage_calc(symbol, float(kwargs.get("qty", 0.1)))
-            
+
         elif action == "get_micro_momentum_score":
             return bot.get_micro_momentum_score(symbol)
-            
+
         elif action == "get_orderbook_velocity":
             return bot.get_orderbook_velocity(symbol)
 
@@ -4751,25 +6143,25 @@ def run(**kwargs) -> dict:
             )
 
         elif action == "get_position_risk":
-            return bot.get_position_risk(
-                category=category, symbol=symbol
-            )
-        
+            return bot.get_position_risk(category=category, symbol=symbol)
+
         elif action == "panic_close":
             return bot.panic_close(category=category)
-        
+
         elif action == "bulk_update_tp_sl":
-            return bot.bulk_update_tp_sl(category=category, tp=take_profit, sl=stop_loss)
-            
+            return bot.bulk_update_tp_sl(
+                category=category, tp=take_profit, sl=stop_loss
+            )
+
         elif action == "check_balance":
             return bot.get_wallet_balance(account_type=account_type)
 
         elif action == "close_position":
             return bot.close_position(symbol=symbol, category=category)
-            
+
         elif action == "get_account_summary":
             return bot.get_account_summary()
-        
+
         elif action == "add_signal":
             return bot.add_signal(
                 symbol=symbol,
@@ -4778,114 +6170,182 @@ def run(**kwargs) -> dict:
                 tp=float(kwargs["tp"]),
                 sl=float(kwargs["sl"]),
                 confidence=float(kwargs["confidence"]),
-                reasoning=kwargs["reasoning"]
+                reasoning=kwargs["reasoning"],
             )
-            
+
         elif action == "get_signals":
             return bot.get_signals()
-        
+
         elif action == "send_open_positions_summary":
             return bot.get_open_positions_summary(category=category)
 
         elif action == "alert":
-            return {"status": "ok" if bot.alert(message=kwargs.get("message", "Test Alert"), level=kwargs.get("level", "INFO")) else "error"}
+            return {
+                "status": "ok"
+                if bot.alert(
+                    message=kwargs.get("message", "Test Alert"),
+                    level=kwargs.get("level", "INFO"),
+                )
+                else "error"
+            }
 
         elif action == "export_trade_history":
-            return bot.export_trade_history(symbol=symbol, filename=kwargs.get("filename", "trade_history.csv"))
-        
+            return bot.export_trade_history(
+                symbol=symbol, filename=kwargs.get("filename", "trade_history.csv")
+            )
+
         elif action == "set_tp_sl":
-            return bot.set_tp_sl(symbol=symbol, tp=take_profit, sl=stop_loss, category=category)
-        
+            return bot.set_tp_sl(
+                symbol=symbol, tp=take_profit, sl=stop_loss, category=category
+            )
+
         elif action == "calculate_rsi":
-            return bot.calculate_rsi(symbol=symbol, interval=interval, period=int(kwargs.get("period", 14)))
-            
+            return bot.calculate_rsi(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 14))
+            )
+
         elif action == "calculate_macd":
-            return bot.calculate_macd(symbol=symbol, interval=interval, fast=int(kwargs.get("fast", 12)), slow=int(kwargs.get("slow", 26)), signal=int(kwargs.get("signal", 9)))
-            
+            return bot.calculate_macd(
+                symbol=symbol,
+                interval=interval,
+                fast=int(kwargs.get("fast", 12)),
+                slow=int(kwargs.get("slow", 26)),
+                signal=int(kwargs.get("signal", 9)),
+            )
+
         elif action == "calculate_adx":
-            return bot.calculate_adx(symbol=symbol, interval=interval, period=int(kwargs.get("period", 14)))
-            
+            return bot.calculate_adx(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 14))
+            )
+
         elif action == "calculate_cci":
-            return bot.calculate_cci(symbol=symbol, interval=interval, period=int(kwargs.get("period", 20)))
-            
+            return bot.calculate_cci(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 20))
+            )
+
         elif action == "calculate_ichimoku":
-            return bot.calculate_ichimoku(symbol=symbol, interval=interval, tenkan=int(kwargs.get("tenkan", 9)), kijun=int(kwargs.get("kijun", 26)), senkou_b=int(kwargs.get("senkou_b", 52)))
-            
+            return bot.calculate_ichimoku(
+                symbol=symbol,
+                interval=interval,
+                tenkan=int(kwargs.get("tenkan", 9)),
+                kijun=int(kwargs.get("kijun", 26)),
+                senkou_b=int(kwargs.get("senkou_b", 52)),
+            )
+
         elif action == "calculate_sma":
-            return bot.calculate_sma(symbol=symbol, interval=interval, period=int(kwargs.get("period", 50)))
-            
+            return bot.calculate_sma(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 50))
+            )
+
         elif action == "calculate_ema":
-            return bot.calculate_ema(symbol=symbol, interval=interval, period=int(kwargs.get("period", 20)))
-            
+            return bot.calculate_ema(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 20))
+            )
+
         elif action == "calculate_bollinger_bands":
-            return bot.calculate_bollinger_bands(symbol=symbol, interval=interval, period=int(kwargs.get("period", 20)))
-            
+            return bot.calculate_bollinger_bands(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 20))
+            )
+
         elif action == "calculate_vwap":
             return bot.calculate_vwap(symbol=symbol, interval=interval)
-            
+
         elif action == "calculate_atr":
-            return bot.calculate_atr(symbol=symbol, interval=interval, period=int(kwargs.get("period", 14)))
-            
+            return bot.calculate_atr(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 14))
+            )
+
         elif action == "calculate_stochastic":
-            return bot.calculate_stochastic(symbol=symbol, interval=interval, period=int(kwargs.get("period", 14)), smooth_k=int(kwargs.get("smooth_k", 3)), smooth_d=int(kwargs.get("smooth_d", 3)))
-        
+            return bot.calculate_stochastic(
+                symbol=symbol,
+                interval=interval,
+                period=int(kwargs.get("period", 14)),
+                smooth_k=int(kwargs.get("smooth_k", 3)),
+                smooth_d=int(kwargs.get("smooth_d", 3)),
+            )
+
         elif action == "micro_scalp":
             return bot.micro_scalp(
                 symbol=symbol,
                 qty=float(kwargs.get("qty", 0.01)),
                 fee_rate=float(kwargs.get("fee_rate", 0.0005)),
                 target_profit=float(kwargs.get("target_profit", 0.05)),
-                category=category
+                category=category,
             )
-            
+
         elif action == "stream_orderbook":
             ws = BybitWebSocketManager(bot.config)
-            asyncio.run(ws.stream_orderbook(symbol=symbol, duration=int(kwargs.get("duration", 10))))
+            asyncio.run(
+                ws.stream_orderbook(
+                    symbol=symbol, duration=int(kwargs.get("duration", 10))
+                )
+            )
             return {"status": "ok", "msg": "Stream ended"}
-            
+
         elif action == "calculate_all_indicators":
             return bot.calculate_all_indicators(symbol=symbol, interval=interval)
-        
+
         elif action == "calculate_hma":
-            return bot.calculate_hma(symbol=symbol, interval=interval, period=int(kwargs.get("period", 20)))
-            
+            return bot.calculate_hma(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 20))
+            )
+
         elif action == "calculate_fractals":
             return bot.calculate_fractals(symbol=symbol, interval=interval)
-            
+
         elif action == "calculate_pivot_points":
             return bot.calculate_pivot_points(symbol=symbol, interval=interval)
-            
+
         elif action == "calculate_klinger":
-            return bot.calculate_klinger(symbol=symbol, interval=interval, fast=int(kwargs.get("fast", 34)), slow=int(kwargs.get("slow", 55)))
-            
+            return bot.calculate_klinger(
+                symbol=symbol,
+                interval=interval,
+                fast=int(kwargs.get("fast", 34)),
+                slow=int(kwargs.get("slow", 55)),
+            )
+
         elif action == "calculate_cmf":
-            return bot.calculate_cmf(symbol=symbol, interval=interval, period=int(kwargs.get("period", 20)))
-            
+            return bot.calculate_cmf(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 20))
+            )
+
         elif action == "calculate_adx_with_di":
-            return bot.calculate_adx_with_di(symbol=symbol, interval=interval, period=int(kwargs.get("period", 14)))
-            
+            return bot.calculate_adx_with_di(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 14))
+            )
+
         elif action == "calculate_elder_ray_index":
-            return bot.calculate_elder_ray_index(symbol=symbol, interval=interval, period=int(kwargs.get("period", 13)))
-            
+            return bot.calculate_elder_ray_index(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 13))
+            )
+
         elif action == "calculate_kst":
             return bot.calculate_kst(symbol=symbol, interval=interval)
-            
+
         elif action == "calculate_tema":
-            return bot.calculate_tema(symbol=symbol, interval=interval, period=int(kwargs.get("period", 20)))
-        
+            return bot.calculate_tema(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 20))
+            )
+
         elif action == "calculate_ehler_rsi":
-            return bot.calculate_ehler_rsi(symbol=symbol, interval=interval, period=int(kwargs.get("period", 14)))
-            
+            return bot.calculate_ehler_rsi(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 14))
+            )
+
         elif action == "calculate_ehler_stochastic":
-            return bot.calculate_ehler_stochastic(symbol=symbol, interval=interval, period=int(kwargs.get("period", 14)))
+            return bot.calculate_ehler_stochastic(
+                symbol=symbol, interval=interval, period=int(kwargs.get("period", 14))
+            )
         elif action == "scan_scalping_opportunities":
             return bot.scan_scalping_opportunities(symbol=symbol, interval=interval)
-        
+
         elif action == "get_pnl_summary":
             return bot.get_pnl_summary(days=int(kwargs.get("days", 7)))
 
         elif action == "update_trailing_stop":
-            return bot.update_trailing_stop(symbol=symbol, trailing_stop_pct=trailing_stop_pct, category=category)
+            return bot.update_trailing_stop(
+                symbol=symbol, trailing_stop_pct=trailing_stop_pct, category=category
+            )
 
         elif action == "check_risk_limit":
             return bot.check_risk_limit(symbol=symbol, qty=qty, price=price)
@@ -4907,7 +6367,11 @@ def run(**kwargs) -> dict:
             )
 
         elif action == "place_breakeven_order":
-            return bot.place_breakeven_order(symbol=symbol, fee_rate=float(kwargs.get("fee_rate", 0.0005)), category=category)
+            return bot.place_breakeven_order(
+                symbol=symbol,
+                fee_rate=float(kwargs.get("fee_rate", 0.0005)),
+                category=category,
+            )
 
         elif action == "set_position_mode":
             return bot.set_position_mode(
@@ -4917,18 +6381,17 @@ def run(**kwargs) -> dict:
             )
 
         elif action == "get_executions":
-            return bot.get_executions(
-                category=category, symbol=symbol, limit=limit
-            )
+            return bot.get_executions(category=category, symbol=symbol, limit=limit)
 
         elif action == "get_pnl_history":
-            return bot.get_pnl_history(
-                category=category, symbol=symbol, limit=limit
-            )
+            return bot.get_pnl_history(category=category, symbol=symbol, limit=limit)
 
         elif action == "get_affordable_symbols":
-            return {"status": "ok", "symbols": bot.get_affordable_symbols(float(kwargs.get("balance", 0)))}
-            
+            return {
+                "status": "ok",
+                "symbols": bot.get_affordable_symbols(float(kwargs.get("balance", 0))),
+            }
+
         elif action == "place_spot_with_triggers":
             return bot.place_spot_with_triggers(
                 symbol=symbol,
@@ -4936,7 +6399,7 @@ def run(**kwargs) -> dict:
                 qty=qty,
                 entry=price,
                 tp=float(kwargs["tp"]),
-                sl=float(kwargs["sl"])
+                sl=float(kwargs["sl"]),
             )
 
         # ── Orders ───────────────────────────────────────────────────────────
@@ -4948,7 +6411,7 @@ def run(**kwargs) -> dict:
                 target=float(kwargs.get("target", 0.05)),
                 entry=price if price > 0 else None,
                 execute=str(kwargs.get("execute", "false")).lower() == "true",
-                category=category
+                category=category,
             )
 
         elif action == "place_order":
@@ -4968,7 +6431,7 @@ def run(**kwargs) -> dict:
                 trigger_price=trigger_price,
                 trigger_by=trigger_by,
                 tp_order_type=tp_order_type,
-                sl_order_type=sl_order_type
+                sl_order_type=sl_order_type,
             )
 
         elif action == "place_stop_limit":
@@ -4979,7 +6442,7 @@ def run(**kwargs) -> dict:
                 price=float(kwargs["price"]),
                 trigger_price=float(kwargs["trigger_price"]),
                 trigger_by=kwargs.get("trigger_by", "LastPrice"),
-                category=category
+                category=category,
             )
 
         elif action == "place_stop_market":
@@ -4989,15 +6452,11 @@ def run(**kwargs) -> dict:
                 qty=qty,
                 trigger_price=float(kwargs["trigger_price"]),
                 trigger_by=kwargs.get("trigger_by", "LastPrice"),
-                category=category
+                category=category,
             )
 
         elif action == "place_spot_market":
-            return bot.place_spot_market(
-                symbol=symbol,
-                side=side,
-                qty=qty
-            )
+            return bot.place_spot_market(symbol=symbol, side=side, qty=qty)
 
         elif action == "place_smart_trade":
             return bot.place_smart_trade(
@@ -5032,19 +6491,13 @@ def run(**kwargs) -> dict:
             )
 
         elif action == "cancel_all_orders":
-            return bot.cancel_all_orders(
-                symbol=symbol, category=category
-            )
+            return bot.cancel_all_orders(symbol=symbol, category=category)
 
         elif action == "get_open_orders":
-            return bot.get_open_orders(
-                symbol=symbol, category=category, limit=limit
-            )
+            return bot.get_open_orders(symbol=symbol, category=category, limit=limit)
 
         elif action == "get_order_history":
-            return bot.get_order_history(
-                symbol=symbol, category=category, limit=limit
-            )
+            return bot.get_order_history(symbol=symbol, category=category, limit=limit)
 
         elif action == "batch_place_orders":
             if not orders:
@@ -5052,18 +6505,14 @@ def run(**kwargs) -> dict:
                     "status": "error",
                     "msg": "orders list is required for batch_place_orders",
                 }
-            return bot.batch_place_orders(
-                orders=orders, category=category
-            )
+            return bot.batch_place_orders(orders=orders, category=category)
 
         # ── Market Data ──────────────────────────────────────────────────────
         elif action == "get_ticker":
             return bot.get_ticker(symbol=symbol, category=category)
 
         elif action == "get_orderbook":
-            return bot.get_orderbook(
-                symbol=symbol, limit=limit, category=category
-            )
+            return bot.get_orderbook(symbol=symbol, limit=limit, category=category)
 
         elif action == "get_klines":
             return bot.get_klines(
@@ -5074,9 +6523,7 @@ def run(**kwargs) -> dict:
             )
 
         elif action == "get_recent_trades":
-            return bot.get_recent_trades(
-                symbol=symbol, limit=limit, category=category
-            )
+            return bot.get_recent_trades(symbol=symbol, limit=limit, category=category)
 
         elif action == "get_instruments_info":
             return bot.get_instruments_info(
@@ -5084,9 +6531,7 @@ def run(**kwargs) -> dict:
             )
 
         elif action == "get_funding_rate":
-            return bot.get_funding_rate(
-                symbol=symbol, category=category, limit=limit
-            )
+            return bot.get_funding_rate(symbol=symbol, category=category, limit=limit)
 
         elif action == "get_market_liquidations":
             return bot.get_market_liquidations(
@@ -5157,9 +6602,9 @@ def run(**kwargs) -> dict:
             )
 
         elif action == "calculate_market_depth_profile":
-            order_sizes_raw   = kwargs.get("order_sizes", "100,500,1000,5000")
+            order_sizes_raw = kwargs.get("order_sizes", "100,500,1000,5000")
             distance_pcts_raw = kwargs.get("distance_pcts", "0.1,0.25,0.5,1.0,2.0")
-            order_sizes_list  = [float(x) for x in str(order_sizes_raw).split(",")]
+            order_sizes_list = [float(x) for x in str(order_sizes_raw).split(",")]
             distance_pcts_list = [float(x) for x in str(distance_pcts_raw).split(",")]
             return bot.calculate_market_depth_profile(
                 symbol=symbol,
@@ -5167,23 +6612,25 @@ def run(**kwargs) -> dict:
                 order_sizes=order_sizes_list,
                 distance_pcts=distance_pcts_list,
             )
-        
+
         elif action == "calculate_sr_levels":
             return bot.calculate_sr_levels(
                 symbol=symbol,
                 top_n=int(kwargs.get("top_n", 7)),
-                vol_cut=float(kwargs.get("vol_cut", 0.4))
+                vol_cut=float(kwargs.get("vol_cut", 0.4)),
             )
-            
+
         elif action == "get_orderbook_analysis":
-            return bot.get_orderbook_analysis(symbol=symbol, depth=int(kwargs.get("depth", 50)))
-        
+            return bot.get_orderbook_analysis(
+                symbol=symbol, depth=int(kwargs.get("depth", 50))
+            )
+
         elif action == "calculate_target_pnl":
             return bot.calculate_target_pnl(
                 side=side,
                 entry_price=float(kwargs["entry_price"]),
                 qty=float(qty),
-                target_usdt=float(kwargs["target_usdt"])
+                target_usdt=float(kwargs["target_usdt"]),
             )
 
         elif action == "calculate_limit_micro_profit":
@@ -5191,22 +6638,22 @@ def run(**kwargs) -> dict:
                 entry_price=float(kwargs["entry_price"]),
                 limit_price=float(kwargs["limit_price"]),
                 side=side,
-                qty=float(qty)
+                qty=float(qty),
             )
         elif action == "calculate_support_resistance_levels":
             return bot.calculate_support_resistance_levels(
-                symbol=symbol, 
-                interval=interval, 
-                depth=int(kwargs.get("depth", 50)), 
-                wall_multiplier=float(kwargs.get("wall_multiplier", 3.0))
+                symbol=symbol,
+                interval=interval,
+                depth=int(kwargs.get("depth", 50)),
+                wall_multiplier=float(kwargs.get("wall_multiplier", 3.0)),
             )
 
         elif action == "calculate_fibonacci_levels":
             return bot.calculate_fibonacci_levels(
-                symbol=symbol, 
-                interval=interval, 
+                symbol=symbol,
+                interval=interval,
                 lookback=int(kwargs.get("lookback", 50)),
-                trend=kwargs.get("trend", "bullish")
+                trend=kwargs.get("trend", "bullish"),
             )
 
         elif action == "generate_market_depth_report":
@@ -5214,9 +6661,7 @@ def run(**kwargs) -> dict:
 
         elif action == "detect_high_confluence_levels":
             return bot.detect_high_confluence_levels(
-                symbol=symbol, 
-                interval=interval, 
-                depth=int(kwargs.get("depth", 50))
+                symbol=symbol, interval=interval, depth=int(kwargs.get("depth", 50))
             )
 
     except Exception as exc:
@@ -5227,16 +6672,18 @@ def run(**kwargs) -> dict:
 def export_data(data: dict, filename: str, format: str):
     """Exports data to JSON or CSV."""
     if format == "json":
-        with open(filename, 'w') as f:
+        with open(filename, "w") as f:
             json.dump(data, f, indent=2)
     elif format == "csv":
         items = data.get("list", [data])
-        if not items: return
-        with open(filename, 'w', newline='') as f:
+        if not items:
+            return
+        with open(filename, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=items[0].keys())
             writer.writeheader()
             writer.writerows(items)
     print(f"Data exported to {filename}")
+
 
 def pretty_print_result(action: str, result: dict):
     """Prints results in a human-friendly format."""
@@ -5250,7 +6697,7 @@ def pretty_print_result(action: str, result: dict):
         return
 
     print(f"\n\033[94m═══ {action.upper()} ═══\033[0m")
-    
+
     # Custom formatters for specific actions
     if action == "get_positions":
         positions = result.get("list", [])
@@ -5275,13 +6722,17 @@ def pretty_print_result(action: str, result: dict):
         print(f"Symbol: {result.get('symbol')} | Price: {result.get('last_price')}")
         print("-" * 40)
         for tf, data in result.get("analysis", {}).items():
-            print(f"[{tf:>3}] Regime: {data['regime']:<15} | RSI: {data['rsi']:>5} | EMA: {data['ema']}")
+            print(
+                f"[{tf:>3}] Regime: {data['regime']:<15} | RSI: {data['rsi']:>5} | EMA: {data['ema']}"
+            )
     elif action == "calculate_orderflow_delta":
         print(f"Symbol: {result.get('symbol')} | Net Delta: {result.get('delta')}")
 
     elif action in ["place_order", "place_stop_limit", "place_stop_market"]:
         if result.get("retCode") == 0:
-            print(f"\033[92mOrder Placed Successfully! ID: {result.get('result', {}).get('orderId')}\033[0m")
+            print(
+                f"\033[92mOrder Placed Successfully! ID: {result.get('result', {}).get('orderId')}\033[0m"
+            )
         else:
             print(f"\033[91mOrder Failed: {result.get('retMsg')}\033[0m")
 
@@ -5292,7 +6743,9 @@ def pretty_print_result(action: str, result: dict):
         signals = result.get("signals", [])
         print(f"Active Signals: {len(signals)}")
         for s in signals:
-            print(f"[{s['symbol']}] {s['side']} | Entry: {s['entry']} | TP: {s['tp']} | SL: {s['sl']} | Conf: {s['confidence']}")
+            print(
+                f"[{s['symbol']}] {s['side']} | Entry: {s['entry']} | TP: {s['tp']} | SL: {s['sl']} | Conf: {s['confidence']}"
+            )
 
         print(f"{'Level':<10} | {'Bid Vol':<15} | {'Ask Vol':<15}")
         print("-" * 45)
@@ -5312,8 +6765,10 @@ def pretty_print_result(action: str, result: dict):
     elif action == "detect_high_confluence_levels":
         print(f"High Confluence Zones for {result.get('symbol')}:")
         for zone in result.get("high_confluence_zones", []):
-            color = "\033[92m" if zone['type'] == "Support" else "\033[91m"
-            print(f"{color}{zone['type']:<10}\033[0m | Price: {zone['price']:<10.4f} | Confluence: {zone['score']}")
+            color = "\033[92m" if zone["type"] == "Support" else "\033[91m"
+            print(
+                f"{color}{zone['type']:<10}\033[0m | Price: {zone['price']:<10.4f} | Confluence: {zone['score']}"
+            )
 
     elif action == "generate_market_depth_report":
         print(f"Market Depth Report for {result.get('symbol')}:")
@@ -5332,15 +6787,21 @@ def pretty_print_result(action: str, result: dict):
     elif action == "get_ticker":
         for t in result.get("list", []):
             color = "\033[92m" if float(t.get("price24hPcnt", 0)) > 0 else "\033[91m"
-            print(f"{t['symbol']} | Price: {t['lastPrice']} | 24h: {color}{float(t.get('price24hPcnt', 0))*100:+.2f}%\033[0m")
+            print(
+                f"{t['symbol']} | Price: {t['lastPrice']} | 24h: {color}{float(t.get('price24hPcnt', 0)) * 100:+.2f}%\033[0m"
+            )
 
     elif action == "get_open_orders":
         for o in result.get("list", []):
-            print(f"{o['symbol']} | {o['side']} | {o['orderType']} | {o['price']} | {o['orderStatus']}")
+            print(
+                f"{o['symbol']} | {o['side']} | {o['orderType']} | {o['price']} | {o['orderStatus']}"
+            )
 
     elif action == "get_funding_rate":
         for f in result.get("list", []):
-            print(f"{f['symbol']} | Rate: {float(f['fundingRate'])*100:.4f}% | Next: {f['nextFundingTime']}")
+            print(
+                f"{f['symbol']} | Rate: {float(f['fundingRate']) * 100:.4f}% | Next: {f['nextFundingTime']}"
+            )
 
     elif action == "get_market_liquidations":
         print(f"Recent Liquidations for {result.get('symbol', 'All')}:")
@@ -5351,7 +6812,7 @@ def pretty_print_result(action: str, result: dict):
             print(f"{side:<4} | Price: {price:<10} | Size: {size}")
 
     elif action == "market_summary":
-        print(f"Bybit Market Summary:")
+        print("Bybit Market Summary:")
         for k, v in result.items():
             if k != "status":
                 print(f"{k.replace('_', ' ').title()}: {v}")
@@ -5360,10 +6821,11 @@ def pretty_print_result(action: str, result: dict):
         # Fallback to JSON
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
+
 if __name__ == "__main__":
     import argparse
-    import sys
     import os
+    import sys
 
     # Check for argc environment variables first
     if "argc_action" in os.environ:
@@ -5372,16 +6834,20 @@ if __name__ == "__main__":
             if k.startswith("argc_"):
                 key = k[5:]
                 # Cast common types
-                if v.lower() == "true": val = True
-                elif v.lower() == "false": val = False
+                if v.lower() == "true":
+                    val = True
+                elif v.lower() == "false":
+                    val = False
                 else:
-                    try: val = float(v) if "." in v else int(v)
-                    except: val = v
+                    try:
+                        val = float(v) if "." in v else int(v)
+                    except:
+                        val = v
                 kwargs[key] = val
-        
+
         output_json = kwargs.get("json", False)
         action = kwargs.get("action")
-        
+
         result = run(**kwargs)
         if output_json:
             print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -5402,18 +6868,20 @@ if __name__ == "__main__":
 
     # Use parse_known_args to capture all other flags
     args, unknown = parser.parse_known_args()
-    
+
     # Convert unknown flags (--key value) into a dictionary
     kwargs = {}
     i = 0
     while i < len(unknown):
         key = unknown[i].lstrip("-").replace("-", "_")
-        if i + 1 < len(unknown) and not unknown[i+1].startswith("-"):
+        if i + 1 < len(unknown) and not unknown[i + 1].startswith("-"):
             # Check if it's a number
-            val = unknown[i+1]
+            val = unknown[i + 1]
             try:
-                if "." in val: kwargs[key] = float(val)
-                else: kwargs[key] = int(val)
+                if "." in val:
+                    kwargs[key] = float(val)
+                else:
+                    kwargs[key] = int(val)
             except ValueError:
                 kwargs[key] = val
             i += 2
@@ -5430,11 +6898,11 @@ if __name__ == "__main__":
     result = run(**kwargs)
 
     if args.export:
-        fmt = args.export.split('.')[-1]
+        fmt = args.export.split(".")[-1]
         export_data(result, args.export, fmt)
     elif args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         pretty_print_result(args.action, result)
-    
+
     sys.exit(0 if result.get("status") != "error" else 1)

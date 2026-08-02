@@ -83,33 +83,68 @@ __all__ = [
 # Constants
 # ---------------------------------------------------------------------------
 _RECV_WINDOW_DEFAULT = 20_000
-_RECV_WINDOW_MAX     = 60_000
-_DEFAULT_TIMEOUT     = 30
-_MAX_RETRIES         = 5
+_RECV_WINDOW_MAX = 60_000
+_DEFAULT_TIMEOUT = 30
+_MAX_RETRIES = 5
 
 _BASE_URL_MAINNET = "https://api.bybit.com"
-_BASE_URL_BACKUP  = "https://api.bytick.com"
+_BASE_URL_BACKUP = "https://api.bytick.com"
 _BASE_URL_TESTNET = "https://api-testnet.bybit.com"
 
 _DEFAULT_PRICE_SCALE = 3
 
 # HTTP status codes that warrant a retry
-_RETRY_STATUSES = frozenset({
-    408, 425, 429, 500, 502, 503, 504,
-    520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530,
-})
+_RETRY_STATUSES = frozenset(
+    {
+        408,
+        425,
+        429,
+        500,
+        502,
+        503,
+        504,
+        520,
+        521,
+        522,
+        523,
+        524,
+        525,
+        526,
+        527,
+        528,
+        529,
+        530,
+    }
+)
 
 # Bybit retCodes that are transient and may succeed on retry
-_RETRYABLE_RET_CODES = frozenset({
-    10006, 10018,
-    130006, 130018, 130021, 130029, 130105, 130106,
-    131203,
-})
+_RETRYABLE_RET_CODES = frozenset(
+    {
+        10006,
+        10018,
+        130006,
+        130018,
+        130021,
+        130029,
+        130105,
+        130106,
+        131203,
+    }
+)
 
 # Bybit retCodes that are permanent — never retry
-_PERMANENT_RET_CODES = frozenset({
-    10001, 10002, 10003, 10004, 10005, 10007, 10010, 10017,
-})
+_PERMANENT_RET_CODES = frozenset(
+    {
+        10001,
+        10002,
+        10003,
+        10004,
+        10005,
+        10007,
+        10010,
+        10017,
+    }
+)
 
 _OK_RET_CODES = frozenset({0})
 
@@ -121,8 +156,8 @@ _CONFIG_CACHE_TTL = 5.0
 
 # Threading primitives
 _SESSION_LOCK = threading.Lock()
-_TIME_LOCK    = threading.RLock()   # Re-entrant to allow nested reads
-_CONFIG_LOCK  = threading.Lock()
+_TIME_LOCK = threading.RLock()  # Re-entrant to allow nested reads
+_CONFIG_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -160,15 +195,15 @@ def get_config(force_refresh: bool = False) -> dict[str, Any]:
             return _CONFIG_CACHE
 
         testnet = os.environ.get("BYBIT_TESTNET", "false").lower() in (
-            "1", "true", "yes"
+            "1",
+            "true",
+            "yes",
         )
         base_url = _BASE_URL_TESTNET if testnet else _BASE_URL_MAINNET
 
         use_proxy = (
-            os.environ.get("BYBIT_USE_TOR", "false").lower()
-            in ("1", "true", "yes")
-            or os.environ.get("PROXY_ENABLED", "false").lower()
-            in ("1", "true", "yes")
+            os.environ.get("BYBIT_USE_TOR", "false").lower() in ("1", "true", "yes")
+            or os.environ.get("PROXY_ENABLED", "false").lower() in ("1", "true", "yes")
             or os.environ.get("BYBIT_USE_PROXY", "false").lower()
             in ("1", "true", "yes")
         )
@@ -194,61 +229,47 @@ def get_config(force_refresh: bool = False) -> dict[str, Any]:
                 proxies = {"http": proxy_url, "https": proxy_url}
 
         try:
-            timeout = float(
-                os.environ.get("BYBIT_TIMEOUT", str(_DEFAULT_TIMEOUT))
-            )
+            timeout = float(os.environ.get("BYBIT_TIMEOUT", str(_DEFAULT_TIMEOUT)))
         except (TypeError, ValueError):
             timeout = _DEFAULT_TIMEOUT
 
         try:
             recv_window = int(
-                os.environ.get(
-                    "BYBIT_RECV_WINDOW", str(_RECV_WINDOW_DEFAULT)
-                )
+                os.environ.get("BYBIT_RECV_WINDOW", str(_RECV_WINDOW_DEFAULT))
             )
         except (TypeError, ValueError):
             recv_window = _RECV_WINDOW_DEFAULT
         recv_window = max(1, min(_RECV_WINDOW_MAX, recv_window))
 
         try:
-            max_retries = int(
-                os.environ.get("BYBIT_MAX_RETRIES", str(_MAX_RETRIES))
-            )
+            max_retries = int(os.environ.get("BYBIT_MAX_RETRIES", str(_MAX_RETRIES)))
         except (TypeError, ValueError):
             max_retries = _MAX_RETRIES
 
         try:
             price_scale = int(
-                os.environ.get(
-                    "BYBIT_PRICE_SCALE", str(_DEFAULT_PRICE_SCALE)
-                )
+                os.environ.get("BYBIT_PRICE_SCALE", str(_DEFAULT_PRICE_SCALE))
             )
         except (TypeError, ValueError):
             price_scale = _DEFAULT_PRICE_SCALE
 
         cfg: dict[str, Any] = {
-            "api_key":         os.environ.get("BYBIT_API_KEY", "").strip(),
-            "api_secret":      os.environ.get("BYBIT_API_SECRET", "").strip(),
-            "base_url":        base_url,
-            "backup_base_url": (
-                _BASE_URL_BACKUP if not testnet else _BASE_URL_TESTNET
-            ),
-            "testnet":         testnet,
-            "use_proxy":       use_proxy,
-            "proxy_url":       proxy_url,
-            "proxies":         proxies,
-            "timeout":         timeout,
-            "recv_window":     recv_window,
-            "sign_type":       os.environ.get("BYBIT_SIGN_TYPE", "2"),
-            "max_retries":     max(0, max_retries),
-            "price_scale":     max(0, price_scale),
-            "auto_int_prices": os.environ.get(
-                "BYBIT_AUTO_INT_PRICES", "false"
-            ).lower()
+            "api_key": os.environ.get("BYBIT_API_KEY", "").strip(),
+            "api_secret": os.environ.get("BYBIT_API_SECRET", "").strip(),
+            "base_url": base_url,
+            "backup_base_url": (_BASE_URL_BACKUP if not testnet else _BASE_URL_TESTNET),
+            "testnet": testnet,
+            "use_proxy": use_proxy,
+            "proxy_url": proxy_url,
+            "proxies": proxies,
+            "timeout": timeout,
+            "recv_window": recv_window,
+            "sign_type": os.environ.get("BYBIT_SIGN_TYPE", "2"),
+            "max_retries": max(0, max_retries),
+            "price_scale": max(0, price_scale),
+            "auto_int_prices": os.environ.get("BYBIT_AUTO_INT_PRICES", "false").lower()
             in ("1", "true", "yes"),
-            "use_server_time": os.environ.get(
-                "BYBIT_USE_SERVER_TIME", "true"
-            ).lower()
+            "use_server_time": os.environ.get("BYBIT_USE_SERVER_TIME", "true").lower()
             in ("1", "true", "yes"),
         }
 
@@ -334,11 +355,12 @@ def reset_session() -> None:
 # Price Scaling Helpers
 # ---------------------------------------------------------------------------
 
+
 def to_int_price(price: Any, scale: int | None = None) -> str:
     """
     Convert a decimal price to a Bybit integer-price string.
-    
-    FIX: Uses Decimal arithmetic to prevent binary float drift 
+
+    FIX: Uses Decimal arithmetic to prevent binary float drift
     (e.g. 0.1 + 0.2 = 0.30000000000000004) which causes API rejections.
     """
     if scale is None:
@@ -346,7 +368,7 @@ def to_int_price(price: Any, scale: int | None = None) -> str:
     scale = max(0, int(scale))
     try:
         d_price = Decimal(str(price))
-        scaled = int(d_price * (10 ** scale))
+        scaled = int(d_price * (10**scale))
         return str(scaled)
     except (TypeError, ValueError, InvalidOperation):
         return str(price)
@@ -358,7 +380,7 @@ def from_int_price(int_price: Any, scale: int | None = None) -> float:
         scale = get_config().get("price_scale", _DEFAULT_PRICE_SCALE)
     scale = max(0, int(scale))
     try:
-        return float(Decimal(str(int_price)) / (10 ** scale))
+        return float(Decimal(str(int_price)) / (10**scale))
     except (TypeError, ValueError, InvalidOperation):
         return 0.0
 
@@ -366,6 +388,7 @@ def from_int_price(int_price: Any, scale: int | None = None) -> float:
 # ---------------------------------------------------------------------------
 # Signing & Parameter Serialization
 # ---------------------------------------------------------------------------
+
 
 def _stringify_param(v: Any) -> str:
     """
@@ -389,9 +412,7 @@ def _stringify_param(v: Any) -> str:
 def _sorted_query_string(params: Mapping[str, Any]) -> str:
     """Build a deterministically sorted query string for HMAC signing."""
     items = [
-        (k, _stringify_param(v))
-        for k, v in sorted(params.items())
-        if v is not None
+        (k, _stringify_param(v)) for k, v in sorted(params.items()) if v is not None
     ]
     return urllib.parse.urlencode(items)
 
@@ -420,8 +441,14 @@ def _default_price_fields() -> list[str] | None:
     if not get_config().get("auto_int_prices"):
         return None
     return [
-        "price", "stopLoss", "takeProfit", "activePrice",
-        "trailingStop", "tpLimitPrice", "slLimitPrice", "triggerPrice",
+        "price",
+        "stopLoss",
+        "takeProfit",
+        "activePrice",
+        "trailingStop",
+        "tpLimitPrice",
+        "slLimitPrice",
+        "triggerPrice",
     ]
 
 
@@ -429,9 +456,9 @@ def _default_price_fields() -> list[str] | None:
 # Server Time & Clock Synchronization
 # ---------------------------------------------------------------------------
 _SERVER_TIME_OFFSET_MS: int | None = None
-# FIX: Replaced threading.Event with RLock. 
-# Previously, if Thread A was syncing, Thread B would see the Event set, 
-# skip syncing, and return None (causing auth failures). 
+# FIX: Replaced threading.Event with RLock.
+# Previously, if Thread A was syncing, Thread B would see the Event set,
+# skip syncing, and return None (causing auth failures).
 # Now, Thread B safely waits for Thread A to finish and reads the updated offset.
 _SYNCING_SERVER_TIME = threading.RLock()
 
@@ -459,31 +486,29 @@ def server_time() -> int | None:
             sess = _get_session()
             resp = sess.get(url, proxies=proxies, timeout=timeout)
             if resp.status_code != 200:
-                log.debug(
-                    "server_time HTTP %s: %s", resp.status_code, resp.text[:128]
-                )
+                log.debug("server_time HTTP %s: %s", resp.status_code, resp.text[:128])
                 time.sleep(0.1)
                 continue
             data = resp.json()
             if data.get("retCode") != 0:
                 time.sleep(0.1)
                 continue
-            
+
             # FIX: Use the root 'time' field which is the exact server ms timestamp.
             # Fallback to timeNano if root time is missing.
             raw_ms = data.get("time")
             if raw_ms is not None:
                 return int(raw_ms)
-                
+
             r = data.get("result") or {}
             raw_nano = r.get("timeNano")
             if raw_nano is not None:
                 return int(int(raw_nano) / 1_000_000)
-                
+
         except Exception as exc:
             log.debug("server_time() request failed: %s", exc)
             time.sleep(0.1)
-            
+
     return None
 
 
@@ -492,8 +517,8 @@ def sync_server_time_offset() -> int | None:
     Measure and cache the offset between Bybit server clock and local clock.
 
     Returns offset_ms (server_ms - local_ms), or the last cached value on
-    failure. Thread-safe; re-entrant calls on the same thread are allowed, 
-    while concurrent calls from other threads will block and wait for the 
+    failure. Thread-safe; re-entrant calls on the same thread are allowed,
+    while concurrent calls from other threads will block and wait for the
     sync to complete.
     """
     global _SERVER_TIME_OFFSET_MS
@@ -501,7 +526,9 @@ def sync_server_time_offset() -> int | None:
     # Try to acquire without blocking to check if another thread is syncing
     if not _SYNCING_SERVER_TIME.acquire(blocking=False):
         # Another thread is syncing, wait for it to finish
-        log.debug("sync_server_time_offset(): waiting for another thread to finish syncing.")
+        log.debug(
+            "sync_server_time_offset(): waiting for another thread to finish syncing."
+        )
         _SYNCING_SERVER_TIME.acquire(blocking=True)
         _SYNCING_SERVER_TIME.release()
         return _SERVER_TIME_OFFSET_MS
@@ -512,9 +539,7 @@ def sync_server_time_offset() -> int | None:
         local_after = int(time.time() * 1000)
 
         if st is None:
-            log.warning(
-                "Could not sync server time; server_time() returned None."
-            )
+            log.warning("Could not sync server time; server_time() returned None.")
             return _SERVER_TIME_OFFSET_MS
 
         # Use midpoint of local timestamps to estimate round-trip latency
@@ -525,9 +550,11 @@ def sync_server_time_offset() -> int | None:
             _SERVER_TIME_OFFSET_MS = offset
 
         log.debug(
-            "Server time synced: server=%d local_mid=%d offset=%+d ms "
-            "(rtt=%d ms)",
-            st, local_mid, offset, local_after - local_before,
+            "Server time synced: server=%d local_mid=%d offset=%+d ms (rtt=%d ms)",
+            st,
+            local_mid,
+            offset,
+            local_after - local_before,
         )
         return offset
     finally:
@@ -560,9 +587,7 @@ def _timestamp_ms(cfg: dict[str, Any]) -> str:
 
 def health_check() -> bool:
     """Return True if the Bybit public API is reachable and responding."""
-    result = api_request(
-        "GET", "/v5/market/time", signed=False, retries=1
-    )
+    result = api_request("GET", "/v5/market/time", signed=False, retries=1)
     return result.get("retCode") == 0
 
 
@@ -575,11 +600,12 @@ def is_rate_limited(response: Mapping[str, Any]) -> bool:
 # Backoff Engine
 # ---------------------------------------------------------------------------
 
+
 def _sleep_backoff(attempt: int) -> None:
     """
     Exponential backoff with full jitter.
     """
-    base = min(30.0, (2 ** attempt) * 0.5)
+    base = min(30.0, (2**attempt) * 0.5)
     delay = max(_BACKOFF_FLOOR, random.uniform(0, base))
     log.debug("Backoff: attempt=%d sleeping=%.3fs", attempt, delay)
     time.sleep(delay)
@@ -588,6 +614,7 @@ def _sleep_backoff(attempt: int) -> None:
 # ---------------------------------------------------------------------------
 # Core API Request Function
 # ---------------------------------------------------------------------------
+
 
 def api_request(
     method: str,
@@ -628,19 +655,15 @@ def api_request(
     if recv_window is not None:
         try:
             cfg = dict(cfg)
-            cfg["recv_window"] = max(
-                1, min(_RECV_WINDOW_MAX, int(recv_window))
-            )
+            cfg["recv_window"] = max(1, min(_RECV_WINDOW_MAX, int(recv_window)))
         except (TypeError, ValueError):
             pass
 
     sign_type = sign_type or cfg.get("sign_type", "2")
-    retries   = retries if retries is not None else int(
-        cfg.get("max_retries", _MAX_RETRIES)
+    retries = (
+        retries if retries is not None else int(cfg.get("max_retries", _MAX_RETRIES))
     )
-    timeout   = timeout if timeout is not None else cfg.get(
-        "timeout", _DEFAULT_TIMEOUT
-    )
+    timeout = timeout if timeout is not None else cfg.get("timeout", _DEFAULT_TIMEOUT)
     price_scale = (
         price_scale
         if price_scale is not None
@@ -656,9 +679,7 @@ def api_request(
     if signed and (not cfg["api_key"] or not cfg["api_secret"]):
         return {
             "retCode": 10002,
-            "retMsg": (
-                "Missing BYBIT_API_KEY / BYBIT_API_SECRET in environment"
-            ),
+            "retMsg": ("Missing BYBIT_API_KEY / BYBIT_API_SECRET in environment"),
         }
 
     # --- Optional integer price scaling ------------------------------------
@@ -677,11 +698,9 @@ def api_request(
 
     if method == "GET":
         query_str = _sorted_query_string(params or {})
-        path_url  = f"{endpoint}?{query_str}" if query_str else endpoint
+        path_url = f"{endpoint}?{query_str}" if query_str else endpoint
     else:
-        body_str = json.dumps(
-            params or {}, separators=(",", ":"), ensure_ascii=False
-        )
+        body_str = json.dumps(params or {}, separators=(",", ":"), ensure_ascii=False)
         path_url = endpoint
 
     headers: dict[str, str] = {"X-BAPI-SIGN-TYPE": str(sign_type)}
@@ -689,19 +708,19 @@ def api_request(
         headers["Content-Type"] = "application/json"
 
     if signed:
-        ts      = _timestamp_ms(cfg)
+        ts = _timestamp_ms(cfg)
         payload = body_str if method != "GET" else query_str
-        sig     = _sign(cfg, ts, payload or "")
+        sig = _sign(cfg, ts, payload or "")
         headers.update(
             {
-                "X-BAPI-API-KEY":     cfg["api_key"],
-                "X-BAPI-SIGN":        sig,
-                "X-BAPI-TIMESTAMP":   ts,
+                "X-BAPI-API-KEY": cfg["api_key"],
+                "X-BAPI-SIGN": sig,
+                "X-BAPI-TIMESTAMP": ts,
                 "X-BAPI-RECV-WINDOW": str(cfg["recv_window"]),
             }
         )
 
-    sess    = _get_session()
+    sess = _get_session()
     proxies = cfg["proxies"]
 
     last_resp: dict[str, Any] = {"retCode": -1, "retMsg": "no response"}
@@ -712,9 +731,9 @@ def api_request(
         base_urls.append(cfg["backup_base_url"])
 
     for attempt in range(retries + 1):
-        domain_idx  = 0 if attempt == 0 else (attempt % len(base_urls))
+        domain_idx = 0 if attempt == 0 else (attempt % len(base_urls))
         target_base = base_urls[domain_idx]
-        full_url    = f"{target_base}{path_url}"
+        full_url = f"{target_base}{path_url}"
 
         t_start = time.monotonic()
         try:
@@ -737,8 +756,11 @@ def api_request(
 
             elapsed_ms = int((time.monotonic() - t_start) * 1000)
             log.debug(
-                "%s %s → HTTP %s (%d ms)", method, full_url,
-                resp.status_code, elapsed_ms,
+                "%s %s → HTTP %s (%d ms)",
+                method,
+                full_url,
+                resp.status_code,
+                elapsed_ms,
             )
 
             # Introspect rate-limit headers for observability
@@ -750,13 +772,16 @@ def api_request(
             if resp.status_code != 200:
                 last_resp = {
                     "retCode": resp.status_code,
-                    "retMsg":  f"HTTP {resp.status_code}: {resp.text[:512]}",
+                    "retMsg": f"HTTP {resp.status_code}: {resp.text[:512]}",
                 }
                 if resp.status_code in _RETRY_STATUSES and attempt < retries:
                     log.warning(
                         "HTTP %s on %s %s (attempt %d/%d)",
-                        resp.status_code, method, full_url,
-                        attempt + 1, retries,
+                        resp.status_code,
+                        method,
+                        full_url,
+                        attempt + 1,
+                        retries,
                     )
                     _sleep_backoff(attempt)
                     continue
@@ -785,7 +810,11 @@ def api_request(
             if rc in _RETRYABLE_RET_CODES and attempt < retries:
                 log.warning(
                     "Bybit retCode %s on %s %s (attempt %d/%d)",
-                    rc, method, full_url, attempt + 1, retries,
+                    rc,
+                    method,
+                    full_url,
+                    attempt + 1,
+                    retries,
                 )
                 # Re-sync clock on timestamp errors
                 if rc in (10002, 10006):
@@ -814,7 +843,11 @@ def api_request(
             last_resp = {"retCode": -1, "retMsg": f"Network error: {exc}"}
             log.warning(
                 "Network error on %s %s (attempt %d/%d): %s",
-                method, full_url, attempt + 1, retries, exc,
+                method,
+                full_url,
+                attempt + 1,
+                retries,
+                exc,
             )
             if attempt < retries:
                 _sleep_backoff(attempt)
@@ -822,9 +855,7 @@ def api_request(
             return last_resp
 
         except requests.exceptions.RequestException as exc:
-            log.error(
-                "Unhandled request error on %s %s: %s", method, full_url, exc
-            )
+            log.error("Unhandled request error on %s %s: %s", method, full_url, exc)
             return {"retCode": -1, "retMsg": f"Request error: {exc}"}
 
     return last_resp
@@ -833,6 +864,7 @@ def api_request(
 # ---------------------------------------------------------------------------
 # Position & Margin Management Helpers (V5)
 # ---------------------------------------------------------------------------
+
 
 def switch_position_mode(
     category: str,
@@ -846,9 +878,7 @@ def switch_position_mode(
         body["symbol"] = symbol
     if coin:
         body["coin"] = coin
-    return api_request(
-        "POST", "/v5/position/switch-mode", params=body, signed=True
-    )
+    return api_request("POST", "/v5/position/switch-mode", params=body, signed=True)
 
 
 def switch_cross_isolated(
@@ -861,16 +891,14 @@ def switch_cross_isolated(
     """POST /v5/position/switch-isolated"""
     body: dict[str, Any] = {
         "category": category,
-        "symbol":    symbol,
+        "symbol": symbol,
         "tradeMode": trade_mode,
     }
     if buy_leverage is not None:
         body["buyLeverage"] = str(buy_leverage)
     if sell_leverage is not None:
         body["sellLeverage"] = str(sell_leverage)
-    return api_request(
-        "POST", "/v5/position/switch-isolated", params=body, signed=True
-    )
+    return api_request("POST", "/v5/position/switch-isolated", params=body, signed=True)
 
 
 def set_account_margin_mode(set_margin_mode: str) -> dict[str, Any]:
@@ -886,6 +914,7 @@ def set_account_margin_mode(set_margin_mode: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Market Data Convenience Wrappers
 # ---------------------------------------------------------------------------
+
 
 def get_instruments_info(
     category: str = "linear",
@@ -930,6 +959,7 @@ def get_orderbook(
 # ---------------------------------------------------------------------------
 # Account & Order Management Convenience Wrappers
 # ---------------------------------------------------------------------------
+
 
 def get_positions(
     category: str = "linear",
@@ -1005,13 +1035,13 @@ def amend_order(
 # Standalone CLI Test Execution
 # ---------------------------------------------------------------------------
 
-NEON_CYAN   = "\033[38;5;51m"
-NEON_GREEN  = "\033[38;5;46m"
-NEON_RED    = "\033[38;5;196m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
 NEON_YELLOW = "\033[38;5;226m"
 NEON_PURPLE = "\033[38;5;129m"
-RESET       = "\033[0m"
-BOLD        = "\033[1m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
 
 
 def _is_tty() -> bool:
@@ -1027,9 +1057,11 @@ def _c(text: str, no_color: bool = False) -> str:
     return text
 
 
-def run(action: str = "health_check", no_color: bool = False, verbose: bool = False) -> str:
+def run(
+    action: str = "health_check", no_color: bool = False, verbose: bool = False
+) -> str:
     """Run Bybit Core API test checks.
-    
+
     Args:
         action: Test action: health_check, server_time, config (default: health_check)
         no_color: Disable ANSI color output
@@ -1041,13 +1073,13 @@ def run(action: str = "health_check", no_color: bool = False, verbose: bool = Fa
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             stream=sys.stderr,
         )
-    
+
     if action == "health_check":
         healthy = health_check()
-        status  = "online" if healthy else "offline"
+        status = "online" if healthy else "offline"
         return json.dumps({"success": healthy, "status": status}, indent=2)
     elif action == "server_time":
-        st     = server_time()
+        st = server_time()
         offset = sync_server_time_offset()
         utc_dt = (
             datetime.fromtimestamp(st / 1000, tz=timezone.utc).isoformat()
@@ -1064,12 +1096,10 @@ def run(action: str = "health_check", no_color: bool = False, verbose: bool = Fa
         )
     elif action == "config":
         cfg = dict(get_config())
-        cfg["api_key"]    = f"{cfg['api_key'][:4]}***" if cfg["api_key"] else "NOT_SET"
+        cfg["api_key"] = f"{cfg['api_key'][:4]}***" if cfg["api_key"] else "NOT_SET"
         cfg["api_secret"] = "***REDACTED***" if cfg["api_secret"] else "NOT_SET"
         return json.dumps(cfg, indent=2)
     return json.dumps({"error": f"Invalid action: {action}"})
-
-
 
 
 if __name__ == "__main__":
@@ -1107,32 +1137,30 @@ if __name__ == "__main__":
 
     if args.action == "health_check":
         healthy = health_check()
-        status  = "online" if healthy else "offline"
-        color   = NEON_GREEN if healthy else NEON_RED
+        status = "online" if healthy else "offline"
+        color = NEON_GREEN if healthy else NEON_RED
         sys.stderr.write(
             _c(f"{color}{BOLD}Bybit API: {status.upper()}{RESET}\n", no_color)
         )
-        print(
-            json.dumps({"success": healthy, "status": status}, indent=2)
-        )
+        print(json.dumps({"success": healthy, "status": status}, indent=2))
 
     elif args.action == "server_time":
-        st     = server_time()
+        st = server_time()
         offset = sync_server_time_offset()
         utc_dt = (
             datetime.fromtimestamp(st / 1000, tz=timezone.utc).isoformat()
             if st is not None
             else None
         )
-        
+
         # FIX: Cleaned up ternary operator precedence for predictable formatting
         if offset is not None:
             msg = f"{NEON_CYAN}Server time:{RESET} {utc_dt or 'unavailable'} (offset {offset:+d} ms)\n"
         else:
             msg = f"{NEON_CYAN}Server time:{RESET} {utc_dt or 'unavailable'}\n"
-            
+
         sys.stderr.write(_c(msg, no_color))
-        
+
         print(
             json.dumps(
                 {
@@ -1147,12 +1175,8 @@ if __name__ == "__main__":
     elif args.action == "config":
         cfg = dict(get_config())
         # Redact secrets before display
-        cfg["api_key"]    = (
-            f"{cfg['api_key'][:4]}***" if cfg["api_key"] else "NOT_SET"
-        )
-        cfg["api_secret"] = (
-            "***REDACTED***" if cfg["api_secret"] else "NOT_SET"
-        )
+        cfg["api_key"] = f"{cfg['api_key'][:4]}***" if cfg["api_key"] else "NOT_SET"
+        cfg["api_secret"] = "***REDACTED***" if cfg["api_secret"] else "NOT_SET"
         sys.stderr.write(
             _c(f"{NEON_YELLOW}Configuration (secrets redacted):{RESET}\n", no_color)
         )

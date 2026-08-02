@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # @describe Get expanded system + Termux-API + live memory & virtual-swap dynamics with luminous Termux-optimized clarity.
-import platform
-import os
-import sys
-import subprocess
 import json
+import os
+import platform
 import shutil
+import subprocess
 import time
-from colorama import init, Fore, Style
+
+from colorama import Fore, Style, init
 
 init(autoreset=True)
+
 
 def _safe_termux(cmd: list[str], timeout: float = 4.0) -> str:
     """Invoke a Termux-API spell and return its essence, or a silent ward on failure."""
@@ -29,11 +30,12 @@ def _safe_termux(cmd: list[str], timeout: float = 4.0) -> str:
     except (subprocess.TimeoutExpired, OSError, Exception):
         return f"{Fore.RED}unavailable{Style.RESET_ALL}"
 
+
 def _read_meminfo() -> dict[str, int]:
     """Read /proc/meminfo and return values in kilobytes."""
     info: dict[str, int] = {}
     try:
-        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+        with open("/proc/meminfo", encoding="utf-8") as f:
             for line in f:
                 if ":" not in line:
                     continue
@@ -46,11 +48,12 @@ def _read_meminfo() -> dict[str, int]:
         pass
     return info
 
+
 def _read_vmstat() -> dict[str, int]:
     """Read /proc/vmstat for page & swap activity counters."""
     info: dict[str, int] = {}
     try:
-        with open("/proc/vmstat", "r", encoding="utf-8") as f:
+        with open("/proc/vmstat", encoding="utf-8") as f:
             for line in f:
                 parts = line.split()
                 if len(parts) >= 2 and parts[1].isdigit():
@@ -58,6 +61,7 @@ def _read_vmstat() -> dict[str, int]:
     except (OSError, ValueError):
         pass
     return info
+
 
 def _fmt_bytes(kb: int) -> str:
     """Convert kilobytes into a human-readable luminous string."""
@@ -69,6 +73,7 @@ def _fmt_bytes(kb: int) -> str:
     gb = mb / 1024
     return f"{gb:.2f} GB"
 
+
 def _live_samples(interval: float = 0.7) -> tuple[dict, dict, dict, dict, float]:
     """Dual-sample meminfo + vmstat to expose real-time virtual & swap dynamics."""
     m1 = _read_meminfo()
@@ -77,6 +82,7 @@ def _live_samples(interval: float = 0.7) -> tuple[dict, dict, dict, dict, float]
     m2 = _read_meminfo()
     v2 = _read_vmstat()
     return m1, m2, v1, v2, interval
+
 
 def run() -> str:
     """Channel host + Termux-API + live virtual-memory & swap dynamics into one luminous incantation."""
@@ -250,6 +256,7 @@ def run() -> str:
         f"{Fore.CYAN}═══ TERMUX INFO ═══{Style.RESET_ALL}\n"
         f"{termux_info}"
     )
+
 
 if __name__ == "__main__":
     print(run())

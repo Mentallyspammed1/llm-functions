@@ -5,7 +5,7 @@ def calculate_limit_pnl(
     qty: float,
     fee_rate: float = 0.001,  # 0.1% by default (adjust for Maker/Taker)
     position_size_quote: bool = False,  # True if qty is in quote currency
-    use_maker_fee: bool = True  # Limit orders typically get Maker fees
+    use_maker_fee: bool = True,  # Limit orders typically get Maker fees
 ) -> dict:
     """
     Calculate Profit/Loss for a limit order.
@@ -65,7 +65,6 @@ def calculate_limit_pnl(
     investment = entry_notional
     pct_return = (net_pnl / investment) * 100 if investment != 0 else 0
 
-
     # Volume weighted average price (VWAP) for partial fills consideration
     # This is a simplified version assuming full fill
 
@@ -86,9 +85,8 @@ def calculate_limit_pnl(
         "fee_rate_used": actual_fee_rate,
         "is_maker": use_maker_fee,
         "breakeven_price": round(
-            (entry_notional + total_fees) / base_qty if base_qty != 0 else 0,
-            8
-        )
+            (entry_notional + total_fees) / base_qty if base_qty != 0 else 0, 8
+        ),
     }
 
 
@@ -97,7 +95,7 @@ def calculate_limit_micro_profit(
     limit_price: float,
     side: str,
     qty: float,
-    fee_rate: float = 0.001
+    fee_rate: float = 0.001,
 ) -> dict:
     """
     Simplified micro-profit calculation for small trades.
@@ -115,13 +113,12 @@ def calculate_limit_micro_profit(
     investment = entry_price * qty
     pct_return = (net_pnl / investment) * 100 if investment != 0 else 0
 
-
     return {
         "status": "success",
         "net_pnl": round(net_pnl, 4),
         "fee_applied": round(fee, 4),
         "pct_return": round(pct_return, 2),
-        "raw_pnl": round(raw_pnl, 4)
+        "raw_pnl": round(raw_pnl, 4),
     }
 
 
@@ -132,7 +129,7 @@ def calculate_depth_weighted_pnl(
     side: str,
     qty: float,
     fee_rate: float = 0.001,
-    use_maker: bool = True
+    use_maker: bool = True,
 ) -> dict:
     """
     Calculate PnL considering order book depth for weighted average fill price.
@@ -179,7 +176,7 @@ def calculate_depth_weighted_pnl(
         if total_filled < qty:
             return {
                 "status": "error",
-                "msg": f"Insufficient liquidity to fill order. Only {total_filled:.4f} of {qty} qty available."
+                "msg": f"Insufficient liquidity to fill order. Only {total_filled:.4f} of {qty} qty available.",
             }
 
         avg_fill_price = weighted_sum / total_filled
@@ -187,13 +184,11 @@ def calculate_depth_weighted_pnl(
         # Now calculate PnL using this weighted fill price
         actual_fee_rate = fee_rate * 0.5 if use_maker else fee_rate
 
-
         # Raw PnL
         if side.lower() == "sell":
             raw_pnl = (avg_fill_price - entry_price) * total_filled
         else:  # "buy"
             raw_pnl = (entry_price - avg_fill_price) * total_filled
-
 
         entry_notional = entry_price * total_filled
         exit_notional = avg_fill_price * total_filled
@@ -213,8 +208,13 @@ def calculate_depth_weighted_pnl(
             "exit_fee": round(exit_fee, 4),
             "total_fees": round(total_fees, 4),
             "net_pnl": round(net_pnl, 4),
-            "pct_return": round((net_pnl / entry_notional) * 100, 2) if entry_notional != 0 else 0
+            "pct_return": round((net_pnl / entry_notional) * 100, 2)
+            if entry_notional != 0
+            else 0,
         }
 
     except Exception as e:
-        return {"status": "error", "msg": f"Error calculating depth-weighted PnL: {str(e)}"}
+        return {
+            "status": "error",
+            "msg": f"Error calculating depth-weighted PnL: {e!s}",
+        }

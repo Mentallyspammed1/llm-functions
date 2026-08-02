@@ -33,7 +33,6 @@ import argparse
 import hashlib
 import json
 import logging
-import math
 import os
 import pickle
 import re
@@ -45,18 +44,18 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Optional
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 # ==============================================================================
@@ -152,19 +151,17 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
 
 def _strip_ansi(text: str) -> str:
@@ -174,10 +171,15 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive, non-dumb terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text, stripping colors if stream is not a TTY or --no-color is set."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -185,7 +187,9 @@ def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n"
     print(text, file=target, flush=True, end=end)
 
 
-def print_progress(current: int, total: int, message: str = "", no_color: bool = False) -> None:
+def print_progress(
+    current: int, total: int, message: str = "", no_color: bool = False
+) -> None:
     """Render a visual progress bar for long-running batch operations."""
     if not _is_tty() or no_color:
         return
@@ -220,23 +224,39 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [PERSISTENT MEMORY TOOLKIT v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [PERSISTENT MEMORY TOOLKIT v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}       {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}       {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}"
+    )
 
     if "analytics_type" in data:
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Analytics:{RESET}    {NEON_YELLOW}{data.get('analytics_type')}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Analytics:{RESET}    {NEON_YELLOW}{data.get('analytics_type')}{RESET}"
+        )
 
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Memory Tier:{RESET}  {data.get('type', 'all')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count/Items:{RESET}  {NEON_GREEN}{data.get('count', data.get('total_memories', 0)):,}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Memory Tier:{RESET}  {data.get('type', 'all')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count/Items:{RESET}  {NEON_GREEN}{data.get('count', data.get('total_memories', 0)):,}{RESET}"
+    )
 
     if "health_score" in data:
         hs = data.get("health_score", 0)
         hs_color = NEON_GREEN if hs >= 80 else (NEON_YELLOW if hs >= 50 else NEON_RED)
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Health Score:{RESET} {hs_color}{BOLD}{hs}%{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Health Score:{RESET} {hs_color}{BOLD}{hs}%{RESET}"
+        )
 
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}       {NEON_YELLOW}{data.get('cached', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}       {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -247,14 +267,18 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Distribution by Memory Tier:{RESET}")
         for t_name, count in by_type.items():
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {t_name:<15}: {NEON_YELLOW}{count:,}{RESET} entries")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {t_name:<15}: {NEON_YELLOW}{count:,}{RESET} entries"
+            )
 
     top_tags = data.get("top_tags", {})
     if top_tags:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Top Tags Used:{RESET}")
         for tag, count in list(top_tags.items())[:5]:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} #{tag:<14}: {NEON_GREEN}{count:,}{RESET} occurrences")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} #{tag:<14}: {NEON_GREEN}{count:,}{RESET} occurrences"
+            )
 
     recs = data.get("recommendations", [])
     if recs:
@@ -266,14 +290,18 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     results = data.get("results", [])
     if results:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Memory Entries ({len(results)} shown):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Memory Entries ({len(results)} shown):{RESET}"
+        )
         for item in results[:5]:
             k = item.get("key", item.get("id", "N/A"))
             v_raw = str(item.get("value", ""))
             v = (v_raw[:40] + "...") if len(v_raw) > 40 else v_raw
             score_str = f" [{item['_score']:.2f}]" if "_score" in item else ""
             priority_str = f" [p:{item.get('importance', 5)}]"
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {BOLD}{k}{RESET}{score_str}{priority_str}: {DIM}{v}{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {BOLD}{k}{RESET}{score_str}{priority_str}: {DIM}{v}{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -281,6 +309,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
@@ -304,13 +333,15 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     """Caching utility with TTL support for expensive search & analytics operations."""
@@ -380,6 +411,7 @@ class GracefulShutdown:
 # SECTION 5: Memory Storage & Analytics Utilities
 # ==============================================================================
 
+
 def _parse_timestamp(ts_str: Optional[str]) -> Optional[datetime]:
     """Parse ISO timestamp with robust timezone handling."""
     if not ts_str:
@@ -406,7 +438,7 @@ def _read_jsonl(file_path: Path) -> list[dict[str, Any]]:
     if not file_path.exists():
         return entries
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             for line in f:
                 line_str = line.strip()
                 if not line_str:
@@ -502,12 +534,12 @@ def _calculate_hybrid_score(
     if dt:
         age_days = max(0.0, (now_dt - dt).total_seconds() / 86400.0)
         recency_factor = 1.0 / (1.0 + (age_days / 30.0))
-        score *= (0.7 + 0.3 * recency_factor)
+        score *= 0.7 + 0.3 * recency_factor
 
     # Access Frequency / Recall Boost
     access_count = int(entry.get("access_count", 0))
     if access_count > 0:
-        score *= (1.0 + min(0.5, 0.05 * access_count))
+        score *= 1.0 + min(0.5, 0.05 * access_count)
 
     return round(score, 4)
 
@@ -515,6 +547,7 @@ def _calculate_hybrid_score(
 # ==============================================================================
 # SECTION 6: Analytics & Health Engines
 # ==============================================================================
+
 
 def generate_summary(memory_dir: Path, days: int) -> dict[str, Any]:
     """Generate memory usage statistics."""
@@ -567,7 +600,7 @@ def analyze_patterns(memory_dir: Path, days: int) -> dict[str, Any]:
             session_types[session][entry_type] += 1
 
             for i, tag in enumerate(tags):
-                for other in tags[i + 1:]:
+                for other in tags[i + 1 :]:
                     co_occurrence[tag][other] += 1
                     co_occurrence[other][tag] += 1
 
@@ -584,7 +617,9 @@ def analyze_patterns(memory_dir: Path, days: int) -> dict[str, Any]:
 def analyze_trends(memory_dir: Path, days: int) -> dict[str, Any]:
     """Analyze volume trends per memory tier across time."""
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-    daily_type_volume: defaultdict[str, defaultdict[str, int]] = defaultdict(lambda: defaultdict(int))
+    daily_type_volume: defaultdict[str, defaultdict[str, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
 
     for jsonl_file in memory_dir.glob("*.jsonl"):
         m_type = jsonl_file.stem
@@ -594,7 +629,9 @@ def analyze_trends(memory_dir: Path, days: int) -> dict[str, Any]:
                 day_key = dt.strftime("%Y-%m-%d")
                 daily_type_volume[day_key][entry.get("type", m_type)] += 1
 
-    sorted_trends = {day: dict(types) for day, types in sorted(daily_type_volume.items())}
+    sorted_trends = {
+        day: dict(types) for day, types in sorted(daily_type_volume.items())
+    }
 
     return {
         "period_days": days,
@@ -648,11 +685,17 @@ def analyze_health(memory_dir: Path, days: int) -> dict[str, Any]:
 
     recs: list[str] = []
     if duplicate_count > 0:
-        recs.append(f"Found {duplicate_count} duplicate keys. Run '--action consolidate' to deduplicate.")
+        recs.append(
+            f"Found {duplicate_count} duplicate keys. Run '--action consolidate' to deduplicate."
+        )
     if untagged_pct > 30.0:
-        recs.append(f"{untagged_pct:.1f}% of memories lack tags. Add tags when storing memories for improved hybrid search precision.")
+        recs.append(
+            f"{untagged_pct:.1f}% of memories lack tags. Add tags when storing memories for improved hybrid search precision."
+        )
     if expired_count > 0:
-        recs.append(f"Found {expired_count} expired entries. Run '--action cleanup' to purge them.")
+        recs.append(
+            f"Found {expired_count} expired entries. Run '--action cleanup' to purge them."
+        )
     if not recs:
         recs.append("Memory health is optimal.")
 
@@ -681,10 +724,14 @@ def analyze_recommendations(memory_dir: Path, days: int) -> dict[str, Any]:
     recs: list[str] = list(health.get("recommendations", []))
 
     if total_memories > 500:
-        recs.append(f"High context density detected ({total_memories:,} entries in {days} days). Run '--action cleanup --days 30' to prune old context.")
+        recs.append(
+            f"High context density detected ({total_memories:,} entries in {days} days). Run '--action cleanup --days 30' to prune old context."
+        )
 
     if by_type.get("conversation", 0) > 200:
-        recs.append("Conversation logs exceed 200 items. Summarize active context into 'knowledge' or 'core' memory tiers.")
+        recs.append(
+            "Conversation logs exceed 200 items. Summarize active context into 'knowledge' or 'core' memory tiers."
+        )
 
     return {
         "period_days": days,
@@ -697,6 +744,7 @@ def analyze_recommendations(memory_dir: Path, days: int) -> dict[str, Any]:
 # ==============================================================================
 # SECTION 7: Core Execution Routine
 # ==============================================================================
+
 
 def execute_tool(
     action: str,
@@ -736,9 +784,15 @@ def execute_tool(
     parsed_metadata: dict[str, Any] = {}
     if metadata:
         try:
-            parsed_metadata = json.loads(metadata) if isinstance(metadata, str) else dict(metadata)
+            parsed_metadata = (
+                json.loads(metadata) if isinstance(metadata, str) else dict(metadata)
+            )
         except Exception as exc:
-            return {"success": False, "error": f"Invalid metadata JSON string: {exc}", "exit_code": EXIT_INVALID_INPUT}
+            return {
+                "success": False,
+                "error": f"Invalid metadata JSON string: {exc}",
+                "exit_code": EXIT_INVALID_INPUT,
+            }
 
     root_dir = Path(os.environ.get("LLM_ROOT_DIR", os.getcwd())).resolve()
     memory_dir = root_dir / "memory"
@@ -764,7 +818,11 @@ def execute_tool(
         # ----------------------------------------------------------------------
         if action_clean == "store":
             if not key and not value:
-                return {"success": False, "error": "Store requires --key or --value", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "Store requires --key or --value",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             store_type = "context" if type_clean == "all" else type_clean
             memory_file = memory_dir / f"{store_type}.jsonl"
@@ -775,7 +833,9 @@ def execute_tool(
             # Calculate explicit expires_at if ttl is provided
             expires_at = None
             if ttl and isinstance(ttl, int) and ttl > 0:
-                expires_at = (now_dt + timedelta(seconds=ttl)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                expires_at = (now_dt + timedelta(seconds=ttl)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
 
             entry = {
                 "id": f"id_{uuid.uuid4().hex[:12]}",
@@ -802,7 +862,9 @@ def execute_tool(
                     if existing.get("key") == key_clean:
                         # Preserve existing ID, creation date, and access count
                         entry["id"] = existing.get("id", entry["id"])
-                        entry["created_at"] = existing.get("created_at", existing.get("timestamp", now_iso))
+                        entry["created_at"] = existing.get(
+                            "created_at", existing.get("timestamp", now_iso)
+                        )
                         entry["access_count"] = existing.get("access_count", 0)
                         existing_entries[idx] = entry
                         updated = True
@@ -819,7 +881,11 @@ def execute_tool(
         # ----------------------------------------------------------------------
         elif action_clean == "retrieve":
             if not key:
-                return {"success": False, "error": "Retrieve requires --key", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "Retrieve requires --key",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             files = _get_memory_files(memory_dir, type_clean)
             for f_path in files:
@@ -849,7 +915,11 @@ def execute_tool(
         # ----------------------------------------------------------------------
         elif action_clean == "update":
             if not key:
-                return {"success": False, "error": "Update requires --key", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "Update requires --key",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             files = _get_memory_files(memory_dir, type_clean)
             updated_count = 0
@@ -872,7 +942,9 @@ def execute_tool(
                             item["metadata"] = existing_meta
                         if ttl:
                             item["ttl"] = ttl
-                            item["expires_at"] = (now_dt + timedelta(seconds=ttl)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                            item["expires_at"] = (
+                                now_dt + timedelta(seconds=ttl)
+                            ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
                         item["timestamp"] = now_iso
                         entries[idx] = item
@@ -888,7 +960,11 @@ def execute_tool(
         # ----------------------------------------------------------------------
         elif action_clean == "delete":
             if not key:
-                return {"success": False, "error": "Delete requires --key", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "Delete requires --key",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             files = _get_memory_files(memory_dir, type_clean)
             for f_path in files:
@@ -916,7 +992,11 @@ def execute_tool(
             for f_path in files:
                 for item in _read_jsonl(f_path):
                     if shutdown.should_stop():
-                        return {"success": False, "error": "Interrupted by signal", "exit_code": EXIT_INTERRUPTED}
+                        return {
+                            "success": False,
+                            "error": "Interrupted by signal",
+                            "exit_code": EXIT_INTERRUPTED,
+                        }
 
                     if session and item.get("session") != session.strip():
                         continue
@@ -924,7 +1004,9 @@ def execute_tool(
                     if _is_expired(item, now_dt):
                         continue
 
-                    rel_score = _calculate_hybrid_score(item, query_tokens, tag_list, now_dt)
+                    rel_score = _calculate_hybrid_score(
+                        item, query_tokens, tag_list, now_dt
+                    )
                     if rel_score > 0.0:
                         item_copy = dict(item)
                         item_copy["_score"] = rel_score
@@ -972,21 +1054,38 @@ def execute_tool(
             for f_path in files:
                 all_entries.extend(_read_jsonl(f_path))
 
-            export_filename = f"{type_clean}_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            export_filename = (
+                f"{type_clean}_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            )
             export_path = memory_dir / export_filename
-            export_path.write_text(json.dumps(all_entries, indent=2, ensure_ascii=False, cls=ToolJSONEncoder), encoding="utf-8")
-            results.append({"export_path": str(export_path), "exported_count": len(all_entries)})
+            export_path.write_text(
+                json.dumps(
+                    all_entries, indent=2, ensure_ascii=False, cls=ToolJSONEncoder
+                ),
+                encoding="utf-8",
+            )
+            results.append(
+                {"export_path": str(export_path), "exported_count": len(all_entries)}
+            )
 
         # ----------------------------------------------------------------------
         # ACTION 9: IMPORT
         # ----------------------------------------------------------------------
         elif action_clean == "import":
             if not value:
-                return {"success": False, "error": "Missing import path in --value", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "Missing import path in --value",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             import_path = Path(value).expanduser().resolve()
             if not import_path.exists():
-                return {"success": False, "error": f"Import file not found: {import_path}", "exit_code": EXIT_FILE_NOT_FOUND}
+                return {
+                    "success": False,
+                    "error": f"Import file not found: {import_path}",
+                    "exit_code": EXIT_FILE_NOT_FOUND,
+                }
 
             raw_text = import_path.read_text(encoding="utf-8")
             imported_entries: list[dict[str, Any]] = []
@@ -1032,7 +1131,9 @@ def execute_tool(
                 for item in _read_jsonl(jsonl_file):
                     if _is_expired(item, now_dt):
                         continue
-                    dt = _parse_timestamp(item.get("timestamp") or item.get("created_at"))
+                    dt = _parse_timestamp(
+                        item.get("timestamp") or item.get("created_at")
+                    )
                     if dt and dt < cutoff:
                         continue
                     retained_local.append(item)
@@ -1061,17 +1162,26 @@ def execute_tool(
                         existing_item = key_map[k]
                         e_imp = existing_item.get("importance", 5)
                         i_imp = item.get("importance", 5)
-                        if i_imp > e_imp or (i_imp == e_imp and item.get("timestamp", "") > existing_item.get("timestamp", "")):
+                        if i_imp > e_imp or (
+                            i_imp == e_imp
+                            and item.get("timestamp", "")
+                            > existing_item.get("timestamp", "")
+                        ):
                             key_map[k] = item
                     else:
                         key_map[k] = item
 
                 consolidated_list = list(key_map.values())
-                consolidated_total += (len(entries) - len(consolidated_list))
+                consolidated_total += len(entries) - len(consolidated_list)
                 _write_jsonl_atomic(jsonl_file, consolidated_list)
                 results.extend(consolidated_list)
 
-            results = [{"consolidated_pruned_count": consolidated_total, "retained_count": len(results)}]
+            results = [
+                {
+                    "consolidated_pruned_count": consolidated_total,
+                    "retained_count": len(results),
+                }
+            ]
 
         # ----------------------------------------------------------------------
         # ACTION 12: ANALYTICS
@@ -1150,10 +1260,13 @@ def execute_tool(
 # SECTION 8: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination safely."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -1173,6 +1286,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 9: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     action: str,
@@ -1239,41 +1353,65 @@ def run(
 # SECTION 10: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="memory_tool.py",
         description=f"AIChat Advanced Multi-Tiered Persistent Memory Tool v{__version__}",
     )
     parser.add_argument(
-        "--action", "-a",
+        "--action",
+        "-a",
         required=True,
         choices=[
-            "store", "retrieve", "update", "delete", "search",
-            "list", "clear", "export", "import", "cleanup",
-            "consolidate", "analytics"
+            "store",
+            "retrieve",
+            "update",
+            "delete",
+            "search",
+            "list",
+            "clear",
+            "export",
+            "import",
+            "cleanup",
+            "consolidate",
+            "analytics",
         ],
         help="Action to perform (required)",
     )
     parser.add_argument(
-        "--key", "-k",
+        "--key",
+        "-k",
         type=str,
         default=None,
         help="Memory key or identifier",
     )
     parser.add_argument(
-        "--value", "-v",
+        "--value",
+        "-v",
         type=str,
         default=None,
         help="Value to store, search query, or import file path",
     )
     parser.add_argument(
-        "--type", "-t",
+        "--type",
+        "-t",
         default="context",
-        choices=["core", "working", "conversation", "preference", "context", "knowledge", "archival", "all"],
+        choices=[
+            "core",
+            "working",
+            "conversation",
+            "preference",
+            "context",
+            "knowledge",
+            "archival",
+            "all",
+        ],
         help="Memory tier (default: context)",
     )
     parser.add_argument(
-        "--session", "-s",
+        "--session",
+        "-s",
         type=str,
         default=None,
         help="Session identifier",
@@ -1310,7 +1448,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Analytics mode (default: summary)",
     )
     parser.add_argument(
-        "--days", "-d",
+        "--days",
+        "-d",
         type=int,
         default=30,
         help="Days window for analytics or cleanup retention (default: 30)",

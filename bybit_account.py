@@ -10,13 +10,14 @@
 Bybit Account & Position Tools
 Requires BYBIT_API_KEY and BYBIT_API_SECRET
 """
-import os
-import sys
-import json
+
 import argparse
+import json
+import os
 
 # Load .env if exists
 from pathlib import Path
+
 env_path = Path(__file__).parent.parent / ".env"
 if env_path.exists():
     with open(env_path) as f:
@@ -39,7 +40,7 @@ session = HTTP(
     testnet=TESTNET,
     api_key=os.getenv("BYBIT_API_KEY"),
     api_secret=os.getenv("BYBIT_API_SECRET"),
-    proxy=PROXY
+    proxy=PROXY,
 )
 
 
@@ -82,7 +83,9 @@ def bybit_get_closed_pnl(symbol=None, limit=20):
 def bybit_get_executions(symbol=None, order_id=None):
     """Get execution history"""
     try:
-        result = session.get_executions(category="linear", symbol=symbol, orderId=order_id)
+        result = session.get_executions(
+            category="linear", symbol=symbol, orderId=order_id
+        )
         print(json.dumps(result, indent=2))
     except Exception as e:
         print(json.dumps({"error": str(e)}))

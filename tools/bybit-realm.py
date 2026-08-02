@@ -55,42 +55,45 @@ Usage:
 """
 
 # Standard library
-import os
-import sys
-import json
-import pickle
-import math
-import re
+import hashlib
 import hmac
+import json
+import logging
+import math
+import os
+import pickle
+import random
+import re
+import socket as stdlib_socket
+import statistics
+import subprocess
+import sys
+import threading
 import time
 import uuid
-import logging
-import hashlib
-import threading
-import subprocess
-import statistics
-import random
-import socket as stdlib_socket
-from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv(override=True)
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from collections import deque, defaultdict, OrderedDict
-from contextlib import contextmanager
 from logging.handlers import RotatingFileHandler
-from typing import Optional, List, Dict, Any, Literal, Tuple, Callable, Set
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple
+
+import requests
 
 # Third-party
 import socks  # PySocks
-import requests
+import websocket
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import websocket
 
-class NetworkError(Exception): pass
+
+class NetworkError(Exception):
+    pass
+
 
 # -------------------------------------------------
 #  Helper to guarantee a valid TimeInForce value
@@ -106,10 +109,13 @@ def _sanitize_tif(tif: Any) -> str:
     try:
         # Ensure input is string, convert to upper, and validate against Enum
         sanitized_tif = str(tif).strip().upper()
-        return TimeInForce(sanitized_tif).value # Use Enum for validation
+        return TimeInForce(sanitized_tif).value  # Use Enum for validation
     except ValueError:
-        logger.warning("Invalid TimeInForce value '%s' provided. Falling back to GTC.", tif)
+        logger.warning(
+            "Invalid TimeInForce value '%s' provided. Falling back to GTC.", tif
+        )
         return "GTC"
+
 
 # -------------------------------------------------
 #  Helper to guarantee a valid Category value
@@ -124,6 +130,7 @@ def _sanitize_category(cat: Any) -> str:
     s = str(cat).strip().lower()
     valid_categories = {c.value for c in Category}
     return s if s in valid_categories else Category.LINEAR.value
+
 
 # -------------------------------------------------
 #  Helper to guarantee a valid Order Type value
@@ -142,11 +149,12 @@ def _sanitize_order_type(ot: Any) -> str:
         "market": OrderType.MARKET,
         "limitmaker": OrderType.LIMIT_MAKER,
         "stop": OrderType.STOP,
-        "stoplimit": OrderType.STOP_LIMIT
+        "stoplimit": OrderType.STOP_LIMIT,
     }
 
     # Use title case for Bybit's expected format, e.g., 'Limit'
     return valid_types.get(s, OrderType.LIMIT).value
+
 
 # -------------------------------------------------
 #  Helper to guarantee a valid PositionIdx (int)
@@ -158,23 +166,31 @@ def _sanitize_position_idx(idx: Any) -> int:
     """
     try:
         i = int(idx)
-        if i in {0, 1, 2}: # Valid Bybit indices
+        if i in {0, 1, 2}:  # Valid Bybit indices
             return i
         else:
-            logger.warning("Invalid position_idx %d provided. Falling back to default (1).", i)
-            return 1 # Fallback for invalid integer
+            logger.warning(
+                "Invalid position_idx %d provided. Falling back to default (1).", i
+            )
+            return 1  # Fallback for invalid integer
     except (ValueError, TypeError):
-        logger.warning("Non-integer position_idx provided. Falling back to default (1).")
-        return 1 # Fallback for non-integer types
+        logger.warning(
+            "Non-integer position_idx provided. Falling back to default (1)."
+        )
+        return 1  # Fallback for non-integer types
+
 
 # -------------------------------------------------
 #  Helper to guarantee a boolean value
 # -------------------------------------------------
 def _sanitize_bool(val: Any) -> bool:
-    if isinstance(val, bool): return val
-    if isinstance(val, (int,float)): return bool(val)
-    s = str(val).strip().lower() # Ensure lowercasing for reliable comparison
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return bool(val)
+    s = str(val).strip().lower()  # Ensure lowercasing for reliable comparison
     return s in {"true", "1", "yes", "y"}
+
 
 # -------------------------------------------------
 #  Helper to guarantee a valid TriggerBy value
@@ -185,41 +201,49 @@ def _sanitize_trigger_by(val: str) -> str:
     v = str(val).lower()
     return "MarkPrice" if "mark" in v else "LastPrice"
 
-import math
-import hmac
-import logging
-import hashlib
-import threading
-import socks # PySocks
-from contextlib import contextmanager
 
 # ─────────────────────────────────────────────────────────────
 # CUSTOM EXCEPTIONS
 # ─────────────────────────────────────────────────────────────
 
+
 class TorError(Exception):
     """Base exception for Tor-related errors."""
+
     pass
+
 
 class TorControlError(TorError):
     """Tor control port communication failed."""
+
     pass
+
 
 class TorCircuitError(TorError):
     """Circuit renewal or establishment failed."""
+
     pass
+
 
 class HTTPRequestFailed(RuntimeError):
     """HTTP request completed but returned non-success status."""
+
     def __init__(
-        self, message: str, *, status: Optional[int] = None, url: Optional[str] = None,
-        body_snippet: Optional[str] = None, headers: Optional[Dict[str, str]] = None,
+        self,
+        message: str,
+        *,
+        status: Optional[int] = None,
+        url: Optional[str] = None,
+        body_snippet: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
     ):
         super().__init__(message or f"HTTP {status} from {url}")
         self.status = status
         self.url = url
         self.body_snippet = body_snippet[:500] if body_snippet else ""
         self.headers = headers or {}
+
+
 # BLOCK DETECTION UTILITIES
 # ─────────────────────────────────────────────────────────────
 @dataclass
@@ -229,8 +253,16 @@ class BlockClassification:
     confidence: float
     evidence: str
 
+
 BLOCK_INDICATORS = {
-    "geo": ["geo", "region", "country", "location", "jurisdiction", "not available in your"],
+    "geo": [
+        "geo",
+        "region",
+        "country",
+        "location",
+        "jurisdiction",
+        "not available in your",
+    ],
     "waf": ["cloudflare", "ddos", "protection", "firewall", "security check", "ray id"],
     "captcha": ["captcha", "challenge", "verify you are human", "bot detection"],
     "rate": ["rate limit", "too many requests", "slow down", "throttl"],
@@ -238,27 +270,40 @@ BLOCK_INDICATORS = {
 }
 HTTP_CODE_RE = re.compile(r"\b([45]\d{2})\b")
 
+
 def classify_block(
-    status_code: Optional[int] = None, body: str = "", headers: Optional[Dict[str, str]] = None, exception: Optional[Exception] = None
+    status_code: Optional[int] = None,
+    body: str = "",
+    headers: Optional[Dict[str, str]] = None,
+    exception: Optional[Exception] = None,
 ) -> BlockClassification:
     headers = headers or {}
     body_lower = body.lower()
     evidence_parts = []
     if status_code is None and exception:
         match = HTTP_CODE_RE.search(str(exception))
-        if match: status_code = int(match.group(1))
+        if match:
+            status_code = int(match.group(1))
     if status_code == 403:
         evidence_parts.append("HTTP 403")
-        if "cloudflare" in body_lower or headers.get("server", "").lower() == "cloudflare":
+        if (
+            "cloudflare" in body_lower
+            or headers.get("server", "").lower() == "cloudflare"
+        ):
             return BlockClassification(True, "waf", 0.95, "HTTP 403 + Cloudflare")
         if any(ind in body_lower for ind in BLOCK_INDICATORS["geo"]):
             return BlockClassification(True, "geo", 0.9, "HTTP 403 + geo indicators")
         return BlockClassification(True, "access", 0.8, "HTTP 403 Forbidden")
-    if status_code == 451: return BlockClassification(True, "geo", 0.95, "HTTP 451 Unavailable For Legal Reasons")
-    if status_code == 429: return BlockClassification(True, "rate", 0.95, "HTTP 429 Too Many Requests")
+    if status_code == 451:
+        return BlockClassification(
+            True, "geo", 0.95, "HTTP 451 Unavailable For Legal Reasons"
+        )
+    if status_code == 429:
+        return BlockClassification(True, "rate", 0.95, "HTTP 429 Too Many Requests")
     for block_type, indicators in BLOCK_INDICATORS.items():
         matches = [ind for ind in indicators if ind in body_lower]
-        if matches: evidence_parts.append(f"{block_type}: {matches[:2]}")
+        if matches:
+            evidence_parts.append(f"{block_type}: {matches[:2]}")
     if "cf-ray" in headers or headers.get("server", "").lower() == "cloudflare":
         evidence_parts.append("Cloudflare detected")
     if evidence_parts:
@@ -269,28 +314,31 @@ def classify_block(
         return BlockClassification(True, "unknown", 0.5, "; ".join(evidence_parts))
     return BlockClassification(False, "none", 0.0, "No block indicators found")
 
+
 # ── Optional dependencies ─────────────────────────────────────
 try:
     import requests
     from requests.adapters import HTTPAdapter
     from urllib3.util.retry import Retry
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
 
 try:
     import websocket
+
     WEBSOCKET_AVAILABLE = True
 except ImportError:
     WEBSOCKET_AVAILABLE = False
 
 try:
     import socks  # noqa: F401
+
     PYSOCKS_AVAILABLE = True
 except ImportError:
     PYSOCKS_AVAILABLE = False
 
-from logging.handlers import RotatingFileHandler
 
 # ─────────────────────────────────────────────────────────────
 # LOGGING
@@ -299,25 +347,32 @@ class NoWarningFilter(logging.Filter):
     def filter(self, record):
         return record.levelno != logging.WARNING
 
+
 class ColorFormatter(logging.Formatter):
     COLORS = {
-        'INFO': '\033[1;32m',    # Neon Green
-        'ERROR': '\033[1;35m',   # Neon Magenta
-        'CRITICAL': '\033[1;31m',# Bold Red
-        'DEBUG': '\033[1;36m'    # Neon Cyan
+        "INFO": "\033[1;32m",  # Neon Green
+        "ERROR": "\033[1;35m",  # Neon Magenta
+        "CRITICAL": "\033[1;31m",  # Bold Red
+        "DEBUG": "\033[1;36m",  # Neon Cyan
     }
-    RESET = '\033[0m'
-    
+    RESET = "\033[0m"
+
     def format(self, record):
-        log_color = self.COLORS.get(record.levelname, '')
+        log_color = self.COLORS.get(record.levelname, "")
         log_fmt = f"{log_color}%(asctime)s | %(levelname)-8s | %(name)s | %(message)s{self.RESET}"
         formatter = logging.Formatter(log_fmt, datefmt="%Y-%m-%d %H:%M:%S")
         return formatter.format(record)
 
+
 log_handler = RotatingFileHandler(
     "trading_bot.log", maxBytes=10 * 1024 * 1024, backupCount=5
 )
-log_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+log_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+)
 
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.addFilter(NoWarningFilter())
@@ -334,52 +389,59 @@ logger = logging.getLogger("BybitRealm")
 # ENUMS
 # ─────────────────────────────────────────────────────────────
 class OrderSide(str, Enum):
-    BUY  = "Buy"
+    BUY = "Buy"
     SELL = "Sell"
 
     @classmethod
-    def from_any(cls, val: Any) -> 'OrderSide':
-        if isinstance(val, cls): return val
+    def from_any(cls, val: Any) -> "OrderSide":
+        if isinstance(val, cls):
+            return val
         s = str(val).lower().strip()
-        if "sell" in s: return cls.SELL
-        if "buy" in s: return cls.BUY
+        if "sell" in s:
+            return cls.SELL
+        if "buy" in s:
+            return cls.BUY
         logger.warning(f"Invalid OrderSide: '{val}'. Defaulting to BUY.")
         return cls.BUY
 
 
 class OrderType(str, Enum):
-    LIMIT       = "Limit"
-    MARKET      = "Market"
+    LIMIT = "Limit"
+    MARKET = "Market"
     LIMIT_MAKER = "LimitMaker"
-    STOP        = "Stop"
-    STOP_LIMIT  = "StopLimit"
+    STOP = "Stop"
+    STOP_LIMIT = "StopLimit"
 
     @classmethod
-    def from_any(cls, val: Any) -> 'OrderType':
-        if isinstance(val, cls): return val
+    def from_any(cls, val: Any) -> "OrderType":
+        if isinstance(val, cls):
+            return val
         s = str(val).lower().strip()
         mapping = {
             "limit": cls.LIMIT,
             "market": cls.MARKET,
             "limitmaker": cls.LIMIT_MAKER,
             "stop": cls.STOP,
-            "stoplimit": cls.STOP_LIMIT
+            "stoplimit": cls.STOP_LIMIT,
         }
-        if s in mapping: return mapping[s]
+        if s in mapping:
+            return mapping[s]
         logger.warning(f"Invalid OrderType: '{val}'. Defaulting to LIMIT.")
         return cls.LIMIT
 
 
 class Category(str, Enum):
-    LINEAR  = "linear"
+    LINEAR = "linear"
     INVERSE = "inverse"
-    SPOT    = "spot"
-    OPTION  = "option"
+    SPOT = "spot"
+    OPTION = "option"
 
     @classmethod
-    def from_any(cls, val: Any) -> 'Category':
-        if isinstance(val, cls): return val
-        if not val or str(val).strip() == "0": return cls.LINEAR
+    def from_any(cls, val: Any) -> "Category":
+        if isinstance(val, cls):
+            return val
+        if not val or str(val).strip() == "0":
+            return cls.LINEAR
         s = str(val).lower().strip()
         try:
             return cls(s)
@@ -389,42 +451,61 @@ class Category(str, Enum):
 
 
 class CircuitState(str, Enum):
-    CLOSED    = "CLOSED"
-    OPEN      = "OPEN"
+    CLOSED = "CLOSED"
+    OPEN = "OPEN"
     HALF_OPEN = "HALF_OPEN"
 
     @classmethod
-    def from_any(cls, val: Any) -> 'CircuitState':
-        if isinstance(val, cls): return val
+    def from_any(cls, val: Any) -> "CircuitState":
+        if isinstance(val, cls):
+            return val
         s = str(val).upper().strip()
-        if s in {e.value for e in cls}: return cls(s)
+        if s in {e.value for e in cls}:
+            return cls(s)
         logger.warning(f"Invalid CircuitState: '{val}'. Defaulting to CLOSED.")
         return cls.CLOSED
+
 
 # ─────────────────────────────────────────────────────────────
 # DIANOSTICS & ERROR HANDLING HELPERS
 # ─────────────────────────────────────────────────────────────
 HTTP_CODE_RE = re.compile(r"\b(4\d\d|5\d\d)\b")
 BLOCK_HINTS = (
-    "geo", "blocked", "forbidden", "access denied", "cloudflare", "captcha",
-    "bot", "ddos", "restricted", "unavailable for legal reasons"
+    "geo",
+    "blocked",
+    "forbidden",
+    "access denied",
+    "cloudflare",
+    "captcha",
+    "bot",
+    "ddos",
+    "restricted",
+    "unavailable for legal reasons",
 )
+
 
 def _safe_snip(text: str, n: int = 300) -> str:
     text = text or ""
     text = text.replace("\n", "\\n")
     return text[:n]
 
+
 class HTTPRequestFailed(RuntimeError):
     def __init__(
-        self, message: str, *, status: Optional[int] = None, url: Optional[str] = None,
-        body_snippet: Optional[str] = None, headers: Optional[Dict[str, str]] = None,
+        self,
+        message: str,
+        *,
+        status: Optional[int] = None,
+        url: Optional[str] = None,
+        body_snippet: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
     ):
         super().__init__(message)
         self.status = status
         self.url = url
         self.body_snippet = body_snippet
         self.headers = headers or {}
+
 
 def looks_like_block(exc: Exception) -> bool:
     if isinstance(exc, HTTPRequestFailed) and exc.status in (403, 451):
@@ -435,6 +516,7 @@ def looks_like_block(exc: Exception) -> bool:
     if code in (403, 451):
         return True
     return any(h in s for h in BLOCK_HINTS)
+
 
 def _tor_ctl_send(sock: stdlib_socket.socket, line: str) -> str:
     sock.sendall((line + "\r\n").encode("utf-8"))
@@ -450,39 +532,44 @@ def _tor_ctl_send(sock: stdlib_socket.socket, line: str) -> str:
             return txt
     return data.decode("utf-8", errors="replace")
 
+
 def _tor_ctl_ok(reply: str) -> bool:
     return "250" in reply.splitlines()[0] if reply else False
 
 
-
 class Signal(str, Enum):
-    STRONG_BUY  = "STRONG_BUY"
-    BUY         = "BUY"
-    NEUTRAL     = "NEUTRAL"
-    SELL        = "SELL"
+    STRONG_BUY = "STRONG_BUY"
+    BUY = "BUY"
+    NEUTRAL = "NEUTRAL"
+    SELL = "SELL"
     STRONG_SELL = "STRONG_SELL"
 
     @classmethod
-    def from_any(cls, val: Any) -> 'Signal':
-        if isinstance(val, cls): return val
+    def from_any(cls, val: Any) -> "Signal":
+        if isinstance(val, cls):
+            return val
         s = str(val).upper().strip()
-        if s in {e.value for e in cls}: return cls(s)
+        if s in {e.value for e in cls}:
+            return cls(s)
         logger.warning(f"Invalid Signal: '{val}'. Defaulting to NEUTRAL.")
         return cls.NEUTRAL
 
 
 class TimeInForce(str, Enum):
-    GTC       = "GTC"
-    IOC       = "IOC"
-    FOK       = "FOK"
+    GTC = "GTC"
+    IOC = "IOC"
+    FOK = "FOK"
     POST_ONLY = "PostOnly"
 
     @classmethod
-    def from_any(cls, val: Any) -> 'TimeInForce':
-        if isinstance(val, cls): return val
-        if not val or str(val).strip() == "0": return cls.GTC
+    def from_any(cls, val: Any) -> "TimeInForce":
+        if isinstance(val, cls):
+            return val
+        if not val or str(val).strip() == "0":
+            return cls.GTC
         s = str(val).upper().strip()
-        if s == "POSTONLY" or s == "POST_ONLY": return cls.POST_ONLY
+        if s == "POSTONLY" or s == "POST_ONLY":
+            return cls.POST_ONLY
         try:
             return cls(s)
         except ValueError:
@@ -491,16 +578,18 @@ class TimeInForce(str, Enum):
 
 
 class PositionIdx(int, Enum):
-    ONE_WAY    = 0
-    HEDGE_BUY  = 1
+    ONE_WAY = 0
+    HEDGE_BUY = 1
     HEDGE_SELL = 2
 
     @classmethod
-    def from_any(cls, val: Any) -> 'PositionIdx':
-        if isinstance(val, cls): return val
+    def from_any(cls, val: Any) -> "PositionIdx":
+        if isinstance(val, cls):
+            return val
         try:
             i = int(val)
-            if i in {0, 1, 2}: return cls(i)
+            if i in {0, 1, 2}:
+                return cls(i)
         except (ValueError, TypeError):
             pass
         logger.warning(f"Invalid PositionIdx: '{val}'. Defaulting to 1 (HEDGE_BUY).")
@@ -521,28 +610,28 @@ def calculate_breakeven_with_fees(
     entry_price: float,
     position_size_usdt: float,
     maker_fee_rate: float = 0.0006,  # 0.06% for VIP 0-1
-    taker_fee_rate: float = 0.001,   # 0.1% for VIP 0-1
+    taker_fee_rate: float = 0.001,  # 0.1% for VIP 0-1
     min_net_profit_usdt: float = 0.02,
     is_maker: bool = True,
     leverage: int = 1,
 ) -> Dict[str, float]:
     """
     Calculate breakeven price accounting for fees and minimum net profit.
-    
+
     For a LONG position:
     - Entry fee = position_size_usdt * maker_fee_rate
     - Exit fee = position_size_usdt * taker_fee_rate
     - Total fees = entry_fee + exit_fee
     - Required gross profit = total_fees + min_net_profit_usdt
     - Breakeven price = entry_price + (required_gross_profit / position_size)
-    
+
     For a SHORT position:
     - Entry fee = position_size_usdt * maker_fee_rate
     - Exit fee = position_size_usdt * taker_fee_rate
     - Total fees = entry_fee + exit_fee
     - Required gross profit = total_fees + min_net_profit_usdt
     - Breakeven price = entry_price - (required_gross_profit / position_size)
-    
+
     Args:
         entry_price: Entry price of the position
         position_size_usdt: Position size in USDT
@@ -551,44 +640,52 @@ def calculate_breakeven_with_fees(
         min_net_profit_usdt: Minimum net profit in USDT (default 0.02)
         is_maker: Whether entry was a maker order (default True)
         leverage: Leverage multiplier (default 1)
-    
+
     Returns:
         Dictionary with breakeven prices for long and short positions
     """
     if position_size_usdt <= 0 or entry_price <= 0:
         raise ValueError("Position size and entry price must be positive")
-    
+
     # Calculate position size in base asset
     position_size_base = position_size_usdt / entry_price
-    
+
     # Calculate fees
     entry_fee_rate = maker_fee_rate if is_maker else taker_fee_rate
     entry_fee = position_size_usdt * entry_fee_rate
     exit_fee = position_size_usdt * taker_fee_rate
     total_fees = entry_fee + exit_fee
-    
+
     # Required gross profit to achieve minimum net profit
     required_gross_profit = total_fees + min_net_profit_usdt
-    
+
     # Calculate breakeven prices
     # For LONG: need price to rise enough to cover fees + min profit
     long_breakeven_price = entry_price + (required_gross_profit / position_size_base)
-    
+
     # For SHORT: need price to fall enough to cover fees + min profit
     short_breakeven_price = entry_price - (required_gross_profit / position_size_base)
-    
+
     # Calculate percentage moves needed
     long_move_pct = ((long_breakeven_price - entry_price) / entry_price) * 100
     short_move_pct = ((entry_price - short_breakeven_price) / entry_price) * 100
-    
+
     # Calculate breakeven with leverage (margin-based)
     # With leverage, the required price move is divided by leverage
-    long_breakeven_price_leveraged = entry_price + (required_gross_profit / (position_size_base * leverage))
-    short_breakeven_price_leveraged = entry_price - (required_gross_profit / (position_size_base * leverage))
-    
-    long_move_pct_leveraged = ((long_breakeven_price_leveraged - entry_price) / entry_price) * 100
-    short_move_pct_leveraged = ((entry_price - short_breakeven_price_leveraged) / entry_price) * 100
-    
+    long_breakeven_price_leveraged = entry_price + (
+        required_gross_profit / (position_size_base * leverage)
+    )
+    short_breakeven_price_leveraged = entry_price - (
+        required_gross_profit / (position_size_base * leverage)
+    )
+
+    long_move_pct_leveraged = (
+        (long_breakeven_price_leveraged - entry_price) / entry_price
+    ) * 100
+    short_move_pct_leveraged = (
+        (entry_price - short_breakeven_price_leveraged) / entry_price
+    ) * 100
+
     return {
         "entry_price": round(entry_price, 6),
         "position_size_usdt": round(position_size_usdt, 2),
@@ -621,7 +718,7 @@ def calculate_profit_target_with_fees(
 ) -> Dict[str, float]:
     """
     Calculate target price to achieve specific profit after fees.
-    
+
     Args:
         entry_price: Entry price of the position
         position_size_usdt: Position size in USDT
@@ -630,34 +727,42 @@ def calculate_profit_target_with_fees(
         taker_fee_rate: Taker fee rate (default 0.001)
         is_maker: Whether entry was a maker order (default True)
         leverage: Leverage multiplier (default 1)
-    
+
     Returns:
         Dictionary with target prices for long and short positions
     """
     if position_size_usdt <= 0 or entry_price <= 0:
         raise ValueError("Position size and entry price must be positive")
-    
+
     position_size_base = position_size_usdt / entry_price
-    
+
     entry_fee_rate = maker_fee_rate if is_maker else taker_fee_rate
     entry_fee = position_size_usdt * entry_fee_rate
     exit_fee = position_size_usdt * taker_fee_rate
     total_fees = entry_fee + exit_fee
-    
+
     required_gross_profit = total_fees + target_profit_usdt
-    
+
     long_target_price = entry_price + (required_gross_profit / position_size_base)
     short_target_price = entry_price - (required_gross_profit / position_size_base)
-    
+
     long_move_pct = ((long_target_price - entry_price) / entry_price) * 100
     short_move_pct = ((entry_price - short_target_price) / entry_price) * 100
-    
-    long_target_price_leveraged = entry_price + (required_gross_profit / (position_size_base * leverage))
-    short_target_price_leveraged = entry_price - (required_gross_profit / (position_size_base * leverage))
-    
-    long_move_pct_leveraged = ((long_target_price_leveraged - entry_price) / entry_price) * 100
-    short_move_pct_leveraged = ((entry_price - short_target_price_leveraged) / entry_price) * 100
-    
+
+    long_target_price_leveraged = entry_price + (
+        required_gross_profit / (position_size_base * leverage)
+    )
+    short_target_price_leveraged = entry_price - (
+        required_gross_profit / (position_size_base * leverage)
+    )
+
+    long_move_pct_leveraged = (
+        (long_target_price_leveraged - entry_price) / entry_price
+    ) * 100
+    short_move_pct_leveraged = (
+        (entry_price - short_target_price_leveraged) / entry_price
+    ) * 100
+
     return {
         "entry_price": round(entry_price, 6),
         "position_size_usdt": round(position_size_usdt, 2),
@@ -752,60 +857,71 @@ class TradingConfig:
     """Central configuration – all values sourced from environment variables."""
 
     # ── Auth ──────────────────────────────────────────────────
-    api_key:    str = field(default_factory=lambda: os.getenv("BYBIT_API_KEY",    ""))
+    api_key: str = field(default_factory=lambda: os.getenv("BYBIT_API_KEY", ""))
     api_secret: str = field(default_factory=lambda: os.getenv("BYBIT_API_SECRET", ""))
 
     # ── Network ───────────────────────────────────────────────
-    testnet: bool = field(default_factory=lambda: os.getenv(
-        "BYBIT_USE_TESTNET", "false").lower() == "true")
-    use_tor: bool = field(default_factory=lambda: os.getenv(
-        "TOR_ENABLED", "false").lower() == "true")
-    tor_socks_port: int = field(default_factory=lambda: int(
-        os.getenv("TOR_SOCKS_PORT", "9060")))
-    tor_control_port: int = field(default_factory=lambda: int(
-        os.getenv("TOR_CONTROL_PORT", "9061")))
-    tor_control_pass: str = field(default_factory=lambda: os.getenv(
-        "TOR_CONTROL_PASSWORD", ""))
-    tor_use_pysocks: bool = field(default_factory=lambda: os.getenv(
-        "TOR_USE_PYSOCKS", "true").lower() == "true")
+    testnet: bool = field(
+        default_factory=lambda: (
+            os.getenv("BYBIT_USE_TESTNET", "false").lower() == "true"
+        )
+    )
+    use_tor: bool = field(
+        default_factory=lambda: os.getenv("TOR_ENABLED", "false").lower() == "true"
+    )
+    tor_socks_port: int = field(
+        default_factory=lambda: int(os.getenv("TOR_SOCKS_PORT", "9060"))
+    )
+    tor_control_port: int = field(
+        default_factory=lambda: int(os.getenv("TOR_CONTROL_PORT", "9061"))
+    )
+    tor_control_pass: str = field(
+        default_factory=lambda: os.getenv("TOR_CONTROL_PASSWORD", "")
+    )
+    tor_use_pysocks: bool = field(
+        default_factory=lambda: os.getenv("TOR_USE_PYSOCKS", "true").lower() == "true"
+    )
 
     # ── PySocks Geo Routing ───────────────────────────────────
-    pysocks_enabled: bool = field(default_factory=lambda: os.getenv(
-        "PYSOCKS_ENABLED", "true").lower() == "true")
-    pysocks_host: str = field(default_factory=lambda: os.getenv(
-        "PYSOCKS_HOST", "127.0.0.1"))
-    pysocks_port: int = field(default_factory=lambda: int(
-        os.getenv("PYSOCKS_PORT", "9050")))
-    pysocks_region: str = field(default_factory=lambda: os.getenv(
-        "PYSOCKS_REGION", ""))
-    pysocks_global: bool = field(default_factory=lambda: os.getenv(
-        "PYSOCKS_GLOBAL", "false").lower() == "true")
-    request_timeout: int  = 15
-    max_retries:     int  = 3
+    pysocks_enabled: bool = field(
+        default_factory=lambda: os.getenv("PYSOCKS_ENABLED", "true").lower() == "true"
+    )
+    pysocks_host: str = field(
+        default_factory=lambda: os.getenv("PYSOCKS_HOST", "127.0.0.1")
+    )
+    pysocks_port: int = field(
+        default_factory=lambda: int(os.getenv("PYSOCKS_PORT", "9050"))
+    )
+    pysocks_region: str = field(default_factory=lambda: os.getenv("PYSOCKS_REGION", ""))
+    pysocks_global: bool = field(
+        default_factory=lambda: os.getenv("PYSOCKS_GLOBAL", "false").lower() == "true"
+    )
+    request_timeout: int = 15
+    max_retries: int = 3
 
     # ── Circuit Breaker ───────────────────────────────────────
-    cb_failure_threshold: int   = 5
-    cb_recovery_timeout:  float = 60.0
-    cb_cooldown:          float = 30.0
+    cb_failure_threshold: int = 5
+    cb_recovery_timeout: float = 60.0
+    cb_cooldown: float = 30.0
 
     # ── Rate Limiting ─────────────────────────────────────────
-    rate_limit_calls:  int   = 10
+    rate_limit_calls: int = 10
     rate_limit_window: float = 1.0
 
     # ── Risk Management ───────────────────────────────────────
-    max_position_usdt:       float = 1000.0
-    default_leverage:        int   = 1
-    default_stop_loss_pct:   float = 0.02
+    max_position_usdt: float = 1000.0
+    default_leverage: int = 1
+    default_stop_loss_pct: float = 0.02
     default_take_profit_pct: float = 0.04
-    order_timeout_seconds:   int   = 30
+    order_timeout_seconds: int = 30
 
     # ── Iceberg ───────────────────────────────────────────────
-    iceberg_min_slices:   int   = 3
-    iceberg_max_slices:   int   = 10
-    iceberg_delay:        float = 0.5
+    iceberg_min_slices: int = 3
+    iceberg_max_slices: int = 10
+    iceberg_delay: float = 0.5
 
     # ── Logging ───────────────────────────────────────────────
-    log_level:    str = "INFO"
+    log_level: str = "INFO"
     log_max_bytes: int = 10485760
     log_backup_count: int = 5
 
@@ -813,48 +929,60 @@ class TradingConfig:
     rsi_period: int = 14
     sma_period: int = 20
     ema_period: int = 50
-    macd_fast:  int = 12
-    macd_slow:  int = 26
+    macd_fast: int = 12
+    macd_slow: int = 26
     macd_signal: int = 9
 
     @classmethod
-    def from_file(cls, path: str = "trading_config.json") -> 'TradingConfig':
+    def from_file(cls, path: str = "trading_config.json") -> "TradingConfig":
         """Load configuration from a JSON file with environment variable fallback."""
         if os.path.exists(path):
             try:
-                with open(path, 'r') as f:
+                with open(path) as f:
                     data = json.load(f)
 
                 settings = data.get("trading_settings", {})
-                net      = data.get("network", {})
-                cb       = data.get("circuit_breaker", {})
-                rl       = data.get("rate_limit", {})
-                iceberg  = data.get("iceberg", {})
-                logging  = data.get("logging", {})
+                net = data.get("network", {})
+                cb = data.get("circuit_breaker", {})
+                rl = data.get("rate_limit", {})
+                iceberg = data.get("iceberg", {})
+                logging = data.get("logging", {})
                 indicators = data.get("indicators", {})
 
                 return cls(
-                    api_key              = data.get("api_key") or os.getenv("BYBIT_API_KEY", ""),
-                    api_secret           = data.get("api_secret") or os.getenv("BYBIT_API_SECRET", ""),
-                    use_tor              = bool(data.get("network", {}).get("use_tor", os.getenv("TOR_ENABLED", "false").lower() == "true")),
-                    tor_socks_port       = int(data.get("network", {}).get("tor_socks_port", int(os.getenv("TOR_SOCKS_PORT", "9050")))),
-                    max_position_usdt    = settings.get("max_position_usdt", 1000.0),
-                    default_leverage     = settings.get("leverage", 1),
-                    default_stop_loss_pct   = settings.get("default_stop_loss_pct", 0.02),
-                    default_take_profit_pct = settings.get("default_take_profit_pct", 0.04),
-                    order_timeout_seconds   = settings.get("order_timeout_seconds", 30),
-                    iceberg_min_slices      = iceberg.get("min_slices", 3),
-                    iceberg_max_slices      = iceberg.get("max_slices", 10),
-                    iceberg_delay           = iceberg.get("delay_between_slices", 0.5),
-                    log_level               = logging.get("level", "INFO"),
-                    log_max_bytes           = logging.get("max_bytes", 10485760),
-                    log_backup_count        = logging.get("backup_count", 5),
-                    rsi_period              = indicators.get("rsi_period", 14),
-                    sma_period              = indicators.get("sma_period", 20),
-                    ema_period              = indicators.get("ema_period", 50),
-                    macd_fast               = indicators.get("macd_fast", 12),
-                    macd_slow               = indicators.get("macd_slow", 26),
-                    macd_signal             = indicators.get("macd_signal", 9)
+                    api_key=data.get("api_key") or os.getenv("BYBIT_API_KEY", ""),
+                    api_secret=data.get("api_secret")
+                    or os.getenv("BYBIT_API_SECRET", ""),
+                    use_tor=bool(
+                        data.get("network", {}).get(
+                            "use_tor",
+                            os.getenv("TOR_ENABLED", "false").lower() == "true",
+                        )
+                    ),
+                    tor_socks_port=int(
+                        data.get("network", {}).get(
+                            "tor_socks_port", int(os.getenv("TOR_SOCKS_PORT", "9050"))
+                        )
+                    ),
+                    max_position_usdt=settings.get("max_position_usdt", 1000.0),
+                    default_leverage=settings.get("leverage", 1),
+                    default_stop_loss_pct=settings.get("default_stop_loss_pct", 0.02),
+                    default_take_profit_pct=settings.get(
+                        "default_take_profit_pct", 0.04
+                    ),
+                    order_timeout_seconds=settings.get("order_timeout_seconds", 30),
+                    iceberg_min_slices=iceberg.get("min_slices", 3),
+                    iceberg_max_slices=iceberg.get("max_slices", 10),
+                    iceberg_delay=iceberg.get("delay_between_slices", 0.5),
+                    log_level=logging.get("level", "INFO"),
+                    log_max_bytes=logging.get("max_bytes", 10485760),
+                    log_backup_count=logging.get("backup_count", 5),
+                    rsi_period=indicators.get("rsi_period", 14),
+                    sma_period=indicators.get("sma_period", 20),
+                    ema_period=indicators.get("ema_period", 50),
+                    macd_fast=indicators.get("macd_fast", 12),
+                    macd_slow=indicators.get("macd_slow", 26),
+                    macd_signal=indicators.get("macd_signal", 9),
                 )
             except Exception as e:
                 logger.error("Error loading config from %s: %s", path, e)
@@ -879,7 +1007,10 @@ class TradingConfig:
         ]
 
     def validate(self) -> None:
-        logger.info("Validating configuration. API Key present: %s", "Yes" if self.api_key else "No")
+        logger.info(
+            "Validating configuration. API Key present: %s",
+            "Yes" if self.api_key else "No",
+        )
         if not self.api_key or not self.api_secret:
             raise ValueError(
                 "BYBIT_API_KEY and BYBIT_API_SECRET must be set "
@@ -900,8 +1031,8 @@ class PySocksGeoRouter:
     PROXY_CONFIGS = {
         "us_east": {"host": "127.0.0.1", "port": 9050, "rdns": True, "weight": 1},
         "us_west": {"host": "127.0.0.1", "port": 9051, "rdns": True, "weight": 1},
-        "europe":  {"host": "127.0.0.1", "port": 9052, "rdns": True, "weight": 1},
-        "asia":    {"host": "127.0.0.1", "port": 9053, "rdns": True, "weight": 1},
+        "europe": {"host": "127.0.0.1", "port": 9052, "rdns": True, "weight": 1},
+        "asia": {"host": "127.0.0.1", "port": 9053, "rdns": True, "weight": 1},
     }
 
     def __init__(
@@ -915,6 +1046,7 @@ class PySocksGeoRouter:
     ):
         try:
             import socks as _socks
+
             self.proxy_type = proxy_type or _socks.SOCKS5
         except ImportError:
             self.proxy_type = 5
@@ -929,10 +1061,10 @@ class PySocksGeoRouter:
 
         # Enhanced fields
         self._proxy_pool = list(self.PROXY_CONFIGS.keys())
-        self._proxy_health = {region: 1.0 for region in self.PROXY_CONFIGS}
+        self._proxy_health = dict.fromkeys(self.PROXY_CONFIGS, 1.0)
         self._current_region = None
         self._last_ip_change = time.time()
-        self._ip_change_cooldown = 30 # Seconds between forced IP changes
+        self._ip_change_cooldown = 30  # Seconds between forced IP changes
         self._last_verified_ip = None
 
     def _create_socks_session(self):
@@ -941,13 +1073,21 @@ class PySocksGeoRouter:
         session = requests.Session()
         # Proxy forced to None to ensure direct connection
         session.proxies = {"http": None, "https": None}
-        retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+        retry = Retry(
+            total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]
+        )
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("https://", adapter)
         session.mount("http://", adapter)
         return session
 
-    def set_proxy(self, proxy_host: str, proxy_port: int, proxy_type: int = None, rdns: bool = True):
+    def set_proxy(
+        self,
+        proxy_host: str,
+        proxy_port: int,
+        proxy_type: int = None,
+        rdns: bool = True,
+    ):
         self.proxy_host = proxy_host
         self.proxy_port = proxy_port
         if proxy_type:
@@ -957,7 +1097,9 @@ class PySocksGeoRouter:
 
     def set_region(self, region: str):
         if region not in self.PROXY_CONFIGS:
-            raise ValueError(f"Unsupported region: {region}. Available: {list(self.PROXY_CONFIGS.keys())}")
+            raise ValueError(
+                f"Unsupported region: {region}. Available: {list(self.PROXY_CONFIGS.keys())}"
+            )
         config = self.PROXY_CONFIGS[region]
         self.set_proxy(config["host"], config["port"], rdns=config.get("rdns", True))
 
@@ -975,7 +1117,9 @@ class PySocksGeoRouter:
         if not available:
             available = self._proxy_pool.copy()
         # Try regions in order of health score
-        healthy_regions = sorted(available, key=lambda r: self._proxy_health.get(r, 0), reverse=True)
+        healthy_regions = sorted(
+            available, key=lambda r: self._proxy_health.get(r, 0), reverse=True
+        )
         for region in healthy_regions:
             try:
                 if region != self._current_region:
@@ -987,14 +1131,22 @@ class PySocksGeoRouter:
                     old_ip = self._last_verified_ip
                     if new_ip and new_ip != old_ip:
                         self._last_verified_ip = new_ip
-                        self._proxy_health[region] = min(1.0, self._proxy_health.get(region, 1.0) + 0.1)
-                        logger.info(f"Rotated to proxy region '{region}' - new IP: {new_ip}")
+                        self._proxy_health[region] = min(
+                            1.0, self._proxy_health.get(region, 1.0) + 0.1
+                        )
+                        logger.info(
+                            f"Rotated to proxy region '{region}' - new IP: {new_ip}"
+                        )
                         return True
                     else:
                         # IP didn't change, mark as degraded
-                        self._proxy_health[region] = max(0, self._proxy_health.get(region, 1.0) - 0.3)
+                        self._proxy_health[region] = max(
+                            0, self._proxy_health.get(region, 1.0) - 0.3
+                        )
             except Exception as e:
-                self._proxy_health[region] = max(0, self._proxy_health.get(region, 1.0) - 0.5)
+                self._proxy_health[region] = max(
+                    0, self._proxy_health.get(region, 1.0) - 0.5
+                )
                 logger.warning(f"Proxy rotation to '{region}' failed: {e}")
         return False
 
@@ -1004,23 +1156,25 @@ class PySocksGeoRouter:
         Returns True if successful after trying all available proxies.
         """
         attempts = 0
-        max_attempts = len(self._proxy_pool) * 2 # Try each region twice
+        max_attempts = len(self._proxy_pool) * 2  # Try each region twice
         while attempts < max_attempts:
             attempts += 1
             # Check if we need to rotate based on time
             if time.time() - self._last_ip_change < self._ip_change_cooldown:
-                sleep_time = self._ip_change_cooldown - (time.time() - self._last_ip_change)
+                sleep_time = self._ip_change_cooldown - (
+                    time.time() - self._last_ip_change
+                )
                 logger.info(f"Waiting {sleep_time:.1f}s before next rotation...")
                 time.sleep(min(sleep_time, 5))
 
             if self.rotate_proxy():
                 return True
-            time.sleep(2) # Small delay between attempts
+            time.sleep(2)  # Small delay between attempts
         logger.error(f"Failed to bypass geo-block after {attempts} attempts")
         return False
 
     def set_region_with_fallback(self, region: str) -> bool:
-        """ Set proxy region with automatic fallback if connection fails. """
+        """Set proxy region with automatic fallback if connection fails."""
         try:
             self.set_region(region)
             # Test the connection
@@ -1044,6 +1198,7 @@ class PySocksGeoRouter:
             return False
         try:
             import socks as _socks
+
             # Store original socket only once
             if self._original_socket is None:
                 self._original_socket = stdlib_socket.socket
@@ -1056,15 +1211,17 @@ class PySocksGeoRouter:
                 self.proxy_port,
                 rdns=self.rdns,
                 username=self.username,
-                password=self.password
+                password=self.password,
             )
             stdlib_socket.socket = _socks.socksocket
             self._global_proxy_active = True
-            logger.info("Global SOCKS5 proxy enabled: %s:%d", self.proxy_host, self.proxy_port)
+            logger.info(
+                "Global SOCKS5 proxy enabled: %s:%d", self.proxy_host, self.proxy_port
+            )
             return True
         except Exception as exc:
             logger.error("Failed to enable global proxy: %s", exc)
-            self.disable_global_proxy() # Clean up on failure
+            self.disable_global_proxy()  # Clean up on failure
             return False
 
     def disable_global_proxy(self):
@@ -1080,14 +1237,24 @@ class PySocksGeoRouter:
             logger.error("Failed to disable global proxy: %s", exc)
             return False
 
-    def request(self, method: str, url: str, headers: Optional[dict] = None,
-                params: Optional[dict] = None, json_data: Optional[dict] = None,
-                timeout: int = 15) -> dict:
+    def request(
+        self,
+        method: str,
+        url: str,
+        headers: Optional[dict] = None,
+        params: Optional[dict] = None,
+        json_data: Optional[dict] = None,
+        timeout: int = 15,
+    ) -> dict:
         if not self._session:
             raise RuntimeError("requests library not available")
         resp = self._session.request(
-            method=method, url=url, headers=headers or {},
-            params=params, json=json_data, timeout=timeout,
+            method=method,
+            url=url,
+            headers=headers or {},
+            params=params,
+            json=json_data,
+            timeout=timeout,
         )
         resp.raise_for_status()
         return resp.json()
@@ -1095,7 +1262,9 @@ class PySocksGeoRouter:
     def get_public_ip(self) -> str:
         try:
             if self._session:
-                resp = self._session.get("https://api.ipify.org?format=json", timeout=10)
+                resp = self._session.get(
+                    "https://api.ipify.org?format=json", timeout=10
+                )
             else:
                 resp = requests.get("https://api.ipify.org?format=json", timeout=10)
             return resp.json().get("ip", "Unknown")
@@ -1138,7 +1307,7 @@ def configure_pysocks_from_env() -> Optional[PySocksGeoRouter]:
         proxy_port=port,
         rdns=True,
         username=username if username else None,
-        password=password if password else None
+        password=password if password else None,
     )
 
     if region and region in PySocksGeoRouter.PROXY_CONFIGS:
@@ -1203,7 +1372,9 @@ class WebSocketManager:
         logger.error("WebSocket error: %s", error)
 
     def _on_close(self, ws, close_status_code, close_msg):
-        logger.info("WebSocket closed (code=%s). Scheduling reconnect…", close_status_code)
+        logger.info(
+            "WebSocket closed (code=%s). Scheduling reconnect…", close_status_code
+        )
         self.running = False
         # FIX: reconnect in a new daemon thread, not in the callback thread
         t = threading.Thread(target=self._reconnect, daemon=True)
@@ -1236,10 +1407,10 @@ class RateLimiter:
 
     def __init__(self, max_calls: int, window: float, burst_limit: int = None) -> None:
         self._max_calls = max_calls
-        self._window    = window
+        self._window = window
         self._burst_limit = burst_limit or (max_calls * 2)  # Allow 2x burst
         self._calls: deque = deque()
-        self._lock  = threading.Lock()
+        self._lock = threading.Lock()
         self._cooldown_until = 0.0
         self._burst_calls = 0
         self._burst_window_start = time.monotonic()
@@ -1263,7 +1434,9 @@ class RateLimiter:
 
             # Check burst limit
             if burst and self._burst_calls >= self._burst_limit:
-                logger.warning("Burst limit exceeded, falling back to normal rate limiting")
+                logger.warning(
+                    "Burst limit exceeded, falling back to normal rate limiting"
+                )
                 burst = False
 
             # Clean old calls
@@ -1300,17 +1473,17 @@ class CircuitBreaker:
 
     def __init__(
         self,
-        failure_threshold: int   = 5,
-        recovery_timeout:  float = 60.0,
-        cooldown:          float = 30.0,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 60.0,
+        cooldown: float = 30.0,
     ) -> None:
-        self._threshold        = failure_threshold
+        self._threshold = failure_threshold
         self._recovery_timeout = recovery_timeout
-        self._cooldown         = cooldown
-        self._state            = CircuitState.CLOSED
-        self._failure_count    = 0
-        self._last_failure_ts  = 0.0
-        self._lock             = threading.Lock()
+        self._cooldown = cooldown
+        self._state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._last_failure_ts = 0.0
+        self._lock = threading.Lock()
 
     @property
     def state(self) -> CircuitState:
@@ -1326,7 +1499,9 @@ class CircuitBreaker:
         with self._lock:
             self._maybe_transition()
             if self._state == CircuitState.OPEN:
-                wait = self._recovery_timeout - (time.monotonic() - self._last_failure_ts)
+                wait = self._recovery_timeout - (
+                    time.monotonic() - self._last_failure_ts
+                )
                 raise RuntimeError(f"Circuit OPEN – retry in {max(0, wait):.1f}s")
         try:
             result = fn(*args, **kwargs)
@@ -1338,7 +1513,7 @@ class CircuitBreaker:
 
     def reset(self) -> None:
         with self._lock:
-            self._state         = CircuitState.CLOSED
+            self._state = CircuitState.CLOSED
             self._failure_count = 0
             logger.info("Circuit manually reset → CLOSED")
 
@@ -1362,9 +1537,11 @@ class CircuitBreaker:
         # FIX: determine whether to trip, release lock, THEN sleep
         should_cooldown = False
         with self._lock:
-            self._failure_count  += 1
+            self._failure_count += 1
             self._last_failure_ts = time.monotonic()
-            logger.warning("Circuit failure %d/%d", self._failure_count, self._threshold)
+            logger.warning(
+                "Circuit failure %d/%d", self._failure_count, self._threshold
+            )
             if (
                 self._state == CircuitState.HALF_OPEN
                 or self._failure_count >= self._threshold
@@ -1395,9 +1572,11 @@ class TorConfig:
     max_retries: int = 3
     use_pysocks: bool = True
 
+
 class TorManager:
     RENEWAL_COOLDOWN_SECONDS = 15
     MAX_RENEWALS_PER_MINUTE = 4
+
     def __init__(self, config: TorConfig):
         self.config = config
         self.enabled = config.enabled
@@ -1409,19 +1588,27 @@ class TorManager:
         self._last_known_exit_ip: Optional[str] = None
         self._last_exit_ip_check: float = 0.0
         self._session: Optional[requests.Session] = None
-        self._socks_session = self._build_socks_session(self.config.max_retries, self.config.socks_port)
+        self._socks_session = self._build_socks_session(
+            self.config.max_retries, self.config.socks_port
+        )
         self._socks_alive = False
         self._socks_probe_ts = 0.0
         self._proxychains4_bin = self._find_proxychains4()
         if self.enabled:
-            self._tor_socks_port_accessible = self._check_local_port(self.config.socks_port, name="SOCKS")
-            self._tor_control_port_accessible = self._check_local_port(self.config.control_port, name="ControlPort")
+            self._tor_socks_port_accessible = self._check_local_port(
+                self.config.socks_port, name="SOCKS"
+            )
+            self._tor_control_port_accessible = self._check_local_port(
+                self.config.control_port, name="ControlPort"
+            )
             self._build_session()
             self._verify_tor_routing()
 
     def _check_local_port(self, port: int, name: str) -> bool:
         """Check if a local port is listening."""
-        with stdlib_socket.socket(stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM) as s:
+        with stdlib_socket.socket(
+            stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM
+        ) as s:
             s.settimeout(2)
             return s.connect_ex(("127.0.0.1", port)) == 0
 
@@ -1456,9 +1643,7 @@ class TorManager:
                 last_exc = exc
                 logger.warning("Network tier %s failed: %s", tier.__name__, exc)
 
-        raise ConnectionError(
-            f"All network tiers exhausted. Last error: {last_exc}"
-        )
+        raise ConnectionError(f"All network tiers exhausted. Last error: {last_exc}")
 
     def renew_tor_circuit(self, request_id: str = None) -> bool:
         """Renew Tor circuit via control port."""
@@ -1466,11 +1651,17 @@ class TorManager:
             logger.warning("Tor control port not accessible")
             return False
         try:
-            with stdlib_socket.socket(stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM) as sock:
+            with stdlib_socket.socket(
+                stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM
+            ) as sock:
                 sock.settimeout(5)
                 sock.connect(("127.0.0.1", self.config.control_port))
                 # Authenticate
-                auth_cmd = f'AUTHENTICATE "{self.config.control_password}"' if self.config.control_password else "AUTHENTICATE"
+                auth_cmd = (
+                    f'AUTHENTICATE "{self.config.control_password}"'
+                    if self.config.control_password
+                    else "AUTHENTICATE"
+                )
                 reply = _tor_ctl_send(sock, auth_cmd)
                 if not _tor_ctl_ok(reply):
                     logger.error("Tor control auth failed: %s", reply[:200])
@@ -1491,6 +1682,7 @@ class TorManager:
     def _find_proxychains4() -> Optional[str]:
         """Find proxychains4 binary."""
         import shutil
+
         for bin_name in ["proxychains4", "torify"]:
             path = shutil.which(bin_name)
             if path:
@@ -1505,20 +1697,26 @@ class TorManager:
             raise RuntimeError("requests library not available")
         if not self._socks_session:
             raise RuntimeError("SOCKS session not initialized")
-        conn_timeout = min(self.config.timeout, 8) if hasattr(self.config, 'timeout') else 8
-        request_timeout = self.config.timeout if hasattr(self.config, 'timeout') else 15
+        conn_timeout = (
+            min(self.config.timeout, 8) if hasattr(self.config, "timeout") else 8
+        )
+        request_timeout = self.config.timeout if hasattr(self.config, "timeout") else 15
         timeouts = (conn_timeout, request_timeout)
         if json_data is not None:
             resp = self._socks_session.request(
-                method, url,
-                headers=headers, params=params,
+                method,
+                url,
+                headers=headers,
+                params=params,
                 data=json.dumps(json_data, sort_keys=True, separators=(",", ":")),
                 timeout=timeouts,
             )
         else:
             resp = self._socks_session.request(
-                method, url,
-                headers=headers, params=params,
+                method,
+                url,
+                headers=headers,
+                params=params,
                 timeout=timeouts,
             )
         self._socks_alive = True
@@ -1530,18 +1728,28 @@ class TorManager:
         if not self._proxychains4_bin:
             raise RuntimeError("proxychains4 binary not found")
 
-        cmd = [self._proxychains4_bin, "curl", "-s", "-w", "\n%{http_code}", "-X", method]
+        cmd = [
+            self._proxychains4_bin,
+            "curl",
+            "-s",
+            "-w",
+            "\n%{http_code}",
+            "-X",
+            method,
+        ]
         for k, v in headers.items():
             cmd += ["-H", f"{k}: {v}"]
         if json_data:
             cmd += ["-d", json.dumps(json_data, sort_keys=True, separators=(",", ":"))]
         if params:
-            qs  = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+            qs = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
             url = f"{url}?{qs}"
         cmd.append(url)
 
         result = subprocess.run(
-            cmd, capture_output=True, text=True,
+            cmd,
+            capture_output=True,
+            text=True,
             timeout=self.timeout + 5,
         )
         if result.returncode != 0:
@@ -1555,11 +1763,13 @@ class TorManager:
         http_code = int(lines[-1]) if len(lines) > 1 and lines[-1].isdigit() else 0
 
         if http_code == 403:
-            raise RuntimeError(f"403 Forbidden (geo-blocked) via proxychains4 for url: {url}")
+            raise RuntimeError(
+                f"403 Forbidden (geo-blocked) via proxychains4 for url: {url}"
+            )
         if http_code >= 400:
             raise RuntimeError(f"HTTP {http_code} via proxychains4 for url: {url}")
 
-        data     = json.loads(body)
+        data = json.loads(body)
         ret_code = data.get("retCode", 0)
         if ret_code != 0 and ret_code not in (110043,):
             raise RuntimeError(
@@ -1573,15 +1783,19 @@ class TorManager:
             raise RuntimeError("requests library not available")
         if json_data is not None:
             resp = self._session.request(
-                method, url,
-                headers=headers, params=params,
+                method,
+                url,
+                headers=headers,
+                params=params,
                 data=json.dumps(json_data, sort_keys=True, separators=(",", ":")),
                 timeout=self.timeout,
             )
         else:
             resp = self._session.request(
-                method, url,
-                headers=headers, params=params,
+                method,
+                url,
+                headers=headers,
+                params=params,
                 timeout=self.timeout,
             )
         return self._parse_response(resp)
@@ -1601,7 +1815,7 @@ class TorManager:
         session.mount("https://", adapter)
         session.mount("http://", adapter)
         session.proxies = {
-            "http":  f"socks5h://127.0.0.1:{socks_port}",
+            "http": f"socks5h://127.0.0.1:{socks_port}",
             "https": f"socks5h://127.0.0.1:{socks_port}",
         }
         return session
@@ -1625,9 +1839,14 @@ class TorManager:
             response = self._socks_session.get("https://api.ipify.org", timeout=5)
             if response.status_code == 200:
                 self._last_known_exit_ip = response.text.strip()
-                logger.info(f"Tor routing verified. Exit IP: {self._last_known_exit_ip}")
+                logger.info(
+                    f"Tor routing verified. Exit IP: {self._last_known_exit_ip}"
+                )
             else:
-                logger.warning("Tor routing verification failed: Received status %d", response.status_code)
+                logger.warning(
+                    "Tor routing verification failed: Received status %d",
+                    response.status_code,
+                )
         except Exception as e:
             logger.warning("Tor routing verification failed: %s", e)
 
@@ -1648,18 +1867,20 @@ class TorManager:
                         status=resp.status_code,
                         url=resp.url,
                         body_snippet=str(error_data)[:200],
-                        message=f"Bybit API Error {ret_code}: {ret_msg} (HTTP {resp.status_code})"
+                        message=f"Bybit API Error {ret_code}: {ret_msg} (HTTP {resp.status_code})",
                     )
                 else:
                     # If not a Bybit structured error, raise generic HTTP error
                     resp.raise_for_status()
-            except ValueError: # If response is not JSON
-                resp.raise_for_status() # Raise standard HTTP error
-            except HTTPRequestFailed as hr: # Re-raise our specific Bybit API error
+            except ValueError:  # If response is not JSON
+                resp.raise_for_status()  # Raise standard HTTP error
+            except HTTPRequestFailed as hr:  # Re-raise our specific Bybit API error
                 raise hr
-            except Exception as e: # Catch any other parsing/raising errors
-                logger.error(f"Error processing non-OK response ({resp.status_code}): {e}")
-                resp.raise_for_status() # Ensure an error is raised
+            except Exception as e:  # Catch any other parsing/raising errors
+                logger.error(
+                    f"Error processing non-OK response ({resp.status_code}): {e}"
+                )
+                resp.raise_for_status()  # Ensure an error is raised
 
         # If HTTP status is OK (2xx), attempt JSON parsing
         try:
@@ -1671,17 +1892,21 @@ class TorManager:
                     status=resp.status_code,
                     url=resp.url,
                     body_snippet=str(data)[:200],
-                    message=f"Bybit API error retCode={ret_code}: {data.get('retMsg', 'unknown')}"
+                    message=f"Bybit API error retCode={ret_code}: {data.get('retMsg', 'unknown')}",
                 )
             return data
-        except ValueError: # If response is not valid JSON
+        except ValueError:  # If response is not valid JSON
             logger.error("Received non-JSON response from API for URL: %s", resp.url)
             raise ValueError("API response was not valid JSON.")
-        except HTTPRequestFailed as hr: # Re-raise Bybit API specific errors
+        except HTTPRequestFailed as hr:  # Re-raise Bybit API specific errors
             raise hr
-        except Exception as e: # Catch other potential issues during parsing
+        except Exception as e:  # Catch other potential issues during parsing
             logger.error(f"Error parsing successful API response: {e}")
-            raise HTTPRequestFailed(status=resp.status_code, url=resp.url, message=f"Failed to parse API response: {e}")
+            raise HTTPRequestFailed(
+                status=resp.status_code,
+                url=resp.url,
+                message=f"Failed to parse API response: {e}",
+            )
 
 
 class TorHTTPClient:
@@ -1691,46 +1916,68 @@ class TorHTTPClient:
         if tor.enabled:
             proxy = f"socks5h://{tor.config.socks_host}:{tor.config.socks_port}"
             self.session.proxies.update({"http": proxy, "https": proxy})
-        self.session.headers.update({
-            "User-Agent": "bybit-realm/1.0 (tor-diagnostics)",
-            "Accept": "application/json,text/plain,*/*",
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": "bybit-realm/1.0 (tor-diagnostics)",
+                "Accept": "application/json,text/plain,*/*",
+            }
+        )
+
     def request(
-        self, method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
-        params: Optional[Dict[str, Any]] = None, json_data: Optional[Dict[str, Any]] = None,
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        json_data: Optional[Dict[str, Any]] = None,
         data: Optional[str] = None,
         timeout: int = 30,
     ) -> Tuple[int, Dict[str, str], str]:
         try:
             r = self.session.request(
-                method=method.upper(), url=url, headers=headers,
-                params=params, json=json_data, data=data, timeout=timeout,
+                method=method.upper(),
+                url=url,
+                headers=headers,
+                params=params,
+                json=json_data,
+                data=data,
+                timeout=timeout,
             )
-        except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout,
-                requests.exceptions.ProxyError, requests.exceptions.ConnectionError) as exc:
+        except (
+            requests.exceptions.ConnectTimeout,
+            requests.exceptions.ReadTimeout,
+            requests.exceptions.ProxyError,
+            requests.exceptions.ConnectionError,
+        ) as exc:
             raise NetworkError(f"Network/proxy failure: {exc}") from exc
         body_text = r.text or ""
         if not (200 <= r.status_code < 300):
             raise HTTPRequestFailed(
                 f"HTTP {r.status_code} from {url}",
-                status=r.status_code, url=url,
+                status=r.status_code,
+                url=url,
                 body_snippet=_safe_snip(body_text, 500),
-                headers=dict(r.headers)
+                headers=dict(r.headers),
             )
         return r.status_code, dict(r.headers), body_text
+
+
 @dataclass
 class LotSizeFilter:
-    qty_step:      float
+    qty_step: float
     min_order_qty: float
     max_order_qty: float
-    min_notional:  float = 0.0
+    min_notional: float = 0.0
 
     def adjust(self, qty: float) -> float:
         if self.qty_step <= 0:
-            logger.warning(f"Invalid qty_step: {self.qty_step}. Returning original quantity.")
+            logger.warning(
+                f"Invalid qty_step: {self.qty_step}. Returning original quantity."
+            )
             return qty
         precision = max(0, -int(math.floor(math.log10(self.qty_step))))
-        adjusted  = round(round(qty / self.qty_step) * self.qty_step, precision)
+        adjusted = round(round(qty / self.qty_step) * self.qty_step, precision)
         return float(max(self.min_order_qty, min(self.max_order_qty, adjusted)))
 
 
@@ -1742,19 +1989,21 @@ class PriceFilter:
 
     def adjust(self, price: float) -> float:
         if self.tick_size <= 0:
-            logger.warning(f"Invalid tick_size: {self.tick_size}. Returning original price.")
+            logger.warning(
+                f"Invalid tick_size: {self.tick_size}. Returning original price."
+            )
             return price
         precision = max(0, -int(math.floor(math.log10(self.tick_size))))
-        adjusted  = round(round(price / self.tick_size) * self.tick_size, precision)
+        adjusted = round(round(price / self.tick_size) * self.tick_size, precision)
         return float(max(self.min_price, min(self.max_price, adjusted)))
 
 
 @dataclass
 class InstrumentInfo:
-    lot_size:   LotSizeFilter
-    price_flt:  PriceFilter
-    symbol:     str
-    status:     str   = "Trading"
+    lot_size: LotSizeFilter
+    price_flt: PriceFilter
+    symbol: str
+    status: str = "Trading"
     fetched_at: float = field(default_factory=time.time)
 
     @property
@@ -1805,55 +2054,55 @@ class InstrumentCache:
 # ─────────────────────────────────────────────────────────────
 @dataclass
 class MomentumResult:
-    symbol:       str
-    imbalance:    float
-    signal:       Signal
-    buy_vol:      float
-    sell_vol:     float
-    vwap:         float = 0.0
+    symbol: str
+    imbalance: float
+    signal: Signal
+    buy_vol: float
+    sell_vol: float
+    vwap: float = 0.0
     avg_trade_sz: float = 0.0
-    timestamp:    float = field(default_factory=time.time)
+    timestamp: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
         return {
-            "symbol":       self.symbol,
-            "imbalance":    round(self.imbalance,    4),
-            "signal":       self.signal.value,
-            "buy_vol":      round(self.buy_vol,      4),
-            "sell_vol":     round(self.sell_vol,     4),
-            "vwap":         round(self.vwap,         4),
+            "symbol": self.symbol,
+            "imbalance": round(self.imbalance, 4),
+            "signal": self.signal.value,
+            "buy_vol": round(self.buy_vol, 4),
+            "sell_vol": round(self.sell_vol, 4),
+            "vwap": round(self.vwap, 4),
             "avg_trade_sz": round(self.avg_trade_sz, 4),
-            "timestamp":    self.timestamp,
+            "timestamp": self.timestamp,
         }
 
 
 @dataclass
 class PnLReport:
-    symbol:       str
-    total_pnl:    float
-    win_count:    int
-    loss_count:   int
-    win_rate:     float
-    avg_win:      float
-    avg_loss:     float
-    largest_win:  float
+    symbol: str
+    total_pnl: float
+    win_count: int
+    loss_count: int
+    win_rate: float
+    avg_win: float
+    avg_loss: float
+    largest_win: float
     largest_loss: float
-    total_fees:   float
-    trade_count:  int
+    total_fees: float
+    trade_count: int
 
     def to_dict(self) -> dict:
         return {
-            "symbol":       self.symbol,
-            "total_pnl":    round(self.total_pnl,    4),
-            "win_count":    self.win_count,
-            "loss_count":   self.loss_count,
-            "win_rate":     round(self.win_rate,     4),
-            "avg_win":      round(self.avg_win,      4),
-            "avg_loss":     round(self.avg_loss,     4),
-            "largest_win":  round(self.largest_win,  4),
+            "symbol": self.symbol,
+            "total_pnl": round(self.total_pnl, 4),
+            "win_count": self.win_count,
+            "loss_count": self.loss_count,
+            "win_rate": round(self.win_rate, 4),
+            "avg_win": round(self.avg_win, 4),
+            "avg_loss": round(self.avg_loss, 4),
+            "largest_win": round(self.largest_win, 4),
             "largest_loss": round(self.largest_loss, 4),
-            "total_fees":   round(self.total_fees,   4),
-            "trade_count":  self.trade_count,
+            "total_fees": round(self.total_fees, 4),
+            "trade_count": self.trade_count,
         }
 
 
@@ -1865,18 +2114,26 @@ class BybitToolDispatcher:
 
     _RECV_WINDOW = "10000"
     MAX_API_RETRIES = 3
-    _BLOCK_HINTS = ("geo", "blocked", "forbidden", "access denied", "cloudflare", "captcha", "bot")
+    _BLOCK_HINTS = (
+        "geo",
+        "blocked",
+        "forbidden",
+        "access denied",
+        "cloudflare",
+        "captcha",
+        "bot",
+    )
     _HTTP_CODE_RE = re.compile(r"\b(4\d\d|5\d\d)\b")
 
     def _looks_like_block(self, exc: Exception) -> bool:
         """Classify exception to see if it likely represents a geo/WAF block."""
         if isinstance(exc, HTTPRequestFailed):
             return exc.status in (403, 451)
-        
+
         s = str(exc).lower()
         m = self._HTTP_CODE_RE.search(s)
         code = int(m.group(1)) if m else None
-        
+
         if code in (403, 451):
             return True
         if any(h in s for h in self._BLOCK_HINTS):
@@ -1885,7 +2142,7 @@ class BybitToolDispatcher:
 
     def __init__(self, config: TradingConfig) -> None:
         config.validate()
-        self.config  = config
+        self.config = config
         tor_config = TorConfig(
             enabled=config.use_tor,
             socks_port=config.tor_socks_port,
@@ -1895,13 +2152,13 @@ class BybitToolDispatcher:
         self.tor = TorManager(tor_config)
         self.http = TorHTTPClient(self.tor)
         self.circuit = CircuitBreaker(
-            failure_threshold = config.cb_failure_threshold,
-            recovery_timeout  = config.cb_recovery_timeout,
-            cooldown          = config.cb_cooldown,
+            failure_threshold=config.cb_failure_threshold,
+            recovery_timeout=config.cb_recovery_timeout,
+            cooldown=config.cb_cooldown,
         )
         self.limiter = RateLimiter(
-            max_calls = config.rate_limit_calls,
-            window    = config.rate_limit_window,
+            max_calls=config.rate_limit_calls,
+            window=config.rate_limit_window,
         )
         self._renewed_for_requests: Set[str] = set()
         self._auto_recovery = True
@@ -1909,11 +2166,11 @@ class BybitToolDispatcher:
         self._circuit_failures = 0
         # ... (keep existing init code for other fields) ...
         self._instrument_cache = InstrumentCache()
-        self._cache_lock       = threading.Lock()
-        self._fee_cache: Dict[str, Dict] = {} # key: "symbol_category", value: fee_data
-        self._fee_cache_ttl = 3600 # Cache for 1 hour
-        self._time_offset  = 0  # ms offset: server_time - local_time
-        self._time_synced  = False
+        self._cache_lock = threading.Lock()
+        self._fee_cache: Dict[str, Dict] = {}  # key: "symbol_category", value: fee_data
+        self._fee_cache_ttl = 3600  # Cache for 1 hour
+        self._time_offset = 0  # ms offset: server_time - local_time
+        self._time_synced = False
         self._geo_router: Optional[PySocksGeoRouter] = None
 
         # Initialize PySocks geo router if configured
@@ -1944,12 +2201,18 @@ class BybitToolDispatcher:
             new_offset = server_time_ms - local_mid
 
             # Re-sync if not synced, or if new offset significantly differs from current offset
-            if not self._time_synced or abs(new_offset - self._time_offset) > 500: # e.g., 500ms threshold
+            if (
+                not self._time_synced or abs(new_offset - self._time_offset) > 500
+            ):  # e.g., 500ms threshold
                 self._time_offset = new_offset
                 self._time_synced = True
-                logger.warning("Clock drift detected/corrected: offset=%dms", self._time_offset)
+                logger.warning(
+                    "Clock drift detected/corrected: offset=%dms", self._time_offset
+                )
             else:
-                logger.debug("Server time sync successful: offset=%dms", self._time_offset)
+                logger.debug(
+                    "Server time sync successful: offset=%dms", self._time_offset
+                )
 
         except Exception as exc:
             logger.warning("Server time sync failed: %s", exc)
@@ -1990,9 +2253,11 @@ class BybitToolDispatcher:
             "message": error_msg,
             "category": error_info[0],
             "is_fatal": is_fatal,
-            "is_retryable": not is_fatal and error_code not in (10016, 10017, 10018, 10019),
+            "is_retryable": not is_fatal
+            and error_code not in (10016, 10017, 10018, 10019),
             "user_action": self._get_error_action(error_code),
         }
+
     def health_check(self) -> dict:
         """Enhanced health check with geo IP info and Tor status, with error handling."""
         try:
@@ -2002,7 +2267,7 @@ class BybitToolDispatcher:
                     return {"status": "error", "msg": "Tor proxy not accessible"}
 
             resp = self.api_request("GET", "/v5/market/time", signed=False)
-            
+
             geo_ip = "N/A"
             geo_location = {"status": "not_checked"}
 
@@ -2020,7 +2285,7 @@ class BybitToolDispatcher:
                         proxy_port=self.config.pysocks_port,
                         rdns=True,
                     )
-                    geo_ip       = router.get_public_ip()
+                    geo_ip = router.get_public_ip()
                     geo_location = router.get_geo_location()
                     router.close()
                 except Exception:
@@ -2031,31 +2296,33 @@ class BybitToolDispatcher:
             circuit_fails = self.circuit.failure_count if self.circuit else 0
 
             # Check time offset safely
-            time_offset = self._time_offset if hasattr(self, '_time_offset') else 0
+            time_offset = self._time_offset if hasattr(self, "_time_offset") else 0
 
             return {
-                "status":            "ok",
-                "circuit":           circuit_state,
-                "circuit_fails":     circuit_fails,
-                "rate_usage":        self.limiter.current_usage if self.limiter else 0,
-                "server_time":       resp.get("result", {}).get("timeNano"),
-                "time_offset_ms":    time_offset,
-                "base_url":          self.config.base_url,
-                "tor_enabled":       self.config.use_tor,
-                "tor_socks_port":    self.config.tor_socks_port,
-                "tor_control_port":  self.config.tor_control_port,
+                "status": "ok",
+                "circuit": circuit_state,
+                "circuit_fails": circuit_fails,
+                "rate_usage": self.limiter.current_usage if self.limiter else 0,
+                "server_time": resp.get("result", {}).get("timeNano"),
+                "time_offset_ms": time_offset,
+                "base_url": self.config.base_url,
+                "tor_enabled": self.config.use_tor,
+                "tor_socks_port": self.config.tor_socks_port,
+                "tor_control_port": self.config.tor_control_port,
                 "tor_control_accessible": self.tor.tor_control_accessible,
-                "tor_use_pysocks":   self.config.tor_use_pysocks,
+                "tor_use_pysocks": self.config.tor_use_pysocks,
                 "pysocks_available": PYSOCKS_AVAILABLE,
-                "pysocks_enabled":   self.config.pysocks_enabled,
-                "pysocks_host":      self.config.pysocks_host,
-                "pysocks_port":      self.config.pysocks_port,
-                "pysocks_region":    self.config.pysocks_region,
-                "pysocks_global":    self.config.pysocks_global,
-                "geo_ip":            geo_ip,
-                "geo_location":      geo_location,
-                "testnet":           self.config.testnet,
-                "cache_symbols":     list(self._instrument_cache.keys()) if self._instrument_cache else [],
+                "pysocks_enabled": self.config.pysocks_enabled,
+                "pysocks_host": self.config.pysocks_host,
+                "pysocks_port": self.config.pysocks_port,
+                "pysocks_region": self.config.pysocks_region,
+                "pysocks_global": self.config.pysocks_global,
+                "geo_ip": geo_ip,
+                "geo_location": geo_location,
+                "testnet": self.config.testnet,
+                "cache_symbols": list(self._instrument_cache.keys())
+                if self._instrument_cache
+                else [],
             }
         except Exception as exc:
             logger.error("Health check failed: %s", exc)
@@ -2067,7 +2334,7 @@ class BybitToolDispatcher:
             start = time.time()
             self.api_request("GET", "/v5/market/time", signed=False)
             latency = (time.time() - start) * 1000
-            
+
             # Score based on latency
             if latency < 100:
                 score = 100
@@ -2079,23 +2346,28 @@ class BybitToolDispatcher:
                 score = 50
             else:
                 score = 30
-                
+
             return {
                 "status": "ok",
                 "latency_ms": round(latency, 2),
                 "score": score,
-                "circuit_state": self.circuit.state.value if hasattr(self, 'circuit') else "UNKNOWN",
-                "timestamp": time.time()
+                "circuit_state": self.circuit.state.value
+                if hasattr(self, "circuit")
+                else "UNKNOWN",
+                "timestamp": time.time(),
             }
         except Exception as e:
             return {"status": "error", "score": 0, "msg": str(e)}
 
     def _get_error_action(self, error_code: int) -> str:
         """Get recommended user action for error."""
-        if error_code == 10001: return "Wait and retry, or contact support"
+        if error_code == 10001:
+            return "Wait and retry, or contact support"
         return "Review and retry"
 
-    def _handle_api_error(self, error_code: int, error_msg: str, request_id: Optional[str] = None) -> dict:
+    def _handle_api_error(
+        self, error_code: int, error_msg: str, request_id: Optional[str] = None
+    ) -> dict:
         """Handle API error with structured response."""
         parsed = self.parse_bybit_error(error_code, error_msg)
 
@@ -2103,12 +2375,16 @@ class BybitToolDispatcher:
         log_id = request_id if request_id else "N/A"
         logger.warning(
             "[%s] Bybit API error %d: %s (fatal=%s, retryable=%s)",
-            log_id, error_code, error_msg, parsed["is_fatal"], parsed["is_retryable"]
+            log_id,
+            error_code,
+            error_msg,
+            parsed["is_fatal"],
+            parsed["is_retryable"],
         )
 
         # Snippet 11: Ensure consistent error return structure
         return {
-            "status": "error", # Ensure consistent error status
+            "status": "error",  # Ensure consistent error status
             "code": error_code,
             "message": error_msg,
             "category": parsed.get("category"),
@@ -2119,30 +2395,34 @@ class BybitToolDispatcher:
 
     def _build_get_query(self, params: dict) -> str:
         """Build sorted query string for GET signature."""
+
         def format_val(v):
             if isinstance(v, bool):
                 return str(v).lower()
             return str(v)
+
         return "&".join(f"{k}={format_val(v)}" for k, v in sorted(params.items()))
 
     def api_request(
         self,
-        method:    str,
-        endpoint:  str,
-        params:    Optional[dict] = None,
+        method: str,
+        endpoint: str,
+        params: Optional[dict] = None,
         json_data: Optional[dict] = None,
-        signed:    bool = True,
+        signed: bool = True,
     ) -> dict:
         self.limiter.acquire()
         request_id = str(uuid.uuid4())[:8]
         self._renewed_for_requests.discard(request_id)
-        
+
         # Normalization
         for container in (params, json_data):
             if container:
                 if "symbol" in container and isinstance(container["symbol"], str):
                     container["symbol"] = container["symbol"].upper()
-                if "category" in container and isinstance(container["category"], (Category, Enum)):
+                if "category" in container and isinstance(
+                    container["category"], (Category, Enum)
+                ):
                     container["category"] = container["category"].value
                 # Ensure all numeric values are stringified for consistent API requirements
                 for k, v in container.items():
@@ -2151,7 +2431,7 @@ class BybitToolDispatcher:
 
         self._ensure_clock_sync()
         ts = self._get_timestamp()
-        
+
         # Build headers and payload
         headers = {
             "X-BAPI-API-KEY": self.config.api_key,
@@ -2165,7 +2445,7 @@ class BybitToolDispatcher:
             payload = self._build_get_query(params or {})
         else:
             # Use strict separators to ensure exact match with Bybit expectation
-            payload = json.dumps(json_data or {}, sort_keys=True, separators=(',', ':'))
+            payload = json.dumps(json_data or {}, sort_keys=True, separators=(",", ":"))
 
         if signed:
             headers["X-BAPI-SIGN"] = self._sign(payload, ts)
@@ -2176,23 +2456,38 @@ class BybitToolDispatcher:
             try:
                 # Use new structured HTTP client
                 _, _, body = self.http.request(
-                    method=method, url=url, headers=headers,
-                    params=params, data=payload if method != "GET" else None,
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    params=params,
+                    data=payload if method != "GET" else None,
                 )
                 self._circuit_failures = 0
                 return json.loads(body)
             except HTTPRequestFailed as exc:
                 last_exc = exc
-                classification = classify_block(status_code=exc.status, body=exc.body_snippet, headers=exc.headers)
-                logger.warning(f"[{request_id}] HTTP {exc.status} from {base_url}. Block: {classification.is_blocked}")
-                if classification.is_blocked and classification.block_type in ("geo", "waf", "access"):
+                classification = classify_block(
+                    status_code=exc.status, body=exc.body_snippet, headers=exc.headers
+                )
+                logger.warning(
+                    f"[{request_id}] HTTP {exc.status} from {base_url}. Block: {classification.is_blocked}"
+                )
+                if classification.is_blocked and classification.block_type in (
+                    "geo",
+                    "waf",
+                    "access",
+                ):
                     self._circuit_failures += 1
-                    if self._auto_recovery and self._circuit_failures < self._max_circuit_failures and self.tor.enabled:
+                    if (
+                        self._auto_recovery
+                        and self._circuit_failures < self._max_circuit_failures
+                        and self.tor.enabled
+                    ):
                         if request_id not in self._renewed_for_requests:
                             self._renewed_for_requests.add(request_id)
                             if self.tor.renew_tor_circuit(request_id=request_id):
                                 time.sleep(2)
-                                continue # retry
+                                continue  # retry
                 continue
             except NetworkError as exc:
                 last_exc = exc
@@ -2224,39 +2519,52 @@ class BybitToolDispatcher:
             price_filters = item.get("priceFilter", {})
 
             lsf = LotSizeFilter(
-                qty_step      = float(lot_filters.get("qtyStep", lot_filters.get("basePrecision", 1))),
-                min_order_qty = float(lot_filters.get("minOrderQty", 0)),
-                max_order_qty = float(lot_filters.get("maxOrderQty", 1e9)),
-                min_notional  = float(lot_filters.get("minNotionalValue", 0)),
+                qty_step=float(
+                    lot_filters.get("qtyStep", lot_filters.get("basePrecision", 1))
+                ),
+                min_order_qty=float(lot_filters.get("minOrderQty", 0)),
+                max_order_qty=float(lot_filters.get("maxOrderQty", 1e9)),
+                min_notional=float(lot_filters.get("minNotionalValue", 0)),
             )
             pf = PriceFilter(
-                tick_size = float(price_filters.get("tickSize", 0.01)),
-                min_price = float(price_filters.get("minPrice", 0)),
-                max_price = float(price_filters.get("maxPrice", 1e12)),
+                tick_size=float(price_filters.get("tickSize", 0.01)),
+                min_price=float(price_filters.get("minPrice", 0)),
+                max_price=float(price_filters.get("maxPrice", 1e12)),
             )
             info = InstrumentInfo(
-                lot_size   = lsf,
-                price_flt  = pf,
-                symbol     = symbol,
-                status     = item.get("status", "Trading"),
-                fetched_at = time.time(),
+                lot_size=lsf,
+                price_flt=pf,
+                symbol=symbol,
+                status=item.get("status", "Trading"),
+                fetched_at=time.time(),
             )
         except (KeyError, TypeError, ValueError) as e:
-            logger.error("Failed to parse instrument filters for %s: %s. Item data: %s", symbol, e, item)
-            raise ValueError(f"Could not parse instrument filters for {symbol} due to malformed data.") from e
+            logger.error(
+                "Failed to parse instrument filters for %s: %s. Item data: %s",
+                symbol,
+                e,
+                item,
+            )
+            raise ValueError(
+                f"Could not parse instrument filters for {symbol} due to malformed data."
+            ) from e
 
         with self._cache_lock:
             self._instrument_cache.set(symbol, info)
         return info
 
-    def adjust_quantity(self, symbol: str, qty: float, category: str = Category.LINEAR) -> float:
-        info     = self._fetch_instrument(symbol, category)
+    def adjust_quantity(
+        self, symbol: str, qty: float, category: str = Category.LINEAR
+    ) -> float:
+        info = self._fetch_instrument(symbol, category)
         adjusted = info.lot_size.adjust(qty)
         logger.debug("%s qty %.8f → %.8f", symbol, qty, adjusted)
         return adjusted
 
-    def adjust_price(self, symbol: str, price: float, category: str = Category.LINEAR) -> float:
-        info     = self._fetch_instrument(symbol, category)
+    def adjust_price(
+        self, symbol: str, price: float, category: str = Category.LINEAR
+    ) -> float:
+        info = self._fetch_instrument(symbol, category)
         adjusted = info.price_flt.adjust(price)
         logger.debug("%s price %.8f → %.8f", symbol, price, adjusted)
         return adjusted
@@ -2266,18 +2574,20 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     def place_order(
         self,
-        symbol:        str,
-        side:          Literal["Buy", "Sell"],
-        qty:           float,
-        price:         Optional[float] = None,
-        order_type:    Literal["Limit", "Market", "LimitMaker", "Stop", "StopLimit"] = "Limit",
-        category:      Literal["linear", "inverse", "spot", "option"] = "linear",
-        stop_loss:     Optional[float] = None,
-        take_profit:   Optional[float] = None,
-        reduce_only:   bool = False,
+        symbol: str,
+        side: Literal["Buy", "Sell"],
+        qty: float,
+        price: Optional[float] = None,
+        order_type: Literal[
+            "Limit", "Market", "LimitMaker", "Stop", "StopLimit"
+        ] = "Limit",
+        category: Literal["linear", "inverse", "spot", "option"] = "linear",
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        reduce_only: bool = False,
         time_in_force: Literal["GTC", "IOC", "FOK", "PostOnly"] = "GTC",
-        position_idx:  int = 1,
-        client_oid:    Optional[str] = None,
+        position_idx: int = 1,
+        client_oid: Optional[str] = None,
         trailing_stop: Optional[float] = None,
     ) -> dict:
         """Place a single order on Bybit.
@@ -2300,54 +2610,75 @@ class BybitToolDispatcher:
         try:
             side_enum = OrderSide.from_any(side)
         except ValueError:
-            return {"status": "error", "msg": f"Invalid order side: {side}. Must be 'Buy' or 'Sell'."}
+            return {
+                "status": "error",
+                "msg": f"Invalid order side: {side}. Must be 'Buy' or 'Sell'.",
+            }
 
         try:
             order_type_enum = OrderType.from_any(order_type)
         except ValueError:
-            return {"status": "error", "msg": f"Invalid order type: {order_type}. Must be one of {list(OrderType.__members__.keys())}"}
+            return {
+                "status": "error",
+                "msg": f"Invalid order type: {order_type}. Must be one of {list(OrderType.__members__.keys())}",
+            }
 
         time_in_force_enum = TimeInForce.from_any(time_in_force)
-        category_enum      = Category.from_any(category)
-        position_idx_enum  = PositionIdx.from_any(position_idx)
-        reduce_only_bool   = _sanitize_bool(reduce_only)
+        category_enum = Category.from_any(category)
+        position_idx_enum = PositionIdx.from_any(position_idx)
+        reduce_only_bool = _sanitize_bool(reduce_only)
 
-        qty           = float(qty) if qty is not None else 0.0
+        qty = float(qty) if qty is not None else 0.0
         # Snippet 9: Ensure quantity is a positive number
         if qty <= 0:
-            return {"status": "error", "msg": f"Order quantity must be positive. Received: {qty}"}
+            return {
+                "status": "error",
+                "msg": f"Order quantity must be positive. Received: {qty}",
+            }
 
-        price         = _safe_float(price)
-        stop_loss     = _safe_float(stop_loss)
-        take_profit   = _safe_float(take_profit)
+        price = _safe_float(price)
+        stop_loss = _safe_float(stop_loss)
+        take_profit = _safe_float(take_profit)
         trailing_stop = _safe_float(trailing_stop)
 
         adj_qty = self.adjust_quantity(symbol, qty, category_enum.value)
 
         payload: Dict[str, Any] = {
-            "category":    category_enum.value,
-            "symbol":      symbol,
-            "side":        side_enum.value,
-            "orderType":   order_type_enum.value,
-            "qty":         str(adj_qty),
+            "category": category_enum.value,
+            "symbol": symbol,
+            "side": side_enum.value,
+            "orderType": order_type_enum.value,
+            "qty": str(adj_qty),
             "timeInForce": time_in_force_enum.value,
             "positionIdx": position_idx_enum.value,
         }
 
         if price is not None:
-            payload["price"]        = str(self.adjust_price(symbol, price, category_enum.value))
+            payload["price"] = str(
+                self.adjust_price(symbol, price, category_enum.value)
+            )
         if stop_loss is not None:
-            payload["stopLoss"]     = str(self.adjust_price(symbol, stop_loss, category_enum.value))
+            payload["stopLoss"] = str(
+                self.adjust_price(symbol, stop_loss, category_enum.value)
+            )
         if take_profit is not None:
-            payload["takeProfit"]   = str(self.adjust_price(symbol, take_profit, category_enum.value))
+            payload["takeProfit"] = str(
+                self.adjust_price(symbol, take_profit, category_enum.value)
+            )
         if trailing_stop is not None:
             payload["trailingStop"] = str(trailing_stop)
         if reduce_only_bool:
-            payload["reduceOnly"]   = True
+            payload["reduceOnly"] = True
         payload["orderLinkId"] = client_oid if client_oid else str(uuid.uuid4())[:10]
 
-        logger.info("Placing %s %s %s @ %s qty=%s", category_enum.value, side_enum.value, symbol, price or "MARKET", adj_qty)
-
+        logger.info(
+            "Placing %s %s %s @ %s qty=%s",
+            category_enum.value,
+            side_enum.value,
+            symbol,
+            price or "MARKET",
+            adj_qty,
+        )
 
         return self.api_request("POST", "/v5/order/create", json_data=payload)
 
@@ -2362,31 +2693,43 @@ class BybitToolDispatcher:
         if not order_list:
             raise ValueError("order_list must not be empty")
         if len(order_list) > self.config.max_orders_per_batch:
-            raise ValueError(f"Bybit batch API max {self.config.max_orders_per_batch} orders")
+            raise ValueError(
+                f"Bybit batch API max {self.config.max_orders_per_batch} orders"
+            )
 
         batch = []
         for o in order_list:
-            cat     = o.get("category", Category.LINEAR)
+            cat = o.get("category", Category.LINEAR)
             adj_qty = self.adjust_quantity(o["symbol"], float(o["qty"]), cat)
             entry: Dict[str, Any] = {
-                "category":    cat,
-                "symbol":      o["symbol"],
-                "side":        o["side"],
-                "orderType":   o.get("orderType", OrderType.LIMIT),
-                "qty":         str(adj_qty),
+                "category": cat,
+                "symbol": o["symbol"],
+                "side": o["side"],
+                "orderType": o.get("orderType", OrderType.LIMIT),
+                "qty": str(adj_qty),
                 "timeInForce": _sanitize_tif(o.get("timeInForce", TimeInForce.GTC)),
             }
-            if "price"       in o: entry["price"]       = str(self.adjust_price(o["symbol"], float(o["price"]), cat))
-            if "stopLoss"    in o: entry["stopLoss"]    = str(self.adjust_price(o["symbol"], float(o["stopLoss"]), cat))
-            if "takeProfit"  in o: entry["takeProfit"]  = str(self.adjust_price(o["symbol"], float(o["takeProfit"]), cat))
-            if "orderLinkId" in o: entry["orderLinkId"] = o["orderLinkId"]
+            if "price" in o:
+                entry["price"] = str(
+                    self.adjust_price(o["symbol"], float(o["price"]), cat)
+                )
+            if "stopLoss" in o:
+                entry["stopLoss"] = str(
+                    self.adjust_price(o["symbol"], float(o["stopLoss"]), cat)
+                )
+            if "takeProfit" in o:
+                entry["takeProfit"] = str(
+                    self.adjust_price(o["symbol"], float(o["takeProfit"]), cat)
+                )
+            if "orderLinkId" in o:
+                entry["orderLinkId"] = o["orderLinkId"]
             batch.append(entry)
 
         logger.info("Submitting batch of %d orders…", len(batch))
 
-
         return self.api_request(
-            "POST", "/v5/order/create-batch",
+            "POST",
+            "/v5/order/create-batch",
             json_data={"category": Category.LINEAR, "request": batch},
         )
 
@@ -2395,15 +2738,15 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     def place_iceberg_order(
         self,
-        symbol:      str,
-        side:        Literal["Buy", "Sell"],
-        total_qty:   float,
-        price:       float,
-        slices:      int = 5,
-        category:    Literal["linear", "inverse", "spot", "option"] = "linear",
-        stop_loss:   Optional[float] = None,
+        symbol: str,
+        side: Literal["Buy", "Sell"],
+        total_qty: float,
+        price: float,
+        slices: int = 5,
+        category: Literal["linear", "inverse", "spot", "option"] = "linear",
+        stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
-        delay:       Optional[float] = None,
+        delay: Optional[float] = None,
     ) -> List[dict]:
         """Place an iceberg order by splitting it into multiple smaller orders.
         Args:
@@ -2417,23 +2760,33 @@ class BybitToolDispatcher:
             take_profit: Take profit price
             delay: Delay between slices in seconds
         """
-        slices    = max(self.config.iceberg_min_slices, min(self.config.iceberg_max_slices, slices))
-        delay     = delay if delay is not None else self.config.iceberg_delay
+        slices = max(
+            self.config.iceberg_min_slices, min(self.config.iceberg_max_slices, slices)
+        )
+        delay = delay if delay is not None else self.config.iceberg_delay
         slice_qty = total_qty / slices
-        results   = []
+        results = []
 
-        logger.info("Iceberg: %s %s %s total=%.4f in %d slices @ %.4f", category, side, symbol, total_qty, slices, price)
+        logger.info(
+            "Iceberg: %s %s %s total=%.4f in %d slices @ %.4f",
+            category,
+            side,
+            symbol,
+            total_qty,
+            slices,
+            price,
+        )
         for i in range(slices):
             result = self.safe_execute(
                 self.place_order,
-                symbol      = symbol,
-                side        = side,
-                qty         = slice_qty,
-                price       = price,
-                category    = category,
-                stop_loss   = stop_loss   if i == 0 else None,
-                take_profit = take_profit if i == 0 else None,
-                client_oid  = f"iceberg_{symbol}_{int(time.time())}_{i}",
+                symbol=symbol,
+                side=side,
+                qty=slice_qty,
+                price=price,
+                category=category,
+                stop_loss=stop_loss if i == 0 else None,
+                take_profit=take_profit if i == 0 else None,
+                client_oid=f"iceberg_{symbol}_{int(time.time())}_{i}",
             )
             results.append({"slice": i + 1, "result": result})
             logger.info("Iceberg slice %d/%d placed", i + 1, slices)
@@ -2482,7 +2835,6 @@ class BybitToolDispatcher:
             payload["triggerBy"] = "ByLastPrice"
             payload["trailingStop"] = str(trailing_distance)
 
-
         return self.api_request("POST", "/v5/order/create", json_data=payload)
 
     def check_balance(
@@ -2499,8 +2851,10 @@ class BybitToolDispatcher:
         if coin:
             params["coin"] = coin
 
+        return self.api_request(
+            "GET", "/v5/account/wallet-balance", params=params, signed=True
+        )
 
-        return self.api_request("GET", "/v5/account/wallet-balance", params=params, signed=True)
     def calculate_trailing_stop_levels(
         self,
         symbol: str,
@@ -2535,7 +2889,15 @@ class BybitToolDispatcher:
                 "symbol": symbol,
                 "activation_price": round(activation_price, 4),
                 "trigger_price": round(trigger_price, 4),
-                "distance_to_activation": round(max(0, activation_price - current_price if is_long else current_price - activation_price), 4),
+                "distance_to_activation": round(
+                    max(
+                        0,
+                        activation_price - current_price
+                        if is_long
+                        else current_price - activation_price,
+                    ),
+                    4,
+                ),
                 "timestamp": time.time(),
             }
         except Exception as e:
@@ -2553,7 +2915,8 @@ class BybitToolDispatcher:
         """
         try:
             positions = self.get_positions(category=category, symbol=symbol)
-            if not positions: return {"status": "error", "msg": "No position found"}
+            if not positions:
+                return {"status": "error", "msg": "No position found"}
             pos = positions[0]
             return {
                 "symbol": symbol,
@@ -2568,10 +2931,10 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     def cancel_order(
         self,
-        symbol:     str,
-        order_id:   Optional[str] = None,
+        symbol: str,
+        order_id: Optional[str] = None,
         client_oid: Optional[str] = None,
-        category:   Category = Category.LINEAR,
+        category: Category = Category.LINEAR,
     ) -> dict:
         payload: Dict[str, Any] = {"category": category, "symbol": symbol}
         if order_id:
@@ -2581,12 +2944,11 @@ class BybitToolDispatcher:
         else:
             return {"status": "error", "msg": "order_id or client_oid required"}
 
-
         return self.api_request("POST", "/v5/order/cancel", json_data=payload)
 
     def cancel_all_orders(
         self,
-        symbol:   Optional[str] = None,
+        symbol: Optional[str] = None,
         category: Category = Category.LINEAR,
     ) -> dict:
         """Cancel all open orders for a symbol (or all symbols in category)."""
@@ -2594,30 +2956,32 @@ class BybitToolDispatcher:
         if symbol:
             payload["symbol"] = symbol.upper()
 
-
         return self.api_request("POST", "/v5/order/cancel-all", json_data=payload)
 
     def amend_order(
         self,
-        symbol:      str,
-        order_id:    Optional[str] = None,
-        client_oid:  Optional[str] = None,
-        qty:         Optional[float] = None,
-        price:       Optional[float] = None,
-        category:    Category = Category.LINEAR,
-        stop_loss:   Optional[float] = None,
+        symbol: str,
+        order_id: Optional[str] = None,
+        client_oid: Optional[str] = None,
+        qty: Optional[float] = None,
+        price: Optional[float] = None,
+        category: Category = Category.LINEAR,
+        stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
         trigger_price: Optional[float] = None,
     ) -> dict:
         """Amend an existing order by order_id or client_oid."""
         payload: Dict[str, Any] = {
             "category": category,
-            "symbol":   symbol,
+            "symbol": symbol,
         }
 
         # Validate that at least one modifiable parameter is provided
         if not any([qty, price, stop_loss, take_profit, trigger_price]):
-            return {"status": "error", "msg": "No modifiable parameters provided for amendment."}
+            return {
+                "status": "error",
+                "msg": "No modifiable parameters provided for amendment.",
+            }
 
         if order_id:
             payload["orderId"] = order_id
@@ -2626,35 +2990,38 @@ class BybitToolDispatcher:
         else:
             return {"status": "error", "msg": "order_id or client_oid required"}
         if qty is not None:
-            payload["qty"]        = str(self.adjust_quantity(symbol, qty, category))
+            payload["qty"] = str(self.adjust_quantity(symbol, qty, category))
         if price is not None:
-            payload["price"]      = str(self.adjust_price(symbol, price, category))
+            payload["price"] = str(self.adjust_price(symbol, price, category))
         if stop_loss is not None:
-            payload["stopLoss"]   = str(self.adjust_price(symbol, stop_loss, category))
+            payload["stopLoss"] = str(self.adjust_price(symbol, stop_loss, category))
         if take_profit is not None:
-            payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
+            payload["takeProfit"] = str(
+                self.adjust_price(symbol, take_profit, category)
+            )
         if trigger_price is not None:
-            payload["triggerPrice"] = str(self.adjust_price(symbol, trigger_price, category))
-
+            payload["triggerPrice"] = str(
+                self.adjust_price(symbol, trigger_price, category)
+            )
 
         return self.api_request("POST", "/v5/order/amend", json_data=payload)
 
     def place_conditional_order(
         self,
-        symbol:        str,
-        side:          OrderSide,
-        qty:           float,
+        symbol: str,
+        side: OrderSide,
+        qty: float,
         trigger_price: float,
-        price:         Optional[float] = None,
-        order_type:    OrderType = OrderType.MARKET,
-        trigger_by:    str = "LastPrice",
-        category:      Category = Category.LINEAR,
-        stop_loss:     Optional[float] = None,
-        take_profit:   Optional[float] = None,
-        reduce_only:   bool = False,
+        price: Optional[float] = None,
+        order_type: OrderType = OrderType.MARKET,
+        trigger_by: str = "LastPrice",
+        category: Category = Category.LINEAR,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        reduce_only: bool = False,
         time_in_force: TimeInForce = TimeInForce.GTC,
-        position_idx:  PositionIdx = PositionIdx.ONE_WAY,
-        client_oid:    Optional[str] = None,
+        position_idx: PositionIdx = PositionIdx.ONE_WAY,
+        client_oid: Optional[str] = None,
     ) -> dict:
         """Place a conditional (stop/trigger) order."""
         # Ensure a proper enum value for TimeInForce
@@ -2663,28 +3030,29 @@ class BybitToolDispatcher:
         adj_qty = self.adjust_quantity(symbol, qty, category)
         is_buy = side == OrderSide.BUY
         payload: Dict[str, Any] = {
-            "category":         category,
-            "symbol":           symbol,
-            "side":             side,
-            "orderType":        order_type,
-            "qty":              str(adj_qty),
-            "triggerPrice":     str(self.adjust_price(symbol, trigger_price, category)),
+            "category": category,
+            "symbol": symbol,
+            "side": side,
+            "orderType": order_type,
+            "qty": str(adj_qty),
+            "triggerPrice": str(self.adjust_price(symbol, trigger_price, category)),
             "triggerDirection": 1 if is_buy else 2,
-            "triggerBy":        trigger_by,
-            "timeInForce":      time_in_force,
-            "positionIdx":      int(position_idx),
+            "triggerBy": trigger_by,
+            "timeInForce": time_in_force,
+            "positionIdx": int(position_idx),
         }
         if price is not None:
             payload["price"] = str(self.adjust_price(symbol, price, category))
         if stop_loss is not None:
             payload["stopLoss"] = str(self.adjust_price(symbol, stop_loss, category))
         if take_profit is not None:
-            payload["takeProfit"] = str(self.adjust_price(symbol, take_profit, category))
+            payload["takeProfit"] = str(
+                self.adjust_price(symbol, take_profit, category)
+            )
         if reduce_only:
             payload["reduceOnly"] = True
         if client_oid:
             payload["orderLinkId"] = client_oid
-
 
         return self.api_request("POST", "/v5/order/create", json_data=payload)
 
@@ -2704,14 +3072,18 @@ class BybitToolDispatcher:
             elif "orderLinkId" in o:
                 entry["orderLinkId"] = o["orderLinkId"]
             if "qty" in o:
-                entry["qty"] = str(self.adjust_quantity(o["symbol"], float(o["qty"]), category))
+                entry["qty"] = str(
+                    self.adjust_quantity(o["symbol"], float(o["qty"]), category)
+                )
             if "price" in o:
-                entry["price"] = str(self.adjust_price(o["symbol"], float(o["price"]), category))
+                entry["price"] = str(
+                    self.adjust_price(o["symbol"], float(o["price"]), category)
+                )
             batch.append(entry)
 
-
         return self.api_request(
-            "POST", "/v5/order/amend-batch",
+            "POST",
+            "/v5/order/amend-batch",
             json_data={"category": category, "request": batch},
         )
 
@@ -2732,17 +3104,17 @@ class BybitToolDispatcher:
                 entry["orderLinkId"] = o["orderLinkId"]
             batch.append(entry)
 
-
         return self.api_request(
-            "POST", "/v5/order/cancel-batch",
+            "POST",
+            "/v5/order/cancel-batch",
             json_data={"category": category, "request": batch},
         )
 
     def get_open_orders(
         self,
-        symbol:   Optional[str] = None,
+        symbol: Optional[str] = None,
         category: Category = Category.LINEAR,
-        limit:    int = 50,
+        limit: int = 50,
         settle_coin: str = "USDT",
     ) -> List[dict]:
         params: Dict[str, Any] = {"category": category, "limit": limit}
@@ -2755,11 +3127,11 @@ class BybitToolDispatcher:
 
     def get_order_history(
         self,
-        symbol:   Optional[str] = None,
+        symbol: Optional[str] = None,
         category: Category = Category.LINEAR,
-        limit:    int = 50,
+        limit: int = 50,
         start_time: Optional[int] = None,
-        end_time:   Optional[int] = None,
+        end_time: Optional[int] = None,
     ) -> List[dict]:
         """Fetch historical orders with optional time range filtering.
 
@@ -2786,7 +3158,7 @@ class BybitToolDispatcher:
     def get_positions(
         self,
         category: Category = Category.LINEAR,
-        symbol:   Optional[str] = None,
+        symbol: Optional[str] = None,
         settle_coin: str = "USDT",
     ) -> List[dict]:
         if isinstance(category, str):
@@ -2805,41 +3177,46 @@ class BybitToolDispatcher:
         for pos in positions_list:
             size = _safe_float(pos.get("size", 0))
             if size and size > 0:
-                active_positions.append({
-                    "symbol": pos.get("symbol", "N/A"),
-                    "side": pos.get("side", "None"),
-                    "size": size,
-                    "avgPrice": _safe_float(pos.get("avgPrice", 0)),
-                    "markPrice": _safe_float(pos.get("markPrice", 0)),
-                    "unrealisedPnl": _safe_float(pos.get("unrealisedPnl", 0)),
-                    "leverage": _safe_float(pos.get("leverage", 1.0)),
-                    "liqPrice": _safe_float(pos.get("liqPrice", 0)),
-                    "stopLoss": pos.get("stopLoss", "0"),
-                    "takeProfit": pos.get("takeProfit", "0"),
-                    "trailingStop": pos.get("trailingStop", "0"),
-                })
+                active_positions.append(
+                    {
+                        "symbol": pos.get("symbol", "N/A"),
+                        "side": pos.get("side", "None"),
+                        "size": size,
+                        "avgPrice": _safe_float(pos.get("avgPrice", 0)),
+                        "markPrice": _safe_float(pos.get("markPrice", 0)),
+                        "unrealisedPnl": _safe_float(pos.get("unrealisedPnl", 0)),
+                        "leverage": _safe_float(pos.get("leverage", 1.0)),
+                        "liqPrice": _safe_float(pos.get("liqPrice", 0)),
+                        "stopLoss": pos.get("stopLoss", "0"),
+                        "takeProfit": pos.get("takeProfit", "0"),
+                        "trailingStop": pos.get("trailingStop", "0"),
+                    }
+                )
         return active_positions
 
     def get_wallet_balance(self, account_type: str = "UNIFIED") -> dict:
         # Snippet 13: Handle missing result or empty list gracefully
-        resp = self.api_request("GET", "/v5/account/wallet-balance", params={"accountType": account_type})
+        resp = self.api_request(
+            "GET", "/v5/account/wallet-balance", params={"accountType": account_type}
+        )
         result_data = resp.get("result", {})
         accounts_list = result_data.get("list", [])
-        if not accounts_list: # Handle empty list case gracefully
+        if not accounts_list:  # Handle empty list case gracefully
             logger.warning("No account list found in wallet balance response.")
-            return {"list": []} # Return an empty list to prevent downstream errors
+            return {"list": []}  # Return an empty list to prevent downstream errors
         return result_data
 
-    def get_formatted_balance(self, account_type: str = "UNIFIED") -> List[Dict[str, float]]:
+    def get_formatted_balance(
+        self, account_type: str = "UNIFIED"
+    ) -> List[Dict[str, float]]:
         """Retrieve and format wallet balances to show only coin and equity."""
         balance_data = self.get_wallet_balance(account_type=account_type)
         formatted_list = []
         for account in balance_data.get("list", []):
             for coin in account.get("coin", []):
-                formatted_list.append({
-                    "coin": coin["coin"],
-                    "equity": float(coin["equity"])
-                })
+                formatted_list.append(
+                    {"coin": coin["coin"], "equity": float(coin["equity"])}
+                )
         return formatted_list
 
     def print_formatted_balance(self, account_type: str = "UNIFIED") -> None:
@@ -2850,81 +3227,89 @@ class BybitToolDispatcher:
             print(f"{b['coin']:<10}: {b['equity']:>15.4f}")
         print("----------------------------------\n")
 
-    def get_formatted_positions(self, category: Category = Category.LINEAR, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_formatted_positions(
+        self, category: Category = Category.LINEAR, symbol: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Retrieve and format open positions to show essential details."""
         positions = self.get_positions(category=category, symbol=symbol)
         formatted_list = []
         for pos in positions:
             # Only include positions with size > 0
             if float(pos.get("size", 0)) > 0:
-                formatted_list.append({
-                    "symbol": pos["symbol"],
-                    "side": pos["side"],
-                    "size": float(pos["size"]),
-                    "avgPrice": float(pos["avgPrice"]),
-                    "unrealisedPnl": float(pos.get("unrealisedPnl", 0))
-                })
+                formatted_list.append(
+                    {
+                        "symbol": pos["symbol"],
+                        "side": pos["side"],
+                        "size": float(pos["size"]),
+                        "avgPrice": float(pos["avgPrice"]),
+                        "unrealisedPnl": float(pos.get("unrealisedPnl", 0)),
+                    }
+                )
         return formatted_list
 
-    def print_formatted_positions(self, category: Category = Category.LINEAR, symbol: Optional[str] = None) -> None:
+    def print_formatted_positions(
+        self, category: Category = Category.LINEAR, symbol: Optional[str] = None
+    ) -> None:
         """Print formatted open positions."""
         positions = self.get_formatted_positions(category=category, symbol=symbol)
-        print(f"\n--- Open Positions ---")
+        print("\n--- Open Positions ---")
         if not positions:
             print("No open positions.")
         for p in positions:
-            print(f"{p['symbol']:<10} | {p['side']:<4} | Size: {p['size']:<8.4f} | Avg: {p['avgPrice']:>10.2f} | PnL: {p['unrealisedPnl']:>10.4f}")
+            print(
+                f"{p['symbol']:<10} | {p['side']:<4} | Size: {p['size']:<8.4f} | Avg: {p['avgPrice']:>10.2f} | PnL: {p['unrealisedPnl']:>10.4f}"
+            )
         print("----------------------\n")
 
     def set_leverage(
         self,
-        symbol:        str,
-        leverage:      int,
-        category:      Category = Category.LINEAR,
-        buy_leverage:  Optional[int] = None,
+        symbol: str,
+        leverage: int,
+        category: Category = Category.LINEAR,
+        buy_leverage: Optional[int] = None,
         sell_leverage: Optional[int] = None,
     ) -> dict:
         payload = {
-            "category":     category,
-            "symbol":       symbol,
-            "buyLeverage":  str(buy_leverage  or leverage),
+            "category": category,
+            "symbol": symbol,
+            "buyLeverage": str(buy_leverage or leverage),
             "sellLeverage": str(sell_leverage or leverage),
         }
-
 
         return self.api_request("POST", "/v5/position/set-leverage", json_data=payload)
 
     def set_trading_stop(
         self,
-        symbol:        str,
-        stop_loss:     Optional[float] = None,
-        take_profit:   Optional[float] = None,
+        symbol: str,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
         trailing_stop: Optional[float] = None,
-        category:      Category = Category.LINEAR,
-        position_idx:  PositionIdx = PositionIdx.ONE_WAY,
+        category: Category = Category.LINEAR,
+        position_idx: PositionIdx = PositionIdx.ONE_WAY,
     ) -> dict:
         payload: Dict[str, Any] = {
-            "category":    category,
-            "symbol":      symbol,
+            "category": category,
+            "symbol": symbol,
             "positionIdx": int(position_idx),
         }
         if stop_loss is not None:
-            payload["stopLoss"]     = str(self.adjust_price(symbol, stop_loss, category))
+            payload["stopLoss"] = str(self.adjust_price(symbol, stop_loss, category))
         if take_profit is not None:
-            payload["takeProfit"]   = str(self.adjust_price(symbol, take_profit, category))
+            payload["takeProfit"] = str(
+                self.adjust_price(symbol, take_profit, category)
+            )
         if trailing_stop is not None:
             payload["trailingStop"] = str(trailing_stop)
-
 
         return self.api_request("POST", "/v5/position/trading-stop", json_data=payload)
 
     def get_pnl_history(
         self,
-        symbol:   Optional[str] = None,
+        symbol: Optional[str] = None,
         category: Category = Category.LINEAR,
-        limit:    int = 100,
+        limit: int = 100,
         start_time: Optional[int] = None,
-        end_time:   Optional[int] = None,
+        end_time: Optional[int] = None,
     ) -> List[dict]:
         """Fetch PnL history with optional time range filtering.
 
@@ -2947,46 +3332,69 @@ class BybitToolDispatcher:
 
     def get_pnl_report(
         self,
-        symbol:   str,
+        symbol: str,
         category: Category = Category.LINEAR,
-        limit:    int = 100,
+        limit: int = 100,
         start_time: Optional[int] = None,
-        end_time:   Optional[int] = None,
+        end_time: Optional[int] = None,
     ) -> PnLReport:
-        records = self.get_pnl_history(symbol=symbol, category=category, limit=limit, start_time=start_time, end_time=end_time)
+        records = self.get_pnl_history(
+            symbol=symbol,
+            category=category,
+            limit=limit,
+            start_time=start_time,
+            end_time=end_time,
+        )
         if not records:
             return PnLReport(
-                symbol=symbol, total_pnl=0, win_count=0, loss_count=0,
-                win_rate=0, avg_win=0, avg_loss=0, largest_win=0,
-                largest_loss=0, total_fees=0, trade_count=0,
+                symbol=symbol,
+                total_pnl=0,
+                win_count=0,
+                loss_count=0,
+                win_rate=0,
+                avg_win=0,
+                avg_loss=0,
+                largest_win=0,
+                largest_loss=0,
+                total_fees=0,
+                trade_count=0,
             )
-        pnls   = [float(r.get("closedPnl", 0)) for r in records]
-        fees   = [float(r.get("cumExecFee", 0)) for r in records]
-        wins   = [p for p in pnls if p > 0]
+        pnls = [float(r.get("closedPnl", 0)) for r in records]
+        fees = [float(r.get("cumExecFee", 0)) for r in records]
+        wins = [p for p in pnls if p > 0]
         losses = [p for p in pnls if p <= 0]
         return PnLReport(
-            symbol       = symbol,
-            total_pnl    = sum(pnls),
-            win_count    = len(wins),
-            loss_count   = len(losses),
-            win_rate     = len(wins) / len(pnls) * 100 if pnls else 0, # Added check for len(pnls)
-            avg_win      = statistics.mean(wins) if wins else 0, # Safe division by zero
-            avg_loss     = statistics.mean(losses) if losses else 0, # Safe division by zero
-            largest_win  = max(wins) if wins else 0, # Safe max on empty list
-            largest_loss = min(losses) if losses else 0, # Safe min on empty list
-            total_fees   = sum(fees),
-            trade_count  = len(pnls),
+            symbol=symbol,
+            total_pnl=sum(pnls),
+            win_count=len(wins),
+            loss_count=len(losses),
+            win_rate=len(wins) / len(pnls) * 100
+            if pnls
+            else 0,  # Added check for len(pnls)
+            avg_win=statistics.mean(wins) if wins else 0,  # Safe division by zero
+            avg_loss=statistics.mean(losses) if losses else 0,  # Safe division by zero
+            largest_win=max(wins) if wins else 0,  # Safe max on empty list
+            largest_loss=min(losses) if losses else 0,  # Safe min on empty list
+            total_fees=sum(fees),
+            trade_count=len(pnls),
         )
 
     def get_fee_rate(self, symbol: str, category: Category = Category.LINEAR) -> dict:
         """Get trading fee rate for a symbol, with caching."""
         cache_key = f"{symbol}_{category.value}"
         now = time.time()
-        if cache_key in self._fee_cache and (now - self._fee_cache[cache_key]['timestamp']) < self._fee_cache_ttl:
+        if (
+            cache_key in self._fee_cache
+            and (now - self._fee_cache[cache_key]["timestamp"]) < self._fee_cache_ttl
+        ):
             logger.debug("Using cached fee rate for %s", cache_key)
-            return self._fee_cache[cache_key]['data']
+            return self._fee_cache[cache_key]["data"]
 
-        resp = self.api_request("GET", "/v5/account/fee-rate", params={"category": category.value, "symbol": symbol})
+        resp = self.api_request(
+            "GET",
+            "/v5/account/fee-rate",
+            params={"category": category.value, "symbol": symbol},
+        )
 
         # Snippet 14: Improve default handling and return formatted dictionary
         fee_list = resp.get("result", {}).get("list", [{}])
@@ -2995,7 +3403,7 @@ class BybitToolDispatcher:
         fee_data = {"takerFeeRate": taker_fee, "makerFeeRate": maker_fee}
 
         # Store in cache
-        self._fee_cache[cache_key] = {'data': fee_data, 'timestamp': now}
+        self._fee_cache[cache_key] = {"data": fee_data, "timestamp": now}
         return fee_data
 
     def get_transaction_log(
@@ -3011,12 +3419,18 @@ class BybitToolDispatcher:
     ) -> List[dict]:
         """Fetch transaction logs for the account."""
         params: Dict[str, Any] = {"accountType": account_type, "limit": limit}
-        if category: params["category"] = category
-        if currency: params["currency"] = currency
-        if base_coin: params["baseCoin"] = base_coin
-        if type: params["type"] = type
-        if start_time: params["startTime"] = start_time
-        if end_time: params["endTime"] = end_time
+        if category:
+            params["category"] = category
+        if currency:
+            params["currency"] = currency
+        if base_coin:
+            params["baseCoin"] = base_coin
+        if type:
+            params["type"] = type
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
         resp = self.api_request("GET", "/v5/account/transaction-log", params=params)
         return resp.get("result", {}).get("list", [])
 
@@ -3036,8 +3450,9 @@ class BybitToolDispatcher:
             "sellLeverage": leverage,
         }
 
-
-        return self.api_request("POST", "/v5/position/switch-isolated", json_data=payload)
+        return self.api_request(
+            "POST", "/v5/position/switch-isolated", json_data=payload
+        )
 
     def switch_position_mode(
         self,
@@ -3053,7 +3468,6 @@ class BybitToolDispatcher:
         if coin:
             payload["coin"] = coin
 
-
         return self.api_request("POST", "/v5/position/switch-mode", json_data=payload)
 
     # ══════════════════════════════════════════════════════════
@@ -3061,13 +3475,17 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     def get_ticker(self, symbol: str, category: Category = Category.LINEAR) -> dict:
         resp = self.api_request(
-            "GET", "/v5/market/tickers",
-            params={"category": category, "symbol": symbol}, signed=False,
+            "GET",
+            "/v5/market/tickers",
+            params={"category": category, "symbol": symbol},
+            signed=False,
         )
         items = resp.get("result", {}).get("list", [])
         return items[0] if items else {}
 
-    def get_orderbook(self, symbol: str, limit: int = 25, category: Category = Category.LINEAR) -> dict:
+    def get_orderbook(
+        self, symbol: str, limit: int = 25, category: Category = Category.LINEAR
+    ) -> dict:
         """Get market depth.
         Args:
             symbol: Trading symbol
@@ -3082,8 +3500,10 @@ class BybitToolDispatcher:
         )
 
         return self.api_request(
-            "GET", "/v5/market/orderbook",
-            params={"category": category, "symbol": symbol, "limit": limit}, signed=False,
+            "GET",
+            "/v5/market/orderbook",
+            params={"category": category, "symbol": symbol, "limit": limit},
+            signed=False,
         )
 
     def get_mark_price(
@@ -3093,7 +3513,8 @@ class BybitToolDispatcher:
     ) -> dict:
         """Get current mark price and funding info via tickers endpoint."""
         resp = self.api_request(
-            "GET", "/v5/market/tickers",
+            "GET",
+            "/v5/market/tickers",
             params={"category": category, "symbol": symbol},
             signed=False,
         )
@@ -3117,7 +3538,8 @@ class BybitToolDispatcher:
     ) -> dict:
         """Get index price for a symbol via tickers endpoint."""
         resp = self.api_request(
-            "GET", "/v5/market/tickers",
+            "GET",
+            "/v5/market/tickers",
             params={"category": category, "symbol": symbol},
             signed=False,
         )
@@ -3142,26 +3564,30 @@ class BybitToolDispatcher:
         if symbol:
             params["symbol"] = symbol
         resp = self.api_request(
-            "GET", "/v5/market/tickers",
+            "GET",
+            "/v5/market/tickers",
             params=params,
             signed=False,
         )
         results = []
         for item in resp.get("result", {}).get("list", []):
-            results.append({
-                "symbol": item.get("symbol"),
-                "last_price": _safe_float(item.get("lastPrice")) or 0.0,
-                "bid1_price": _safe_float(item.get("bid1Price")) or 0.0,
-                "ask1_price": _safe_float(item.get("ask1Price")) or 0.0,
-                "price_24h_change": (_safe_float(item.get("price24hPcnt")) or 0.0) * 100,
-                "price_24h_high": _safe_float(item.get("highPrice24h")) or 0.0,
-                "price_24h_low": _safe_float(item.get("lowPrice24h")) or 0.0,
-                "volume_24h": _safe_float(item.get("volume24h")) or 0.0,
-                "turnover_24h": _safe_float(item.get("turnover24h")) or 0.0,
-                "open_interest": _safe_float(item.get("openInterest")) or 0.0,
-                "funding_rate": _safe_float(item.get("fundingRate")) or 0.0,
-                "next_funding_time": int(item.get("nextFundingTime") or 0),
-            })
+            results.append(
+                {
+                    "symbol": item.get("symbol"),
+                    "last_price": _safe_float(item.get("lastPrice")) or 0.0,
+                    "bid1_price": _safe_float(item.get("bid1Price")) or 0.0,
+                    "ask1_price": _safe_float(item.get("ask1Price")) or 0.0,
+                    "price_24h_change": (_safe_float(item.get("price24hPcnt")) or 0.0)
+                    * 100,
+                    "price_24h_high": _safe_float(item.get("highPrice24h")) or 0.0,
+                    "price_24h_low": _safe_float(item.get("lowPrice24h")) or 0.0,
+                    "volume_24h": _safe_float(item.get("volume24h")) or 0.0,
+                    "turnover_24h": _safe_float(item.get("turnover24h")) or 0.0,
+                    "open_interest": _safe_float(item.get("openInterest")) or 0.0,
+                    "funding_rate": _safe_float(item.get("fundingRate")) or 0.0,
+                    "next_funding_time": int(item.get("nextFundingTime") or 0),
+                }
+            )
         return results
 
     def get_price_bands(
@@ -3171,7 +3597,8 @@ class BybitToolDispatcher:
     ) -> dict:
         """Get upper/lower price limits."""
         resp = self.api_request(
-            "GET", "/v5/market/price-limit",
+            "GET",
+            "/v5/market/price-limit",
             params={"category": category, "symbol": symbol},
             signed=False,
         )
@@ -3187,8 +3614,6 @@ class BybitToolDispatcher:
             "ask1_price": float(item.get("ask1Price", 0)),
         }
 
-
-
     def get_klines(
         self,
         symbol: str,
@@ -3200,9 +3625,19 @@ class BybitToolDispatcher:
     ) -> List[List[float]]:
         """Fetch klines for a symbol."""
         mapping = {
-            "1m": "1", "3m": "3", "5m": "5", "15m": "15", "30m": "30",
-            "1h": "60", "2h": "120", "4h": "240", "6h": "360", "12h": "720",
-            "1d": "D", "1w": "W", "1M": "M",
+            "1m": "1",
+            "3m": "3",
+            "5m": "5",
+            "15m": "15",
+            "30m": "30",
+            "1h": "60",
+            "2h": "120",
+            "4h": "240",
+            "6h": "360",
+            "12h": "720",
+            "1d": "D",
+            "1w": "W",
+            "1M": "M",
         }
         interval = mapping.get(str(interval).lower(), interval)
         params: Dict[str, Any] = {
@@ -3223,55 +3658,92 @@ class BybitToolDispatcher:
         return self.get_klines(*args, **kwargs)
 
     def get_recent_trades(
-        self, symbol: str, limit: int = 500, category: Category = Category.LINEAR,
+        self,
+        symbol: str,
+        limit: int = 500,
+        category: Category = Category.LINEAR,
     ) -> List[dict]:
         resp = self.api_request(
-            "GET", "/v5/market/recent-trade",
-            params={"category": category, "symbol": symbol, "limit": limit}, signed=False,
-        )
-        return resp.get("result", {}).get("list", [])
-
-    def get_open_interest(
-        self, symbol: str, interval_time: str = "5min",
-        category: Category = Category.LINEAR, limit: int = 50,
-    ) -> List[dict]:
-        resp = self.api_request(
-            "GET", "/v5/market/open-interest",
-            params={"category": category, "symbol": symbol, "intervalTime": interval_time, "limit": limit},
-            signed=False,
-        )
-        return resp.get("result", {}).get("list", [])
-
-    def get_liquidations(
-        self, symbol: str, category: Category = Category.LINEAR, limit: int = 200,
-    ) -> List[dict]:
-        """Alias for backward compatibility – fetch liquidation data."""
-        return self.get_market_liquidations(symbol, category, limit)
-
-    def get_market_liquidations(
-        self, symbol: str, category: Category = Category.LINEAR, limit: int = 200,
-    ) -> List[dict]:
-        """Get liquidation data using the dedicated liquidations endpoint."""
-        resp = self.api_request(
-            "GET", "/v5/market/liquidation-info",
+            "GET",
+            "/v5/market/recent-trade",
             params={"category": category, "symbol": symbol, "limit": limit},
             signed=False,
         )
         return resp.get("result", {}).get("list", [])
 
-    def get_long_short_ratio(self, symbol: str, period: str = "5min", limit: int = 50, category: Category = Category.LINEAR) -> List[dict]:
-        """Get long/short ratio for a symbol."""
+    def get_open_interest(
+        self,
+        symbol: str,
+        interval_time: str = "5min",
+        category: Category = Category.LINEAR,
+        limit: int = 50,
+    ) -> List[dict]:
         resp = self.api_request(
-            "GET", "/v5/market/account-ratio",
-            params={"category": category, "symbol": symbol, "period": period, "limit": limit},
+            "GET",
+            "/v5/market/open-interest",
+            params={
+                "category": category,
+                "symbol": symbol,
+                "intervalTime": interval_time,
+                "limit": limit,
+            },
             signed=False,
         )
         return resp.get("result", {}).get("list", [])
 
-    def get_funding_rate(self, symbol: str, category: Category = Category.LINEAR) -> dict:
+    def get_liquidations(
+        self,
+        symbol: str,
+        category: Category = Category.LINEAR,
+        limit: int = 200,
+    ) -> List[dict]:
+        """Alias for backward compatibility – fetch liquidation data."""
+        return self.get_market_liquidations(symbol, category, limit)
+
+    def get_market_liquidations(
+        self,
+        symbol: str,
+        category: Category = Category.LINEAR,
+        limit: int = 200,
+    ) -> List[dict]:
+        """Get liquidation data using the dedicated liquidations endpoint."""
         resp = self.api_request(
-            "GET", "/v5/market/funding/history",
-            params={"category": category, "symbol": symbol, "limit": 1}, signed=False,
+            "GET",
+            "/v5/market/liquidation-info",
+            params={"category": category, "symbol": symbol, "limit": limit},
+            signed=False,
+        )
+        return resp.get("result", {}).get("list", [])
+
+    def get_long_short_ratio(
+        self,
+        symbol: str,
+        period: str = "5min",
+        limit: int = 50,
+        category: Category = Category.LINEAR,
+    ) -> List[dict]:
+        """Get long/short ratio for a symbol."""
+        resp = self.api_request(
+            "GET",
+            "/v5/market/account-ratio",
+            params={
+                "category": category,
+                "symbol": symbol,
+                "period": period,
+                "limit": limit,
+            },
+            signed=False,
+        )
+        return resp.get("result", {}).get("list", [])
+
+    def get_funding_rate(
+        self, symbol: str, category: Category = Category.LINEAR
+    ) -> dict:
+        resp = self.api_request(
+            "GET",
+            "/v5/market/funding/history",
+            params={"category": category, "symbol": symbol, "limit": 1},
+            signed=False,
         )
         items = resp.get("result", {}).get("list", [])
         return items[0] if items else {}
@@ -3281,10 +3753,10 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     def get_market_momentum(
         self,
-        symbol:           str,
-        category:         Category = Category.LINEAR,
-        strong_threshold: float    = 0.20,
-        mild_threshold:   float    = 0.08,
+        symbol: str,
+        category: Category = Category.LINEAR,
+        strong_threshold: float = 0.20,
+        mild_threshold: float = 0.08,
     ) -> dict:
         """
         Analyze recent trade flow to determine buy/sell momentum.
@@ -3294,20 +3766,25 @@ class BybitToolDispatcher:
             trades = self.get_recent_trades(symbol=symbol, limit=500, category=category)
             if not trades:
                 return {
-                    "symbol": symbol, "imbalance": 0.0, "signal": Signal.NEUTRAL.value,
-                    "buy_vol": 0.0, "sell_vol": 0.0, "vwap": 0.0, "avg_trade_sz": 0.0,
+                    "symbol": symbol,
+                    "imbalance": 0.0,
+                    "signal": Signal.NEUTRAL.value,
+                    "buy_vol": 0.0,
+                    "sell_vol": 0.0,
+                    "vwap": 0.0,
+                    "avg_trade_sz": 0.0,
                     "timestamp": time.time(),
                 }
 
-            buy_vol  = 0.0
+            buy_vol = 0.0
             sell_vol = 0.0
             vol_price_sum = 0.0
-            total_qty     = 0.0
-            sizes         = []
+            total_qty = 0.0
+            sizes = []
 
             for t in trades:
-                tqty  = float(t.get("size", 0))
-                tpx   = float(t.get("price", 0))
+                tqty = float(t.get("size", 0))
+                tpx = float(t.get("price", 0))
                 tside = t.get("side", "").lower()
 
                 if tside == "buy":
@@ -3316,23 +3793,33 @@ class BybitToolDispatcher:
                     sell_vol += tqty
 
                 vol_price_sum += tpx * tqty
-                total_qty     += tqty
+                total_qty += tqty
                 sizes.append(tqty)
 
             total_vol = buy_vol + sell_vol
             imbalance = (buy_vol - sell_vol) / total_vol if total_vol > 0 else 0.0
-            vwap      = vol_price_sum / total_qty if total_qty > 0 else 0.0
-            avg_sz    = statistics.mean(sizes) if sizes else 0.0
+            vwap = vol_price_sum / total_qty if total_qty > 0 else 0.0
+            avg_sz = statistics.mean(sizes) if sizes else 0.0
 
-            if   imbalance >=  strong_threshold: signal = Signal.STRONG_BUY
-            elif imbalance >=  mild_threshold:   signal = Signal.BUY
-            elif imbalance <= -strong_threshold: signal = Signal.STRONG_SELL
-            elif imbalance <= -mild_threshold:   signal = Signal.SELL
-            else:                                signal = Signal.NEUTRAL
+            if imbalance >= strong_threshold:
+                signal = Signal.STRONG_BUY
+            elif imbalance >= mild_threshold:
+                signal = Signal.BUY
+            elif imbalance <= -strong_threshold:
+                signal = Signal.STRONG_SELL
+            elif imbalance <= -mild_threshold:
+                signal = Signal.SELL
+            else:
+                signal = Signal.NEUTRAL
 
             result = MomentumResult(
-                symbol=symbol, imbalance=imbalance, signal=signal,
-                buy_vol=buy_vol, sell_vol=sell_vol, vwap=vwap, avg_trade_sz=avg_sz,
+                symbol=symbol,
+                imbalance=imbalance,
+                signal=signal,
+                buy_vol=buy_vol,
+                sell_vol=sell_vol,
+                vwap=vwap,
+                avg_trade_sz=avg_sz,
             )
             return result.to_dict()
         except Exception as exc:
@@ -3342,35 +3829,43 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     # MARKET HEALTH (was MISSING – now implemented)
     # ══════════════════════════════════════════════════════════
-    def get_market_health(self, symbol: str, category: Category = Category.LINEAR) -> dict:
+    def get_market_health(
+        self, symbol: str, category: Category = Category.LINEAR
+    ) -> dict:
         """
         Composite market health check: spread, depth, volatility, funding, OI.
         Returns a 0–100 health score and component breakdown.
         """
         try:
-            ticker   = self.get_ticker(symbol, category)
-            ob       = self.get_orderbook(symbol, limit=25, category=category)
-            funding  = self.get_funding_rate(symbol, category)
-            oi_data  = self.get_open_interest(symbol, interval_time="5min", category=category, limit=2)
+            ticker = self.get_ticker(symbol, category)
+            ob = self.get_orderbook(symbol, limit=25, category=category)
+            funding = self.get_funding_rate(symbol, category)
+            oi_data = self.get_open_interest(
+                symbol, interval_time="5min", category=category, limit=2
+            )
 
             # Spread analysis
-            best_bid  = float(ticker.get("bid1Price", 0))
-            best_ask  = float(ticker.get("ask1Price", 0))
-            last_px   = float(ticker.get("lastPrice", 1))
-            spread    = (best_ask - best_bid) / last_px * 100 if last_px > 0 else 999
-            spread_score = max(0, min(25, 25 - (spread * 500))) if spread != 999 else 0 # Handle initial high spread
+            best_bid = float(ticker.get("bid1Price", 0))
+            best_ask = float(ticker.get("ask1Price", 0))
+            last_px = float(ticker.get("lastPrice", 1))
+            spread = (best_ask - best_bid) / last_px * 100 if last_px > 0 else 999
+            spread_score = (
+                max(0, min(25, 25 - (spread * 500))) if spread != 999 else 0
+            )  # Handle initial high spread
 
             # Depth analysis (bid+ask volume in top 25 levels)
             ob_result = ob.get("result", {})
             bid_depth = sum(float(b[1]) for b in ob_result.get("b", []))
             ask_depth = sum(float(a[1]) for a in ob_result.get("a", []))
             total_depth = bid_depth + ask_depth
-            depth_imbalance = abs(bid_depth - ask_depth) / max(total_depth, 1e-9) # Prevent division by zero
+            depth_imbalance = abs(bid_depth - ask_depth) / max(
+                total_depth, 1e-9
+            )  # Prevent division by zero
             depth_score = max(0, min(25, 25 * (1 - depth_imbalance)))
 
             # Funding rate analysis
-            fund_rate   = abs(float(funding.get("fundingRate", 0)))
-            fund_score  = max(0, min(25, 25 - (fund_rate * 2500)))  # <0.01% = 25
+            fund_rate = abs(float(funding.get("fundingRate", 0)))
+            fund_score = max(0, min(25, 25 - (fund_rate * 2500)))  # <0.01% = 25
 
             # Open interest trend
             oi_score = 12.5  # neutral default
@@ -3384,18 +3879,18 @@ class BybitToolDispatcher:
             health_score = spread_score + depth_score + fund_score + oi_score
 
             return {
-                "symbol":         symbol,
-                "health_score":   round(health_score, 1),
-                "spread_pct":     round(spread, 6),
-                "spread_score":   round(spread_score, 1),
-                "depth_score":    round(depth_score, 1),
-                "bid_depth":      round(bid_depth, 2),
-                "ask_depth":      round(ask_depth, 2),
-                "funding_rate":   funding.get("fundingRate", "0"),
-                "funding_score":  round(fund_score, 1),
-                "oi_score":       round(oi_score, 1),
-                "last_price":     last_px,
-                "timestamp":      time.time(),
+                "symbol": symbol,
+                "health_score": round(health_score, 1),
+                "spread_pct": round(spread, 6),
+                "spread_score": round(spread_score, 1),
+                "depth_score": round(depth_score, 1),
+                "bid_depth": round(bid_depth, 2),
+                "ask_depth": round(ask_depth, 2),
+                "funding_rate": funding.get("fundingRate", "0"),
+                "funding_score": round(fund_score, 1),
+                "oi_score": round(oi_score, 1),
+                "last_price": last_px,
+                "timestamp": time.time(),
             }
         except Exception as exc:
             logger.error("Market health failed for %s: %s", symbol, exc)
@@ -3412,10 +3907,10 @@ class BybitToolDispatcher:
         total_vol = 0.0
         for k in ohlcv_list:
             # Bybit klines might use different keys depending on how they are fetched
-            high   = float(k.get('high')  or k[2])
-            low    = float(k.get('low')   or k[3])
-            close  = float(k.get('close') or k[4])
-            vol    = float(k.get('volume') or k[5])
+            high = float(k.get("high") or k[2])
+            low = float(k.get("low") or k[3])
+            close = float(k.get("close") or k[4])
+            vol = float(k.get("volume") or k[5])
 
             typical_price = (high + low + close) / 3
             total_vol_price += typical_price * vol
@@ -3425,9 +3920,9 @@ class BybitToolDispatcher:
     def calculate_ichimoku_cloud(
         self,
         highs: List[float],
-        lows:  List[float],
+        lows: List[float],
         tenkan_period: int = 9,
-        kijun_period:  int = 26,
+        kijun_period: int = 26,
         senkou_b_period: int = 52,
     ) -> dict:
         """Calculate Ichimoku Cloud components."""
@@ -3438,13 +3933,13 @@ class BybitToolDispatcher:
             return (max(h[-p:]) + min(l[-p:])) / 2
 
         tenkan = get_midpoint(highs, lows, tenkan_period)
-        kijun  = get_midpoint(highs, lows, kijun_period)
+        kijun = get_midpoint(highs, lows, kijun_period)
         senkou_a = (tenkan + kijun) / 2
         senkou_b = get_midpoint(highs, lows, senkou_b_period)
 
         return {
-            "tenkan":   round(tenkan, 4),
-            "kijun":    round(kijun, 4),
+            "tenkan": round(tenkan, 4),
+            "kijun": round(kijun, 4),
             "senkou_a": round(senkou_a, 4),
             "senkou_b": round(senkou_b, 4),
         }
@@ -3452,20 +3947,28 @@ class BybitToolDispatcher:
     def calculate_rsi(self, prices: List[float], period: int = 14) -> float:
         # Snippet 15: Validate RSI period
         if period <= 0:
-            logger.warning("RSI period must be positive. Got %d. Using default 14.", period)
+            logger.warning(
+                "RSI period must be positive. Got %d. Using default 14.", period
+            )
             period = 14
 
-        if len(prices) < period + 1: # Need at least period + 1 prices for deltas
-            logger.warning("Not enough data points for RSI calculation (need %d, got %d)", period + 1, len(prices))
-            return 50.0 # Return neutral default
+        if len(prices) < period + 1:  # Need at least period + 1 prices for deltas
+            logger.warning(
+                "Not enough data points for RSI calculation (need %d, got %d)",
+                period + 1,
+                len(prices),
+            )
+            return 50.0  # Return neutral default
 
         # Check if all prices are the same
         if all(p == prices[0] for p in prices):
-            logger.info("Constant price detected for RSI calculation. Returning neutral 50.0.")
+            logger.info(
+                "Constant price detected for RSI calculation. Returning neutral 50.0."
+            )
             return 50.0
 
         deltas = [prices[i + 1] - prices[i] for i in range(len(prices) - 1)]
-        gains  = [d if d > 0 else 0 for d in deltas]
+        gains = [d if d > 0 else 0 for d in deltas]
         losses = [-d if d < 0 else 0 for d in deltas]
         avg_gain = sum(gains[-period:]) / period
         avg_loss = sum(losses[-period:]) / period
@@ -3484,36 +3987,51 @@ class BybitToolDispatcher:
         return ema
 
     def calculate_atr(self, ohlcv_list: List[dict], period: int = 14) -> float:
-        if len(ohlcv_list) < period + 1: # Need period + 1 bars to calculate period-length ATR
-            logger.warning("Not enough data points for ATR calculation (need %d, got %d)", period + 1, len(ohlcv_list))
-            return 0.0 # Return zero default
+        if (
+            len(ohlcv_list) < period + 1
+        ):  # Need period + 1 bars to calculate period-length ATR
+            logger.warning(
+                "Not enough data points for ATR calculation (need %d, got %d)",
+                period + 1,
+                len(ohlcv_list),
+            )
+            return 0.0  # Return zero default
 
         tr_list = []
         for i in range(1, len(ohlcv_list)):
-            high       = float(ohlcv_list[i]['high'])
-            low        = float(ohlcv_list[i]['low'])
-            prev_close = float(ohlcv_list[i - 1]['close'])
+            high = float(ohlcv_list[i]["high"])
+            low = float(ohlcv_list[i]["low"])
+            prev_close = float(ohlcv_list[i - 1]["close"])
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             tr_list.append(tr)
         return sum(tr_list[-period:]) / period
 
-    def calculate_bollinger_bands(self, prices: List[float], period: int = 20, std_dev: float = 2.0) -> dict:
+    def calculate_bollinger_bands(
+        self, prices: List[float], period: int = 20, std_dev: float = 2.0
+    ) -> dict:
         if len(prices) < period:
             return {"upper": 0.0, "middle": 0.0, "lower": 0.0}
-        subset   = prices[-period:]
-        mean     = sum(subset) / period
+        subset = prices[-period:]
+        mean = sum(subset) / period
         variance = sum((x - mean) ** 2 for x in subset) / period
-        std      = math.sqrt(variance)
+        std = math.sqrt(variance)
         return {
             "middle": round(mean, 4),
-            "upper":  round(mean + (std * std_dev), 4),
-            "lower":  round(mean - (std * std_dev), 4),
+            "upper": round(mean + (std * std_dev), 4),
+            "lower": round(mean - (std * std_dev), 4),
         }
 
-    def calculate_macd(self, prices: List[float], fast: int = 12, slow: int = 26, signal: int = 9) -> dict:
+    def calculate_macd(
+        self, prices: List[float], fast: int = 12, slow: int = 26, signal: int = 9
+    ) -> dict:
         # Snippet 16: Validate MACD periods
         if not (fast > 0 and slow > 0 and signal > 0 and slow > fast):
-            logger.warning("Invalid periods for MACD calculation (fast=%d, slow=%d, signal=%d). Using defaults.", fast, slow, signal)
+            logger.warning(
+                "Invalid periods for MACD calculation (fast=%d, slow=%d, signal=%d). Using defaults.",
+                fast,
+                slow,
+                signal,
+            )
             fast, slow, signal = 12, 26, 9
 
         if len(prices) < slow + signal:
@@ -3526,19 +4044,25 @@ class BybitToolDispatcher:
                 ema_list.append(val * k + ema_list[-1] * (1 - k))
             return ema_list
 
-        fast_ema  = get_ema_series(prices, fast)
-        slow_ema  = get_ema_series(prices, slow)
+        fast_ema = get_ema_series(prices, fast)
+        slow_ema = get_ema_series(prices, slow)
         macd_line = [f - s for f, s in zip(fast_ema, slow_ema)]
-        sig_line  = get_ema_series(macd_line, signal)
-        cur_macd  = macd_line[-1]
-        cur_sig   = sig_line[-1]
+        sig_line = get_ema_series(macd_line, signal)
+        cur_macd = macd_line[-1]
+        cur_sig = sig_line[-1]
         return {
-            "macd":      round(cur_macd, 4),
-            "signal":    round(cur_sig, 4),
+            "macd": round(cur_macd, 4),
+            "signal": round(cur_sig, 4),
             "histogram": round(cur_macd - cur_sig, 4),
         }
 
-    def calculate_stoch_rsi(self, prices: List[float], period: int = 14, smooth_k: int = 3, smooth_d: int = 3) -> dict:
+    def calculate_stoch_rsi(
+        self,
+        prices: List[float],
+        period: int = 14,
+        smooth_k: int = 3,
+        smooth_d: int = 3,
+    ) -> dict:
         """Calculate Stochastic RSI with proper sliding window.
 
         Args:
@@ -3553,19 +4077,24 @@ class BybitToolDispatcher:
         # Calculate RSI values using sliding window
         rsi_values = []
         for i in range(period, len(prices) + 1):
-            window = prices[i - period:i]
+            window = prices[i - period : i]
             rsi_val = self.calculate_rsi(window, period=period)
             rsi_values.append(rsi_val)
 
         if len(rsi_values) < smooth_k:
-            return {"stoch_rsi": 0.0, "k": 0.0, "d": 0.0, "rsi": round(rsi_values[-1], 2)}
+            return {
+                "stoch_rsi": 0.0,
+                "k": 0.0,
+                "d": 0.0,
+                "rsi": round(rsi_values[-1], 2),
+            }
 
         # Calculate Stochastic RSI
         stoch_rsi_values = []
         lookback = min(14, len(rsi_values))  # Use 14-period lookback for Stoch RSI
 
         for i in range(lookback - 1, len(rsi_values)):
-            rsi_window = rsi_values[max(0, i - lookback + 1):i + 1]
+            rsi_window = rsi_values[max(0, i - lookback + 1) : i + 1]
             rsi_min = min(rsi_window)
             rsi_max = max(rsi_window)
 
@@ -3578,65 +4107,91 @@ class BybitToolDispatcher:
         # Smooth %K
         k_values = []
         for i in range(smooth_k - 1, len(stoch_rsi_values)):
-            k_window = stoch_rsi_values[i - smooth_k + 1:i + 1]
+            k_window = stoch_rsi_values[i - smooth_k + 1 : i + 1]
             k_values.append(sum(k_window) / len(k_window))
 
         # Smooth %D
         d_values = []
         for i in range(smooth_d - 1, len(k_values)):
-            d_window = k_values[i - smooth_d + 1:i + 1]
+            d_window = k_values[i - smooth_d + 1 : i + 1]
             d_values.append(sum(d_window) / len(d_window))
 
         return {
-            "stoch_rsi": round(stoch_rsi_values[-1] * 100, 2) if stoch_rsi_values else 0.0,
+            "stoch_rsi": round(stoch_rsi_values[-1] * 100, 2)
+            if stoch_rsi_values
+            else 0.0,
             "k": round(k_values[-1] * 100, 2) if k_values else 0.0,
             "d": round(d_values[-1] * 100, 2) if d_values else 0.0,
             "rsi": round(rsi_values[-1], 2) if rsi_values else 50.0,
         }
 
-    def calculate_cci(self, highs: List[float], lows: List[float], closes: List[float], period: int = 20) -> float:
+    def calculate_cci(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        period: int = 20,
+    ) -> float:
         if len(closes) < period:
             return 0.0
-        tp       = [(h + l + c) / 3 for h, l, c in zip(highs[-period:], lows[-period:], closes[-period:])]
-        sma      = sum(tp) / period
+        tp = [
+            (h + l + c) / 3
+            for h, l, c in zip(highs[-period:], lows[-period:], closes[-period:])
+        ]
+        sma = sum(tp) / period
         mean_dev = sum(abs(x - sma) for x in tp) / period
         return round((tp[-1] - sma) / (0.015 * mean_dev) if mean_dev != 0 else 0.0, 2)
 
-    def calculate_donchian_channels(self, highs: List[float], lows: List[float], period: int = 20) -> dict:
+    def calculate_donchian_channels(
+        self, highs: List[float], lows: List[float], period: int = 20
+    ) -> dict:
         if len(highs) < period:
             return {"upper": 0.0, "lower": 0.0}
-        return {"upper": round(max(highs[-period:]), 4), "lower": round(min(lows[-period:]), 4)}
+        return {
+            "upper": round(max(highs[-period:]), 4),
+            "lower": round(min(lows[-period:]), 4),
+        }
 
-    def calculate_adx(self, highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
+    def calculate_adx(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        period: int = 14,
+    ) -> float:
         if len(closes) < period * 2:
             return 0.0
         tr_list, pos_dm, neg_dm = [], [], []
         for i in range(1, len(closes)):
-            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
-            up_move   = highs[i] - highs[i - 1]
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i] - closes[i - 1]),
+            )
+            up_move = highs[i] - highs[i - 1]
             down_move = lows[i - 1] - lows[i]
             pd = max(up_move, 0) if up_move > down_move else 0
             nd = max(down_move, 0) if down_move > up_move else 0
             tr_list.append(tr)
             pos_dm.append(pd)
             neg_dm.append(nd)
-        sum_pos    = sum(pos_dm[-period:])
-        sum_neg    = sum(neg_dm[-period:])
-        denom      = sum_pos + sum_neg + 1e-9
-        adx        = 100 * abs(sum_pos - sum_neg) / denom
+        sum_pos = sum(pos_dm[-period:])
+        sum_neg = sum(neg_dm[-period:])
+        denom = sum_pos + sum_neg + 1e-9
+        adx = 100 * abs(sum_pos - sum_neg) / denom
         return round(adx, 2)
 
     def calculate_fib_pivots(self, high: float, low: float, close: float) -> dict:
-        pivot     = (high + low + close) / 3
+        pivot = (high + low + close) / 3
         range_val = high - low
         return {
-            "R3": round(pivot + (range_val * 1.0),   4),
+            "R3": round(pivot + (range_val * 1.0), 4),
             "R2": round(pivot + (range_val * 0.618), 4),
             "R1": round(pivot + (range_val * 0.382), 4),
-            "P":  round(pivot, 4),
+            "P": round(pivot, 4),
             "S1": round(pivot - (range_val * 0.382), 4),
             "S2": round(pivot - (range_val * 0.618), 4),
-            "S3": round(pivot - (range_val * 1.0),   4),
+            "S3": round(pivot - (range_val * 1.0), 4),
         }
 
     # ══════════════════════════════════════════════════════════
@@ -3683,7 +4238,14 @@ class BybitToolDispatcher:
             "cvd_last5": [round(v, 4) for v in cvd_series[-5:]],
         }
 
-    def calculate_mfi(self, highs: List[float], lows: List[float], closes: List[float], volumes: List[float], period: int = 14) -> float:
+    def calculate_mfi(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        volumes: List[float],
+        period: int = 14,
+    ) -> float:
         """Money Flow Index: volume-weighted RSI (0-100)."""
         n = min(len(highs), len(lows), len(closes), len(volumes))
         if n < period + 1:
@@ -3702,7 +4264,14 @@ class BybitToolDispatcher:
         ratio = pos_flow / neg_flow
         return round(100 - (100 / (1 + ratio)), 2)
 
-    def calculate_cmf(self, highs: List[float], lows: List[float], closes: List[float], volumes: List[float], period: int = 20) -> float:
+    def calculate_cmf(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        volumes: List[float],
+        period: int = 20,
+    ) -> float:
         """Chaikin Money Flow: accumulation/distribution pressure (-1 to +1)."""
         n = min(len(highs), len(lows), len(closes), len(volumes))
         if n < period:
@@ -3719,7 +4288,13 @@ class BybitToolDispatcher:
             vol_sum += volumes[i]
         return round(mfv_sum / vol_sum, 4) if vol_sum > 0 else 0.0
 
-    def calculate_williams_r(self, highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
+    def calculate_williams_r(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        period: int = 14,
+    ) -> float:
         """Williams %R: overbought/oversold oscillator (-100 to 0)."""
         if len(closes) < period:
             return -50.0
@@ -3729,7 +4304,14 @@ class BybitToolDispatcher:
             return -50.0
         return round(-100 * (hh - closes[-1]) / (hh - ll), 2)
 
-    def calculate_parabolic_sar(self, highs: List[float], lows: List[float], af_start: float = 0.02, af_step: float = 0.02, af_max: float = 0.2) -> dict:
+    def calculate_parabolic_sar(
+        self,
+        highs: List[float],
+        lows: List[float],
+        af_start: float = 0.02,
+        af_step: float = 0.02,
+        af_max: float = 0.2,
+    ) -> dict:
         """Parabolic SAR: trend-following stop-and-reverse levels."""
         n = len(highs)
         if n < 3:
@@ -3751,10 +4333,9 @@ class BybitToolDispatcher:
                     sar = ep
                     ep = lows[i]
                     af = af_start
-                else:
-                    if highs[i] > ep:
-                        ep = highs[i]
-                        af = min(af + af_step, af_max)
+                elif highs[i] > ep:
+                    ep = highs[i]
+                    af = min(af + af_step, af_max)
             else:
                 sar = max(sar, highs[i - 1])
                 if i >= 2:
@@ -3764,10 +4345,9 @@ class BybitToolDispatcher:
                     sar = ep
                     ep = highs[i]
                     af = af_start
-                else:
-                    if lows[i] < ep:
-                        ep = lows[i]
-                        af = min(af + af_step, af_max)
+                elif lows[i] < ep:
+                    ep = lows[i]
+                    af = min(af + af_step, af_max)
             sar_values.append(sar)
         return {
             "sar": round(sar_values[-1], 6),
@@ -3776,10 +4356,20 @@ class BybitToolDispatcher:
             "af": round(af, 4),
         }
 
-    def calculate_keltner_channels(self, highs: List[float], lows: List[float], closes: List[float], ema_period: int = 20, atr_period: int = 14, atr_mult: float = 2.0) -> dict:
+    def calculate_keltner_channels(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        ema_period: int = 20,
+        atr_period: int = 14,
+        atr_mult: float = 2.0,
+    ) -> dict:
         """Keltner Channels: EMA-based volatility bands."""
         ema = self.calculate_ema(closes, ema_period)
-        ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+        ohlcv = [
+            {"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)
+        ]
         atr = self.calculate_atr(ohlcv, atr_period)
         return {
             "upper": round(ema + atr_mult * atr, 6),
@@ -3792,7 +4382,9 @@ class BybitToolDispatcher:
         """Rate of Change: percentage change over N periods."""
         if len(prices) <= period or prices[-period - 1] == 0:
             return 0.0
-        return round(((prices[-1] - prices[-period - 1]) / prices[-period - 1]) * 100, 4)
+        return round(
+            ((prices[-1] - prices[-period - 1]) / prices[-period - 1]) * 100, 4
+        )
 
     def calculate_trix(self, prices: List[float], period: int = 15) -> float:
         """TRIX: rate of change of triple-smoothed EMA."""
@@ -3812,7 +4404,15 @@ class BybitToolDispatcher:
             return 0.0
         return round(((e1[-1] - e1[-2]) / e1[-2]) * 10000, 4)
 
-    def calculate_ultimate_oscillator(self, highs: List[float], lows: List[float], closes: List[float], p1: int = 7, p2: int = 14, p3: int = 28) -> float:
+    def calculate_ultimate_oscillator(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        p1: int = 7,
+        p2: int = 14,
+        p3: int = 28,
+    ) -> float:
         """Ultimate Oscillator: multi-timeframe momentum (0-100)."""
         n = len(closes)
         if n < p3 + 1:
@@ -3824,39 +4424,53 @@ class BybitToolDispatcher:
             tr = max(highs[i], closes[i - 1]) - min(lows[i], closes[i - 1])
             bp_list.append(bp)
             tr_list.append(tr)
+
         def avg_ratio(period: int) -> float:
             bp_s = sum(bp_list[-period:])
             tr_s = sum(tr_list[-period:])
             return bp_s / tr_s if tr_s > 0 else 0.5
+
         a1 = avg_ratio(p1)
         a2 = avg_ratio(p2)
         a3 = avg_ratio(p3)
         uo = 100 * (4 * a1 + 2 * a2 + a3) / 7
         return round(uo, 2)
 
-    def calculate_choppiness_index(self, highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
+    def calculate_choppiness_index(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        period: int = 14,
+    ) -> float:
         """Choppiness Index: 0-100, high = choppy/ranging, low = trending."""
         n = len(closes)
         if n < period + 1:
             return 50.0
         atr_sum = 0.0
         for i in range(n - period, n):
-            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i] - closes[i - 1]),
+            )
             atr_sum += tr
-        hh = max(highs[n - period:n])
-        ll = min(lows[n - period:n])
+        hh = max(highs[n - period : n])
+        ll = min(lows[n - period : n])
         hl_range = hh - ll
         if hl_range <= 0:
             return 50.0
         ci = 100 * math.log10(atr_sum / hl_range) / math.log10(period)
         return round(ci, 2)
 
-    def calculate_aroon(self, highs: List[float], lows: List[float], period: int = 25) -> dict:
+    def calculate_aroon(
+        self, highs: List[float], lows: List[float], period: int = 25
+    ) -> dict:
         """Aroon Oscillator: trend strength and direction."""
         if len(highs) < period + 1:
             return {"aroon_up": 50.0, "aroon_down": 50.0, "oscillator": 0.0}
-        h_slice = highs[-(period + 1):]
-        l_slice = lows[-(period + 1):]
+        h_slice = highs[-(period + 1) :]
+        l_slice = lows[-(period + 1) :]
         days_since_high = period - h_slice.index(max(h_slice))
         days_since_low = period - l_slice.index(min(l_slice))
         aroon_up = (period - days_since_high) / period * 100
@@ -3873,7 +4487,7 @@ class BybitToolDispatcher:
         if len(closes) < period + shift:
             return 0.0
         sma_idx = -(shift + 1)
-        sma_slice = closes[sma_idx - period + 1: sma_idx + 1]
+        sma_slice = closes[sma_idx - period + 1 : sma_idx + 1]
         sma = sum(sma_slice) / period if len(sma_slice) == period else 0.0
         return round(closes[-(shift + 1)] - sma, 6)
 
@@ -3887,7 +4501,9 @@ class BybitToolDispatcher:
         wma_full = self._wma(prices, period)
         if not wma_half or not wma_full:
             return prices[-1]
-        diff_series = [2 * h - f for h, f in zip(wma_half[-sqrt_p:], wma_full[-sqrt_p:])]
+        diff_series = [
+            2 * h - f for h, f in zip(wma_half[-sqrt_p:], wma_full[-sqrt_p:])
+        ]
         if len(diff_series) < sqrt_p:
             return diff_series[-1] if diff_series else prices[-1]
         result = self._wma(diff_series, sqrt_p)
@@ -3909,20 +4525,34 @@ class BybitToolDispatcher:
         if len(prices) < period:
             return prices[-1] if prices else 0.0
         lag = (period - 1) // 2
-        adjusted = [prices[i] + (prices[i] - prices[i - lag]) if i >= lag else prices[i] for i in range(len(prices))]
+        adjusted = [
+            prices[i] + (prices[i] - prices[i - lag]) if i >= lag else prices[i]
+            for i in range(len(prices))
+        ]
         return self.calculate_ema(adjusted, period)
 
-    def calculate_supertrend(self, highs: List[float], lows: List[float], closes: List[float], period: int = 10, multiplier: float = 3.0) -> dict:
+    def calculate_supertrend(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        period: int = 10,
+        multiplier: float = 3.0,
+    ) -> dict:
         """Supertrend: trend-following overlay with dynamic support/resistance."""
         n = len(closes)
         if n < period + 1:
             return {"supertrend": closes[-1] if closes else 0.0, "trend": "NEUTRAL"}
-        ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+        ohlcv = [
+            {"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)
+        ]
         atr_val = self.calculate_atr(ohlcv, period)
 
         # Snippet 17: Handle zero ATR
         if atr_val == 0:
-            logger.warning("ATR value is zero. Supertrend calculation may be inaccurate.")
+            logger.warning(
+                "ATR value is zero. Supertrend calculation may be inaccurate."
+            )
             return {"supertrend": closes[-1] if closes else 0.0, "trend": "NEUTRAL"}
 
         hl2 = (highs[-1] + lows[-1]) / 2
@@ -3937,7 +4567,9 @@ class BybitToolDispatcher:
             "trend": "BULLISH" if in_uptrend else "BEARISH",
         }
 
-    def calculate_linear_regression_slope(self, prices: List[float], period: int = 20) -> float:
+    def calculate_linear_regression_slope(
+        self, prices: List[float], period: int = 20
+    ) -> float:
         """Linear Regression Slope: rate of price change per bar."""
         if len(prices) < period:
             return 0.0
@@ -3961,9 +4593,17 @@ class BybitToolDispatcher:
         """Volume Rate of Change: percentage change in volume over N bars."""
         if len(volumes) <= period or volumes[-period - 1] == 0:
             return 0.0
-        return round(((volumes[-1] - volumes[-period - 1]) / volumes[-period - 1]) * 100, 2)
+        return round(
+            ((volumes[-1] - volumes[-period - 1]) / volumes[-period - 1]) * 100, 2
+        )
 
-    def calculate_elder_ray(self, highs: List[float], lows: List[float], closes: List[float], period: int = 13) -> dict:
+    def calculate_elder_ray(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        period: int = 13,
+    ) -> dict:
         """Elder Ray: bull power (highs vs EMA) and bear power (lows vs EMA)."""
         ema = self.calculate_ema(closes, period)
         return {
@@ -3972,16 +4612,22 @@ class BybitToolDispatcher:
             "ema": round(ema, 6),
         }
 
-    def calculate_vwma(self, closes: List[float], volumes: List[float], period: int = 20) -> float:
+    def calculate_vwma(
+        self, closes: List[float], volumes: List[float], period: int = 20
+    ) -> float:
         """Volume Weighted Moving Average."""
         n = min(len(closes), len(volumes))
         if n < period:
             return closes[-1] if closes else 0.0
-        pv_sum = sum(closes[n - period + i] * volumes[n - period + i] for i in range(period))
-        v_sum = sum(volumes[n - period:n])
+        pv_sum = sum(
+            closes[n - period + i] * volumes[n - period + i] for i in range(period)
+        )
+        v_sum = sum(volumes[n - period : n])
         return round(pv_sum / v_sum, 6) if v_sum > 0 else round(closes[-1], 6)
 
-    def calculate_awesome_oscillator(self, highs: List[float], lows: List[float], fast: int = 5, slow: int = 34) -> float:
+    def calculate_awesome_oscillator(
+        self, highs: List[float], lows: List[float], fast: int = 5, slow: int = 34
+    ) -> float:
         """Awesome Oscillator: difference between 5-period and 34-period SMA of midpoints."""
         n = min(len(highs), len(lows))
         if n < slow:
@@ -3991,7 +4637,13 @@ class BybitToolDispatcher:
         slow_sma = sum(mids[-slow:]) / slow
         return round(fast_sma - slow_sma, 6)
 
-    def calculate_accumulation_distribution(self, highs: List[float], lows: List[float], closes: List[float], volumes: List[float]) -> float:
+    def calculate_accumulation_distribution(
+        self,
+        highs: List[float],
+        lows: List[float],
+        closes: List[float],
+        volumes: List[float],
+    ) -> float:
         """Accumulation/Distribution Line: current value."""
         n = min(len(highs), len(lows), len(closes), len(volumes))
         if n == 0:
@@ -4019,7 +4671,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Volume Profile: distribution of volume across price levels (POC, VAH, VAL)."""
         try:
-            klines = self.get_klines(symbol, interval="15", limit=lookback, category=category)
+            klines = self.get_klines(
+                symbol, interval="15", limit=lookback, category=category
+            )
             if not klines or len(klines) < 10:
                 return {"status": "error", "msg": "Insufficient kline data"}
             klines.reverse()
@@ -4030,22 +4684,36 @@ class BybitToolDispatcher:
             price_high = max(all_highs)
             price_low = min(all_lows)
             if price_high == price_low:
-                logger.warning("Price range is zero for %s. Cannot calculate volume profile.", symbol)
+                logger.warning(
+                    "Price range is zero for %s. Cannot calculate volume profile.",
+                    symbol,
+                )
                 return {"status": "error", "msg": "No price range"}
             bin_size = (price_high - price_low) / num_bins
-            bins: Dict[int, float] = {i: 0.0 for i in range(num_bins)}
+            bins: Dict[int, float] = dict.fromkeys(range(num_bins), 0.0)
             for i in range(len(klines)):
                 tp = (all_highs[i] + all_lows[i] + all_closes[i]) / 3
                 bin_idx = min(int((tp - price_low) / bin_size), num_bins - 1)
                 bins[bin_idx] += all_vols[i]
             total_vol = sum(bins.values())
             if total_vol == 0:
-                logger.warning("Total volume is zero for %s. Cannot calculate profile percentages.", symbol)
+                logger.warning(
+                    "Total volume is zero for %s. Cannot calculate profile percentages.",
+                    symbol,
+                )
                 # Return profile with zero volume and percentages
                 return {
                     "status": "success",
                     "total_volume": 0.0,
-                    "profile": [{"price": round(price_low + (i + 0.5) * bin_size, 6), "volume": 0.0, "pct": 0.0, "in_value_area": False} for i in range(num_bins)]
+                    "profile": [
+                        {
+                            "price": round(price_low + (i + 0.5) * bin_size, 6),
+                            "volume": 0.0,
+                            "pct": 0.0,
+                            "in_value_area": False,
+                        }
+                        for i in range(num_bins)
+                    ],
                 }
             poc_idx = max(bins, key=bins.get)
             poc_price = price_low + (poc_idx + 0.5) * bin_size
@@ -4063,12 +4731,14 @@ class BybitToolDispatcher:
             for i in range(num_bins):
                 level_price = price_low + (i + 0.5) * bin_size
                 pct = (bins[i] / total_vol * 100) if total_vol > 0 else 0
-                profile.append({
-                    "price": round(level_price, 6),
-                    "volume": round(bins[i], 2),
-                    "pct": round(pct, 2),
-                    "in_value_area": i in va_bins,
-                })
+                profile.append(
+                    {
+                        "price": round(level_price, 6),
+                        "volume": round(bins[i], 2),
+                        "pct": round(pct, 2),
+                        "in_value_area": i in va_bins,
+                    }
+                )
             return {
                 "symbol": symbol,
                 "poc_price": round(poc_price, 6),
@@ -4091,14 +4761,20 @@ class BybitToolDispatcher:
     ) -> dict:
         """Detect price/volume divergence (bullish/bearish)."""
         try:
-            klines = self.get_klines(symbol, interval="15", limit=lookback, category=category)
+            klines = self.get_klines(
+                symbol, interval="15", limit=lookback, category=category
+            )
             if not klines or len(klines) < 20:
                 return {"status": "error", "msg": "Insufficient data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
             volumes = [float(k[5]) for k in klines]
-            price_slope = self.calculate_linear_regression_slope(closes, min(20, len(closes)))
-            vol_slope = self.calculate_linear_regression_slope(volumes, min(20, len(volumes)))
+            price_slope = self.calculate_linear_regression_slope(
+                closes, min(20, len(closes))
+            )
+            vol_slope = self.calculate_linear_regression_slope(
+                volumes, min(20, len(volumes))
+            )
             obv = self.calculate_obv(closes, volumes)
             obv_slope = self.calculate_linear_regression_slope(obv, min(20, len(obv)))
             divergence = "NONE"
@@ -4155,11 +4831,31 @@ class BybitToolDispatcher:
 
             all_sizes = [b[1] for b in bids] + [a[1] for a in asks]
             avg_size = sum(all_sizes) / len(all_sizes) if all_sizes else 1.0
-            std_size = math.sqrt(sum((s - avg_size) ** 2 for s in all_sizes) / max(len(all_sizes), 1))
+            std_size = math.sqrt(
+                sum((s - avg_size) ** 2 for s in all_sizes) / max(len(all_sizes), 1)
+            )
 
             wall_threshold = avg_size + 2.5 * std_size
-            bid_walls = [{"price": b[0], "size": b[1], "notional": round(b[0] * b[1], 2), "sigma": round((b[1] - avg_size) / max(std_size, 1e-9), 2)} for b in bids if b[1] >= wall_threshold]
-            ask_walls = [{"price": a[0], "size": a[1], "notional": round(a[0] * a[1], 2), "sigma": round((a[1] - avg_size) / max(std_size, 1e-9), 2)} for a in asks if a[1] >= wall_threshold]
+            bid_walls = [
+                {
+                    "price": b[0],
+                    "size": b[1],
+                    "notional": round(b[0] * b[1], 2),
+                    "sigma": round((b[1] - avg_size) / max(std_size, 1e-9), 2),
+                }
+                for b in bids
+                if b[1] >= wall_threshold
+            ]
+            ask_walls = [
+                {
+                    "price": a[0],
+                    "size": a[1],
+                    "notional": round(a[0] * a[1], 2),
+                    "sigma": round((a[1] - avg_size) / max(std_size, 1e-9), 2),
+                }
+                for a in asks
+                if a[1] >= wall_threshold
+            ]
 
             # Bid-ask ratio at each depth tier
             tiers = [5, 10, 25, 50]
@@ -4186,11 +4882,21 @@ class BybitToolDispatcher:
                 band = int((a[0] - mid) / (mid * band_pct))
                 ask_clusters[band] = ask_clusters.get(band, 0) + a[1]
 
-            top_bid_zones = sorted(bid_clusters.items(), key=lambda x: x[1], reverse=True)[:5]
-            top_ask_zones = sorted(ask_clusters.items(), key=lambda x: x[1], reverse=True)[:5]
+            top_bid_zones = sorted(
+                bid_clusters.items(), key=lambda x: x[1], reverse=True
+            )[:5]
+            top_ask_zones = sorted(
+                ask_clusters.items(), key=lambda x: x[1], reverse=True
+            )[:5]
 
-            bid_zones = [{"distance_pct": round(k * 0.1, 2), "volume": round(v, 4)} for k, v in top_bid_zones]
-            ask_zones = [{"distance_pct": round(k * 0.1, 2), "volume": round(v, 4)} for k, v in top_ask_zones]
+            bid_zones = [
+                {"distance_pct": round(k * 0.1, 2), "volume": round(v, 4)}
+                for k, v in top_bid_zones
+            ]
+            ask_zones = [
+                {"distance_pct": round(k * 0.1, 2), "volume": round(v, 4)}
+                for k, v in top_ask_zones
+            ]
 
             # Spoofing heuristic: large orders far from mid that are disproportionate
             far_threshold = mid * 0.02  # 2% from mid
@@ -4230,9 +4936,15 @@ class BybitToolDispatcher:
     ) -> dict:
         """Combined order flow: L2 book + recent trades CVD + momentum for trade decisions."""
         try:
-            ob_analysis = self.get_l2_orderbook_analysis(symbol, depth=depth, category=category)
+            ob_analysis = self.get_l2_orderbook_analysis(
+                symbol, depth=depth, category=category
+            )
             trades = self.get_recent_trades(symbol, limit=500, category=category)
-            cvd = self.calculate_cvd(trades) if trades else {"cvd": 0, "buy_vol": 0, "sell_vol": 0, "delta": 0}
+            cvd = (
+                self.calculate_cvd(trades)
+                if trades
+                else {"cvd": 0, "buy_vol": 0, "sell_vol": 0, "delta": 0}
+            )
             momentum = self.get_market_momentum(symbol, category=category)
 
             ob_pressure = ob_analysis.get("pressure", "BALANCED")
@@ -4247,19 +4959,21 @@ class BybitToolDispatcher:
                 score -= 30 if "STRONG" in ob_pressure else 15
 
             # Safely calculate score contributions from CVD
-            sell_vol_cvd = abs(cvd.get("sell_vol", 1)) # Default to 1 if missing to prevent division by zero
-            buy_vol_cvd = cvd.get("buy_vol", 1) # Default to 1 if missing
+            sell_vol_cvd = abs(
+                cvd.get("sell_vol", 1)
+            )  # Default to 1 if missing to prevent division by zero
+            buy_vol_cvd = cvd.get("buy_vol", 1)  # Default to 1 if missing
 
             # Ensure denominator is not zero before division
             if sell_vol_cvd > 0:
                 score += min(25, int(cvd_val / sell_vol_cvd * 25))
-            elif cvd_val > 0: # Handle case where sell_vol is zero but cvd is positive
-                score += 25 # Max score if positive CVD and zero sell volume
+            elif cvd_val > 0:  # Handle case where sell_vol is zero but cvd is positive
+                score += 25  # Max score if positive CVD and zero sell volume
 
             if buy_vol_cvd > 0:
                 score -= min(25, int(abs(cvd_val) / buy_vol_cvd * 25))
-            elif cvd_val < 0: # Handle case where buy_vol is zero but cvd is negative
-                score -= 25 # Min score if negative CVD and zero buy volume
+            elif cvd_val < 0:  # Handle case where buy_vol is zero but cvd is negative
+                score -= 25  # Min score if negative CVD and zero buy volume
 
             if "STRONG_BUY" in mom_signal:
                 score += 20
@@ -4328,7 +5042,10 @@ class BybitToolDispatcher:
         is clear order flow imbalance.
         """
         try:
-            precision = self.get_instrument_precision(symbol, category=category.value if isinstance(category, Category) else category)
+            precision = self.get_instrument_precision(
+                symbol,
+                category=category.value if isinstance(category, Category) else category,
+            )
             if precision.get("status") == "error":
                 return precision
             tick_size = precision["price"]["tick_size"]
@@ -4391,7 +5108,11 @@ class BybitToolDispatcher:
             tp_price = round(round(tp_price / tick_size) * tick_size, 8)
             sl_price = round(round(sl_price / tick_size) * tick_size, 8)
 
-            qty = risk_usdt / abs(entry_price - sl_price) if abs(entry_price - sl_price) > 0 else 0
+            qty = (
+                risk_usdt / abs(entry_price - sl_price)
+                if abs(entry_price - sl_price) > 0
+                else 0
+            )
             qty = round(round(qty / qty_step) * qty_step, 8)
 
             notional = entry_price * qty
@@ -4449,9 +5170,17 @@ class BybitToolDispatcher:
         - Market Structure (10%): ADX, Aroon, Elder Ray, CCI, DPO, Fib Pivots
         """
         try:
-            klines = self.get_klines(symbol, interval=interval, limit=max(lookback_periods, 200), category=category)
+            klines = self.get_klines(
+                symbol,
+                interval=interval,
+                limit=max(lookback_periods, 200),
+                category=category,
+            )
             if not klines or len(klines) < 50:
-                return {"status": "error", "msg": f"Insufficient data ({len(klines) if klines else 0} bars, need 50+)"}
+                return {
+                    "status": "error",
+                    "msg": f"Insufficient data ({len(klines) if klines else 0} bars, need 50+)",
+                }
             klines.reverse()
 
             closes = [float(k[4]) for k in klines]
@@ -4474,10 +5203,14 @@ class BybitToolDispatcher:
 
             # EMA stack alignment (5pts)
             ema_stack = 0
-            if ema9 > ema21: ema_stack += 1
-            if ema21 > ema50: ema_stack += 1
-            if ema50 > ema200: ema_stack += 1
-            if current_price > ema21: ema_stack += 1
+            if ema9 > ema21:
+                ema_stack += 1
+            if ema21 > ema50:
+                ema_stack += 1
+            if ema50 > ema200:
+                ema_stack += 1
+            if current_price > ema21:
+                ema_stack += 1
             trend_score += (ema_stack - 2) * 2.5  # -5 to +5 scaled
 
             # Supertrend (4pts)
@@ -4581,7 +5314,10 @@ class BybitToolDispatcher:
             vol_score = 0.0
             bb = self.calculate_bollinger_bands(closes)
             keltner = self.calculate_keltner_channels(highs, lows, closes)
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
             atr = self.calculate_atr(ohlcv)
             stddev = self.calculate_stddev(closes)
             chop = self.calculate_choppiness_index(highs, lows, closes)
@@ -4593,7 +5329,11 @@ class BybitToolDispatcher:
             vol_score += (bb_pos - 0.5) * 8  # -4 to +4
 
             # Keltner position (4pts)
-            kelt_range = keltner["upper"] - keltner["lower"] if keltner["upper"] != keltner["lower"] else 1
+            kelt_range = (
+                keltner["upper"] - keltner["lower"]
+                if keltner["upper"] != keltner["lower"]
+                else 1
+            )
             kelt_pos = (current_price - keltner["lower"]) / kelt_range
             vol_score += (kelt_pos - 0.5) * 8
 
@@ -4607,7 +5347,11 @@ class BybitToolDispatcher:
             # If choppy, dampen the overall score later
 
             # Donchian position (3pts)
-            don_range = donchian["upper"] - donchian["lower"] if donchian["upper"] != donchian["lower"] else 1
+            don_range = (
+                donchian["upper"] - donchian["lower"]
+                if donchian["upper"] != donchian["lower"]
+                else 1
+            )
             don_pos = (current_price - donchian["lower"]) / don_range
             vol_score += (don_pos - 0.5) * 6
 
@@ -4616,7 +5360,10 @@ class BybitToolDispatcher:
             obv = self.calculate_obv(closes, volumes)
             cmf = self.calculate_cmf(highs, lows, closes, volumes)
             mfi = self.calculate_mfi(highs, lows, closes, volumes)
-            ohlcv_vwap = [{"high": h, "low": l, "close": c, "volume": v} for h, l, c, v in zip(highs, lows, closes, volumes)]
+            ohlcv_vwap = [
+                {"high": h, "low": l, "close": c, "volume": v}
+                for h, l, c, v in zip(highs, lows, closes, volumes)
+            ]
             vwap = self.calculate_vwap(ohlcv_vwap)
             vroc = self.calculate_vroc(volumes)
             ad = self.calculate_accumulation_distribution(highs, lows, closes, volumes)
@@ -4662,7 +5409,12 @@ class BybitToolDispatcher:
                 volume_score -= 2
 
             # A/D direction (3pts)
-            mid_ad = self.calculate_accumulation_distribution(highs[:len(highs)//2], lows[:len(lows)//2], closes[:len(closes)//2], volumes[:len(volumes)//2])
+            mid_ad = self.calculate_accumulation_distribution(
+                highs[: len(highs) // 2],
+                lows[: len(lows) // 2],
+                closes[: len(closes) // 2],
+                volumes[: len(volumes) // 2],
+            )
             if ad > mid_ad:
                 volume_score += 3
             else:
@@ -4738,7 +5490,14 @@ class BybitToolDispatcher:
                 struct_score -= 2
 
             # ── Composite ──
-            raw_score = trend_score + mom_score + vol_score + volume_score + flow_score + struct_score
+            raw_score = (
+                trend_score
+                + mom_score
+                + vol_score
+                + volume_score
+                + flow_score
+                + struct_score
+            )
             # Clamp to [-100, 100]
             composite = max(-100, min(100, raw_score))
 
@@ -4756,7 +5515,9 @@ class BybitToolDispatcher:
             if interval in ("15", "60", "1h"):
                 try:
                     htf_int = "240" if interval in ("60", "1h") else "60"
-                    htf_klines = self.get_klines(symbol, interval=htf_int, limit=50, category=category)
+                    htf_klines = self.get_klines(
+                        symbol, interval=htf_int, limit=50, category=category
+                    )
                     if htf_klines:
                         htf_klines.reverse()
                         htf_closes = [float(k[4]) for k in htf_klines]
@@ -4792,7 +5553,9 @@ class BybitToolDispatcher:
             elif trend == "STRONG_BEARISH":
                 advice = "STRONG_SELL"
             elif trend == "BEARISH":
-                advice = "SELL_ON_RALLY" if current_price >= ema9 * 0.995 else "HOLD_SHORT"
+                advice = (
+                    "SELL_ON_RALLY" if current_price >= ema9 * 0.995 else "HOLD_SHORT"
+                )
             if rsi > 78:
                 advice = "OVERBOUGHT_CAUTION"
             elif rsi < 22:
@@ -4819,24 +5582,41 @@ class BybitToolDispatcher:
                     "market_structure": round(struct_score, 2),
                 },
                 "indicators": {
-                    "ema9": round(ema9, 6), "ema21": round(ema21, 6),
-                    "ema50": round(ema50, 6), "ema200": round(ema200, 6),
-                    "hma": round(hma, 6), "zlema": round(zlema, 6),
-                    "supertrend": supertrend, "psar": psar,
+                    "ema9": round(ema9, 6),
+                    "ema21": round(ema21, 6),
+                    "ema50": round(ema50, 6),
+                    "ema200": round(ema200, 6),
+                    "hma": round(hma, 6),
+                    "zlema": round(zlema, 6),
+                    "supertrend": supertrend,
+                    "psar": psar,
                     "ichimoku": ichimoku,
-                    "rsi": round(rsi, 2), "macd": macd,
-                    "stoch_rsi": stoch, "williams_r": round(williams, 2),
-                    "ultimate_osc": round(uo, 2), "awesome_osc": round(ao, 6),
-                    "roc": round(roc, 4), "trix": round(trix, 4),
-                    "bb": bb, "keltner": keltner,
-                    "atr": round(atr, 6), "stddev": round(stddev, 6),
-                    "choppiness": round(chop, 2), "donchian": donchian,
-                    "obv_slope": round(obv_slope, 4), "cmf": round(cmf, 4),
-                    "mfi": round(mfi, 2), "vwap": round(vwap, 6),
-                    "vroc": round(vroc, 2), "ad": round(ad, 2),
-                    "adx": round(adx, 2), "aroon": aroon,
-                    "elder_ray": elder, "cci": round(cci, 2),
-                    "dpo": round(dpo, 6), "fib_pivots": fib,
+                    "rsi": round(rsi, 2),
+                    "macd": macd,
+                    "stoch_rsi": stoch,
+                    "williams_r": round(williams, 2),
+                    "ultimate_osc": round(uo, 2),
+                    "awesome_osc": round(ao, 6),
+                    "roc": round(roc, 4),
+                    "trix": round(trix, 4),
+                    "bb": bb,
+                    "keltner": keltner,
+                    "atr": round(atr, 6),
+                    "stddev": round(stddev, 6),
+                    "choppiness": round(chop, 2),
+                    "donchian": donchian,
+                    "obv_slope": round(obv_slope, 4),
+                    "cmf": round(cmf, 4),
+                    "mfi": round(mfi, 2),
+                    "vwap": round(vwap, 6),
+                    "vroc": round(vroc, 2),
+                    "ad": round(ad, 2),
+                    "adx": round(adx, 2),
+                    "aroon": aroon,
+                    "elder_ray": elder,
+                    "cci": round(cci, 2),
+                    "dpo": round(dpo, 6),
+                    "fib_pivots": fib,
                 },
                 "risk_guidance": {
                     "suggested_sl": round(sl, 6),
@@ -4853,7 +5633,9 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     # RISK CALCULATORS (were MISSING – now implemented)
     # ══════════════════════════════════════════════════════════
-    def calculate_kelly_criterion(self, win_rate: float, win_loss_ratio: float) -> float:
+    def calculate_kelly_criterion(
+        self, win_rate: float, win_loss_ratio: float
+    ) -> float:
         """
         Kelly Criterion: f* = (bp - q) / b
         where b = win_loss_ratio, p = win_rate, q = 1 - win_rate
@@ -4861,10 +5643,16 @@ class BybitToolDispatcher:
         """
         # Validate inputs
         if win_rate <= 0 or win_rate >= 1:
-            logger.warning("Invalid win_rate for Kelly Criterion: %f. Must be between 0 and 1 (exclusive).", win_rate)
+            logger.warning(
+                "Invalid win_rate for Kelly Criterion: %f. Must be between 0 and 1 (exclusive).",
+                win_rate,
+            )
             return 0.0
         if win_loss_ratio <= 0:
-            logger.warning("Invalid win_loss_ratio for Kelly Criterion: %f. Must be positive.", win_loss_ratio)
+            logger.warning(
+                "Invalid win_loss_ratio for Kelly Criterion: %f. Must be positive.",
+                win_loss_ratio,
+            )
             return 0.0
 
         q = 1 - win_rate
@@ -4874,9 +5662,9 @@ class BybitToolDispatcher:
     def calculate_trade_pnl(
         self,
         entry: float,
-        exit:  float,
-        qty:   float,
-        side:  str,
+        exit: float,
+        qty: float,
+        side: str,
         fee_rate: float = 0.0006,
     ) -> dict:
         """Calculate PnL for a completed trade including fees."""
@@ -4884,25 +5672,25 @@ class BybitToolDispatcher:
             raw_pnl = (exit - entry) * qty
         else:
             raw_pnl = (entry - exit) * qty
-        fees     = (entry * qty + exit * qty) * fee_rate
-        net_pnl  = raw_pnl - fees
-        pnl_pct  = (net_pnl / (entry * qty)) * 100 if entry * qty > 0 else 0
+        fees = (entry * qty + exit * qty) * fee_rate
+        net_pnl = raw_pnl - fees
+        pnl_pct = (net_pnl / (entry * qty)) * 100 if entry * qty > 0 else 0
         return {
-            "entry":     entry,
-            "exit":      exit,
-            "qty":       qty,
-            "side":      side,
-            "raw_pnl":   round(raw_pnl, 4),
-            "fees":      round(fees, 4),
-            "net_pnl":   round(net_pnl, 4),
-            "pnl_pct":   round(pnl_pct, 4),
+            "entry": entry,
+            "exit": exit,
+            "qty": qty,
+            "side": side,
+            "raw_pnl": round(raw_pnl, 4),
+            "fees": round(fees, 4),
+            "net_pnl": round(net_pnl, 4),
+            "pnl_pct": round(pnl_pct, 4),
         }
 
     def calculate_profit_target(
         self,
         entry_price: float,
-        sl_price:    float,
-        rr_ratios:   Optional[List[float]] = None,
+        sl_price: float,
+        rr_ratios: Optional[List[float]] = None,
     ) -> dict:
         """Calculate take-profit levels based on risk-reward ratios from SL distance."""
         rr_ratios = rr_ratios or [1.0, 1.5, 2.0, 3.0, 5.0]
@@ -4915,19 +5703,19 @@ class BybitToolDispatcher:
             targets[f"RR_{rr}"] = round(tp, 4)
 
         return {
-            "entry":       entry_price,
-            "stop_loss":   sl_price,
-            "risk":        round(risk, 4),
-            "direction":   "LONG" if is_long else "SHORT",
-            "targets":     targets,
+            "entry": entry_price,
+            "stop_loss": sl_price,
+            "risk": round(risk, 4),
+            "direction": "LONG" if is_long else "SHORT",
+            "targets": targets,
         }
 
     def calculate_sl_tp(
         self,
         entry_price: float,
-        side:        OrderSide,
-        sl_pct:      Optional[float] = None,
-        tp_pct:      Optional[float] = None,
+        side: OrderSide,
+        sl_pct: Optional[float] = None,
+        tp_pct: Optional[float] = None,
     ) -> Tuple[float, float]:
         sl_pct = sl_pct if sl_pct is not None else self.config.default_stop_loss
         tp_pct = tp_pct if tp_pct is not None else self.config.default_take_profit
@@ -4941,12 +5729,12 @@ class BybitToolDispatcher:
 
     def calculate_position_size(
         self,
-        symbol:      str,
+        symbol: str,
         entry_price: float,
-        sl_price:    float,
-        risk_usdt:   float,
-        category:    Category = Category.LINEAR,
-        leverage:    Optional[float] = None,
+        sl_price: float,
+        risk_usdt: float,
+        category: Category = Category.LINEAR,
+        leverage: Optional[float] = None,
     ) -> float:
         """Single canonical position sizing method.
 
@@ -4960,7 +5748,10 @@ class BybitToolDispatcher:
         """
         price_diff = abs(entry_price - sl_price)
         if price_diff == 0:
-            logger.warning("Entry price equals stop loss price for %s. Cannot calculate position size.", symbol)
+            logger.warning(
+                "Entry price equals stop loss price for %s. Cannot calculate position size.",
+                symbol,
+            )
             return 0.0
 
         # Get leverage - use provided value or fetch current position leverage
@@ -4993,14 +5784,22 @@ class BybitToolDispatcher:
     ) -> dict:
         """Calculate position size with volatility adjustment using ATR."""
         try:
-            klines = self.get_klines(symbol, interval="60", limit=100, category=category)
+            klines = self.get_klines(
+                symbol, interval="60", limit=100, category=category
+            )
             if not klines or len(klines) < 20:
-                return {"status": "error", "msg": "Insufficient data for volatility calculation"}
+                return {
+                    "status": "error",
+                    "msg": "Insufficient data for volatility calculation",
+                }
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
-            ohlcv_list = [{'high': h, 'low': l, 'close': c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv_list = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
             atr = self.calculate_atr(ohlcv_list, period=14)
             atr_pct = (atr / entry_price) * 100 if entry_price > 0 else 0
 
@@ -5012,11 +5811,16 @@ class BybitToolDispatcher:
             raw_qty = risk_usdt / sl_distance
 
             # Volatility adjustment factor
-            if atr_pct > 3.0: vol_adjustment = 0.5
-            elif atr_pct > 2.0: vol_adjustment = 0.7
-            elif atr_pct > 1.0: vol_adjustment = 1.0
-            elif atr_pct > 0.5: vol_adjustment = 1.2
-            else: vol_adjustment = 1.5
+            if atr_pct > 3.0:
+                vol_adjustment = 0.5
+            elif atr_pct > 2.0:
+                vol_adjustment = 0.7
+            elif atr_pct > 1.0:
+                vol_adjustment = 1.0
+            elif atr_pct > 0.5:
+                vol_adjustment = 1.2
+            else:
+                vol_adjustment = 1.5
 
             adjusted_qty = raw_qty * vol_adjustment
             actual_risk = adjusted_qty * sl_distance
@@ -5025,7 +5829,11 @@ class BybitToolDispatcher:
 
             final_qty = self.adjust_quantity(symbol, adjusted_qty, category)
             is_long = entry_price > sl_price
-            suggested_sl = entry_price - (atr * atr_multiplier) if is_long else entry_price + (atr * atr_multiplier)
+            suggested_sl = (
+                entry_price - (atr * atr_multiplier)
+                if is_long
+                else entry_price + (atr * atr_multiplier)
+            )
 
             return {
                 "symbol": symbol,
@@ -5040,29 +5848,29 @@ class BybitToolDispatcher:
 
     def calculate_position_risk(
         self,
-        symbol:          str,
-        entry_price:     float,
-        stop_loss:       float,
+        symbol: str,
+        entry_price: float,
+        stop_loss: float,
         account_balance: float,
         risk_percentage: float = 0.02,
     ) -> dict:
         risk_per_unit = abs(entry_price - stop_loss)
         if risk_per_unit == 0:
             return {"error": "Stop loss equals entry price"}
-        max_risk      = account_balance * risk_percentage
+        max_risk = account_balance * risk_percentage
         position_size = max_risk / risk_per_unit
         adjusted_size = self.adjust_quantity(symbol, position_size)
-        actual_risk   = adjusted_size * risk_per_unit
+        actual_risk = adjusted_size * risk_per_unit
         risk_pct_actual = actual_risk / account_balance if account_balance > 0 else 0
         return {
-            "symbol":          symbol,
-            "entry_price":     entry_price,
-            "stop_loss":       stop_loss,
-            "position_size":   adjusted_size,
-            "max_risk":        max_risk,
-            "actual_risk":     actual_risk,
+            "symbol": symbol,
+            "entry_price": entry_price,
+            "stop_loss": stop_loss,
+            "position_size": adjusted_size,
+            "max_risk": max_risk,
+            "actual_risk": actual_risk,
             "risk_percentage": risk_pct_actual,
-            "risk_per_unit":   risk_per_unit,
+            "risk_per_unit": risk_per_unit,
         }
 
     # ══════════════════════════════════════════════════════════
@@ -5084,7 +5892,9 @@ class BybitToolDispatcher:
             if last_price <= 0:
                 return {"status": "error", "msg": "Invalid price"}
 
-            klines = self.get_klines(symbol, interval="15", limit=100, category=category)
+            klines = self.get_klines(
+                symbol, interval="15", limit=100, category=category
+            )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient kline data"}
 
@@ -5092,7 +5902,10 @@ class BybitToolDispatcher:
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
 
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
             atr = self.calculate_atr(ohlcv, period=14)
             atr_pct = (atr / last_price) * 100 if last_price > 0 else 1.0
 
@@ -5123,11 +5936,10 @@ class BybitToolDispatcher:
                     momentum_score = 1.3
                 elif rsi > 70:
                     momentum_score = 0.5
-            else:
-                if rsi > 70:
-                    momentum_score = 1.3
-                elif rsi < 30:
-                    momentum_score = 0.5
+            elif rsi > 70:
+                momentum_score = 1.3
+            elif rsi < 30:
+                momentum_score = 0.5
 
             ob_score = 1.0
             try:
@@ -5145,16 +5957,29 @@ class BybitToolDispatcher:
             except Exception:
                 pass
 
-            composite = vol_score * 0.30 + trend_score * 0.25 + momentum_score * 0.25 + ob_score * 0.20
+            composite = (
+                vol_score * 0.30
+                + trend_score * 0.25
+                + momentum_score * 0.25
+                + ob_score * 0.20
+            )
             adjusted_risk = risk_usdt * composite
 
             sl_distance = atr * 1.5
-            sl_price = last_price - sl_distance if side.lower() in ("buy", "long") else last_price + sl_distance
+            sl_price = (
+                last_price - sl_distance
+                if side.lower() in ("buy", "long")
+                else last_price + sl_distance
+            )
             raw_qty = adjusted_risk / sl_distance if sl_distance > 0 else 0
             final_qty = self.adjust_quantity(symbol, raw_qty, category)
 
             tp_distance = sl_distance * 2.0
-            tp_price = last_price + tp_distance if side.lower() in ("buy", "long") else last_price - tp_distance
+            tp_price = (
+                last_price + tp_distance
+                if side.lower() in ("buy", "long")
+                else last_price - tp_distance
+            )
 
             return {
                 "status": "ok",
@@ -5205,7 +6030,9 @@ class BybitToolDispatcher:
             "risk_amount": round(risk_amount, 4),
             "quantity": qty,
             "actual_risk": round(actual_risk, 4),
-            "actual_risk_pct": round((actual_risk / account_balance) * 100, 4) if account_balance > 0 else 0,
+            "actual_risk_pct": round((actual_risk / account_balance) * 100, 4)
+            if account_balance > 0
+            else 0,
         }
 
     def get_anti_martingale_size(
@@ -5221,7 +6048,9 @@ class BybitToolDispatcher:
         if consecutive_wins > 0:
             multiplier = min(max_multiplier, 1.0 + (consecutive_wins * scale_factor))
         elif consecutive_losses > 0:
-            multiplier = max(min_multiplier, 1.0 - (consecutive_losses * scale_factor * 0.5))
+            multiplier = max(
+                min_multiplier, 1.0 - (consecutive_losses * scale_factor * 0.5)
+            )
         else:
             multiplier = 1.0
         adjusted_qty = base_qty * multiplier
@@ -5232,7 +6061,11 @@ class BybitToolDispatcher:
             "multiplier": round(multiplier, 4),
             "consecutive_wins": consecutive_wins,
             "consecutive_losses": consecutive_losses,
-            "regime": "scaling_up" if multiplier > 1 else "scaling_down" if multiplier < 1 else "neutral",
+            "regime": "scaling_up"
+            if multiplier > 1
+            else "scaling_down"
+            if multiplier < 1
+            else "neutral",
         }
 
     def get_portfolio_heat(
@@ -5245,16 +6078,24 @@ class BybitToolDispatcher:
             balance_resp = self.get_wallet_balance()
             equity = 0.0
             if isinstance(balance_resp, dict):
-                coins = balance_resp.get("result", {}).get("list", [{}])[0].get("coin", [])
+                coins = (
+                    balance_resp.get("result", {}).get("list", [{}])[0].get("coin", [])
+                )
                 for c in coins:
                     equity += float(c.get("usdValue", 0))
             if equity <= 0:
-                total_eq = balance_resp.get("result", {}).get("list", [{}])[0].get("totalEquity", "0")
+                total_eq = (
+                    balance_resp.get("result", {})
+                    .get("list", [{}])[0]
+                    .get("totalEquity", "0")
+                )
                 equity = float(total_eq) if total_eq else 0
 
             total_risk = 0.0
             position_risks = []
-            active_positions = [p for p in (positions or []) if float(p.get("size", 0)) > 0]
+            active_positions = [
+                p for p in (positions or []) if float(p.get("size", 0)) > 0
+            ]
             for pos in active_positions:
                 size = float(pos.get("size", 0))
                 entry = float(pos.get("avgPrice", 0))
@@ -5274,18 +6115,28 @@ class BybitToolDispatcher:
                     position_risk = abs(size * entry * 0.02)
 
                 total_risk += position_risk
-                position_risks.append({
-                    "symbol": sym,
-                    "side": side,
-                    "size": size,
-                    "entry": entry,
-                    "mark": mark,
-                    "unrealized_pnl": round(unrealized, 4),
-                    "risk_usdt": round(position_risk, 4),
-                })
+                position_risks.append(
+                    {
+                        "symbol": sym,
+                        "side": side,
+                        "size": size,
+                        "entry": entry,
+                        "mark": mark,
+                        "unrealized_pnl": round(unrealized, 4),
+                        "risk_usdt": round(position_risk, 4),
+                    }
+                )
 
             heat_pct = (total_risk / equity * 100) if equity > 0 else 0
-            heat_level = "LOW" if heat_pct < 3 else "MODERATE" if heat_pct < 6 else "HIGH" if heat_pct < 10 else "EXTREME"
+            heat_level = (
+                "LOW"
+                if heat_pct < 3
+                else "MODERATE"
+                if heat_pct < 6
+                else "HIGH"
+                if heat_pct < 10
+                else "EXTREME"
+            )
 
             return {
                 "status": "ok",
@@ -5363,7 +6214,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Momentum sniper: catches strong directional moves early using multi-indicator confluence (RSI breakout + MACD cross + volume surge + ADX filter)."""
         try:
-            klines = self.get_klines(symbol, interval="15", limit=100, category=category)
+            klines = self.get_klines(
+                symbol, interval="15", limit=100, category=category
+            )
             if not klines or len(klines) < 50:
                 return {"status": "error", "msg": "Insufficient data"}
 
@@ -5371,7 +6224,10 @@ class BybitToolDispatcher:
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
             volumes = [float(k[5]) for k in klines]
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
 
             rsi = self.calculate_rsi(closes, 14)
             macd_data = self.calculate_macd(closes)
@@ -5380,20 +6236,45 @@ class BybitToolDispatcher:
             plus_di = 0.0
             minus_di = 0.0
             if len(highs) > 14:
-                pos_dm = [max(highs[i] - highs[i-1], 0) if (highs[i] - highs[i-1]) > (lows[i-1] - lows[i]) else 0 for i in range(1, len(highs))]
-                neg_dm = [max(lows[i-1] - lows[i], 0) if (lows[i-1] - lows[i]) > (highs[i] - highs[i-1]) else 0 for i in range(1, len(lows))]
-                tr_list = [max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])) for i in range(1, len(closes))]
+                pos_dm = [
+                    max(highs[i] - highs[i - 1], 0)
+                    if (highs[i] - highs[i - 1]) > (lows[i - 1] - lows[i])
+                    else 0
+                    for i in range(1, len(highs))
+                ]
+                neg_dm = [
+                    max(lows[i - 1] - lows[i], 0)
+                    if (lows[i - 1] - lows[i]) > (highs[i] - highs[i - 1])
+                    else 0
+                    for i in range(1, len(lows))
+                ]
+                tr_list = [
+                    max(
+                        highs[i] - lows[i],
+                        abs(highs[i] - closes[i - 1]),
+                        abs(lows[i] - closes[i - 1]),
+                    )
+                    for i in range(1, len(closes))
+                ]
                 atr_sum = sum(tr_list[-14:]) + 1e-9
                 plus_di = 100 * sum(pos_dm[-14:]) / atr_sum
                 minus_di = 100 * sum(neg_dm[-14:]) / atr_sum
 
-            avg_vol = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else sum(volumes) / len(volumes)
+            avg_vol = (
+                sum(volumes[-20:]) / 20
+                if len(volumes) >= 20
+                else sum(volumes) / len(volumes)
+            )
             curr_vol = volumes[-1] if volumes else 0
             vol_surge = curr_vol / avg_vol if avg_vol > 0 else 1.0
 
             macd_line = macd_data.get("macd", 0) if isinstance(macd_data, dict) else 0
-            signal_line = macd_data.get("signal", 0) if isinstance(macd_data, dict) else 0
-            macd_hist = macd_data.get("histogram", 0) if isinstance(macd_data, dict) else 0
+            signal_line = (
+                macd_data.get("signal", 0) if isinstance(macd_data, dict) else 0
+            )
+            macd_hist = (
+                macd_data.get("histogram", 0) if isinstance(macd_data, dict) else 0
+            )
 
             bull_signals = 0
             bear_signals = 0
@@ -5470,8 +6351,12 @@ class BybitToolDispatcher:
             if side and confidence >= 60:
                 sl_dist = atr * 1.5
                 tp_dist = atr * 3.0
-                sl_price = last_price - sl_dist if side == "Buy" else last_price + sl_dist
-                tp_price = last_price + tp_dist if side == "Buy" else last_price - tp_dist
+                sl_price = (
+                    last_price - sl_dist if side == "Buy" else last_price + sl_dist
+                )
+                tp_price = (
+                    last_price + tp_dist if side == "Buy" else last_price - tp_dist
+                )
                 raw_qty = risk_usdt / sl_dist if sl_dist > 0 else 0
                 qty = self.adjust_quantity(symbol, raw_qty, category)
 
@@ -5506,7 +6391,10 @@ class BybitToolDispatcher:
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
             volumes = [float(k[5]) for k in klines]
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
 
             bb = self.calculate_bollinger_bands(closes, 20, 2.0)
             rsi = self.calculate_rsi(closes, 14)
@@ -5530,7 +6418,9 @@ class BybitToolDispatcher:
             reversion_score = 0
 
             if bb_position > bb_threshold and rsi > 70:
-                reversion_score = min(100, int((bb_position - bb_threshold) * 200 + (rsi - 70) * 2))
+                reversion_score = min(
+                    100, int((bb_position - bb_threshold) * 200 + (rsi - 70) * 2)
+                )
                 if vol_declining:
                     reversion_score += 15
                 if reversion_score >= 40:
@@ -5539,7 +6429,9 @@ class BybitToolDispatcher:
                     confidence = min(90, reversion_score)
 
             elif bb_position < (1 - bb_threshold) and rsi < 30:
-                reversion_score = min(100, int(((1 - bb_threshold) - bb_position) * 200 + (30 - rsi) * 2))
+                reversion_score = min(
+                    100, int(((1 - bb_threshold) - bb_position) * 200 + (30 - rsi) * 2)
+                )
                 if vol_declining:
                     reversion_score += 15
                 if reversion_score >= 40:
@@ -5563,7 +6455,9 @@ class BybitToolDispatcher:
             if side and confidence >= 50:
                 tp_price = middle
                 sl_dist = atr * 2.0
-                sl_price = last_price + sl_dist if side == "Sell" else last_price - sl_dist
+                sl_price = (
+                    last_price + sl_dist if side == "Sell" else last_price - sl_dist
+                )
                 raw_qty = risk_usdt / sl_dist if sl_dist > 0 else 0
                 qty = self.adjust_quantity(symbol, raw_qty, category)
                 tp_dist = abs(last_price - tp_price)
@@ -5590,7 +6484,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Funding rate arbitrage scanner: finds coins with extreme funding rates to exploit the next funding payment."""
         try:
-            tickers_resp = self.api_request("GET", "/v5/market/tickers", {"category": category.value})
+            tickers_resp = self.api_request(
+                "GET", "/v5/market/tickers", {"category": category.value}
+            )
             tickers = tickers_resp.get("result", {}).get("list", [])
             if not tickers:
                 return {"status": "error", "msg": "No tickers found"}
@@ -5609,16 +6505,18 @@ class BybitToolDispatcher:
                 annualized = funding * 3 * 365 * 100
                 direction = "SHORT" if funding > 0 else "LONG"
 
-                opportunities.append({
-                    "symbol": sym,
-                    "funding_rate": round(funding, 6),
-                    "funding_rate_pct": round(funding * 100, 4),
-                    "annualized_pct": round(annualized, 2),
-                    "direction": direction,
-                    "last_price": last_price,
-                    "volume_24h": round(volume24h, 2),
-                    "turnover_24h": round(turnover, 2),
-                })
+                opportunities.append(
+                    {
+                        "symbol": sym,
+                        "funding_rate": round(funding, 6),
+                        "funding_rate_pct": round(funding * 100, 4),
+                        "annualized_pct": round(annualized, 2),
+                        "direction": direction,
+                        "last_price": last_price,
+                        "volume_24h": round(volume24h, 2),
+                        "turnover_24h": round(turnover, 2),
+                    }
+                )
 
             opportunities.sort(key=lambda x: abs(x["funding_rate"]), reverse=True)
             top_opps = opportunities[:top_n]
@@ -5652,7 +6550,9 @@ class BybitToolDispatcher:
             if last_price <= 0:
                 return {"status": "error", "msg": "Invalid price"}
 
-            klines = self.get_klines(symbol, interval="60", limit=100, category=category)
+            klines = self.get_klines(
+                symbol, interval="60", limit=100, category=category
+            )
             closes = [float(k[4]) for k in klines] if klines else []
 
             levels = []
@@ -5689,18 +6589,24 @@ class BybitToolDispatcher:
                 cost = qty * level_price
                 cumulative_qty += qty
                 cumulative_cost += cost
-                avg_entry = cumulative_cost / cumulative_qty if cumulative_qty > 0 else 0
+                avg_entry = (
+                    cumulative_cost / cumulative_qty if cumulative_qty > 0 else 0
+                )
 
-                orders.append({
-                    "level": i + 1,
-                    "price": round(level_price, 6),
-                    "dip_from_current_pct": round((1 - level_price / last_price) * 100, 2),
-                    "quantity": qty,
-                    "allocation_usdt": round(allocation, 2),
-                    "weight": round(weight, 2),
-                    "cumulative_qty": round(cumulative_qty, 6),
-                    "avg_entry_if_filled": round(avg_entry, 6),
-                })
+                orders.append(
+                    {
+                        "level": i + 1,
+                        "price": round(level_price, 6),
+                        "dip_from_current_pct": round(
+                            (1 - level_price / last_price) * 100, 2
+                        ),
+                        "quantity": qty,
+                        "allocation_usdt": round(allocation, 2),
+                        "weight": round(weight, 2),
+                        "cumulative_qty": round(cumulative_qty, 6),
+                        "avg_entry_if_filled": round(avg_entry, 6),
+                    }
+                )
 
             return {
                 "status": "ok",
@@ -5713,9 +6619,15 @@ class BybitToolDispatcher:
                 "orders": orders,
                 "if_all_filled": {
                     "total_qty": round(cumulative_qty, 6),
-                    "avg_entry": round(cumulative_cost / cumulative_qty, 6) if cumulative_qty > 0 else 0,
+                    "avg_entry": round(cumulative_cost / cumulative_qty, 6)
+                    if cumulative_qty > 0
+                    else 0,
                     "total_cost": round(cumulative_cost, 2),
-                    "breakeven_with_fees": round((cumulative_cost / cumulative_qty) * 1.0012, 6) if cumulative_qty > 0 else 0,
+                    "breakeven_with_fees": round(
+                        (cumulative_cost / cumulative_qty) * 1.0012, 6
+                    )
+                    if cumulative_qty > 0
+                    else 0,
                 },
             }
         except Exception as e:
@@ -5734,14 +6646,19 @@ class BybitToolDispatcher:
             if not ob:
                 return {"status": "error", "msg": "Cannot fetch orderbook"}
 
-            klines = self.get_klines(symbol, interval="15", limit=100, category=category)
+            klines = self.get_klines(
+                symbol, interval="15", limit=100, category=category
+            )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient kline data"}
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
             atr = self.calculate_atr(ohlcv, 14)
             last_price = closes[-1]
 
@@ -5750,25 +6667,33 @@ class BybitToolDispatcher:
 
             bid_clusters = []
             for i in range(len(bids) - 2):
-                cluster_vol = sum(float(bids[j][1]) for j in range(i, min(i + 3, len(bids))))
+                cluster_vol = sum(
+                    float(bids[j][1]) for j in range(i, min(i + 3, len(bids)))
+                )
                 avg_vol = sum(float(b[1]) for b in bids) / len(bids) if bids else 1
                 if cluster_vol > avg_vol * 3:
-                    bid_clusters.append({
-                        "price": float(bids[i][0]),
-                        "cluster_volume": round(cluster_vol, 4),
-                        "significance": round(cluster_vol / avg_vol, 2),
-                    })
+                    bid_clusters.append(
+                        {
+                            "price": float(bids[i][0]),
+                            "cluster_volume": round(cluster_vol, 4),
+                            "significance": round(cluster_vol / avg_vol, 2),
+                        }
+                    )
 
             ask_clusters = []
             for i in range(len(asks) - 2):
-                cluster_vol = sum(float(asks[j][1]) for j in range(i, min(i + 3, len(asks))))
+                cluster_vol = sum(
+                    float(asks[j][1]) for j in range(i, min(i + 3, len(asks)))
+                )
                 avg_vol = sum(float(a[1]) for a in asks) / len(asks) if asks else 1
                 if cluster_vol > avg_vol * 3:
-                    ask_clusters.append({
-                        "price": float(asks[i][0]),
-                        "cluster_volume": round(cluster_vol, 4),
-                        "significance": round(cluster_vol / avg_vol, 2),
-                    })
+                    ask_clusters.append(
+                        {
+                            "price": float(asks[i][0]),
+                            "cluster_volume": round(cluster_vol, 4),
+                            "significance": round(cluster_vol / avg_vol, 2),
+                        }
+                    )
 
             recent_lows = sorted(lows[-20:])[:3]
             recent_highs = sorted(highs[-20:], reverse=True)[:3]
@@ -5777,27 +6702,34 @@ class BybitToolDispatcher:
             for low in recent_lows:
                 for bc in bid_clusters:
                     if abs(bc["price"] - low) / last_price < 0.005:
-                        sweep_below.append({
-                            "level": round(low, 6),
-                            "cluster_price": bc["price"],
-                            "volume": bc["cluster_volume"],
-                            "type": "long_stop_sweep",
-                        })
+                        sweep_below.append(
+                            {
+                                "level": round(low, 6),
+                                "cluster_price": bc["price"],
+                                "volume": bc["cluster_volume"],
+                                "type": "long_stop_sweep",
+                            }
+                        )
 
             sweep_above = []
             for high in recent_highs:
                 for ac in ask_clusters:
                     if abs(ac["price"] - high) / last_price < 0.005:
-                        sweep_above.append({
-                            "level": round(high, 6),
-                            "cluster_price": ac["price"],
-                            "volume": ac["cluster_volume"],
-                            "type": "short_stop_sweep",
-                        })
+                        sweep_above.append(
+                            {
+                                "level": round(high, 6),
+                                "cluster_price": ac["price"],
+                                "volume": ac["cluster_volume"],
+                                "type": "short_stop_sweep",
+                            }
+                        )
 
             signal = "NONE"
             trade = None
-            if sweep_below and last_price - min(s["level"] for s in sweep_below) < atr * 2:
+            if (
+                sweep_below
+                and last_price - min(s["level"] for s in sweep_below) < atr * 2
+            ):
                 signal = "LONG_AFTER_SWEEP"
                 sweep_level = min(s["level"] for s in sweep_below)
                 entry = sweep_level * 0.998
@@ -5812,7 +6744,10 @@ class BybitToolDispatcher:
                     "quantity": self.adjust_quantity(symbol, raw_qty, category),
                     "risk_usdt": risk_usdt,
                 }
-            elif sweep_above and max(s["level"] for s in sweep_above) - last_price < atr * 2:
+            elif (
+                sweep_above
+                and max(s["level"] for s in sweep_above) - last_price < atr * 2
+            ):
                 signal = "SHORT_AFTER_SWEEP"
                 sweep_level = max(s["level"] for s in sweep_above)
                 entry = sweep_level * 1.002
@@ -5867,7 +6802,11 @@ class BybitToolDispatcher:
         rr_raw = reward / risk if risk > 0 else 0
         rr_net = net_reward / net_risk if net_risk > 0 else 0
         breakeven_pct = (fee_rate * 2) * 100
-        be_price = entry_price * (1 + fee_rate * 2) if is_long else entry_price * (1 - fee_rate * 2)
+        be_price = (
+            entry_price * (1 + fee_rate * 2)
+            if is_long
+            else entry_price * (1 - fee_rate * 2)
+        )
 
         return {
             "status": "ok",
@@ -5886,7 +6825,9 @@ class BybitToolDispatcher:
             "rr_ratio_net": round(rr_net, 3),
             "breakeven_move_pct": round(breakeven_pct, 4),
             "breakeven_price": round(be_price, 6),
-            "min_winrate_for_profit": round(1 / (1 + rr_net) * 100, 2) if rr_net > 0 else 100,
+            "min_winrate_for_profit": round(1 / (1 + rr_net) * 100, 2)
+            if rr_net > 0
+            else 100,
         }
 
     def get_liquidation_price(
@@ -5898,7 +6839,10 @@ class BybitToolDispatcher:
     ) -> dict:
         """Calculate estimated liquidation price for a leveraged position."""
         if leverage <= 0:
-            logger.warning("Leverage must be positive for liquidation price calculation. Got: %f", leverage)
+            logger.warning(
+                "Leverage must be positive for liquidation price calculation. Got: %f",
+                leverage,
+            )
             return {"status": "error", "msg": "Leverage must be positive"}
         if side.lower() in ("buy", "long"):
             liq_price = entry_price * (1 - (1 / leverage) + maint_margin_rate)
@@ -5915,7 +6859,11 @@ class BybitToolDispatcher:
             "maint_margin_rate": maint_margin_rate,
             "liquidation_price": round(liq_price, 6),
             "distance_pct": round(distance_pct, 4),
-            "warning": "DANGER" if distance_pct < 2 else "CAUTION" if distance_pct < 5 else "OK",
+            "warning": "DANGER"
+            if distance_pct < 2
+            else "CAUTION"
+            if distance_pct < 5
+            else "OK",
         }
 
     def get_drawdown_analysis(
@@ -5953,8 +6901,7 @@ class BybitToolDispatcher:
 
                 dd = peak - cumulative
                 dd_trades += 1
-                if dd > max_dd:
-                    max_dd = dd
+                max_dd = max(max_dd, dd)
 
                 if pnl > 0:
                     wins += 1
@@ -6010,7 +6957,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Detect key support/resistance levels from price action pivot points."""
         try:
-            klines = self.get_klines(symbol, interval="60", limit=lookback, category=category)
+            klines = self.get_klines(
+                symbol, interval="60", limit=lookback, category=category
+            )
             if not klines or len(klines) < 20:
                 return {"status": "error", "msg": "Insufficient data"}
 
@@ -6022,12 +6971,24 @@ class BybitToolDispatcher:
             pivots_high = []
             pivots_low = []
             for i in range(2, len(klines) - 2):
-                if highs[i] > highs[i - 1] and highs[i] > highs[i - 2] and highs[i] > highs[i + 1] and highs[i] > highs[i + 2]:
+                if (
+                    highs[i] > highs[i - 1]
+                    and highs[i] > highs[i - 2]
+                    and highs[i] > highs[i + 1]
+                    and highs[i] > highs[i + 2]
+                ):
                     pivots_high.append(highs[i])
-                if lows[i] < lows[i - 1] and lows[i] < lows[i - 2] and lows[i] < lows[i + 1] and lows[i] < lows[i + 2]:
+                if (
+                    lows[i] < lows[i - 1]
+                    and lows[i] < lows[i - 2]
+                    and lows[i] < lows[i + 1]
+                    and lows[i] < lows[i + 2]
+                ):
                     pivots_low.append(lows[i])
 
-            def cluster_levels(levels: List[float], tolerance: float = 0.003) -> List[dict]:
+            def cluster_levels(
+                levels: List[float], tolerance: float = 0.003
+            ) -> List[dict]:
                 if not levels:
                     return []
                 sorted_lvls = sorted(levels)
@@ -6039,11 +7000,13 @@ class BybitToolDispatcher:
                         clusters.append([lvl])
                 result = []
                 for c in clusters:
-                    result.append({
-                        "price": round(sum(c) / len(c), 6),
-                        "touches": len(c),
-                        "strength": min(100, len(c) * 25),
-                    })
+                    result.append(
+                        {
+                            "price": round(sum(c) / len(c), 6),
+                            "touches": len(c),
+                            "strength": min(100, len(c) * 25),
+                        }
+                    )
                 result.sort(key=lambda x: x["touches"], reverse=True)
                 return result[:num_levels]
 
@@ -6056,7 +7019,9 @@ class BybitToolDispatcher:
                 if s["price"] < last_price:
                     nearest_support = s
                     break
-            for r in sorted(resistance_levels, key=lambda x: abs(x["price"] - last_price)):
+            for r in sorted(
+                resistance_levels, key=lambda x: abs(x["price"] - last_price)
+            ):
                 if r["price"] > last_price:
                     nearest_resistance = r
                     break
@@ -6069,8 +7034,16 @@ class BybitToolDispatcher:
                 "support_levels": support_levels,
                 "nearest_support": nearest_support,
                 "nearest_resistance": nearest_resistance,
-                "support_distance_pct": round(((last_price - nearest_support["price"]) / last_price) * 100, 3) if nearest_support else None,
-                "resistance_distance_pct": round(((nearest_resistance["price"] - last_price) / last_price) * 100, 3) if nearest_resistance else None,
+                "support_distance_pct": round(
+                    ((last_price - nearest_support["price"]) / last_price) * 100, 3
+                )
+                if nearest_support
+                else None,
+                "resistance_distance_pct": round(
+                    ((nearest_resistance["price"] - last_price) / last_price) * 100, 3
+                )
+                if nearest_resistance
+                else None,
             }
         except Exception as e:
             return {"status": "error", "msg": str(e)}
@@ -6082,22 +7055,44 @@ class BybitToolDispatcher:
     ) -> dict:
         """Classify market as TRENDING_UP, TRENDING_DOWN, RANGING, or VOLATILE using ADX + Choppiness + ATR."""
         try:
-            klines = self.get_klines(symbol, interval="60", limit=100, category=category)
+            klines = self.get_klines(
+                symbol, interval="60", limit=100, category=category
+            )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient data"}
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
 
             adx_val = self.calculate_adx(highs, lows, closes, 14)
             plus_di = 0.0
             minus_di = 0.0
             if len(highs) > 14:
-                pos_dm = [max(highs[i] - highs[i-1], 0) if (highs[i] - highs[i-1]) > (lows[i-1] - lows[i]) else 0 for i in range(1, len(highs))]
-                neg_dm = [max(lows[i-1] - lows[i], 0) if (lows[i-1] - lows[i]) > (highs[i] - highs[i-1]) else 0 for i in range(1, len(lows))]
-                tr_list = [max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])) for i in range(1, len(closes))]
+                pos_dm = [
+                    max(highs[i] - highs[i - 1], 0)
+                    if (highs[i] - highs[i - 1]) > (lows[i - 1] - lows[i])
+                    else 0
+                    for i in range(1, len(highs))
+                ]
+                neg_dm = [
+                    max(lows[i - 1] - lows[i], 0)
+                    if (lows[i - 1] - lows[i]) > (highs[i] - highs[i - 1])
+                    else 0
+                    for i in range(1, len(lows))
+                ]
+                tr_list = [
+                    max(
+                        highs[i] - lows[i],
+                        abs(highs[i] - closes[i - 1]),
+                        abs(lows[i] - closes[i - 1]),
+                    )
+                    for i in range(1, len(closes))
+                ]
                 atr_sum = sum(tr_list[-14:]) + 1e-9
                 plus_di = 100 * sum(pos_dm[-14:]) / atr_sum
                 minus_di = 100 * sum(neg_dm[-14:]) / atr_sum
@@ -6189,22 +7184,27 @@ class BybitToolDispatcher:
                 elif rsi > 70:
                     score -= 20
                     factors.append("RSI overbought (-20)")
-            else:
-                if rsi > 65:
-                    score += 15
-                    factors.append("RSI overbought (+15)")
-                elif rsi > 55:
-                    score += 5
-                    factors.append("RSI favorable (+5)")
-                elif rsi < 30:
-                    score -= 20
-                    factors.append("RSI oversold (-20)")
+            elif rsi > 65:
+                score += 15
+                factors.append("RSI overbought (+15)")
+            elif rsi > 55:
+                score += 5
+                factors.append("RSI favorable (+5)")
+            elif rsi < 30:
+                score -= 20
+                factors.append("RSI oversold (-20)")
 
             if isinstance(bb, dict):
                 upper = bb.get("upper", 0)
                 lower = bb.get("lower", 0)
-                bb_range = bb["upper"] - bb["lower"] if isinstance(bb, dict) and bb["upper"] and bb["lower"] else 1.0
-                bb_pos = (closes[-1] - bb["lower"]) / bb_range if bb_range > 1e-9 else 0.5 # Prevent division by zero
+                bb_range = (
+                    bb["upper"] - bb["lower"]
+                    if isinstance(bb, dict) and bb["upper"] and bb["lower"]
+                    else 1.0
+                )
+                bb_pos = (
+                    (closes[-1] - bb["lower"]) / bb_range if bb_range > 1e-9 else 0.5
+                )  # Prevent division by zero
                 if is_buy and bb_pos < 0.2:
                     score += 10
                     factors.append("Near BB lower (+10)")
@@ -6224,7 +7224,9 @@ class BybitToolDispatcher:
             avg_vol = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else 1
             curr_vol = volumes[-1]
             if curr_vol > avg_vol * 1.5:
-                if (is_buy and closes[-1] > closes[-2]) or (not is_buy and closes[-1] < closes[-2]):
+                if (is_buy and closes[-1] > closes[-2]) or (
+                    not is_buy and closes[-1] < closes[-2]
+                ):
                     score += 10
                     factors.append("Volume confirms (+10)")
 
@@ -6238,7 +7240,17 @@ class BybitToolDispatcher:
                 factors.append("EMA alignment (+5)")
 
             score = max(0, min(100, score))
-            quality = "EXCELLENT" if score >= 80 else "GOOD" if score >= 65 else "FAIR" if score >= 50 else "POOR" if score >= 35 else "AVOID"
+            quality = (
+                "EXCELLENT"
+                if score >= 80
+                else "GOOD"
+                if score >= 65
+                else "FAIR"
+                if score >= 50
+                else "POOR"
+                if score >= 35
+                else "AVOID"
+            )
 
             return {
                 "status": "ok",
@@ -6286,13 +7298,15 @@ class BybitToolDispatcher:
                 qty = self.adjust_quantity(symbol, total_qty * qty_fraction, category)
                 adj_price = self.adjust_price(symbol, price, category)
 
-                orders.append({
-                    "level": i + 1,
-                    "price": adj_price,
-                    "quantity": qty,
-                    "pct_of_total": round(qty_fraction * 100, 1),
-                    "notional": round(adj_price * qty, 2),
-                })
+                orders.append(
+                    {
+                        "level": i + 1,
+                        "price": adj_price,
+                        "quantity": qty,
+                        "pct_of_total": round(qty_fraction * 100, 1),
+                        "notional": round(adj_price * qty, 2),
+                    }
+                )
 
             total_notional = sum(o["notional"] for o in orders)
             avg_entry = total_notional / total_qty if total_qty > 0 else 0
@@ -6343,13 +7357,15 @@ class BybitToolDispatcher:
                 qty = self.adjust_quantity(symbol, total_qty * qty_fraction, category)
                 adj_price = self.adjust_price(symbol, price, category)
 
-                orders.append({
-                    "level": i + 1,
-                    "price": adj_price,
-                    "quantity": qty,
-                    "pct_of_total": round(qty_fraction * 100, 1),
-                    "profit_pct": round(tp_spacing_pct * (i + 1), 2),
-                })
+                orders.append(
+                    {
+                        "level": i + 1,
+                        "price": adj_price,
+                        "quantity": qty,
+                        "pct_of_total": round(qty_fraction * 100, 1),
+                        "profit_pct": round(tp_spacing_pct * (i + 1), 2),
+                    }
+                )
 
             return {
                 "status": "ok",
@@ -6421,7 +7437,9 @@ class BybitToolDispatcher:
             bear_count = 0
 
             for interval, label in timeframes:
-                klines = self.get_klines(symbol, interval=interval, limit=50, category=category)
+                klines = self.get_klines(
+                    symbol, interval=interval, limit=50, category=category
+                )
                 if not klines or len(klines) < 20:
                     signals[label] = {"signal": "INSUFFICIENT_DATA"}
                     continue
@@ -6432,7 +7450,9 @@ class BybitToolDispatcher:
                 ema9 = self.calculate_ema(closes, 9)
                 ema21 = self.calculate_ema(closes, 21)
                 macd_data = self.calculate_macd(closes)
-                macd_hist = macd_data.get("histogram", 0) if isinstance(macd_data, dict) else 0
+                macd_hist = (
+                    macd_data.get("histogram", 0) if isinstance(macd_data, dict) else 0
+                )
 
                 bull = 0
                 bear = 0
@@ -6488,7 +7508,9 @@ class BybitToolDispatcher:
                 "bull_timeframes": bull_count,
                 "bear_timeframes": bear_count,
                 "timeframes": signals,
-                "recommendation": "Enter with confidence" if alignment else "Wait for alignment or reduce size",
+                "recommendation": "Enter with confidence"
+                if alignment
+                else "Wait for alignment or reduce size",
             }
         except Exception as e:
             return {"status": "error", "msg": str(e)}
@@ -6496,6 +7518,7 @@ class BybitToolDispatcher:
     def get_market_session_info(self) -> dict:
         """Return current trading session info (Asian/European/US) and optimal trading windows."""
         import datetime
+
         now = datetime.datetime.utcnow()
         hour = now.hour
 
@@ -6510,7 +7533,9 @@ class BybitToolDispatcher:
             sessions.append("ASIAN_PRE")
 
         overlap = len(sessions) > 1
-        volatility_expectation = "HIGH" if overlap else "MODERATE" if sessions else "LOW"
+        volatility_expectation = (
+            "HIGH" if overlap else "MODERATE" if sessions else "LOW"
+        )
 
         return {
             "status": "ok",
@@ -6537,7 +7562,11 @@ class BybitToolDispatcher:
             if not trades:
                 return {"status": "error", "msg": "No trade data"}
 
-            trade_list = trades if isinstance(trades, list) else trades.get("result", {}).get("list", [])
+            trade_list = (
+                trades
+                if isinstance(trades, list)
+                else trades.get("result", {}).get("list", [])
+            )
             if not trade_list:
                 return {"status": "error", "msg": "Empty trade list"}
 
@@ -6554,13 +7583,15 @@ class BybitToolDispatcher:
                 if size >= threshold:
                     side = t.get("side", "")
                     price = float(t.get("price", 0))
-                    whale_trades.append({
-                        "price": price,
-                        "size": size,
-                        "side": side,
-                        "multiple_of_avg": round(size / avg_size, 1),
-                        "time": t.get("time", ""),
-                    })
+                    whale_trades.append(
+                        {
+                            "price": price,
+                            "size": size,
+                            "side": side,
+                            "multiple_of_avg": round(size / avg_size, 1),
+                            "time": t.get("time", ""),
+                        }
+                    )
                     if side == "Buy":
                         whale_buy_vol += size
                     else:
@@ -6593,7 +7624,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Market sentiment composite from RSI, volume, funding, volatility, and price momentum."""
         try:
-            klines = self.get_klines(symbol, interval="60", limit=100, category=category)
+            klines = self.get_klines(
+                symbol, interval="60", limit=100, category=category
+            )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient data"}
 
@@ -6601,7 +7634,10 @@ class BybitToolDispatcher:
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
             volumes = [float(k[5]) for k in klines]
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
 
             rsi = self.calculate_rsi(closes, 14)
             atr = self.calculate_atr(ohlcv, 14)
@@ -6610,7 +7646,11 @@ class BybitToolDispatcher:
             avg_vol = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else 1
             vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1
 
-            price_change_24h = ((closes[-1] - closes[-24]) / closes[-24] * 100) if len(closes) >= 24 and closes[-24] > 0 else 0
+            price_change_24h = (
+                ((closes[-1] - closes[-24]) / closes[-24] * 100)
+                if len(closes) >= 24 and closes[-24] > 0
+                else 0
+            )
 
             rsi_score = 0
             if rsi > 70:
@@ -6624,7 +7664,12 @@ class BybitToolDispatcher:
             momentum_score = min(100, max(0, 50 + price_change_24h * 5))
             volatility_score = min(100, atr_pct * 20)
 
-            composite = rsi_score * 0.35 + momentum_score * 0.30 + vol_score * 0.15 + volatility_score * 0.20
+            composite = (
+                rsi_score * 0.35
+                + momentum_score * 0.30
+                + vol_score * 0.15
+                + volatility_score * 0.20
+            )
 
             if composite > 75:
                 label = "EXTREME_GREED"
@@ -6681,27 +7726,42 @@ class BybitToolDispatcher:
 
         for day in range(1, days + 1):
             day_pnl = 0.0
-            if trades_per_day <= 0 or starting_capital <= 0: # Handle invalid inputs
-                logger.warning("Invalid input for compound growth: trades_per_day=%d, starting_capital=%f", trades_per_day, starting_capital)
-                break # Exit loop if inputs are invalid
+            if trades_per_day <= 0 or starting_capital <= 0:  # Handle invalid inputs
+                logger.warning(
+                    "Invalid input for compound growth: trades_per_day=%d, starting_capital=%f",
+                    trades_per_day,
+                    starting_capital,
+                )
+                break  # Exit loop if inputs are invalid
 
             # Calculate capital change for the day, ensuring no division by zero
-            capital_change_per_trade = (daily_return_pct / 100.0) / max(trades_per_day, 1) # Prevent div by zero
+            capital_change_per_trade = (daily_return_pct / 100.0) / max(
+                trades_per_day, 1
+            )  # Prevent div by zero
 
             for _ in range(trades_per_day):
-                import random
                 if random.random() * 100 < win_rate_pct:
-                    day_pnl += capital * capital_change_per_trade # Use calculated change
+                    day_pnl += (
+                        capital * capital_change_per_trade
+                    )  # Use calculated change
                 else:
-                    day_pnl -= capital * capital_change_per_trade * 0.8 # Use calculated change
+                    day_pnl -= (
+                        capital * capital_change_per_trade * 0.8
+                    )  # Use calculated change
 
             capital += day_pnl
             if day % 7 == 0 or day == days:
-                daily_results.append({
-                    "day": day,
-                    "capital": round(capital, 2),
-                    "growth_pct": round(((capital - starting_capital) / starting_capital) * 100, 2) if starting_capital > 0 else 0,
-                })
+                daily_results.append(
+                    {
+                        "day": day,
+                        "capital": round(capital, 2),
+                        "growth_pct": round(
+                            ((capital - starting_capital) / starting_capital) * 100, 2
+                        )
+                        if starting_capital > 0
+                        else 0,
+                    }
+                )
 
         return {
             "status": "ok",
@@ -6710,7 +7770,9 @@ class BybitToolDispatcher:
             "win_rate_pct": win_rate_pct,
             "trades_per_day": trades_per_day,
             "final_capital": round(capital, 2),
-            "total_growth_pct": round(((capital - starting_capital) / starting_capital) * 100, 2),
+            "total_growth_pct": round(
+                ((capital - starting_capital) / starting_capital) * 100, 2
+            ),
             "total_profit": round(capital - starting_capital, 2),
             "milestones": daily_results,
             "note": "Projections assume constant parameters. Real results vary. Use half-Kelly sizing.",
@@ -6738,20 +7800,28 @@ class BybitToolDispatcher:
 
         total += 1
         if rr >= 1.5:
-            checks.append({"check": "Risk:Reward >= 1.5", "passed": True, "value": round(rr, 2)})
+            checks.append(
+                {"check": "Risk:Reward >= 1.5", "passed": True, "value": round(rr, 2)}
+            )
             passed += 1
         else:
-            checks.append({"check": "Risk:Reward >= 1.5", "passed": False, "value": round(rr, 2)})
+            checks.append(
+                {"check": "Risk:Reward >= 1.5", "passed": False, "value": round(rr, 2)}
+            )
 
         total += 1
-        if (is_long and stop_loss < entry_price) or (not is_long and stop_loss > entry_price):
+        if (is_long and stop_loss < entry_price) or (
+            not is_long and stop_loss > entry_price
+        ):
             checks.append({"check": "Stop loss correctly placed", "passed": True})
             passed += 1
         else:
             checks.append({"check": "Stop loss correctly placed", "passed": False})
 
         total += 1
-        if (is_long and take_profit > entry_price) or (not is_long and take_profit < entry_price):
+        if (is_long and take_profit > entry_price) or (
+            not is_long and take_profit < entry_price
+        ):
             checks.append({"check": "Take profit correctly placed", "passed": True})
             passed += 1
         else:
@@ -6761,21 +7831,52 @@ class BybitToolDispatcher:
             heat = self.get_portfolio_heat(category=category)
             total += 1
             if isinstance(heat, dict) and heat.get("heat_pct", 100) < 10:
-                checks.append({"check": "Portfolio heat < 10%", "passed": True, "value": heat.get("heat_pct")})
+                checks.append(
+                    {
+                        "check": "Portfolio heat < 10%",
+                        "passed": True,
+                        "value": heat.get("heat_pct"),
+                    }
+                )
                 passed += 1
             else:
-                checks.append({"check": "Portfolio heat < 10%", "passed": False, "value": heat.get("heat_pct") if isinstance(heat, dict) else "N/A"})
+                checks.append(
+                    {
+                        "check": "Portfolio heat < 10%",
+                        "passed": False,
+                        "value": heat.get("heat_pct")
+                        if isinstance(heat, dict)
+                        else "N/A",
+                    }
+                )
         except Exception:
             pass
 
         try:
             entry_quality = self.get_entry_timing(symbol, side, category)
             total += 1
-            if isinstance(entry_quality, dict) and entry_quality.get("entry_score", 0) >= 50:
-                checks.append({"check": "Entry timing >= 50", "passed": True, "value": entry_quality.get("entry_score")})
+            if (
+                isinstance(entry_quality, dict)
+                and entry_quality.get("entry_score", 0) >= 50
+            ):
+                checks.append(
+                    {
+                        "check": "Entry timing >= 50",
+                        "passed": True,
+                        "value": entry_quality.get("entry_score"),
+                    }
+                )
                 passed += 1
             else:
-                checks.append({"check": "Entry timing >= 50", "passed": False, "value": entry_quality.get("entry_score") if isinstance(entry_quality, dict) else "N/A"})
+                checks.append(
+                    {
+                        "check": "Entry timing >= 50",
+                        "passed": False,
+                        "value": entry_quality.get("entry_score")
+                        if isinstance(entry_quality, dict)
+                        else "N/A",
+                    }
+                )
         except Exception:
             pass
 
@@ -6784,12 +7885,22 @@ class BybitToolDispatcher:
             total += 1
             if isinstance(mtf, dict):
                 consensus = mtf.get("consensus", "")
-                aligned = (is_long and "BULL" in consensus) or (not is_long and "BEAR" in consensus)
-                checks.append({"check": "Multi-TF alignment", "passed": aligned, "value": consensus})
+                aligned = (is_long and "BULL" in consensus) or (
+                    not is_long and "BEAR" in consensus
+                )
+                checks.append(
+                    {
+                        "check": "Multi-TF alignment",
+                        "passed": aligned,
+                        "value": consensus,
+                    }
+                )
                 if aligned:
                     passed += 1
             else:
-                checks.append({"check": "Multi-TF alignment", "passed": False, "value": "N/A"})
+                checks.append(
+                    {"check": "Multi-TF alignment", "passed": False, "value": "N/A"}
+                )
         except Exception:
             pass
 
@@ -6821,7 +7932,10 @@ class BybitToolDispatcher:
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
             atr = self.calculate_atr(ohlcv, 14)
             atr_pct = (atr / closes[-1]) * 100 if closes[-1] > 0 else 5
 
@@ -6860,7 +7974,12 @@ class BybitToolDispatcher:
             positions = self.get_positions(category=category)
             active = [p for p in (positions or []) if float(p.get("size", 0)) > 0]
             if not active:
-                return {"status": "ok", "positions": [], "total_unrealized": 0, "msg": "No open positions"}
+                return {
+                    "status": "ok",
+                    "positions": [],
+                    "total_unrealized": 0,
+                    "msg": "No open positions",
+                }
 
             total_unrealized = 0.0
             total_notional = 0.0
@@ -6876,25 +7995,33 @@ class BybitToolDispatcher:
                 unrealized = float(pos.get("unrealisedPnl", 0))
                 notional = size * mark
 
-                pnl_pct = (unrealized / (size * entry) * 100) if (size * entry) > 0 else 0
+                pnl_pct = (
+                    (unrealized / (size * entry) * 100) if (size * entry) > 0 else 0
+                )
                 roi = pnl_pct * leverage
 
                 total_unrealized += unrealized
                 total_notional += notional
 
-                details.append({
-                    "symbol": sym,
-                    "side": side,
-                    "size": size,
-                    "entry": entry,
-                    "mark": mark,
-                    "leverage": leverage,
-                    "unrealized_pnl": round(unrealized, 4),
-                    "pnl_pct": round(pnl_pct, 3),
-                    "roi_pct": round(roi, 3),
-                    "notional": round(notional, 2),
-                    "status": "PROFIT" if unrealized > 0 else "LOSS" if unrealized < 0 else "FLAT",
-                })
+                details.append(
+                    {
+                        "symbol": sym,
+                        "side": side,
+                        "size": size,
+                        "entry": entry,
+                        "mark": mark,
+                        "leverage": leverage,
+                        "unrealized_pnl": round(unrealized, 4),
+                        "pnl_pct": round(pnl_pct, 3),
+                        "roi_pct": round(roi, 3),
+                        "notional": round(notional, 2),
+                        "status": "PROFIT"
+                        if unrealized > 0
+                        else "LOSS"
+                        if unrealized < 0
+                        else "FLAT",
+                    }
+                )
 
             return {
                 "status": "ok",
@@ -6914,7 +8041,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Detect RSI and MACD divergence signals (bullish/bearish)."""
         try:
-            klines = self.get_klines(symbol, interval="60", limit=lookback, category=category)
+            klines = self.get_klines(
+                symbol, interval="60", limit=lookback, category=category
+            )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient data"}
 
@@ -6924,53 +8053,80 @@ class BybitToolDispatcher:
 
             rsi_values = []
             for i in range(14, len(closes)):
-                rsi_values.append(self.calculate_rsi(closes[:i + 1], 14))
+                rsi_values.append(self.calculate_rsi(closes[: i + 1], 14))
 
             divergences = []
 
             if len(rsi_values) >= 10:
                 price_recent_low = min(lows[-10:])
-                price_prev_low = min(lows[-20:-10]) if len(lows) >= 20 else price_recent_low
+                price_prev_low = (
+                    min(lows[-20:-10]) if len(lows) >= 20 else price_recent_low
+                )
                 rsi_recent_low = min(rsi_values[-10:])
-                rsi_prev_low = min(rsi_values[-20:-10]) if len(rsi_values) >= 20 else rsi_recent_low
+                rsi_prev_low = (
+                    min(rsi_values[-20:-10])
+                    if len(rsi_values) >= 20
+                    else rsi_recent_low
+                )
 
                 if price_recent_low < price_prev_low and rsi_recent_low > rsi_prev_low:
-                    divergences.append({
-                        "type": "BULLISH_RSI_DIVERGENCE",
-                        "description": "Price making lower lows but RSI making higher lows",
-                        "strength": "STRONG" if rsi_recent_low < 35 else "MODERATE",
-                    })
+                    divergences.append(
+                        {
+                            "type": "BULLISH_RSI_DIVERGENCE",
+                            "description": "Price making lower lows but RSI making higher lows",
+                            "strength": "STRONG" if rsi_recent_low < 35 else "MODERATE",
+                        }
+                    )
 
                 price_recent_high = max(highs[-10:])
-                price_prev_high = max(highs[-20:-10]) if len(highs) >= 20 else price_recent_high
+                price_prev_high = (
+                    max(highs[-20:-10]) if len(highs) >= 20 else price_recent_high
+                )
                 rsi_recent_high = max(rsi_values[-10:])
-                rsi_prev_high = max(rsi_values[-20:-10]) if len(rsi_values) >= 20 else rsi_recent_high
+                rsi_prev_high = (
+                    max(rsi_values[-20:-10])
+                    if len(rsi_values) >= 20
+                    else rsi_recent_high
+                )
 
-                if price_recent_high > price_prev_high and rsi_recent_high < rsi_prev_high:
-                    divergences.append({
-                        "type": "BEARISH_RSI_DIVERGENCE",
-                        "description": "Price making higher highs but RSI making lower highs",
-                        "strength": "STRONG" if rsi_recent_high > 65 else "MODERATE",
-                    })
+                if (
+                    price_recent_high > price_prev_high
+                    and rsi_recent_high < rsi_prev_high
+                ):
+                    divergences.append(
+                        {
+                            "type": "BEARISH_RSI_DIVERGENCE",
+                            "description": "Price making higher highs but RSI making lower highs",
+                            "strength": "STRONG"
+                            if rsi_recent_high > 65
+                            else "MODERATE",
+                        }
+                    )
 
             volumes = [float(k[5]) for k in klines]
             obv = self.calculate_obv(closes, volumes)
             if len(obv) >= 20:
                 obv_slope = (obv[-1] - obv[-10]) / 10 if len(obv) >= 10 else 0
-                price_slope = (closes[-1] - closes[-10]) / 10 if len(closes) >= 10 else 0
+                price_slope = (
+                    (closes[-1] - closes[-10]) / 10 if len(closes) >= 10 else 0
+                )
 
                 if price_slope > 0 and obv_slope < 0:
-                    divergences.append({
-                        "type": "BEARISH_VOLUME_DIVERGENCE",
-                        "description": "Price rising but OBV declining - distribution",
-                        "strength": "MODERATE",
-                    })
+                    divergences.append(
+                        {
+                            "type": "BEARISH_VOLUME_DIVERGENCE",
+                            "description": "Price rising but OBV declining - distribution",
+                            "strength": "MODERATE",
+                        }
+                    )
                 elif price_slope < 0 and obv_slope > 0:
-                    divergences.append({
-                        "type": "BULLISH_VOLUME_DIVERGENCE",
-                        "description": "Price falling but OBV rising - accumulation",
-                        "strength": "MODERATE",
-                    })
+                    divergences.append(
+                        {
+                            "type": "BULLISH_VOLUME_DIVERGENCE",
+                            "description": "Price falling but OBV rising - accumulation",
+                            "strength": "MODERATE",
+                        }
+                    )
 
             return {
                 "status": "ok",
@@ -6991,7 +8147,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Identify optimal price zones for entry based on S/R, Fib, VWAP, and volume profile."""
         try:
-            klines = self.get_klines(symbol, interval="60", limit=200, category=category)
+            klines = self.get_klines(
+                symbol, interval="60", limit=200, category=category
+            )
             if not klines or len(klines) < 50:
                 return {"status": "error", "msg": "Insufficient data"}
 
@@ -7019,8 +8177,14 @@ class BybitToolDispatcher:
             bb_upper = bb.get("upper", 0) if isinstance(bb, dict) else 0
 
             try:
-                vp = self.get_volume_profile(symbol, num_bins=15, lookback=100, category=category)
-                poc = vp.get("poc_price", last_price) if isinstance(vp, dict) else last_price
+                vp = self.get_volume_profile(
+                    symbol, num_bins=15, lookback=100, category=category
+                )
+                poc = (
+                    vp.get("poc_price", last_price)
+                    if isinstance(vp, dict)
+                    else last_price
+                )
                 vah = vp.get("vah", last_price) if isinstance(vp, dict) else last_price
                 val = vp.get("val", last_price) if isinstance(vp, dict) else last_price
             except Exception:
@@ -7034,7 +8198,10 @@ class BybitToolDispatcher:
             key_levels = [
                 ("EMA20", ema20),
                 ("EMA50", ema50),
-                ("BB_Lower" if is_buy else "BB_Upper", bb_lower if is_buy else bb_upper),
+                (
+                    "BB_Lower" if is_buy else "BB_Upper",
+                    bb_lower if is_buy else bb_upper,
+                ),
                 ("Volume_POC", poc),
                 ("Volume_VAL" if is_buy else "Volume_VAH", val if is_buy else vah),
             ]
@@ -7045,19 +8212,23 @@ class BybitToolDispatcher:
                 if is_buy and level < last_price:
                     distance = ((last_price - level) / last_price) * 100
                     if distance < 5:
-                        zones.append({
-                            "zone": name,
-                            "price": round(level, 6),
-                            "distance_pct": round(distance, 3),
-                        })
+                        zones.append(
+                            {
+                                "zone": name,
+                                "price": round(level, 6),
+                                "distance_pct": round(distance, 3),
+                            }
+                        )
                 elif not is_buy and level > last_price:
                     distance = ((level - last_price) / last_price) * 100
                     if distance < 5:
-                        zones.append({
-                            "zone": name,
-                            "price": round(level, 6),
-                            "distance_pct": round(distance, 3),
-                        })
+                        zones.append(
+                            {
+                                "zone": name,
+                                "price": round(level, 6),
+                                "distance_pct": round(distance, 3),
+                            }
+                        )
 
             zones.sort(key=lambda x: x["distance_pct"])
 
@@ -7068,7 +8239,11 @@ class BybitToolDispatcher:
                 "current_price": last_price,
                 "optimal_zones": zones[:8],
                 "fib_levels": fib_levels,
-                "volume_profile": {"poc": round(poc, 6), "vah": round(vah, 6), "val": round(val, 6)},
+                "volume_profile": {
+                    "poc": round(poc, 6),
+                    "vah": round(vah, 6),
+                    "val": round(val, 6),
+                },
                 "moving_averages": {"ema20": round(ema20, 6), "ema50": round(ema50, 6)},
             }
         except Exception as e:
@@ -7116,12 +8291,14 @@ class BybitToolDispatcher:
                 avg_fill = cost / filled if filled > 0 else best_ask
                 slippage = ((avg_fill - best_ask) / best_ask) * 10000
 
-                slippage_estimates.append({
-                    "size_usdt": size_usdt,
-                    "avg_fill_price": round(avg_fill, 6),
-                    "slippage_bps": round(slippage, 2),
-                    "total_cost": round(cost, 2),
-                })
+                slippage_estimates.append(
+                    {
+                        "size_usdt": size_usdt,
+                        "avg_fill_price": round(avg_fill, 6),
+                        "slippage_bps": round(slippage, 2),
+                        "total_cost": round(cost, 2),
+                    }
+                )
 
             bid_depth = sum(float(b[0]) * float(b[1]) for b in bids)
             ask_depth = sum(float(a[0]) * float(a[1]) for a in asks)
@@ -7134,10 +8311,16 @@ class BybitToolDispatcher:
                 "mid_price": round(mid_price, 6),
                 "spread": round(spread, 6),
                 "spread_bps": round(spread_bps, 2),
-                "spread_quality": "TIGHT" if spread_bps < 3 else "NORMAL" if spread_bps < 10 else "WIDE",
+                "spread_quality": "TIGHT"
+                if spread_bps < 3
+                else "NORMAL"
+                if spread_bps < 10
+                else "WIDE",
                 "bid_depth_usdt": round(bid_depth, 2),
                 "ask_depth_usdt": round(ask_depth, 2),
-                "depth_imbalance": round(bid_depth / ask_depth, 3) if ask_depth > 0 else 0,
+                "depth_imbalance": round(bid_depth / ask_depth, 3)
+                if ask_depth > 0
+                else 0,
                 "slippage_estimates": slippage_estimates,
             }
         except Exception as e:
@@ -7154,7 +8337,9 @@ class BybitToolDispatcher:
         try:
             price_data: Dict[str, List[float]] = {}
             for sym in symbols:
-                klines = self.get_klines(sym, interval=interval, limit=lookback, category=category)
+                klines = self.get_klines(
+                    sym, interval=interval, limit=lookback, category=category
+                )
                 if klines and len(klines) >= 20:
                     price_data[sym] = [float(k[4]) for k in klines]
 
@@ -7167,7 +8352,10 @@ class BybitToolDispatcher:
 
             returns: Dict[str, List[float]] = {}
             for sym, prices in price_data.items():
-                ret = [(prices[i] - prices[i - 1]) / prices[i - 1] for i in range(1, len(prices))]
+                ret = [
+                    (prices[i] - prices[i - 1]) / prices[i - 1]
+                    for i in range(1, len(prices))
+                ]
                 returns[sym] = ret
 
             correlations = {}
@@ -7179,18 +8367,34 @@ class BybitToolDispatcher:
                     n = len(r1)
                     mean1, mean2 = sum(r1) / n, sum(r2) / n
                     cov = sum((r1[k] - mean1) * (r2[k] - mean2) for k in range(n)) / n
-                    std1 = (sum((x - mean1) ** 2 for x in r1) / n) ** 0.5 if n > 0 else 0
-                    std2 = (sum((x - mean2) ** 2 for x in r2) / n) ** 0.5 if n > 0 else 0
+                    std1 = (
+                        (sum((x - mean1) ** 2 for x in r1) / n) ** 0.5 if n > 0 else 0
+                    )
+                    std2 = (
+                        (sum((x - mean2) ** 2 for x in r2) / n) ** 0.5 if n > 0 else 0
+                    )
 
                     # Safe correlation calculation
                     if std1 == 0 or std2 == 0:
-                        corr = 0.0 # Handle as undefined
-                        logger.warning(f"Zero standard deviation for {s1} or {s2} in correlation analysis.")
+                        corr = 0.0  # Handle as undefined
+                        logger.warning(
+                            f"Zero standard deviation for {s1} or {s2} in correlation analysis."
+                        )
                     else:
                         corr = cov / (std1 * std2)
 
                     pair = f"{s1}/{s2}"
-                    label = "STRONG_POS" if corr > 0.7 else "MODERATE_POS" if corr > 0.3 else "WEAK" if corr > -0.3 else "MODERATE_NEG" if corr > -0.7 else "STRONG_NEG"
+                    label = (
+                        "STRONG_POS"
+                        if corr > 0.7
+                        else "MODERATE_POS"
+                        if corr > 0.3
+                        else "WEAK"
+                        if corr > -0.3
+                        else "MODERATE_NEG"
+                        if corr > -0.7
+                        else "STRONG_NEG"
+                    )
                     correlations[pair] = {
                         "correlation": round(corr, 4),
                         "label": label,
@@ -7230,7 +8434,10 @@ class BybitToolDispatcher:
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
             atr = self.calculate_atr(ohlcv, 14)
 
             if side == "Buy":
@@ -7270,39 +8477,47 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     def get_trend_analysis(
         self,
-        symbol:   str,
+        symbol: str,
         category: Category = Category.LINEAR,
-        interval: str      = "60",
+        interval: str = "60",
         lookback_periods: int = 200,
         include_advanced_indicators: bool = True,
         timeframe_analysis: bool = True,
     ) -> dict:
         """Advanced multi-indicator trend analysis with consensus scoring."""
         try:
-            klines = self.get_klines(symbol, interval=interval, limit=lookback_periods, category=category)
+            klines = self.get_klines(
+                symbol, interval=interval, limit=lookback_periods, category=category
+            )
             if not klines or len(klines) < 50:
                 count = len(klines) if klines else 0
-                return {"status": "error", "msg": f"Insufficient data for {symbol} (found {count}, need >=50)"}
+                return {
+                    "status": "error",
+                    "msg": f"Insufficient data for {symbol} (found {count}, need >=50)",
+                }
 
             klines.reverse()
 
             closes = [float(k[4]) for k in klines]
-            highs  = [float(k[2]) for k in klines]
-            lows   = [float(k[3]) for k in klines]
-            vols   = [float(k[5]) for k in klines]
+            highs = [float(k[2]) for k in klines]
+            lows = [float(k[3]) for k in klines]
+            vols = [float(k[5]) for k in klines]
 
             current_price = closes[-1]
 
-            ema9   = self.calculate_ema(closes, period=9)
-            ema21  = self.calculate_ema(closes, period=21)
-            ema50  = self.calculate_ema(closes, period=50)
+            ema9 = self.calculate_ema(closes, period=9)
+            ema21 = self.calculate_ema(closes, period=21)
+            ema50 = self.calculate_ema(closes, period=50)
             ema200 = self.calculate_ema(closes, period=200)
 
-            rsi  = self.calculate_rsi(closes, period=14)
+            rsi = self.calculate_rsi(closes, period=14)
             macd = self.calculate_macd(closes)
-            bb   = self.calculate_bollinger_bands(closes)
+            bb = self.calculate_bollinger_bands(closes)
 
-            ohlcv_list = [{'high': h, 'low': l, 'close': c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv_list = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
             atr = self.calculate_atr(ohlcv_list, period=14)
 
             momentum = self.get_market_momentum(symbol, category=category)
@@ -7312,118 +8527,169 @@ class BybitToolDispatcher:
 
             # MA Trend (30%)
             ma_score = 0
-            if current_price > ema21: ma_score += 15
-            else:                     ma_score -= 15
-            if ema9 > ema21:          ma_score += 15
-            else:                     ma_score -= 15
+            if current_price > ema21:
+                ma_score += 15
+            else:
+                ma_score -= 15
+            if ema9 > ema21:
+                ma_score += 15
+            else:
+                ma_score -= 15
             score += ma_score
 
             # MACD Trend (20%)
             macd_score = 0
-            if macd['macd'] > macd['signal']: macd_score += 10
-            else:                              macd_score -= 10
-            if macd['macd'] > 0:              macd_score += 10
-            else:                              macd_score -= 10
+            if macd["macd"] > macd["signal"]:
+                macd_score += 10
+            else:
+                macd_score -= 10
+            if macd["macd"] > 0:
+                macd_score += 10
+            else:
+                macd_score -= 10
             score += macd_score
 
             # RSI Momentum (15%)
             rsi_score = 0
-            if   40 <= rsi <= 60: rsi_score = 0
-            elif rsi > 60:        rsi_score = 15 if rsi < 80 else 5
-            elif rsi < 40:        rsi_score = -15 if rsi > 20 else -5
+            if 40 <= rsi <= 60:
+                rsi_score = 0
+            elif rsi > 60:
+                rsi_score = 15 if rsi < 80 else 5
+            elif rsi < 40:
+                rsi_score = -15 if rsi > 20 else -5
             score += rsi_score
 
             # Volume Confirmation (10%)
-            vol_avg   = sum(vols[-20:]) / 20 if len(vols) >= 20 else sum(vols) / max(len(vols), 1)
+            vol_avg = (
+                sum(vols[-20:]) / 20
+                if len(vols) >= 20
+                else sum(vols) / max(len(vols), 1)
+            )
             vol_score = 0
             if vols[-1] > vol_avg:
-                if closes[-1] > closes[-2]: vol_score += 10
-                else:                       vol_score -= 10
+                if closes[-1] > closes[-2]:
+                    vol_score += 10
+                else:
+                    vol_score -= 10
             score += vol_score
 
             # Order Flow (10%)
             flow_score = 0
-            sig = momentum.get('signal', 'NEUTRAL')
-            if   "STRONG_BUY"  in sig: flow_score += 10
-            elif "BUY"         in sig: flow_score += 5
-            elif "STRONG_SELL" in sig: flow_score -= 10
-            elif "SELL"        in sig: flow_score -= 5
+            sig = momentum.get("signal", "NEUTRAL")
+            if "STRONG_BUY" in sig:
+                flow_score += 10
+            elif "BUY" in sig:
+                flow_score += 5
+            elif "STRONG_SELL" in sig:
+                flow_score -= 10
+            elif "SELL" in sig:
+                flow_score -= 5
             score += flow_score
 
             # Price Action / Alignment (15%)
             pa_score = 0
-            if current_price > ema50: pa_score += 7.5
-            else:                     pa_score -= 7.5
-            if ema50 > ema200:        pa_score += 7.5
-            else:                     pa_score -= 7.5
+            if current_price > ema50:
+                pa_score += 7.5
+            else:
+                pa_score -= 7.5
+            if ema50 > ema200:
+                pa_score += 7.5
+            else:
+                pa_score -= 7.5
             score += pa_score
 
             # Multi-Timeframe check
             mtf_alignment = "NOT_CHECKED"
             if interval in ("60", "1h"):
                 try:
-                    klines_4h = self.get_klines(symbol, interval="240", limit=50, category=category)
+                    klines_4h = self.get_klines(
+                        symbol, interval="240", limit=50, category=category
+                    )
                     if klines_4h:
                         klines_4h.reverse()
                         closes_4h = [float(k[4]) for k in klines_4h]
-                        ema20_4h  = self.calculate_ema(closes_4h, 20)
-                        if   current_price > ema20_4h and score > 0:  mtf_alignment = "ALIGNED_BULLISH"
-                        elif current_price < ema20_4h and score < 0:  mtf_alignment = "ALIGNED_BEARISH"
-                        else:                                          mtf_alignment = "MIXED"
+                        ema20_4h = self.calculate_ema(closes_4h, 20)
+                        if current_price > ema20_4h and score > 0:
+                            mtf_alignment = "ALIGNED_BULLISH"
+                        elif current_price < ema20_4h and score < 0:
+                            mtf_alignment = "ALIGNED_BEARISH"
+                        else:
+                            mtf_alignment = "MIXED"
                 except Exception:
                     mtf_alignment = "ERROR"
 
             # Classification
-            if   score >= 60:  trend = "STRONG_BULLISH"
-            elif score >= 20:  trend = "BULLISH"
-            elif score <= -60: trend = "STRONG_BEARISH"
-            elif score <= -20: trend = "BEARISH"
-            else:              trend = "NEUTRAL"
+            if score >= 60:
+                trend = "STRONG_BULLISH"
+            elif score >= 20:
+                trend = "BULLISH"
+            elif score <= -60:
+                trend = "STRONG_BEARISH"
+            elif score <= -20:
+                trend = "BEARISH"
+            else:
+                trend = "NEUTRAL"
 
             # Risk Metrics
-            stop_loss   = current_price - (atr * 2.0) if score >= 0 else current_price + (atr * 2.0)
-            take_profit = current_price + (atr * 4.0) if score >= 0 else current_price - (atr * 4.0)
+            stop_loss = (
+                current_price - (atr * 2.0)
+                if score >= 0
+                else current_price + (atr * 2.0)
+            )
+            take_profit = (
+                current_price + (atr * 4.0)
+                if score >= 0
+                else current_price - (atr * 4.0)
+            )
 
             # Guidance
             advice = "WAIT"
-            if   trend == "STRONG_BULLISH":  advice = "STRONG_BUY"
-            elif trend == "BULLISH":         advice = "BUY_ON_DIP" if current_price <= ema9 * 1.005 else "HOLD_LONG"
-            elif trend == "STRONG_BEARISH":  advice = "STRONG_SELL"
-            elif trend == "BEARISH":         advice = "SELL_ON_RALLY" if current_price >= ema9 * 0.995 else "HOLD_SHORT"
+            if trend == "STRONG_BULLISH":
+                advice = "STRONG_BUY"
+            elif trend == "BULLISH":
+                advice = "BUY_ON_DIP" if current_price <= ema9 * 1.005 else "HOLD_LONG"
+            elif trend == "STRONG_BEARISH":
+                advice = "STRONG_SELL"
+            elif trend == "BEARISH":
+                advice = (
+                    "SELL_ON_RALLY" if current_price >= ema9 * 0.995 else "HOLD_SHORT"
+                )
 
-            if rsi > 75: advice = "TAKE_PROFIT / AVOID_LONG"
-            if rsi < 25: advice = "WATCH_FOR_REVERSAL / AVOID_SHORT"
+            if rsi > 75:
+                advice = "TAKE_PROFIT / AVOID_LONG"
+            if rsi < 25:
+                advice = "WATCH_FOR_REVERSAL / AVOID_SHORT"
 
             result = {
-                "symbol":        symbol,
-                "interval":      interval,
-                "score":         round(score, 2),
-                "trend":         trend,
+                "symbol": symbol,
+                "interval": interval,
+                "score": round(score, 2),
+                "trend": trend,
                 "mtf_alignment": mtf_alignment,
                 "current_price": round(current_price, 4),
                 "indicators": {
-                    "rsi":    round(rsi, 2),
-                    "macd":   macd,
-                    "ema9":   round(ema9, 4),
-                    "ema21":  round(ema21, 4),
-                    "ema50":  round(ema50, 4),
+                    "rsi": round(rsi, 2),
+                    "macd": macd,
+                    "ema9": round(ema9, 4),
+                    "ema21": round(ema21, 4),
+                    "ema50": round(ema50, 4),
                     "ema200": round(ema200, 4),
-                    "atr":    round(atr, 4),
-                    "bb":     bb,
+                    "atr": round(atr, 4),
+                    "bb": bb,
                 },
                 "risk_guidance": {
-                    "suggested_stop_loss":   round(stop_loss, 4),
+                    "suggested_stop_loss": round(stop_loss, 4),
                     "suggested_take_profit": round(take_profit, 4),
-                    "risk_reward_ratio":     2.0,
+                    "risk_reward_ratio": 2.0,
                 },
                 "action_advice": advice,
-                "timestamp":     time.time(),
+                "timestamp": time.time(),
             }
 
             if include_advanced_indicators:
                 result["advanced"] = {
-                    "adx":       self.calculate_adx(highs, lows, closes),
-                    "cci":       self.calculate_cci(highs, lows, closes),
+                    "adx": self.calculate_adx(highs, lows, closes),
+                    "cci": self.calculate_cci(highs, lows, closes),
                     "stoch_rsi": self.calculate_stoch_rsi(closes),
                 }
             return result
@@ -7436,10 +8702,10 @@ class BybitToolDispatcher:
     # ══════════════════════════════════════════════════════════
     def safe_execute(
         self,
-        fn:          Callable,
+        fn: Callable,
         *args,
-        max_retries: int   = 3,
-        base_delay:  float = 1.0,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
         **kwargs,
     ) -> Any:
         last_exc: Optional[Exception] = None
@@ -7456,11 +8722,22 @@ class BybitToolDispatcher:
 
             # Log retry attempt
             delay = base_delay * (2 ** (attempt - 1))
-            logger.warning("Attempt %d/%d failed for action %s: %s. Retrying in %.1fs",
-                           attempt, max_retries, fn.__name__, last_exc, delay)
+            logger.warning(
+                "Attempt %d/%d failed for action %s: %s. Retrying in %.1fs",
+                attempt,
+                max_retries,
+                fn.__name__,
+                last_exc,
+                delay,
+            )
             time.sleep(delay)
 
-        logger.error("All %d attempts exhausted for action %s. Last error: %s", max_retries, fn.__name__, last_exc)
+        logger.error(
+            "All %d attempts exhausted for action %s. Last error: %s",
+            max_retries,
+            fn.__name__,
+            last_exc,
+        )
         return {"status": "error", "msg": str(last_exc)}
 
     # ══════════════════════════════════════════════════════════
@@ -7481,7 +8758,11 @@ class BybitToolDispatcher:
         entry_fee = notional * fee_rate
         exit_fee_est = notional * fee_rate
         total_fees = entry_fee + exit_fee_est
-        funding_cost = notional * abs(funding_rate) * holding_periods if holding_periods > 0 else 0.0
+        funding_cost = (
+            notional * abs(funding_rate) * holding_periods
+            if holding_periods > 0
+            else 0.0
+        )
         total_cost = total_fees + funding_cost
         price_move_needed = total_cost / qty if qty > 0 else 0.0
         if side.lower() in ("buy", "long"):
@@ -7490,12 +8771,16 @@ class BybitToolDispatcher:
             breakeven_price = entry_price - price_move_needed
         fee_pct_of_position = (total_cost / notional) * 100 if notional > 0 else 0.0
         margin_required = notional / leverage if leverage > 0 else notional
-        fee_pct_of_margin = (total_cost / margin_required) * 100 if margin_required > 0 else 0.0
+        fee_pct_of_margin = (
+            (total_cost / margin_required) * 100 if margin_required > 0 else 0.0
+        )
         return {
             "entry_price": entry_price,
             "breakeven_price": round(breakeven_price, 8),
             "price_move_needed": round(price_move_needed, 8),
-            "price_move_pct": round((price_move_needed / entry_price) * 100, 6) if entry_price > 0 else 0.0,
+            "price_move_pct": round((price_move_needed / entry_price) * 100, 6)
+            if entry_price > 0
+            else 0.0,
             "entry_fee": round(entry_fee, 8),
             "exit_fee_est": round(exit_fee_est, 8),
             "funding_cost": round(funding_cost, 8),
@@ -7532,8 +8817,12 @@ class BybitToolDispatcher:
             funding = self.get_funding_rate(symbol, category)
             fund_rate = float(funding.get("fundingRate", 0)) if funding else 0.0
             holding_periods = int(holding_hours / 8) if holding_hours > 0 else 0
-            taker_be = self.calculate_breakeven(entry_price, qty, side, taker_fee, fund_rate, holding_periods, leverage)
-            maker_be = self.calculate_breakeven(entry_price, qty, side, maker_fee, fund_rate, holding_periods, leverage)
+            taker_be = self.calculate_breakeven(
+                entry_price, qty, side, taker_fee, fund_rate, holding_periods, leverage
+            )
+            maker_be = self.calculate_breakeven(
+                entry_price, qty, side, maker_fee, fund_rate, holding_periods, leverage
+            )
             return {
                 "symbol": symbol,
                 "taker_breakeven": taker_be,
@@ -7573,7 +8862,9 @@ class BybitToolDispatcher:
         net_pnl = gross_pnl - total_fees - funding_cost
         margin = notional_entry / leverage if leverage > 0 else notional_entry
         roi_on_margin = (net_pnl / margin) * 100 if margin > 0 else 0.0
-        roi_on_position = (net_pnl / notional_entry) * 100 if notional_entry > 0 else 0.0
+        roi_on_position = (
+            (net_pnl / notional_entry) * 100 if notional_entry > 0 else 0.0
+        )
         is_profitable = net_pnl > 0
         return {
             "gross_pnl": round(gross_pnl, 8),
@@ -7615,14 +8906,20 @@ class BybitToolDispatcher:
             total_bid_vol = sum(b[1] for b in bids)
             total_ask_vol = sum(a[1] for a in asks)
             total_vol = total_bid_vol + total_ask_vol
-            imbalance = (total_bid_vol - total_ask_vol) / total_vol if total_vol > 0 else 0
+            imbalance = (
+                (total_bid_vol - total_ask_vol) / total_vol if total_vol > 0 else 0
+            )
             bid_notional = sum(b[0] * b[1] for b in bids)
             ask_notional = sum(a[0] * a[1] for a in asks)
             avg_bid_size = total_bid_vol / len(bids) if bids else 0
             avg_ask_size = total_ask_vol / len(asks) if asks else 0
             wall_threshold = max(avg_bid_size, avg_ask_size) * 3
-            bid_walls = [{"price": b[0], "size": b[1]} for b in bids if b[1] >= wall_threshold]
-            ask_walls = [{"price": a[0], "size": a[1]} for a in asks if a[1] >= wall_threshold]
+            bid_walls = [
+                {"price": b[0], "size": b[1]} for b in bids if b[1] >= wall_threshold
+            ]
+            ask_walls = [
+                {"price": a[0], "size": a[1]} for a in asks if a[1] >= wall_threshold
+            ]
             bid_cum = []
             cum = 0
             for b in bids:
@@ -7635,7 +8932,11 @@ class BybitToolDispatcher:
                 ask_cum.append({"price": a[0], "cumulative": round(cum, 4)})
             top5_bid_vol = sum(b[1] for b in bids[:5])
             top5_ask_vol = sum(a[1] for a in asks[:5])
-            top5_imbalance = (top5_bid_vol - top5_ask_vol) / (top5_bid_vol + top5_ask_vol) if (top5_bid_vol + top5_ask_vol) > 0 else 0
+            top5_imbalance = (
+                (top5_bid_vol - top5_ask_vol) / (top5_bid_vol + top5_ask_vol)
+                if (top5_bid_vol + top5_ask_vol) > 0
+                else 0
+            )
             pct_ranges = [0.001, 0.005, 0.01, 0.02, 0.05]
             depth_profile = {}
             for pct in pct_ranges:
@@ -7643,10 +8944,14 @@ class BybitToolDispatcher:
                 ask_limit = mid_price * (1 + pct)
                 bid_vol_in_range = sum(b[1] for b in bids if b[0] >= bid_limit)
                 ask_vol_in_range = sum(a[1] for a in asks if a[0] <= ask_limit)
-                depth_profile[f"{pct*100:.1f}%"] = {
+                depth_profile[f"{pct * 100:.1f}%"] = {
                     "bid_vol": round(bid_vol_in_range, 4),
                     "ask_vol": round(ask_vol_in_range, 4),
-                    "imbalance": round((bid_vol_in_range - ask_vol_in_range) / max(bid_vol_in_range + ask_vol_in_range, 1e-9), 4),
+                    "imbalance": round(
+                        (bid_vol_in_range - ask_vol_in_range)
+                        / max(bid_vol_in_range + ask_vol_in_range, 1e-9),
+                        4,
+                    ),
                 }
             if imbalance > 0.3:
                 pressure = "STRONG_BUY_PRESSURE"
@@ -7705,7 +9010,9 @@ class BybitToolDispatcher:
             params["symbol"] = symbol
         if status:
             params["status"] = status
-        resp = self.api_request("GET", "/v5/market/instruments-info", params=params, signed=False)
+        resp = self.api_request(
+            "GET", "/v5/market/instruments-info", params=params, signed=False
+        )
         return resp.get("result", {}).get("list", [])
 
     def get_risk_limit(
@@ -7715,7 +9022,8 @@ class BybitToolDispatcher:
     ) -> List[dict]:
         """Get risk limit tiers for a symbol."""
         resp = self.api_request(
-            "GET", "/v5/market/risk-limit",
+            "GET",
+            "/v5/market/risk-limit",
             params={"category": category, "symbol": symbol},
             signed=False,
         )
@@ -7729,9 +9037,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Set risk limit tier for a position."""
 
-
         return self.api_request(
-            "POST", "/v5/position/set-risk-limit",
+            "POST",
+            "/v5/position/set-risk-limit",
             json_data={"category": category, "symbol": symbol, "riskId": risk_id},
         )
 
@@ -7749,12 +9057,18 @@ class BybitToolDispatcher:
         end_time: Optional[int] = None,
     ) -> List[dict]:
         """Get historical funding rates."""
-        params: Dict[str, Any] = {"category": category, "symbol": symbol, "limit": limit}
+        params: Dict[str, Any] = {
+            "category": category,
+            "symbol": symbol,
+            "limit": limit,
+        }
         if start_time:
             params["startTime"] = start_time
         if end_time:
             params["endTime"] = end_time
-        resp = self.api_request("GET", "/v5/market/funding/history", params=params, signed=False)
+        resp = self.api_request(
+            "GET", "/v5/market/funding/history", params=params, signed=False
+        )
         return resp.get("result", {}).get("list", [])
 
     def get_server_time(self) -> dict:
@@ -7765,7 +9079,8 @@ class BybitToolDispatcher:
     def get_insurance_pool(self, coin: str = "USDT") -> List[dict]:
         """Get insurance pool data."""
         resp = self.api_request(
-            "GET", "/v5/market/insurance",
+            "GET",
+            "/v5/market/insurance",
             params={"coin": coin},
             signed=False,
         )
@@ -7781,7 +9096,9 @@ class BybitToolDispatcher:
         params: Dict[str, Any] = {"category": category, "limit": limit}
         if symbol:
             params["symbol"] = symbol
-        resp = self.api_request("GET", "/v5/market/delivery-price", params=params, signed=False)
+        resp = self.api_request(
+            "GET", "/v5/market/delivery-price", params=params, signed=False
+        )
         return resp.get("result", {}).get("list", [])
 
     def get_historical_volatility(
@@ -7797,7 +9114,9 @@ class BybitToolDispatcher:
             params["startTime"] = start_time
         if end_time:
             params["endTime"] = end_time
-        resp = self.api_request("GET", "/v5/market/historical-volatility", params=params, signed=False)
+        resp = self.api_request(
+            "GET", "/v5/market/historical-volatility", params=params, signed=False
+        )
         return resp.get("result", [])
 
     def get_trade_history(
@@ -7867,20 +9186,24 @@ class BybitToolDispatcher:
             "toAccountType": to_account,
         }
 
-
-        return self.api_request("POST", "/v5/asset/transfer/inter-transfer", json_data=payload)
+        return self.api_request(
+            "POST", "/v5/asset/transfer/inter-transfer", json_data=payload
+        )
 
     def get_coin_balance(self, coin: str, account_type: str = "FUND") -> dict:
         """Get single coin balance for a specific account type."""
         resp = self.api_request(
-            "GET", "/v5/asset/transfer/query-account-coin-balance",
+            "GET",
+            "/v5/asset/transfer/query-account-coin-balance",
             params={"coin": coin, "accountType": account_type},
         )
         return resp.get("result", {})
 
     def get_withdrawable_amount(self) -> dict:
         """Get withdrawable amount for the account."""
-        resp = self.api_request("GET", "/v5/asset/withdraw/withdrawable-amount", params={})
+        resp = self.api_request(
+            "GET", "/v5/asset/withdraw/withdrawable-amount", params={}
+        )
         return resp.get("result", {})
 
     # ══════════════════════════════════════════════════════════
@@ -7911,12 +9234,14 @@ class BybitToolDispatcher:
                     order_price = self.adjust_price(symbol, order_price, category)
                     order_qty = usdt_per_order / order_price if order_price > 0 else 0
                     order_qty = self.adjust_quantity(symbol, order_qty, category)
-                    orders.append({
-                        "level": i + 1,
-                        "price": order_price,
-                        "qty": order_qty,
-                        "notional": round(order_price * order_qty, 4),
-                    })
+                    orders.append(
+                        {
+                            "level": i + 1,
+                            "price": order_price,
+                            "qty": order_qty,
+                            "notional": round(order_price * order_qty, 4),
+                        }
+                    )
             else:
                 high_price = current_price * (1 + price_range_pct / 100)
                 price_step = (high_price - current_price) / max(num_orders - 1, 1)
@@ -7925,13 +9250,20 @@ class BybitToolDispatcher:
                     order_price = self.adjust_price(symbol, order_price, category)
                     order_qty = usdt_per_order / order_price if order_price > 0 else 0
                     order_qty = self.adjust_quantity(symbol, order_qty, category)
-                    orders.append({
-                        "level": i + 1,
-                        "price": order_price,
-                        "qty": order_qty,
-                        "notional": round(order_price * order_qty, 4),
-                    })
-            avg_price = sum(o["price"] * o["qty"] for o in orders) / sum(o["qty"] for o in orders) if orders else 0
+                    orders.append(
+                        {
+                            "level": i + 1,
+                            "price": order_price,
+                            "qty": order_qty,
+                            "notional": round(order_price * order_qty, 4),
+                        }
+                    )
+            avg_price = (
+                sum(o["price"] * o["qty"] for o in orders)
+                / sum(o["qty"] for o in orders)
+                if orders
+                else 0
+            )
             return {
                 "symbol": symbol,
                 "strategy": "DCA",
@@ -7973,13 +9305,15 @@ class BybitToolDispatcher:
                 qty = usdt_per_grid / level_price if level_price > 0 else 0
                 qty = self.adjust_quantity(symbol, qty, category)
                 side = "Buy" if level_price < current_price else "Sell"
-                grid_levels.append({
-                    "level": i + 1,
-                    "price": level_price,
-                    "side": side,
-                    "qty": qty,
-                    "notional": round(level_price * qty, 4),
-                })
+                grid_levels.append(
+                    {
+                        "level": i + 1,
+                        "price": level_price,
+                        "side": side,
+                        "qty": qty,
+                        "notional": round(level_price * qty, 4),
+                    }
+                )
             profit_per_grid = grid_spacing * (usdt_per_grid / current_price)
             return {
                 "symbol": symbol,
@@ -8008,7 +9342,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Generate a momentum-based scalp setup with ATR-based SL/TP."""
         try:
-            analysis = self.get_trend_analysis(symbol, category=category, interval="15", lookback_periods=100)
+            analysis = self.get_trend_analysis(
+                symbol, category=category, interval="15", lookback_periods=100
+            )
             if analysis.get("status") == "error":
                 return analysis
             momentum = self.get_market_momentum(symbol, category=category)
@@ -8038,7 +9374,9 @@ class BybitToolDispatcher:
                 tp_price = current_price - tp_distance
             sl_price = self.adjust_price(symbol, sl_price, category)
             tp_price = self.adjust_price(symbol, tp_price, category)
-            qty = self.calculate_position_size(symbol, current_price, sl_price, risk_usdt, category)
+            qty = self.calculate_position_size(
+                symbol, current_price, sl_price, risk_usdt, category
+            )
             be = self.calculate_breakeven(current_price, qty, side)
             return {
                 "symbol": symbol,
@@ -8058,7 +9396,9 @@ class BybitToolDispatcher:
                 "rsi": rsi,
                 "atr": atr,
                 "momentum": momentum.get("signal", "N/A"),
-                "ob_pressure": ob.get("pressure", "N/A") if isinstance(ob, dict) else "N/A",
+                "ob_pressure": ob.get("pressure", "N/A")
+                if isinstance(ob, dict)
+                else "N/A",
                 "ob_imbalance": ob.get("imbalance", 0) if isinstance(ob, dict) else 0,
                 "note": "Review before executing. Use place_order action to enter.",
             }
@@ -8077,16 +9417,28 @@ class BybitToolDispatcher:
     ) -> dict:
         """Mean reversion strategy using Bollinger Bands and RSI extremes."""
         try:
-            klines = self.get_klines(symbol, interval="60", limit=200, category=category)
+            klines = self.get_klines(
+                symbol, interval="60", limit=200, category=category
+            )
             if not klines or len(klines) < bb_period + 10:
                 return {"status": "error", "msg": "Insufficient kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
             current_price = closes[-1]
-            bb = self.calculate_bollinger_bands(closes, period=bb_period, std_dev=bb_std)
+            bb = self.calculate_bollinger_bands(
+                closes, period=bb_period, std_dev=bb_std
+            )
             rsi = self.calculate_rsi(closes, period=14)
-            bb_width = (bb["upper"] - bb["lower"]) / bb["middle"] * 100 if bb["middle"] > 0 else 0
-            bb_position = (current_price - bb["lower"]) / (bb["upper"] - bb["lower"]) if (bb["upper"] - bb["lower"]) > 0 else 0.5
+            bb_width = (
+                (bb["upper"] - bb["lower"]) / bb["middle"] * 100
+                if bb["middle"] > 0
+                else 0
+            )
+            bb_position = (
+                (current_price - bb["lower"]) / (bb["upper"] - bb["lower"])
+                if (bb["upper"] - bb["lower"]) > 0
+                else 0.5
+            )
             signal = "NO_TRADE"
             side = None
             sl_price = None
@@ -8117,19 +9469,23 @@ class BybitToolDispatcher:
             if side and sl_price and tp_price:
                 sl_price = self.adjust_price(symbol, sl_price, category)
                 tp_price = self.adjust_price(symbol, tp_price, category)
-                qty = self.calculate_position_size(symbol, current_price, sl_price, risk_usdt, category)
+                qty = self.calculate_position_size(
+                    symbol, current_price, sl_price, risk_usdt, category
+                )
                 be = self.calculate_breakeven(current_price, qty, side)
-                result.update({
-                    "side": side,
-                    "entry_price": current_price,
-                    "stop_loss": sl_price,
-                    "take_profit": tp_price,
-                    "qty": qty,
-                    "risk_usdt": risk_usdt,
-                    "breakeven": be["breakeven_price"],
-                    "price_to_breakeven_pct": be["price_move_pct"],
-                    "note": "Review before executing. Use place_order action to enter.",
-                })
+                result.update(
+                    {
+                        "side": side,
+                        "entry_price": current_price,
+                        "stop_loss": sl_price,
+                        "take_profit": tp_price,
+                        "qty": qty,
+                        "risk_usdt": risk_usdt,
+                        "breakeven": be["breakeven_price"],
+                        "price_to_breakeven_pct": be["price_move_pct"],
+                        "note": "Review before executing. Use place_order action to enter.",
+                    }
+                )
             return result
         except Exception as e:
             return {"status": "error", "msg": str(e)}
@@ -8152,15 +9508,17 @@ class BybitToolDispatcher:
                     price = t.get("last_price", 0)
                     annual_rate = fund_rate * 3 * 365 * 100
                     direction = "SHORT" if fund_rate > 0 else "LONG"
-                    opportunities.append({
-                        "symbol": symbol,
-                        "funding_rate": fund_rate,
-                        "annual_rate_pct": round(annual_rate, 2),
-                        "direction": direction,
-                        "last_price": price,
-                        "volume_24h": volume,
-                        "turnover_24h": t.get("turnover_24h", 0),
-                    })
+                    opportunities.append(
+                        {
+                            "symbol": symbol,
+                            "funding_rate": fund_rate,
+                            "annual_rate_pct": round(annual_rate, 2),
+                            "direction": direction,
+                            "last_price": price,
+                            "volume_24h": volume,
+                            "turnover_24h": t.get("turnover_24h", 0),
+                        }
+                    )
             opportunities.sort(key=lambda x: abs(x["funding_rate"]), reverse=True)
             return {
                 "strategy": "FUNDING_ARB",
@@ -8192,12 +9550,14 @@ class BybitToolDispatcher:
             slices = []
             for i in range(num_slices):
                 exec_time = i * interval_seconds
-                slices.append({
-                    "slice": i + 1,
-                    "qty": slice_qty,
-                    "execute_at_seconds": round(exec_time, 1),
-                    "execute_at_minutes": round(exec_time / 60, 2),
-                })
+                slices.append(
+                    {
+                        "slice": i + 1,
+                        "qty": slice_qty,
+                        "execute_at_seconds": round(exec_time, 1),
+                        "execute_at_minutes": round(exec_time / 60, 2),
+                    }
+                )
             return {
                 "symbol": symbol,
                 "strategy": "TWAP",
@@ -8226,7 +9586,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Detect breakout setups using Donchian channels, volume, and ADX."""
         try:
-            klines = self.get_klines(symbol, interval="60", limit=lookback + 20, category=category)
+            klines = self.get_klines(
+                symbol, interval="60", limit=lookback + 20, category=category
+            )
             if not klines or len(klines) < lookback:
                 return {"status": "error", "msg": "Insufficient data"}
             klines.reverse()
@@ -8236,15 +9598,24 @@ class BybitToolDispatcher:
             vols = [float(k[5]) for k in klines]
             current_price = closes[-1]
             donchian = self.calculate_donchian_channels(highs, lows, period=lookback)
-            ohlcv = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+            ohlcv = [
+                {"high": h, "low": l, "close": c}
+                for h, l, c in zip(highs, lows, closes)
+            ]
             atr = self.calculate_atr(ohlcv, period=14)
             adx = self.calculate_adx(highs, lows, closes, period=14)
-            vol_avg = sum(vols[-20:]) / 20 if len(vols) >= 20 else sum(vols) / max(len(vols), 1)
+            vol_avg = (
+                sum(vols[-20:]) / 20
+                if len(vols) >= 20
+                else sum(vols) / max(len(vols), 1)
+            )
             vol_ratio = vols[-1] / vol_avg if vol_avg > 0 else 1.0
             upper = donchian["upper"]
             lower = donchian["lower"]
             range_size = upper - lower
-            position_in_range = (current_price - lower) / range_size if range_size > 0 else 0.5
+            position_in_range = (
+                (current_price - lower) / range_size if range_size > 0 else 0.5
+            )
             signal = "NO_TRADE"
             side = None
             sl_price = None
@@ -8277,19 +9648,23 @@ class BybitToolDispatcher:
             if side and sl_price and tp_price:
                 sl_price = self.adjust_price(symbol, sl_price, category)
                 tp_price = self.adjust_price(symbol, tp_price, category)
-                qty = self.calculate_position_size(symbol, current_price, sl_price, risk_usdt, category)
+                qty = self.calculate_position_size(
+                    symbol, current_price, sl_price, risk_usdt, category
+                )
                 be = self.calculate_breakeven(current_price, qty, side)
-                result.update({
-                    "side": side,
-                    "entry_price": current_price,
-                    "stop_loss": sl_price,
-                    "take_profit": tp_price,
-                    "qty": qty,
-                    "risk_reward": rr_ratio,
-                    "breakeven": be["breakeven_price"],
-                    "price_to_breakeven_pct": be["price_move_pct"],
-                    "note": "Review before executing. Use place_order action to enter.",
-                })
+                result.update(
+                    {
+                        "side": side,
+                        "entry_price": current_price,
+                        "stop_loss": sl_price,
+                        "take_profit": tp_price,
+                        "qty": qty,
+                        "risk_reward": rr_ratio,
+                        "breakeven": be["breakeven_price"],
+                        "price_to_breakeven_pct": be["price_move_pct"],
+                        "note": "Review before executing. Use place_order action to enter.",
+                    }
+                )
             return result
         except Exception as e:
             return {"status": "error", "msg": str(e)}
@@ -8302,11 +9677,31 @@ class BybitToolDispatcher:
         try:
             wallet = self.get_wallet_balance(account_type="UNIFIED")
             positions = self.get_positions(category=category)
-            coins = wallet.get("list", [{}])[0].get("coin", []) if wallet.get("list") else []
-            total_equity = float(wallet.get("list", [{}])[0].get("totalEquity", 0)) if wallet.get("list") else 0
-            available = float(wallet.get("list", [{}])[0].get("totalAvailableBalance", 0)) if wallet.get("list") else 0
-            used_margin = float(wallet.get("list", [{}])[0].get("totalInitialMargin", 0)) if wallet.get("list") else 0
-            unrealized_pnl = float(wallet.get("list", [{}])[0].get("totalPerpUPL", 0)) if wallet.get("list") else 0
+            coins = (
+                wallet.get("list", [{}])[0].get("coin", [])
+                if wallet.get("list")
+                else []
+            )
+            total_equity = (
+                float(wallet.get("list", [{}])[0].get("totalEquity", 0))
+                if wallet.get("list")
+                else 0
+            )
+            available = (
+                float(wallet.get("list", [{}])[0].get("totalAvailableBalance", 0))
+                if wallet.get("list")
+                else 0
+            )
+            used_margin = (
+                float(wallet.get("list", [{}])[0].get("totalInitialMargin", 0))
+                if wallet.get("list")
+                else 0
+            )
+            unrealized_pnl = (
+                float(wallet.get("list", [{}])[0].get("totalPerpUPL", 0))
+                if wallet.get("list")
+                else 0
+            )
             active_positions = []
             total_pos_value = 0
             for pos in positions:
@@ -8320,32 +9715,40 @@ class BybitToolDispatcher:
                 leverage = float(pos.get("leverage", 1))
                 liq_price = float(pos.get("liqPrice", 0))
                 total_pos_value += pos_value
-                active_positions.append({
-                    "symbol": pos.get("symbol"),
-                    "side": pos.get("side"),
-                    "size": size,
-                    "entry_price": entry,
-                    "mark_price": mark,
-                    "position_value": round(pos_value, 4),
-                    "unrealized_pnl": round(upl, 4),
-                    "pnl_pct": round((upl / (entry * size)) * 100, 4) if entry * size > 0 else 0,
-                    "leverage": leverage,
-                    "liq_price": liq_price,
-                    "sl": pos.get("stopLoss", "0"),
-                    "tp": pos.get("takeProfit", "0"),
-                    "trailing_stop": pos.get("trailingStop", "0"),
-                })
-            margin_usage_pct = (used_margin / total_equity) * 100 if total_equity > 0 else 0
+                active_positions.append(
+                    {
+                        "symbol": pos.get("symbol"),
+                        "side": pos.get("side"),
+                        "size": size,
+                        "entry_price": entry,
+                        "mark_price": mark,
+                        "position_value": round(pos_value, 4),
+                        "unrealized_pnl": round(upl, 4),
+                        "pnl_pct": round((upl / (entry * size)) * 100, 4)
+                        if entry * size > 0
+                        else 0,
+                        "leverage": leverage,
+                        "liq_price": liq_price,
+                        "sl": pos.get("stopLoss", "0"),
+                        "tp": pos.get("takeProfit", "0"),
+                        "trailing_stop": pos.get("trailingStop", "0"),
+                    }
+                )
+            margin_usage_pct = (
+                (used_margin / total_equity) * 100 if total_equity > 0 else 0
+            )
             holdings = []
             for c in coins:
                 bal = float(c.get("walletBalance", 0))
                 if bal > 0:
-                    holdings.append({
-                        "coin": c.get("coin"),
-                        "balance": bal,
-                        "usd_value": float(c.get("usdValue", 0)),
-                        "unrealized_pnl": float(c.get("unrealisedPnl", 0)),
-                    })
+                    holdings.append(
+                        {
+                            "coin": c.get("coin"),
+                            "balance": bal,
+                            "usd_value": float(c.get("usdValue", 0)),
+                            "unrealized_pnl": float(c.get("unrealisedPnl", 0)),
+                        }
+                    )
             return {
                 "total_equity": round(total_equity, 4),
                 "available_balance": round(available, 4),
@@ -8370,7 +9773,9 @@ class BybitToolDispatcher:
     ) -> dict:
         """Full smart entry analysis combining trend, momentum, orderbook, and risk."""
         try:
-            trend = self.get_trend_analysis(symbol, category=category, interval="60", lookback_periods=200)
+            trend = self.get_trend_analysis(
+                symbol, category=category, interval="60", lookback_periods=200
+            )
             momentum = self.get_market_momentum(symbol, category=category)
             ob = self.get_l2_orderbook_analysis(symbol, depth=50, category=category)
             health = self.get_market_health(symbol, category=category)
@@ -8390,8 +9795,12 @@ class BybitToolDispatcher:
                 tp_price = current_price - (atr * 4)
             sl_price = self.adjust_price(symbol, sl_price, category)
             tp_price = self.adjust_price(symbol, tp_price, category)
-            qty = self.calculate_position_size(symbol, current_price, sl_price, risk_usdt, category)
-            be = self.calculate_breakeven_with_fees(symbol, current_price, qty, side, category)
+            qty = self.calculate_position_size(
+                symbol, current_price, sl_price, risk_usdt, category
+            )
+            be = self.calculate_breakeven_with_fees(
+                symbol, current_price, qty, side, category
+            )
             warnings = []
             if rsi > 75 and side.lower() == "buy":
                 warnings.append("RSI overbought - risky long entry")
@@ -8417,7 +9826,11 @@ class BybitToolDispatcher:
                 "trend_score": score,
                 "rsi": rsi,
                 "atr": atr,
-                "bb_position": round((current_price - bb["lower"]) / max(bb["upper"] - bb["lower"], 1e-9), 4),
+                "bb_position": round(
+                    (current_price - bb["lower"])
+                    / max(bb["upper"] - bb["lower"], 1e-9),
+                    4,
+                ),
                 "momentum_signal": momentum.get("signal", "N/A"),
                 "ob_imbalance": ob.get("imbalance", 0),
                 "ob_pressure": ob.get("pressure", "N/A"),
@@ -8442,8 +9855,16 @@ class BybitToolDispatcher:
         lot = info.lot_size
         pf = info.price_flt
 
-        qty_precision = max(0, -int(math.floor(math.log10(lot.qty_step)))) if lot.qty_step > 0 else 0
-        price_precision = max(0, -int(math.floor(math.log10(pf.tick_size)))) if pf.tick_size > 0 else 0
+        qty_precision = (
+            max(0, -int(math.floor(math.log10(lot.qty_step))))
+            if lot.qty_step > 0
+            else 0
+        )
+        price_precision = (
+            max(0, -int(math.floor(math.log10(pf.tick_size))))
+            if pf.tick_size > 0
+            else 0
+        )
 
         try:
             fee_data = self.get_fee_rate(symbol=symbol, category=category)
@@ -8483,8 +9904,13 @@ class BybitToolDispatcher:
         }
 
     def validate_order_params(
-        self, symbol: str, side: str, qty: float, price: float = None,
-        order_type: str = "Limit", category: str = "linear",
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        price: float = None,
+        order_type: str = "Limit",
+        category: str = "linear",
     ) -> dict:
         """Pre-validate order parameters against instrument filters before placing."""
         info = self._fetch_instrument(symbol, category)
@@ -8505,7 +9931,9 @@ class BybitToolDispatcher:
         if price is not None:
             adj_price = pf.adjust(price)
             if price != adj_price:
-                warnings.append(f"price {price} adjusted to {adj_price} (tick={pf.tick_size})")
+                warnings.append(
+                    f"price {price} adjusted to {adj_price} (tick={pf.tick_size})"
+                )
             if adj_price < pf.min_price and pf.min_price > 0:
                 errors.append(f"price {adj_price} below min {pf.min_price}")
             if adj_price > pf.max_price:
@@ -8514,13 +9942,21 @@ class BybitToolDispatcher:
             notional = adj_qty * adj_price
             if lot.min_notional > 0 and notional < lot.min_notional:
                 errors.append(f"notional {notional:.4f} below min {lot.min_notional}")
-                min_qty_for_notional = lot.min_notional / adj_price if adj_price > 0 else 0
-                warnings.append(f"min qty for notional at this price: {lot.adjust(min_qty_for_notional)}")
+                min_qty_for_notional = (
+                    lot.min_notional / adj_price if adj_price > 0 else 0
+                )
+                warnings.append(
+                    f"min qty for notional at this price: {lot.adjust(min_qty_for_notional)}"
+                )
 
         try:
             fee_data = self.get_fee_rate(symbol=symbol, category=category)
-            taker_fee = _safe_float(fee_data.get("list", [{}])[0].get("takerFeeRate", 0.0006))
-            maker_fee = _safe_float(fee_data.get("list", [{}])[0].get("makerFeeRate", 0.0002))
+            taker_fee = _safe_float(
+                fee_data.get("list", [{}])[0].get("takerFeeRate", 0.0006)
+            )
+            maker_fee = _safe_float(
+                fee_data.get("list", [{}])[0].get("makerFeeRate", 0.0002)
+            )
         except Exception:
             taker_fee = 0.0006
             maker_fee = 0.0002
@@ -8553,9 +9989,15 @@ class BybitToolDispatcher:
         }
 
     def calculate_fee_adjusted_targets(
-        self, symbol: str, side: str, entry_price: float, qty: float,
-        tp_pct: float = None, sl_pct: float = None,
-        category: str = "linear", order_type: str = "taker",
+        self,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        qty: float,
+        tp_pct: float = None,
+        sl_pct: float = None,
+        category: str = "linear",
+        order_type: str = "taker",
     ) -> dict:
         """Calculate TP/SL targets that account for trading fees to ensure real profitability.
 
@@ -8589,7 +10031,9 @@ class BybitToolDispatcher:
                 fee_adj_tp = None
             if sl_pct:
                 raw_sl = entry_price * (1 - sl_pct)
-                actual_loss_at_sl = (entry_price - raw_sl) * qty + (raw_sl * qty * fee_rate) + entry_fee
+                actual_loss_at_sl = (
+                    (entry_price - raw_sl) * qty + (raw_sl * qty * fee_rate) + entry_fee
+                )
             else:
                 raw_sl = None
                 actual_loss_at_sl = None
@@ -8603,7 +10047,9 @@ class BybitToolDispatcher:
                 fee_adj_tp = None
             if sl_pct:
                 raw_sl = entry_price * (1 + sl_pct)
-                actual_loss_at_sl = (raw_sl - entry_price) * qty + (raw_sl * qty * fee_rate) + entry_fee
+                actual_loss_at_sl = (
+                    (raw_sl - entry_price) * qty + (raw_sl * qty * fee_rate) + entry_fee
+                )
             else:
                 raw_sl = None
                 actual_loss_at_sl = None
@@ -8619,9 +10065,17 @@ class BybitToolDispatcher:
         net_profit_at_tp = None
         if fee_adj_tp is not None:
             if side == "Buy":
-                net_profit_at_tp = (fee_adj_tp - entry_price) * qty - entry_fee - (fee_adj_tp * qty * fee_rate)
+                net_profit_at_tp = (
+                    (fee_adj_tp - entry_price) * qty
+                    - entry_fee
+                    - (fee_adj_tp * qty * fee_rate)
+                )
             else:
-                net_profit_at_tp = (entry_price - fee_adj_tp) * qty - entry_fee - (fee_adj_tp * qty * fee_rate)
+                net_profit_at_tp = (
+                    (entry_price - fee_adj_tp) * qty
+                    - entry_fee
+                    - (fee_adj_tp * qty * fee_rate)
+                )
 
         result = {
             "status": "ok",
@@ -8635,16 +10089,24 @@ class BybitToolDispatcher:
             "entry_fee": round(entry_fee, 6),
             "round_trip_fee_pct": round(round_trip_fee_pct * 100, 4),
             "breakeven_price": breakeven_price,
-            "breakeven_distance_pct": round(abs(breakeven_price - entry_price) / entry_price * 100, 4),
+            "breakeven_distance_pct": round(
+                abs(breakeven_price - entry_price) / entry_price * 100, 4
+            ),
         }
         if raw_tp is not None:
             result["raw_tp"] = raw_tp
             result["fee_adjusted_tp"] = fee_adj_tp
-            result["tp_shift_pct"] = round(abs(fee_adj_tp - raw_tp) / entry_price * 100, 4)
-            result["net_profit_at_adj_tp"] = round(net_profit_at_tp, 6) if net_profit_at_tp else None
+            result["tp_shift_pct"] = round(
+                abs(fee_adj_tp - raw_tp) / entry_price * 100, 4
+            )
+            result["net_profit_at_adj_tp"] = (
+                round(net_profit_at_tp, 6) if net_profit_at_tp else None
+            )
         if raw_sl is not None:
             result["raw_sl"] = raw_sl
-            result["actual_loss_at_sl"] = round(actual_loss_at_sl, 4) if actual_loss_at_sl else None
+            result["actual_loss_at_sl"] = (
+                round(actual_loss_at_sl, 4) if actual_loss_at_sl else None
+            )
         result["tick_size"] = pf.tick_size
         return result
 
@@ -8656,7 +10118,9 @@ class BybitToolDispatcher:
 
         try:
             ticker = self.get_ticker(symbol=symbol, category=category)
-            last_price = _safe_float(ticker.get("result", {}).get("list", [{}])[0].get("lastPrice", 0))
+            last_price = _safe_float(
+                ticker.get("result", {}).get("list", [{}])[0].get("lastPrice", 0)
+            )
         except Exception:
             last_price = 0
 
@@ -8664,9 +10128,15 @@ class BybitToolDispatcher:
         min_value_from_notional = lot.min_notional
 
         effective_min = max(min_value_from_qty, min_value_from_notional)
-        min_qty_for_notional = (lot.min_notional / last_price) if (last_price > 0 and lot.min_notional > 0) else 0
+        min_qty_for_notional = (
+            (lot.min_notional / last_price)
+            if (last_price > 0 and lot.min_notional > 0)
+            else 0
+        )
         if min_qty_for_notional > 0:
-            min_qty_for_notional = lot.adjust(max(min_qty_for_notional, lot.min_order_qty))
+            min_qty_for_notional = lot.adjust(
+                max(min_qty_for_notional, lot.min_order_qty)
+            )
 
         return {
             "status": "ok",
@@ -8679,7 +10149,9 @@ class BybitToolDispatcher:
             "min_value_from_qty": round(min_value_from_qty, 4),
             "min_value_from_notional": lot.min_notional,
             "effective_min_order_value": round(effective_min, 4),
-            "suggested_min_qty": min_qty_for_notional if min_qty_for_notional > 0 else lot.min_order_qty,
+            "suggested_min_qty": min_qty_for_notional
+            if min_qty_for_notional > 0
+            else lot.min_order_qty,
         }
 
     # ══════════════════════════════════════════════════════════
@@ -8712,7 +10184,9 @@ class BybitToolDispatcher:
 
         try:
             fee_data = self.get_fee_rate(symbol=symbol, category=category)
-            taker_fee = _safe_float(fee_data.get("list", [{}])[0].get("takerFeeRate", 0.0006))
+            taker_fee = _safe_float(
+                fee_data.get("list", [{}])[0].get("takerFeeRate", 0.0006)
+            )
         except Exception:
             taker_fee = 0.0006
         close_fee_cost = size * mark * taker_fee
@@ -8742,8 +10216,12 @@ class BybitToolDispatcher:
         }
 
     def scale_position(
-        self, symbol: str, side: str, scale_pct: float,
-        category: str = "linear", reduce: bool = False,
+        self,
+        symbol: str,
+        side: str,
+        scale_pct: float,
+        category: str = "linear",
+        reduce: bool = False,
     ) -> dict:
         """Scale into or out of a position by a percentage of current size.
 
@@ -8769,17 +10247,25 @@ class BybitToolDispatcher:
         if reduce:
             opp_side = "Sell" if side == "Buy" else "Buy"
             return self.place_order(
-                symbol=symbol, side=OrderSide(opp_side), qty=scale_qty,
-                order_type=OrderType.MARKET, category=cat_enum,
+                symbol=symbol,
+                side=OrderSide(opp_side),
+                qty=scale_qty,
+                order_type=OrderType.MARKET,
+                category=cat_enum,
                 reduce_only=True,
             )
         else:
             return self.place_order(
-                symbol=symbol, side=OrderSide(side), qty=scale_qty,
-                order_type=OrderType.MARKET, category=cat_enum,
+                symbol=symbol,
+                side=OrderSide(side),
+                qty=scale_qty,
+                order_type=OrderType.MARKET,
+                category=cat_enum,
             )
 
-    def close_position(self, symbol: str, category: str = "linear", qty_pct: float = 1.0) -> dict:
+    def close_position(
+        self, symbol: str, category: str = "linear", qty_pct: float = 1.0
+    ) -> dict:
         """Close a percentage of a position at market price."""
         cat_enum = Category(category)
         positions = self.get_positions(category=cat_enum, symbol=symbol)
@@ -8799,12 +10285,17 @@ class BybitToolDispatcher:
         close_side = "Sell" if side_str == "Buy" else "Buy"
 
         return self.place_order(
-            symbol=symbol, side=OrderSide(close_side), qty=close_qty,
-            order_type=OrderType.MARKET, category=cat_enum,
+            symbol=symbol,
+            side=OrderSide(close_side),
+            qty=close_qty,
+            order_type=OrderType.MARKET,
+            category=cat_enum,
             reduce_only=True,
         )
 
-    def flip_position(self, symbol: str, category: str = "linear", scale: float = 1.0) -> dict:
+    def flip_position(
+        self, symbol: str, category: str = "linear", scale: float = 1.0
+    ) -> dict:
         """Close current position and open opposite direction. scale=1.0 means same size."""
         cat_enum = Category(category)
         positions = self.get_positions(category=cat_enum, symbol=symbol)
@@ -8819,15 +10310,21 @@ class BybitToolDispatcher:
         close_side = "Sell" if side_str == "Buy" else "Buy"
 
         close_result = self.place_order(
-            symbol=symbol, side=OrderSide(close_side), qty=size,
-            order_type=OrderType.MARKET, category=cat_enum,
+            symbol=symbol,
+            side=OrderSide(close_side),
+            qty=size,
+            order_type=OrderType.MARKET,
+            category=cat_enum,
             reduce_only=True,
         )
 
         new_qty = self.adjust_quantity(symbol, size * scale, category)
         open_result = self.place_order(
-            symbol=symbol, side=OrderSide(close_side), qty=new_qty,
-            order_type=OrderType.MARKET, category=cat_enum,
+            symbol=symbol,
+            side=OrderSide(close_side),
+            qty=new_qty,
+            order_type=OrderType.MARKET,
+            category=cat_enum,
         )
 
         return {
@@ -8841,9 +10338,13 @@ class BybitToolDispatcher:
         }
 
     def auto_sl_tp(
-        self, symbol: str, category: str = "linear",
-        sl_pct: float = None, tp_pct: float = None,
-        use_atr: bool = False, atr_mult: float = 1.5,
+        self,
+        symbol: str,
+        category: str = "linear",
+        sl_pct: float = None,
+        tp_pct: float = None,
+        use_atr: bool = False,
+        atr_mult: float = 1.5,
     ) -> dict:
         """Automatically set SL/TP on an open position based on percentage or ATR."""
         positions = self.get_positions(category=category, symbol=symbol)
@@ -8856,13 +10357,18 @@ class BybitToolDispatcher:
             return {"status": "error", "msg": "Invalid position data"}
 
         if use_atr:
-            klines = self.get_klines(symbol=symbol, interval="60", limit=50, category=category)
+            klines = self.get_klines(
+                symbol=symbol, interval="60", limit=50, category=category
+            )
             if klines:
                 klines.reverse()
                 highs = [float(k[2]) for k in klines]
                 lows = [float(k[3]) for k in klines]
                 closes = [float(k[4]) for k in klines]
-                ohlcv_data = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+                ohlcv_data = [
+                    {"high": h, "low": l, "close": c}
+                    for h, l, c in zip(highs, lows, closes)
+                ]
                 atr = self.calculate_atr(ohlcv_data, period=14)
                 if atr > 0:
                     if side_str == "Buy":
@@ -8889,7 +10395,9 @@ class BybitToolDispatcher:
         tp_price = self.adjust_price(symbol, tp_price, category)
 
         result = self.set_trading_stop(
-            symbol=symbol, stop_loss=sl_price, take_profit=tp_price,
+            symbol=symbol,
+            stop_loss=sl_price,
+            take_profit=tp_price,
             category=Category(category),
         )
         return {
@@ -8903,7 +10411,9 @@ class BybitToolDispatcher:
             "result": result,
         }
 
-    def move_sl_to_breakeven(self, symbol: str, category: str = "linear", offset_pct: float = 0.001) -> dict:
+    def move_sl_to_breakeven(
+        self, symbol: str, category: str = "linear", offset_pct: float = 0.001
+    ) -> dict:
         """Move stop loss to breakeven (entry price + small offset for fees)."""
         positions = self.get_positions(category=category, symbol=symbol)
         if not positions:
@@ -8918,14 +10428,22 @@ class BybitToolDispatcher:
         if side_str == "Buy":
             be_sl = entry * (1 + offset_pct)
             if mark <= be_sl:
-                return {"status": "error", "msg": f"Price {mark} not above breakeven {be_sl}"}
+                return {
+                    "status": "error",
+                    "msg": f"Price {mark} not above breakeven {be_sl}",
+                }
         else:
             be_sl = entry * (1 - offset_pct)
             if mark >= be_sl:
-                return {"status": "error", "msg": f"Price {mark} not below breakeven {be_sl}"}
+                return {
+                    "status": "error",
+                    "msg": f"Price {mark} not below breakeven {be_sl}",
+                }
 
         be_sl = self.adjust_price(symbol, be_sl, category)
-        result = self.set_trading_stop(symbol=symbol, stop_loss=be_sl, category=Category(category))
+        result = self.set_trading_stop(
+            symbol=symbol, stop_loss=be_sl, category=Category(category)
+        )
         return {
             "status": "ok",
             "symbol": symbol,
@@ -8940,7 +10458,12 @@ class BybitToolDispatcher:
         """Get summary of all open positions with aggregated PnL."""
         positions = self.get_positions(category=category)
         if not positions:
-            return {"status": "ok", "count": 0, "positions": [], "total_unrealised_pnl": 0}
+            return {
+                "status": "ok",
+                "count": 0,
+                "positions": [],
+                "total_unrealised_pnl": 0,
+            }
 
         summaries = []
         total_pnl = 0.0
@@ -8953,16 +10476,18 @@ class BybitToolDispatcher:
             margin = _safe_float(pos.get("positionIM", 0))
             total_pnl += unrealised
             total_margin += margin
-            summaries.append({
-                "symbol": pos.get("symbol"),
-                "side": pos.get("side"),
-                "size": size,
-                "entry": _safe_float(pos.get("avgPrice", 0)),
-                "mark": _safe_float(pos.get("markPrice", 0)),
-                "unrealised_pnl": round(unrealised, 4),
-                "leverage": _safe_float(pos.get("leverage", 1)),
-                "liq_price": _safe_float(pos.get("liqPrice", 0)),
-            })
+            summaries.append(
+                {
+                    "symbol": pos.get("symbol"),
+                    "side": pos.get("side"),
+                    "size": size,
+                    "entry": _safe_float(pos.get("avgPrice", 0)),
+                    "mark": _safe_float(pos.get("markPrice", 0)),
+                    "unrealised_pnl": round(unrealised, 4),
+                    "leverage": _safe_float(pos.get("leverage", 1)),
+                    "liq_price": _safe_float(pos.get("liqPrice", 0)),
+                }
+            )
 
         return {
             "status": "ok",
@@ -8978,9 +10503,16 @@ class BybitToolDispatcher:
     _trade_journal: List[Dict[str, Any]] = []
 
     def journal_record_trade(
-        self, symbol: str, side: str, entry_price: float, qty: float,
-        exit_price: float = None, strategy: str = "", tags: str = "",
-        notes: str = "", category: str = "linear",
+        self,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        qty: float,
+        exit_price: float = None,
+        strategy: str = "",
+        tags: str = "",
+        notes: str = "",
+        category: str = "linear",
     ) -> dict:
         """Record a trade entry in the journal.
 
@@ -8997,7 +10529,9 @@ class BybitToolDispatcher:
         """
         try:
             fee_data = self.get_fee_rate(symbol=symbol, category=category)
-            taker_fee = _safe_float(fee_data.get("list", [{}])[0].get("takerFeeRate", 0.0006))
+            taker_fee = _safe_float(
+                fee_data.get("list", [{}])[0].get("takerFeeRate", 0.0006)
+            )
         except Exception:
             taker_fee = 0.0006
 
@@ -9043,7 +10577,9 @@ class BybitToolDispatcher:
             if trade["id"] == trade_id and trade["status"] == "open":
                 trade["exit_price"] = exit_price
                 trade["status"] = "closed"
-                trade["closed_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+                trade["closed_at"] = time.strftime(
+                    "%Y-%m-%d %H:%M:%S UTC", time.gmtime()
+                )
 
                 entry_price = trade["entry_price"]
                 qty = trade["qty"]
@@ -9067,11 +10603,17 @@ class BybitToolDispatcher:
                 trade["roi_pct"] = round(roi, 2)
 
                 return {"status": "ok", "trade": trade}
-        return {"status": "error", "msg": f"Trade {trade_id} not found or already closed"}
+        return {
+            "status": "error",
+            "msg": f"Trade {trade_id} not found or already closed",
+        }
 
     def journal_get_trades(
-        self, symbol: str = None, strategy: str = None,
-        status: str = None, limit: int = 50,
+        self,
+        symbol: str = None,
+        strategy: str = None,
+        status: str = None,
+        limit: int = 50,
     ) -> dict:
         """Query journal trades with optional filters."""
         trades = self._trade_journal[:]
@@ -9101,7 +10643,9 @@ class BybitToolDispatcher:
         total_gross = sum(t.get("gross_pnl", 0) for t in trades)
         total_fees = sum(t.get("entry_fee", 0) + t.get("exit_fee", 0) for t in trades)
         avg_win = sum(t.get("net_pnl", 0) for t in wins) / len(wins) if wins else 0
-        avg_loss = sum(t.get("net_pnl", 0) for t in losses) / len(losses) if losses else 0
+        avg_loss = (
+            sum(t.get("net_pnl", 0) for t in losses) / len(losses) if losses else 0
+        )
         win_rate = len(wins) / len(trades) * 100 if trades else 0
 
         largest_win = max((t.get("net_pnl", 0) for t in trades), default=0)
@@ -9121,16 +10665,18 @@ class BybitToolDispatcher:
         max_dd = 0.0
         for t in sorted(trades, key=lambda x: x["timestamp"]):
             cumulative += t.get("net_pnl", 0)
-            if cumulative > peak:
-                peak = cumulative
+            peak = max(peak, cumulative)
             dd = peak - cumulative
-            if dd > max_dd:
-                max_dd = dd
+            max_dd = max(max_dd, dd)
 
         # Sharpe-like ratio (simplified)
         returns = [t.get("roi_pct", 0) for t in trades]
         avg_return = sum(returns) / len(returns) if returns else 0
-        std_return = (sum((r - avg_return) ** 2 for r in returns) / len(returns)) ** 0.5 if len(returns) > 1 else 0
+        std_return = (
+            (sum((r - avg_return) ** 2 for r in returns) / len(returns)) ** 0.5
+            if len(returns) > 1
+            else 0
+        )
         sharpe = avg_return / std_return if std_return > 0 else 0
 
         # By strategy breakdown
@@ -9140,11 +10686,17 @@ class BybitToolDispatcher:
             if s not in strategies:
                 strategies[s] = {"count": 0, "net_pnl": 0, "wins": 0}
             strategies[s]["count"] += 1
-            strategies[s]["net_pnl"] = round(strategies[s]["net_pnl"] + t.get("net_pnl", 0), 4)
+            strategies[s]["net_pnl"] = round(
+                strategies[s]["net_pnl"] + t.get("net_pnl", 0), 4
+            )
             if t.get("net_pnl", 0) > 0:
                 strategies[s]["wins"] += 1
         for s in strategies:
-            strategies[s]["win_rate"] = round(strategies[s]["wins"] / strategies[s]["count"] * 100, 1) if strategies[s]["count"] > 0 else 0
+            strategies[s]["win_rate"] = (
+                round(strategies[s]["wins"] / strategies[s]["count"] * 100, 1)
+                if strategies[s]["count"] > 0
+                else 0
+            )
 
         return {
             "status": "ok",
@@ -9172,8 +10724,12 @@ class BybitToolDispatcher:
         return {
             "status": "ok",
             "total_trades": len(self._trade_journal),
-            "open_trades": len([t for t in self._trade_journal if t["status"] == "open"]),
-            "closed_trades": len([t for t in self._trade_journal if t["status"] == "closed"]),
+            "open_trades": len(
+                [t for t in self._trade_journal if t["status"] == "open"]
+            ),
+            "closed_trades": len(
+                [t for t in self._trade_journal if t["status"] == "closed"]
+            ),
             "journal": self._trade_journal[:],
         }
 
@@ -9198,44 +10754,76 @@ class BybitToolDispatcher:
     # ─────────────────────────────────────────────────────────
     # MISSING V5 ENDPOINTS
     # ─────────────────────────────────────────────────────────
-    def batch_place_orders(self, orders: list, category: Category = Category.LINEAR) -> dict:
+    def batch_place_orders(
+        self, orders: list, category: Category = Category.LINEAR
+    ) -> dict:
         """Place up to 20 orders in a single batch request."""
 
+        return self.api_request(
+            "POST",
+            "/v5/order/create-batch",
+            json_data={
+                "category": category.value,
+                "request": orders,
+            },
+        )
 
-        return self.api_request("POST", "/v5/order/create-batch", json_data={
-            "category": category.value,
-            "request": orders,
-        })
-
-    def set_tpsl_mode(self, symbol: str, tp_sl_mode: str = "Full",
-                      category: Category = Category.LINEAR) -> dict:
+    def set_tpsl_mode(
+        self,
+        symbol: str,
+        tp_sl_mode: str = "Full",
+        category: Category = Category.LINEAR,
+    ) -> dict:
         """Set TP/SL mode: 'Full' (entire position) or 'Partial'."""
 
+        return self.api_request(
+            "POST",
+            "/v5/position/set-tpsl-mode",
+            json_data={
+                "category": category.value,
+                "symbol": symbol,
+                "tpSlMode": tp_sl_mode,
+            },
+        )
 
-        return self.api_request("POST", "/v5/position/set-tpsl-mode", json_data={
-            "category": category.value, "symbol": symbol, "tpSlMode": tp_sl_mode,
-        })
-
-    def add_reduce_margin(self, symbol: str, margin: str, category: Category = Category.LINEAR) -> dict:
+    def add_reduce_margin(
+        self, symbol: str, margin: str, category: Category = Category.LINEAR
+    ) -> dict:
         """Add or reduce margin for isolated position. Positive=add, negative=reduce."""
 
+        return self.api_request(
+            "POST",
+            "/v5/position/add-margin",
+            json_data={
+                "category": category.value,
+                "symbol": symbol,
+                "margin": margin,
+            },
+        )
 
-        return self.api_request("POST", "/v5/position/add-margin", json_data={
-            "category": category.value, "symbol": symbol, "margin": margin,
-        })
-
-    def set_auto_add_margin(self, symbol: str, auto_add: bool = True,
-                            category: Category = Category.LINEAR) -> dict:
+    def set_auto_add_margin(
+        self, symbol: str, auto_add: bool = True, category: Category = Category.LINEAR
+    ) -> dict:
         """Toggle auto-add-margin for isolated margin positions."""
 
+        return self.api_request(
+            "POST",
+            "/v5/position/set-auto-add-margin",
+            json_data={
+                "category": category.value,
+                "symbol": symbol,
+                "autoAddMargin": 1 if auto_add else 0,
+            },
+        )
 
-        return self.api_request("POST", "/v5/position/set-auto-add-margin", json_data={
-            "category": category.value, "symbol": symbol,
-            "autoAddMargin": 1 if auto_add else 0,
-        })
-
-    def get_executions(self, symbol: str = None, category: Category = Category.LINEAR,
-                       limit: int = 50, start_time: int = None, end_time: int = None) -> list:
+    def get_executions(
+        self,
+        symbol: str = None,
+        category: Category = Category.LINEAR,
+        limit: int = 50,
+        start_time: int = None,
+        end_time: int = None,
+    ) -> list:
         """Get execution records (fills)."""
         params = {"category": category.value, "limit": str(limit)}
         if symbol:
@@ -9247,41 +10835,68 @@ class BybitToolDispatcher:
         resp = self.api_request("GET", "/v5/execution/list", params=params)
         return resp.get("result", {}).get("list", [])
 
-    def confirm_risk_limit(self, symbol: str, category: Category = Category.LINEAR) -> dict:
+    def confirm_risk_limit(
+        self, symbol: str, category: Category = Category.LINEAR
+    ) -> dict:
         """Confirm pending risk limit change."""
 
-
-        return self.api_request("POST", "/v5/position/confirm-pending-mmr", json_data={
-            "category": category.value, "symbol": symbol,
-        })
+        return self.api_request(
+            "POST",
+            "/v5/position/confirm-pending-mmr",
+            json_data={
+                "category": category.value,
+                "symbol": symbol,
+            },
+        )
 
     def set_collateral_coin(self, coin: str, switch: bool = True) -> dict:
         """Toggle whether a coin is used as collateral in unified margin."""
 
+        return self.api_request(
+            "POST",
+            "/v5/account/set-collateral-switch",
+            json_data={
+                "coin": coin,
+                "collateralSwitch": "ON" if switch else "OFF",
+            },
+        )
 
-        return self.api_request("POST", "/v5/account/set-collateral-switch", json_data={
-            "coin": coin, "collateralSwitch": "ON" if switch else "OFF",
-        })
-
-    def get_premium_index_kline(self, symbol: str, interval: str = "60",
-                                 limit: int = 200, category: Category = Category.LINEAR) -> list:
+    def get_premium_index_kline(
+        self,
+        symbol: str,
+        interval: str = "60",
+        limit: int = 200,
+        category: Category = Category.LINEAR,
+    ) -> list:
         """Get premium index price kline data."""
-        params = {"category": category.value, "symbol": symbol,
-                  "interval": interval, "limit": str(limit)}
-        resp = self.api_request("GET", "/v5/market/premium-index-price-kline", params=params)
+        params = {
+            "category": category.value,
+            "symbol": symbol,
+            "interval": interval,
+            "limit": str(limit),
+        }
+        resp = self.api_request(
+            "GET", "/v5/market/premium-index-price-kline", params=params
+        )
         return resp.get("result", {}).get("list", [])
 
-    def calculate_heikin_ashi(self, opens: list, highs: list, lows: list, closes: list) -> dict:
+    def calculate_heikin_ashi(
+        self, opens: list, highs: list, lows: list, closes: list
+    ) -> dict:
         """Calculate Heikin-Ashi candles from OHLC data."""
-        ha_close = [(o + h + l + c) / 4 for o, h, l, c in zip(opens, highs, lows, closes)]
+        ha_close = [
+            (o + h + l + c) / 4 for o, h, l, c in zip(opens, highs, lows, closes)
+        ]
         ha_open = [opens[0]]
         for i in range(1, len(opens)):
             ha_open.append((ha_open[-1] + ha_close[i - 1]) / 2)
         ha_high = [max(h, ho, hc) for h, ho, hc in zip(highs, ha_open, ha_close)]
         ha_low = [min(l, ho, hc) for l, ho, hc in zip(lows, ha_open, ha_close)]
         return {
-            "ha_open": ha_open[-5:], "ha_high": ha_high[-5:],
-            "ha_low": ha_low[-5:], "ha_close": ha_close[-5:],
+            "ha_open": ha_open[-5:],
+            "ha_high": ha_high[-5:],
+            "ha_low": ha_low[-5:],
+            "ha_close": ha_close[-5:],
             "trend": "bullish" if ha_close[-1] > ha_open[-1] else "bearish",
             "candles": len(ha_close),
         }
@@ -9290,7 +10905,9 @@ class BybitToolDispatcher:
         """Calculate Renko bricks from close prices."""
         if brick_size is None:
             atr_val = self.calculate_atr(closes, closes, closes, 14)
-            brick_size = atr_val if isinstance(atr_val, (int, float)) else closes[-1] * 0.01
+            brick_size = (
+                atr_val if isinstance(atr_val, (int, float)) else closes[-1] * 0.01
+            )
         bricks = []
         base = closes[0]
         for c in closes[1:]:
@@ -9303,8 +10920,10 @@ class BybitToolDispatcher:
         up = sum(1 for b in bricks if b["direction"] == "up")
         down = len(bricks) - up
         return {
-            "brick_size": brick_size, "total_bricks": len(bricks),
-            "up_bricks": up, "down_bricks": down,
+            "brick_size": brick_size,
+            "total_bricks": len(bricks),
+            "up_bricks": up,
+            "down_bricks": down,
             "last_bricks": bricks[-5:] if bricks else [],
             "trend": "bullish" if up > down else "bearish" if down > up else "neutral",
         }
@@ -9319,8 +10938,13 @@ class BybitToolDispatcher:
         r3 = high + 2 * (pivot - low)
         s3 = low - 2 * (high - pivot)
         return {
-            "pivot": round(pivot, 8), "r1": round(r1, 8), "r2": round(r2, 8),
-            "r3": round(r3, 8), "s1": round(s1, 8), "s2": round(s2, 8), "s3": round(s3, 8),
+            "pivot": round(pivot, 8),
+            "r1": round(r1, 8),
+            "r2": round(r2, 8),
+            "r3": round(r3, 8),
+            "s1": round(s1, 8),
+            "s2": round(s2, 8),
+            "s3": round(s3, 8),
         }
 
     # ══════════════════════════════════════════════════════════
@@ -9347,8 +10971,10 @@ class BybitToolDispatcher:
                 "status": "ok",
                 "latency_ms": round(latency, 2),
                 "score": score,
-                "circuit_state": self.circuit.state.value if hasattr(self, 'circuit') else "UNKNOWN",
-                "timestamp": time.time()
+                "circuit_state": self.circuit.state.value
+                if hasattr(self, "circuit")
+                else "UNKNOWN",
+                "timestamp": time.time(),
             }
         except Exception as e:
             return {"status": "error", "score": 0, "msg": str(e)}
@@ -9358,12 +10984,12 @@ class BybitToolDispatcher:
         try:
             resp = self.api_request("GET", "/v5/market/time", signed=False)
 
-            geo_ip       = "N/A"
+            geo_ip = "N/A"
             geo_location = {"status": "not_checked"}
 
             if self._geo_router:
                 try:
-                    geo_ip       = self._geo_router.get_public_ip()
+                    geo_ip = self._geo_router.get_public_ip()
                     geo_location = self._geo_router.get_geo_location()
                 except Exception:
                     pass
@@ -9374,35 +11000,35 @@ class BybitToolDispatcher:
                         proxy_port=self.config.pysocks_port,
                         rdns=True,
                     )
-                    geo_ip       = router.get_public_ip()
+                    geo_ip = router.get_public_ip()
                     geo_location = router.get_geo_location()
                     router.close()
                 except Exception:
                     pass
 
             return {
-                "status":            "ok",
-                "circuit":           self.circuit.state.value,
-                "circuit_fails":     self.circuit.failure_count,
-                "rate_usage":        self.limiter.current_usage,
-                "server_time":       resp.get("result", {}).get("timeNano"),
-                "time_offset_ms":    self._time_offset,
-                "base_url":          self.config.base_url,
-                "tor_enabled":       self.config.use_tor,
-                "tor_socks_port":    self.config.tor_socks_port,
-                "tor_control_port":  self.config.tor_control_port,
+                "status": "ok",
+                "circuit": self.circuit.state.value,
+                "circuit_fails": self.circuit.failure_count,
+                "rate_usage": self.limiter.current_usage,
+                "server_time": resp.get("result", {}).get("timeNano"),
+                "time_offset_ms": self._time_offset,
+                "base_url": self.config.base_url,
+                "tor_enabled": self.config.use_tor,
+                "tor_socks_port": self.config.tor_socks_port,
+                "tor_control_port": self.config.tor_control_port,
                 "tor_control_accessible": self.tor.tor_control_accessible,
-                "tor_use_pysocks":   self.config.tor_use_pysocks,
+                "tor_use_pysocks": self.config.tor_use_pysocks,
                 "pysocks_available": PYSOCKS_AVAILABLE,
-                "pysocks_enabled":   self.config.pysocks_enabled,
-                "pysocks_host":      self.config.pysocks_host,
-                "pysocks_port":      self.config.pysocks_port,
-                "pysocks_region":    self.config.pysocks_region,
-                "pysocks_global":    self.config.pysocks_global,
-                "geo_ip":            geo_ip,
-                "geo_location":      geo_location,
-                "testnet":           self.config.testnet,
-                "cache_symbols":     list(self._instrument_cache.keys()),
+                "pysocks_enabled": self.config.pysocks_enabled,
+                "pysocks_host": self.config.pysocks_host,
+                "pysocks_port": self.config.pysocks_port,
+                "pysocks_region": self.config.pysocks_region,
+                "pysocks_global": self.config.pysocks_global,
+                "geo_ip": geo_ip,
+                "geo_location": geo_location,
+                "testnet": self.config.testnet,
+                "cache_symbols": list(self._instrument_cache.keys()),
             }
         except Exception as exc:
             return {"status": "error", "msg": str(exc)}
@@ -9645,113 +11271,113 @@ def run(
         "calculate_bollinger_bandwidth",
     ],
     # ── Order fields ──────────────────────────────────────────
-    symbol:         Optional[str]   = None,
-    side:           Optional[Literal["Buy", "Sell"]] = None,
-    qty:            Optional[float] = None,
-    price:          Optional[float] = None,
-    order_type:     Optional[Literal["Limit", "Market", "LimitMaker"]] = None,
-    category:       Optional[Literal["linear", "inverse", "spot", "option"]] = None,
-    order_id:       Optional[str]   = None,
-    stop_loss:      Optional[float] = None,
-    take_profit:    Optional[float] = None,
-    trailing_stop:  Optional[float] = None,
-    reduce_only:    Optional[bool]  = False,
-    time_in_force:  Optional[Literal["GTC", "IOC", "FOK", "PostOnly"]] = None,
-    position_idx:   Optional[int]   = None,
-    client_oid:     Optional[str]   = None,
+    symbol: Optional[str] = None,
+    side: Optional[Literal["Buy", "Sell"]] = None,
+    qty: Optional[float] = None,
+    price: Optional[float] = None,
+    order_type: Optional[Literal["Limit", "Market", "LimitMaker"]] = None,
+    category: Optional[Literal["linear", "inverse", "spot", "option"]] = None,
+    order_id: Optional[str] = None,
+    stop_loss: Optional[float] = None,
+    take_profit: Optional[float] = None,
+    trailing_stop: Optional[float] = None,
+    reduce_only: Optional[bool] = False,
+    time_in_force: Optional[Literal["GTC", "IOC", "FOK", "PostOnly"]] = None,
+    position_idx: Optional[int] = None,
+    client_oid: Optional[str] = None,
     # ── Account ───────────────────────────────────────────────
-    leverage:       Optional[int]   = None,
-    buy_leverage:   Optional[int]   = None,
-    sell_leverage:  Optional[int]   = None,
-    account_type:   Optional[str]   = "UNIFIED",
+    leverage: Optional[int] = None,
+    buy_leverage: Optional[int] = None,
+    sell_leverage: Optional[int] = None,
+    account_type: Optional[str] = "UNIFIED",
     # ── Market data ───────────────────────────────────────────
-    limit:          Optional[int]   = 25,
-    interval:       Optional[str]   = "1",
-    interval_time:  Optional[str]   = "5min",
+    limit: Optional[int] = 25,
+    interval: Optional[str] = "1",
+    interval_time: Optional[str] = "5min",
     # ── Momentum ──────────────────────────────────────────────
     strong_threshold: Optional[float] = 0.20,
-    mild_threshold:   Optional[float] = 0.08,
+    mild_threshold: Optional[float] = 0.08,
     # ── Risk helpers ──────────────────────────────────────────
-    sl_pct:         Optional[float] = None,
-    tp_pct:         Optional[float] = None,
-    risk_usdt:      Optional[float] = None,
-    sl_price:       Optional[float] = None,
-    fee_rate:       Optional[float] = None,
-    funding_rate:   Optional[float] = None,
-    holding_hours:  Optional[float] = None,
-    holding_periods: Optional[int]  = None,
+    sl_pct: Optional[float] = None,
+    tp_pct: Optional[float] = None,
+    risk_usdt: Optional[float] = None,
+    sl_price: Optional[float] = None,
+    fee_rate: Optional[float] = None,
+    funding_rate: Optional[float] = None,
+    holding_hours: Optional[float] = None,
+    holding_periods: Optional[int] = None,
     # ── Batch / Iceberg ───────────────────────────────────────
-    orders:         Optional[str] = None,
-    slices:         Optional[int]   = 5,
-    delay:          Optional[float] = None,
+    orders: Optional[str] = None,
+    slices: Optional[int] = 5,
+    delay: Optional[float] = None,
     # ── Time Range Filters ─────────────────────────────────────
-    start_time:     Optional[int]   = None,
-    end_time:       Optional[int]   = None,
+    start_time: Optional[int] = None,
+    end_time: Optional[int] = None,
     # ── Position management ────────────────────────────────────
-    scale_pct:      Optional[float] = None,
-    reduce:         Optional[bool]  = False,
-    scale:          Optional[float] = None,
-    use_atr:        Optional[bool]  = False,
-    offset_pct:     Optional[float] = None,
+    scale_pct: Optional[float] = None,
+    reduce: Optional[bool] = False,
+    scale: Optional[float] = None,
+    use_atr: Optional[bool] = False,
+    offset_pct: Optional[float] = None,
     # ── Journal params ─────────────────────────────────────────
-    entry_price:    Optional[float] = None,
-    exit_price:     Optional[float] = None,
-    strategy:       Optional[str]   = None,
-    tags:           Optional[str]   = None,
-    trade_notes:    Optional[str]   = None,
-    trade_id:       Optional[str]   = None,
-    journal_status: Optional[str]   = None,
-    journal_data:   Optional[str] = None,
+    entry_price: Optional[float] = None,
+    exit_price: Optional[float] = None,
+    strategy: Optional[str] = None,
+    tags: Optional[str] = None,
+    trade_notes: Optional[str] = None,
+    trade_id: Optional[str] = None,
+    journal_status: Optional[str] = None,
+    journal_data: Optional[str] = None,
     # ── Macro params ──────────────────────────────────────────
-    total_usdt:     Optional[float] = None,
-    num_orders:     Optional[int]   = None,
-    num_grids:      Optional[int]   = None,
-    upper_price:    Optional[float] = None,
-    lower_price:    Optional[float] = None,
-    rr_ratio:       Optional[float] = None,
-    atr_mult:       Optional[float] = None,
+    total_usdt: Optional[float] = None,
+    num_orders: Optional[int] = None,
+    num_grids: Optional[int] = None,
+    upper_price: Optional[float] = None,
+    lower_price: Optional[float] = None,
+    rr_ratio: Optional[float] = None,
+    atr_mult: Optional[float] = None,
     duration_minutes: Optional[int] = None,
-    num_slices:     Optional[int]   = None,
-    min_rate:       Optional[float] = None,
-    top_n:          Optional[int]   = None,
+    num_slices: Optional[int] = None,
+    min_rate: Optional[float] = None,
+    top_n: Optional[int] = None,
     price_range_pct: Optional[float] = None,
     # ── Transfer params ───────────────────────────────────────
-    coin:           Optional[str]   = None,
-    amount:         Optional[str]   = None,
-    from_account:   Optional[str]   = None,
-    to_account:     Optional[str]   = None,
-    risk_id:        Optional[int]   = None,
-    currency:       Optional[str]   = None,
-    trigger_price:  Optional[float] = None,
-    trigger_by:     Optional[Literal["LastPrice", "IndexPrice", "MarkPrice"]] = None,
-    depth:          Optional[int]   = None,
-    period:         Optional[int]   = None,
-    num_bins:       Optional[int]   = None,
+    coin: Optional[str] = None,
+    amount: Optional[str] = None,
+    from_account: Optional[str] = None,
+    to_account: Optional[str] = None,
+    risk_id: Optional[int] = None,
+    currency: Optional[str] = None,
+    trigger_price: Optional[float] = None,
+    trigger_by: Optional[Literal["LastPrice", "IndexPrice", "MarkPrice"]] = None,
+    depth: Optional[int] = None,
+    period: Optional[int] = None,
+    num_bins: Optional[int] = None,
     # ── New sizing / strategy params ─────────────────────────
-    num_levels:     Optional[int]   = None,
-    num_entries:    Optional[int]   = None,
-    num_exits:      Optional[int]   = None,
-    spacing_pct:    Optional[float] = None,
+    num_levels: Optional[int] = None,
+    num_entries: Optional[int] = None,
+    num_exits: Optional[int] = None,
+    spacing_pct: Optional[float] = None,
     tp_spacing_pct: Optional[float] = None,
-    hedge_pct:      Optional[float] = None,
-    dip_pct:        Optional[float] = None,
-    symbols:        Optional[List[str]] = None,
-    risk_fraction:  Optional[float] = None,
-    consecutive_wins:  Optional[int] = None,
+    hedge_pct: Optional[float] = None,
+    dip_pct: Optional[float] = None,
+    symbols: Optional[List[str]] = None,
+    risk_fraction: Optional[float] = None,
+    consecutive_wins: Optional[int] = None,
     consecutive_losses: Optional[int] = None,
-    daily_return_pct:   Optional[float] = None,
-    days:           Optional[int]   = None,
-    win_rate_pct:   Optional[float] = None,
-    trades_per_day: Optional[int]   = None,
+    daily_return_pct: Optional[float] = None,
+    days: Optional[int] = None,
+    win_rate_pct: Optional[float] = None,
+    trades_per_day: Optional[int] = None,
     starting_capital: Optional[float] = None,
     maint_margin_rate: Optional[float] = None,
     account_balance: Optional[float] = None,
     # ── New V5 endpoint params ────────────────────────────────────
-    margin:         Optional[str]   = None,
+    margin: Optional[str] = None,
     auto_add_margin: Optional[bool] = None,
-    tp_sl_mode:     Optional[Literal["Full", "Partial"]] = None,
+    tp_sl_mode: Optional[Literal["Full", "Partial"]] = None,
     collateral_switch: Optional[bool] = None,
-    brick_size:     Optional[float] = None,
+    brick_size: Optional[float] = None,
 ) -> dict:
     """BYBIT REALM v4.0 – Comprehensive Bybit V5 trading tool with all endpoints, indicators, breakeven logic, L2 analysis, and profitable macros.
 
@@ -9858,17 +11484,35 @@ def run(
         try:
             _parsed_orders = json.loads(orders) if isinstance(orders, str) else orders
         except (json.JSONDecodeError, TypeError):
-            return {"status": "error", "msg": "orders must be a valid JSON array string"}
+            return {
+                "status": "error",
+                "msg": "orders must be a valid JSON array string",
+            }
     _parsed_journal = None
     if journal_data:
         try:
-            _parsed_journal = json.loads(journal_data) if isinstance(journal_data, str) else journal_data
+            _parsed_journal = (
+                json.loads(journal_data)
+                if isinstance(journal_data, str)
+                else journal_data
+            )
         except (json.JSONDecodeError, TypeError):
-            return {"status": "error", "msg": "journal_data must be a valid JSON array string"}
+            return {
+                "status": "error",
+                "msg": "journal_data must be a valid JSON array string",
+            }
 
     try:
-        cat = Category(str(category).strip()) if category and str(category).strip() else Category.LINEAR
-        tif = TimeInForce(str(time_in_force).strip()) if time_in_force and str(time_in_force).strip() else TimeInForce.GTC
+        cat = (
+            Category(str(category).strip())
+            if category and str(category).strip()
+            else Category.LINEAR
+        )
+        tif = (
+            TimeInForce(str(time_in_force).strip())
+            if time_in_force and str(time_in_force).strip()
+            else TimeInForce.GTC
+        )
 
         pidx = PositionIdx.ONE_WAY
         if position_idx is not None:
@@ -9889,7 +11533,12 @@ def run(
             return {"status": "ok", "msg": "Circuit breaker reset to CLOSED"}
         elif action == "renew_tor_circuit":
             success = bot.tor.renew_tor_circuit()
-            return {"status": "ok" if success else "error", "msg": "Tor circuit renewed" if success else "Failed to renew Tor circuit"}
+            return {
+                "status": "ok" if success else "error",
+                "msg": "Tor circuit renewed"
+                if success
+                else "Failed to renew Tor circuit",
+            }
         elif action == "get_server_time":
             return bot.get_server_time()
 
@@ -9899,36 +11548,76 @@ def run(
         elif action == "place_order":
             if not symbol or not side or qty is None:
                 return {"status": "error", "msg": "symbol, side, and qty are required"}
-            ot = OrderType(order_type) if order_type else (OrderType.LIMIT if price is not None else OrderType.MARKET)
+            ot = (
+                OrderType(order_type)
+                if order_type
+                else (OrderType.LIMIT if price is not None else OrderType.MARKET)
+            )
             return bot.place_order(
-                symbol=symbol, side=OrderSide(side), qty=qty, price=price,
-                order_type=ot, category=cat,
-                stop_loss=stop_loss, take_profit=take_profit,
-                reduce_only=reduce_only or False, time_in_force=tif,
-                position_idx=pidx, client_oid=client_oid, trailing_stop=trailing_stop,
+                symbol=symbol,
+                side=OrderSide(side),
+                qty=qty,
+                price=price,
+                order_type=ot,
+                category=cat,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                reduce_only=reduce_only or False,
+                time_in_force=tif,
+                position_idx=pidx,
+                client_oid=client_oid,
+                trailing_stop=trailing_stop,
             )
         elif action == "amend_order":
             if not symbol or (not order_id and not client_oid):
-                return {"status": "error", "msg": "symbol and (order_id or client_oid) required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol and (order_id or client_oid) required",
+                }
             return bot.amend_order(
-                symbol=symbol, order_id=order_id, client_oid=client_oid,
-                qty=qty, price=price, category=cat,
-                stop_loss=stop_loss, take_profit=take_profit,
+                symbol=symbol,
+                order_id=order_id,
+                client_oid=client_oid,
+                qty=qty,
+                price=price,
+                category=cat,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
                 trigger_price=trigger_price,
             )
         elif action == "cancel_order":
             if not symbol or (not order_id and not client_oid):
-                return {"status": "error", "msg": "symbol and (order_id or client_oid) required"}
-            return bot.cancel_order(symbol=symbol, order_id=order_id, client_oid=client_oid, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol and (order_id or client_oid) required",
+                }
+            return bot.cancel_order(
+                symbol=symbol, order_id=order_id, client_oid=client_oid, category=cat
+            )
         elif action in ["cancel_all_orders", "cancel_all"]:
             return bot.cancel_all_orders(symbol=symbol, category=cat)
         elif action in ["get_open_orders", "open_orders", "orders"]:
-            return {"orders": bot.get_open_orders(symbol=symbol, category=cat, limit=limit or 50)}
+            return {
+                "orders": bot.get_open_orders(
+                    symbol=symbol, category=cat, limit=limit or 50
+                )
+            }
         elif action in ["get_order_history", "order_history", "history"]:
-            return {"orders": bot.get_order_history(symbol=symbol, category=cat, limit=limit or 50, start_time=start_time, end_time=end_time)}
+            return {
+                "orders": bot.get_order_history(
+                    symbol=symbol,
+                    category=cat,
+                    limit=limit or 50,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+            }
         elif action == "batch_orders":
             if not _parsed_orders:
-                return {"status": "error", "msg": "orders list is required (JSON string)"}
+                return {
+                    "status": "error",
+                    "msg": "orders list is required (JSON string)",
+                }
             return bot.safe_execute(bot.execute_scalp_batch, _parsed_orders)
         elif action == "iceberg_order":
             if not symbol or not side or qty is None:
@@ -9937,26 +11626,44 @@ def run(
                 ticker = bot.get_ticker(symbol, cat)
                 price = float(ticker.get("lastPrice", 0))
             results = bot.place_iceberg_order(
-                symbol=symbol, side=OrderSide(side), total_qty=qty, price=price,
-                slices=int(slices) if slices else 5, category=cat,
-                stop_loss=stop_loss, take_profit=take_profit,
+                symbol=symbol,
+                side=OrderSide(side),
+                total_qty=qty,
+                price=price,
+                slices=int(slices) if slices else 5,
+                category=cat,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
                 delay=float(delay) if delay is not None else 0.5,
             )
             return {"status": "ok", "iceberg_results": results}
         elif action == "place_trailing_stop_order":
             if not symbol or not side or qty is None or trailing_stop is None:
-                return {"status": "error", "msg": "symbol, side, qty, and trailing_stop required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol, side, qty, and trailing_stop required",
+                }
             return bot.place_trailing_stop_order(
-                symbol=symbol, side=OrderSide(side), qty=qty,
-                trailing_distance=trailing_stop, category=cat,
-                reduce_only=reduce_only or False, position_idx=pidx,
+                symbol=symbol,
+                side=OrderSide(side),
+                qty=qty,
+                trailing_distance=trailing_stop,
+                category=cat,
+                reduce_only=reduce_only or False,
+                position_idx=pidx,
             )
         elif action == "calculate_trailing_stop_levels":
             if not symbol or price is None or not side or trailing_stop is None:
-                return {"status": "error", "msg": "symbol, price (entry), side, and trailing_stop required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol, price (entry), side, and trailing_stop required",
+                }
             return bot.calculate_trailing_stop_levels(
-                symbol=symbol, entry_price=price, side=OrderSide(side),
-                trailing_distance=trailing_stop, category=cat,
+                symbol=symbol,
+                entry_price=price,
+                side=OrderSide(side),
+                trailing_distance=trailing_stop,
+                category=cat,
             )
         elif action == "get_trailing_stop_status":
             if not symbol:
@@ -9964,23 +11671,44 @@ def run(
             return bot.get_trailing_stop_status(symbol=symbol, category=cat)
         elif action == "place_conditional_order":
             if not symbol or not side or qty is None or trigger_price is None:
-                return {"status": "error", "msg": "symbol, side, qty, and trigger_price required"}
-            ot = OrderType(order_type) if order_type else (OrderType.LIMIT if price is not None else OrderType.MARKET)
+                return {
+                    "status": "error",
+                    "msg": "symbol, side, qty, and trigger_price required",
+                }
+            ot = (
+                OrderType(order_type)
+                if order_type
+                else (OrderType.LIMIT if price is not None else OrderType.MARKET)
+            )
             return bot.place_conditional_order(
-                symbol=symbol, side=OrderSide(side), qty=qty,
-                trigger_price=trigger_price, price=price,
-                order_type=ot, trigger_by=trigger_by or "LastPrice",
-                category=cat, stop_loss=stop_loss, take_profit=take_profit,
-                reduce_only=reduce_only or False, time_in_force=tif,
-                position_idx=pidx, client_oid=client_oid,
+                symbol=symbol,
+                side=OrderSide(side),
+                qty=qty,
+                trigger_price=trigger_price,
+                price=price,
+                order_type=ot,
+                trigger_by=trigger_by or "LastPrice",
+                category=cat,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                reduce_only=reduce_only or False,
+                time_in_force=tif,
+                position_idx=pidx,
+                client_oid=client_oid,
             )
         elif action == "batch_amend_orders":
             if not _parsed_orders:
-                return {"status": "error", "msg": "orders list is required (JSON string)"}
+                return {
+                    "status": "error",
+                    "msg": "orders list is required (JSON string)",
+                }
             return bot.batch_amend_orders(_parsed_orders, category=cat)
         elif action == "batch_cancel_orders":
             if not _parsed_orders:
-                return {"status": "error", "msg": "orders list is required (JSON string)"}
+                return {
+                    "status": "error",
+                    "msg": "orders list is required (JSON string)",
+                }
             return bot.batch_cancel_orders(_parsed_orders, category=cat)
 
         # ══════════════════════════════════════════════════════
@@ -9993,38 +11721,82 @@ def run(
         elif action == "set_leverage":
             if not symbol or leverage is None:
                 return {"status": "error", "msg": "symbol and leverage are required"}
-            return bot.set_leverage(symbol=symbol, leverage=leverage, category=cat,
-                                    buy_leverage=buy_leverage, sell_leverage=sell_leverage)
+            return bot.set_leverage(
+                symbol=symbol,
+                leverage=leverage,
+                category=cat,
+                buy_leverage=buy_leverage,
+                sell_leverage=sell_leverage,
+            )
         elif action == "set_trading_stop":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.set_trading_stop(symbol=symbol, stop_loss=stop_loss, take_profit=take_profit,
-                                        trailing_stop=trailing_stop, category=cat, position_idx=pidx)
+            return bot.set_trading_stop(
+                symbol=symbol,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                trailing_stop=trailing_stop,
+                category=cat,
+                position_idx=pidx,
+            )
         elif action == "get_fee_rate":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
             return bot.get_fee_rate(symbol=symbol, category=cat)
         elif action == "get_transaction_log":
-            return {"list": bot.get_transaction_log(
-                account_type=account_type or "UNIFIED", category=cat,
-                start_time=start_time, end_time=end_time, limit=limit or 20
-            )}
+            return {
+                "list": bot.get_transaction_log(
+                    account_type=account_type or "UNIFIED",
+                    category=cat,
+                    start_time=start_time,
+                    end_time=end_time,
+                    limit=limit or 20,
+                )
+            }
         elif action == "get_trade_history":
-            return {"trades": bot.get_trade_history(symbol=symbol, category=cat, limit=limit or 100, start_time=start_time, end_time=end_time)}
+            return {
+                "trades": bot.get_trade_history(
+                    symbol=symbol,
+                    category=cat,
+                    limit=limit or 100,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+            }
         elif action == "switch_margin_mode":
             if not symbol or position_idx is None:
-                return {"status": "error", "msg": "symbol and position_idx (trade_mode: 0=cross, 1=isolated) required"}
-            return bot.switch_margin_mode(symbol=symbol, trade_mode=position_idx, category=cat, leverage=str(leverage or 1))
+                return {
+                    "status": "error",
+                    "msg": "symbol and position_idx (trade_mode: 0=cross, 1=isolated) required",
+                }
+            return bot.switch_margin_mode(
+                symbol=symbol,
+                trade_mode=position_idx,
+                category=cat,
+                leverage=str(leverage or 1),
+            )
         elif action == "switch_position_mode":
             if position_idx is None:
-                return {"status": "error", "msg": "position_idx (mode: 0=one-way, 3=hedge) required"}
-            return bot.switch_position_mode(category=cat, symbol=symbol, mode=position_idx)
+                return {
+                    "status": "error",
+                    "msg": "position_idx (mode: 0=one-way, 3=hedge) required",
+                }
+            return bot.switch_position_mode(
+                category=cat, symbol=symbol, mode=position_idx
+            )
         elif action == "get_account_info":
             return bot.get_account_info()
         elif action == "get_api_key_info":
             return bot.get_api_key_info()
         elif action == "get_borrow_history":
-            return {"list": bot.get_borrow_history(currency=currency, limit=limit or 50, start_time=start_time, end_time=end_time)}
+            return {
+                "list": bot.get_borrow_history(
+                    currency=currency,
+                    limit=limit or 50,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+            }
         elif action == "get_collateral_info":
             return {"list": bot.get_collateral_info(currency=currency)}
         elif action == "get_coin_greeks":
@@ -10033,7 +11805,8 @@ def run(
             if not coin or not amount:
                 return {"status": "error", "msg": "coin and amount required"}
             return bot.internal_transfer(
-                coin=coin, amount=amount,
+                coin=coin,
+                amount=amount,
                 from_account=from_account or "UNIFIED",
                 to_account=to_account or "FUND",
             )
@@ -10058,22 +11831,43 @@ def run(
         elif action == "get_klines":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return {"klines": bot.get_klines(symbol=symbol, interval=interval or "1",
-                                              limit=limit or 200, category=cat,
-                                              start_time=start_time, end_time=end_time)}
+            return {
+                "klines": bot.get_klines(
+                    symbol=symbol,
+                    interval=interval or "1",
+                    limit=limit or 200,
+                    category=cat,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+            }
         elif action == "get_recent_trades":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return {"trades": bot.get_recent_trades(symbol=symbol, limit=limit or 500, category=cat)}
+            return {
+                "trades": bot.get_recent_trades(
+                    symbol=symbol, limit=limit or 500, category=cat
+                )
+            }
         elif action == "get_open_interest":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return {"open_interest": bot.get_open_interest(symbol=symbol, interval_time=interval_time or "5min",
-                                                            category=cat, limit=limit or 50)}
+            return {
+                "open_interest": bot.get_open_interest(
+                    symbol=symbol,
+                    interval_time=interval_time or "5min",
+                    category=cat,
+                    limit=limit or 50,
+                )
+            }
         elif action == "get_liquidations":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return {"liquidations": bot.get_liquidations(symbol=symbol, category=cat, limit=limit or 200)}
+            return {
+                "liquidations": bot.get_liquidations(
+                    symbol=symbol, category=cat, limit=limit or 200
+                )
+            }
         elif action == "get_funding_rate":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
@@ -10081,11 +11875,23 @@ def run(
         elif action == "get_funding_rate_history":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return {"list": bot.get_funding_rate_history(symbol=symbol, category=cat, limit=limit or 200, start_time=start_time, end_time=end_time)}
+            return {
+                "list": bot.get_funding_rate_history(
+                    symbol=symbol,
+                    category=cat,
+                    limit=limit or 200,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+            }
         elif action == "get_long_short_ratio":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return {"list": bot.get_long_short_ratio(symbol=symbol, period=interval_time or "5min", limit=limit or 50)}
+            return {
+                "list": bot.get_long_short_ratio(
+                    symbol=symbol, period=interval_time or "5min", limit=limit or 50
+                )
+            }
         elif action == "get_mark_price":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
@@ -10099,7 +11905,11 @@ def run(
                 return {"status": "error", "msg": "symbol is required"}
             return bot.get_price_bands(symbol=symbol, category=cat)
         elif action == "get_instruments_info":
-            return {"list": bot.get_instruments_info(symbol=symbol, category=cat, limit=limit or 500)}
+            return {
+                "list": bot.get_instruments_info(
+                    symbol=symbol, category=cat, limit=limit or 500
+                )
+            }
         elif action == "get_risk_limit":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
@@ -10111,9 +11921,17 @@ def run(
         elif action == "get_insurance_pool":
             return {"list": bot.get_insurance_pool(coin=coin or "USDT")}
         elif action == "get_delivery_price":
-            return {"list": bot.get_delivery_price(symbol=symbol, category=cat, limit=limit or 50)}
+            return {
+                "list": bot.get_delivery_price(
+                    symbol=symbol, category=cat, limit=limit or 50
+                )
+            }
         elif action == "get_historical_volatility":
-            return {"list": bot.get_historical_volatility(period=period or 7, start_time=start_time, end_time=end_time)}
+            return {
+                "list": bot.get_historical_volatility(
+                    period=period or 7, start_time=start_time, end_time=end_time
+                )
+            }
 
         # ══════════════════════════════════════════════════════
         # L2 ORDERBOOK ANALYSIS
@@ -10121,7 +11939,9 @@ def run(
         elif action == "get_l2_orderbook_analysis":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.get_l2_orderbook_analysis(symbol=symbol, depth=depth or 50, category=cat)
+            return bot.get_l2_orderbook_analysis(
+                symbol=symbol, depth=depth or 50, category=cat
+            )
 
         # ══════════════════════════════════════════════════════
         # MARKET INTELLIGENCE
@@ -10129,9 +11949,12 @@ def run(
         elif action == "get_market_momentum":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.get_market_momentum(symbol=symbol, category=cat,
-                                            strong_threshold=strong_threshold or 0.20,
-                                            mild_threshold=mild_threshold or 0.08)
+            return bot.get_market_momentum(
+                symbol=symbol,
+                category=cat,
+                strong_threshold=strong_threshold or 0.20,
+                mild_threshold=mild_threshold or 0.08,
+            )
         elif action == "get_market_health":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
@@ -10139,27 +11962,48 @@ def run(
         elif action == "get_trend_analysis":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.get_trend_analysis(symbol=symbol, category=cat,
-                                           interval=interval or "60",
-                                           lookback_periods=max(limit or 200, 200),
-                                           include_advanced_indicators=True)
+            return bot.get_trend_analysis(
+                symbol=symbol,
+                category=cat,
+                interval=interval or "60",
+                lookback_periods=max(limit or 200, 200),
+                include_advanced_indicators=True,
+            )
 
         # ══════════════════════════════════════════════════════
         # TECHNICAL INDICATORS
         # ══════════════════════════════════════════════════════
         elif action == "calculate_bollinger_bands":
             if not symbol:
-                return {"status": "error", "msg": "symbol required (fetches klines automatically)"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol required (fetches klines automatically)",
+                }
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return bot.calculate_bollinger_bands(closes, period=int(sl_pct or 20), std_dev=tp_pct or 2.0)
+            return bot.calculate_bollinger_bands(
+                closes, period=int(sl_pct or 20), std_dev=tp_pct or 2.0
+            )
         elif action == "calculate_macd":
             if not symbol:
-                return {"status": "error", "msg": "symbol required (fetches klines automatically)"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol required (fetches klines automatically)",
+                }
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10167,19 +12011,37 @@ def run(
             return bot.calculate_macd(closes)
         elif action == "calculate_stoch_rsi":
             if not symbol:
-                return {"status": "error", "msg": "symbol required (fetches klines automatically)"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol required (fetches klines automatically)",
+                }
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
             smooth_k = int(sl_pct) if sl_pct and sl_pct > 0 else 3
             smooth_d = int(tp_pct) if tp_pct and tp_pct > 0 else 3
-            return bot.calculate_stoch_rsi(closes, period=14, smooth_k=smooth_k, smooth_d=smooth_d)
+            return bot.calculate_stoch_rsi(
+                closes, period=14, smooth_k=smooth_k, smooth_d=smooth_d
+            )
         elif action == "calculate_cci":
             if not symbol:
-                return {"status": "error", "msg": "symbol required (fetches klines automatically)"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol required (fetches klines automatically)",
+                }
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10189,18 +12051,36 @@ def run(
             return {"cci": bot.calculate_cci(highs, lows, closes)}
         elif action == "calculate_donchian_channels":
             if not symbol:
-                return {"status": "error", "msg": "symbol required (fetches klines automatically)"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol required (fetches klines automatically)",
+                }
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
-            return bot.calculate_donchian_channels(highs, lows, period=int(sl_pct or 20))
+            return bot.calculate_donchian_channels(
+                highs, lows, period=int(sl_pct or 20)
+            )
         elif action == "calculate_adx":
             if not symbol:
-                return {"status": "error", "msg": "symbol required (fetches klines automatically)"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol required (fetches klines automatically)",
+                }
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10210,21 +12090,48 @@ def run(
             return {"adx": bot.calculate_adx(highs, lows, closes)}
         elif action == "calculate_fib_pivots":
             if price is None or qty is None or sl_price is None:
-                return {"status": "error", "msg": "price (High), qty (Low), sl_price (Close) required"}
+                return {
+                    "status": "error",
+                    "msg": "price (High), qty (Low), sl_price (Close) required",
+                }
             return bot.calculate_fib_pivots(high=price, low=qty, close=sl_price)
         elif action == "calculate_vwap":
             if not symbol:
-                return {"status": "error", "msg": "symbol required (fetches klines automatically)"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol required (fetches klines automatically)",
+                }
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
-            ohlcv = [{"high": float(k[2]), "low": float(k[3]), "close": float(k[4]), "volume": float(k[5])} for k in klines]
+            ohlcv = [
+                {
+                    "high": float(k[2]),
+                    "low": float(k[3]),
+                    "close": float(k[4]),
+                    "volume": float(k[5]),
+                }
+                for k in klines
+            ]
             return {"vwap": bot.calculate_vwap(ohlcv)}
         elif action == "calculate_ichimoku_cloud":
             if not symbol:
-                return {"status": "error", "msg": "symbol required (fetches klines automatically)"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=max(limit or 200, 60), category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol required (fetches klines automatically)",
+                }
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=max(limit or 200, 60),
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10237,12 +12144,24 @@ def run(
         # ══════════════════════════════════════════════════════
         elif action == "calculate_kelly_criterion":
             if sl_pct is None or tp_pct is None:
-                return {"status": "error", "msg": "sl_pct (win_rate) and tp_pct (win/loss ratio) required"}
+                return {
+                    "status": "error",
+                    "msg": "sl_pct (win_rate) and tp_pct (win/loss ratio) required",
+                }
             return {"kelly_fraction": bot.calculate_kelly_criterion(sl_pct, tp_pct)}
         elif action == "calculate_trade_pnl":
             if price is None or qty is None or sl_price is None or not side:
-                return {"status": "error", "msg": "price (entry), sl_price (exit), qty, side required"}
-            return bot.calculate_trade_pnl(entry=price, exit=sl_price, qty=qty, side=side, fee_rate=fee_rate or 0.0006)
+                return {
+                    "status": "error",
+                    "msg": "price (entry), sl_price (exit), qty, side required",
+                }
+            return bot.calculate_trade_pnl(
+                entry=price,
+                exit=sl_price,
+                qty=qty,
+                side=side,
+                fee_rate=fee_rate or 0.0006,
+            )
         elif action == "calculate_profit_target":
             if price is None or sl_price is None:
                 return {"status": "error", "msg": "price (entry) and sl_price required"}
@@ -10250,38 +12169,77 @@ def run(
         elif action == "calculate_sl_tp":
             if not side or price is None:
                 return {"status": "error", "msg": "side and price are required"}
-            sl, tp = bot.calculate_sl_tp(entry_price=price, side=OrderSide(side), sl_pct=sl_pct, tp_pct=tp_pct)
+            sl, tp = bot.calculate_sl_tp(
+                entry_price=price, side=OrderSide(side), sl_pct=sl_pct, tp_pct=tp_pct
+            )
             return {
-                "symbol": symbol, "entry_price": price, "side": side,
-                "stop_loss": sl, "take_profit": tp,
+                "symbol": symbol,
+                "entry_price": price,
+                "side": side,
+                "stop_loss": sl,
+                "take_profit": tp,
                 "sl_pct": sl_pct or bot.config.default_stop_loss,
                 "tp_pct": tp_pct or bot.config.default_take_profit,
             }
         elif action == "calculate_position_size":
             if not symbol or price is None or sl_price is None or risk_usdt is None:
-                return {"status": "error", "msg": "symbol, price, sl_price, and risk_usdt required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol, price, sl_price, and risk_usdt required",
+                }
             lev = leverage if leverage is not None else None
             qty_out = bot.calculate_position_size(
-                symbol=symbol, entry_price=price, sl_price=sl_price,
-                risk_usdt=risk_usdt, category=cat, leverage=lev,
+                symbol=symbol,
+                entry_price=price,
+                sl_price=sl_price,
+                risk_usdt=risk_usdt,
+                category=cat,
+                leverage=lev,
             )
-            return {"symbol": symbol, "entry_price": price, "sl_price": sl_price,
-                    "risk_usdt": risk_usdt, "quantity": qty_out, "leverage_used": lev}
+            return {
+                "symbol": symbol,
+                "entry_price": price,
+                "sl_price": sl_price,
+                "risk_usdt": risk_usdt,
+                "quantity": qty_out,
+                "leverage_used": lev,
+            }
         elif action == "calculate_volatility_adjusted_size":
             if not symbol or price is None or risk_usdt is None:
-                return {"status": "error", "msg": "symbol, price, sl_price, and risk_usdt required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol, price, sl_price, and risk_usdt required",
+                }
             _sl = sl_price if sl_price is not None else price * 0.98
             _bal = account_balance if account_balance is not None else risk_usdt / 0.02
             result = bot.calculate_volatility_adjusted_size(
-                symbol=symbol, entry_price=price, sl_price=_sl,
-                risk_usdt=risk_usdt, account_balance=_bal, category=cat,
+                symbol=symbol,
+                entry_price=price,
+                sl_price=_sl,
+                risk_usdt=risk_usdt,
+                account_balance=_bal,
+                category=cat,
             )
-            return result if isinstance(result, dict) else {"symbol": symbol, "entry_price": price, "risk_usdt": risk_usdt, "quantity": result}
+            return (
+                result
+                if isinstance(result, dict)
+                else {
+                    "symbol": symbol,
+                    "entry_price": price,
+                    "risk_usdt": risk_usdt,
+                    "quantity": result,
+                }
+            )
         elif action == "calculate_breakeven":
             if price is None or qty is None or not side:
-                return {"status": "error", "msg": "price (entry), qty, and side required"}
+                return {
+                    "status": "error",
+                    "msg": "price (entry), qty, and side required",
+                }
             return bot.calculate_breakeven(
-                entry_price=price, qty=qty, side=side,
+                entry_price=price,
+                qty=qty,
+                side=side,
                 fee_rate=fee_rate or 0.0006,
                 funding_rate=funding_rate or 0.0,
                 holding_periods=holding_periods or 0,
@@ -10289,18 +12247,30 @@ def run(
             )
         elif action == "calculate_breakeven_with_fees":
             if not symbol or price is None or qty is None or not side:
-                return {"status": "error", "msg": "symbol, price (entry), qty, and side required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol, price (entry), qty, and side required",
+                }
             return bot.calculate_breakeven_with_fees(
-                symbol=symbol, entry_price=price, qty=qty, side=side,
+                symbol=symbol,
+                entry_price=price,
+                qty=qty,
+                side=side,
                 category=cat,
                 leverage=float(leverage) if leverage else 1.0,
                 holding_hours=holding_hours or 0.0,
             )
         elif action == "calculate_profit_after_fees":
             if price is None or sl_price is None or qty is None or not side:
-                return {"status": "error", "msg": "price (entry), sl_price (exit), qty, side required"}
+                return {
+                    "status": "error",
+                    "msg": "price (entry), sl_price (exit), qty, side required",
+                }
             return bot.calculate_profit_after_fees(
-                entry_price=price, exit_price=sl_price, qty=qty, side=side,
+                entry_price=price,
+                exit_price=sl_price,
+                qty=qty,
+                side=side,
                 fee_rate=fee_rate or 0.0006,
                 funding_rate=funding_rate or 0.0,
                 holding_periods=holding_periods or 0,
@@ -10311,11 +12281,25 @@ def run(
         # PNL REPORTS
         # ══════════════════════════════════════════════════════
         elif action == "get_pnl_history":
-            return {"pnl_history": bot.get_pnl_history(symbol=symbol, category=cat, limit=limit or 100, start_time=start_time, end_time=end_time)}
+            return {
+                "pnl_history": bot.get_pnl_history(
+                    symbol=symbol,
+                    category=cat,
+                    limit=limit or 100,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+            }
         elif action == "get_pnl_report":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.get_pnl_report(symbol=symbol, category=cat, limit=limit or 100, start_time=start_time, end_time=end_time).to_dict()
+            return bot.get_pnl_report(
+                symbol=symbol,
+                category=cat,
+                limit=limit or 100,
+                start_time=start_time,
+                end_time=end_time,
+            ).to_dict()
 
         # ══════════════════════════════════════════════════════
         # PROFITABLE MACRO STRATEGIES
@@ -10324,47 +12308,70 @@ def run(
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
             return bot.macro_dca_plan(
-                symbol=symbol, total_usdt=total_usdt or 100.0,
-                num_orders=num_orders or 5, price_range_pct=price_range_pct or 5.0,
-                side=side or "Buy", category=cat,
+                symbol=symbol,
+                total_usdt=total_usdt or 100.0,
+                num_orders=num_orders or 5,
+                price_range_pct=price_range_pct or 5.0,
+                side=side or "Buy",
+                category=cat,
             )
         elif action == "macro_grid_plan":
             if not symbol or upper_price is None or lower_price is None:
-                return {"status": "error", "msg": "symbol, upper_price, and lower_price required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol, upper_price, and lower_price required",
+                }
             return bot.macro_grid_plan(
-                symbol=symbol, upper_price=upper_price, lower_price=lower_price,
-                num_grids=num_grids or 10, total_usdt=total_usdt or 100.0, category=cat,
+                symbol=symbol,
+                upper_price=upper_price,
+                lower_price=lower_price,
+                num_grids=num_grids or 10,
+                total_usdt=total_usdt or 100.0,
+                category=cat,
             )
         elif action == "macro_scalp_momentum":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
             return bot.macro_scalp_momentum(
-                symbol=symbol, risk_usdt=risk_usdt or 10.0,
-                rr_ratio=rr_ratio or 2.0, atr_sl_mult=atr_mult or 1.5, category=cat,
+                symbol=symbol,
+                risk_usdt=risk_usdt or 10.0,
+                rr_ratio=rr_ratio or 2.0,
+                atr_sl_mult=atr_mult or 1.5,
+                category=cat,
             )
         elif action == "macro_mean_reversion":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.macro_mean_reversion(symbol=symbol, risk_usdt=risk_usdt or 10.0, category=cat)
+            return bot.macro_mean_reversion(
+                symbol=symbol, risk_usdt=risk_usdt or 10.0, category=cat
+            )
         elif action == "macro_funding_arb":
             return bot.macro_funding_arb(
-                min_rate=min_rate or 0.0005, category=cat, top_n=top_n or 10,
+                min_rate=min_rate or 0.0005,
+                category=cat,
+                top_n=top_n or 10,
             )
         elif action == "macro_twap":
             if not symbol or not side or qty is None:
                 return {"status": "error", "msg": "symbol, side, and qty required"}
             return bot.macro_twap(
-                symbol=symbol, side=side, total_qty=qty,
+                symbol=symbol,
+                side=side,
+                total_qty=qty,
                 duration_minutes=duration_minutes or 30,
-                num_slices=num_slices or 10, category=cat,
+                num_slices=num_slices or 10,
+                category=cat,
             )
         elif action == "macro_breakout":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
             return bot.macro_breakout(
-                symbol=symbol, risk_usdt=risk_usdt or 10.0,
-                lookback=limit or 50, atr_mult=atr_mult or 0.5,
-                rr_ratio=rr_ratio or 3.0, category=cat,
+                symbol=symbol,
+                risk_usdt=risk_usdt or 10.0,
+                lookback=limit or 50,
+                atr_mult=atr_mult or 0.5,
+                rr_ratio=rr_ratio or 3.0,
+                category=cat,
             )
         elif action == "macro_portfolio_summary":
             return bot.macro_portfolio_summary(category=cat)
@@ -10372,13 +12379,18 @@ def run(
             if not symbol or not side:
                 return {"status": "error", "msg": "symbol and side required"}
             return bot.macro_smart_entry(
-                symbol=symbol, side=side, risk_usdt=risk_usdt or 10.0, category=cat,
+                symbol=symbol,
+                side=side,
+                risk_usdt=risk_usdt or 10.0,
+                category=cat,
             )
         elif action == "macro_microprofit_scalp":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
             return bot.macro_microprofit_scalp(
-                symbol=symbol, risk_usdt=risk_usdt or 5.0, category=cat,
+                symbol=symbol,
+                risk_usdt=risk_usdt or 5.0,
+                category=cat,
             )
 
         # ══════════════════════════════════════════════════════
@@ -10387,19 +12399,30 @@ def run(
         elif action == "volume_profile":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.get_volume_profile(symbol=symbol, num_bins=num_bins or 20, lookback=limit or 200, category=cat)
+            return bot.get_volume_profile(
+                symbol=symbol,
+                num_bins=num_bins or 20,
+                lookback=limit or 200,
+                category=cat,
+            )
         elif action == "volume_divergence":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.get_volume_divergence(symbol=symbol, lookback=limit or 50, category=cat)
+            return bot.get_volume_divergence(
+                symbol=symbol, lookback=limit or 50, category=cat
+            )
         elif action == "orderbook_heatmap":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.get_orderbook_heatmap(symbol=symbol, depth=depth or 50, category=cat)
+            return bot.get_orderbook_heatmap(
+                symbol=symbol, depth=depth or 50, category=cat
+            )
         elif action == "orderflow_analysis":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.get_orderflow_analysis(symbol=symbol, depth=depth or 50, category=cat)
+            return bot.get_orderflow_analysis(
+                symbol=symbol, depth=depth or 50, category=cat
+            )
 
         # ══════════════════════════════════════════════════════
         # COMPREHENSIVE TREND ANALYSIS
@@ -10408,8 +12431,10 @@ def run(
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
             return bot.get_comprehensive_trend_analysis(
-                symbol=symbol, interval=interval or "15",
-                lookback_periods=limit or 200, category=cat,
+                symbol=symbol,
+                interval=interval or "15",
+                lookback_periods=limit or 200,
+                category=cat,
             )
 
         # ══════════════════════════════════════════════════════
@@ -10423,16 +12448,28 @@ def run(
             if not symbol or not side or qty is None:
                 return {"status": "error", "msg": "symbol, side, and qty required"}
             return bot.validate_order_params(
-                symbol=symbol, side=side, qty=qty, price=price,
-                order_type=order_type or "Limit", category=cat.value,
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                price=price,
+                order_type=order_type or "Limit",
+                category=cat.value,
             )
         elif action == "calculate_fee_adjusted_targets":
             ep = entry_price if entry_price is not None else price
             if not symbol or not side or ep is None or qty is None:
-                return {"status": "error", "msg": "symbol, side, entry_price (or price), and qty required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol, side, entry_price (or price), and qty required",
+                }
             return bot.calculate_fee_adjusted_targets(
-                symbol=symbol, side=side, entry_price=ep, qty=qty,
-                tp_pct=tp_pct, sl_pct=sl_pct, category=cat.value,
+                symbol=symbol,
+                side=side,
+                entry_price=ep,
+                qty=qty,
+                tp_pct=tp_pct,
+                sl_pct=sl_pct,
+                category=cat.value,
             )
         elif action == "get_min_order_value":
             if not symbol:
@@ -10448,15 +12485,21 @@ def run(
             return bot.get_position_detail(symbol=symbol, category=cat.value)
         elif action == "scale_position":
             if not symbol or not side or scale_pct is None:
-                return {"status": "error", "msg": "symbol, side, and scale_pct required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol, side, and scale_pct required",
+                }
             return bot.scale_position(
-                symbol=symbol, side=side, scale_pct=scale_pct,
-                category=cat.value, reduce=reduce or False,
+                symbol=symbol,
+                side=side,
+                scale_pct=scale_pct,
+                category=cat.value,
+                reduce=reduce or False,
             )
         elif action == "close_position":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            
+
             # Robustly parse qty (e.g., "75%" or 0.75 or 0.004)
             qty_pct = 1.0
             if qty is not None:
@@ -10469,25 +12512,34 @@ def run(
                     # If it's a number, assume it's a fraction or full amount
                     q = float(qty)
                     qty_pct = q if q <= 1.0 else 1.0
-            
-            return bot.close_position(symbol=symbol, category=cat.value, qty_pct=qty_pct)
+
+            return bot.close_position(
+                symbol=symbol, category=cat.value, qty_pct=qty_pct
+            )
         elif action == "flip_position":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
-            return bot.flip_position(symbol=symbol, category=cat.value, scale=scale or 1.0)
+            return bot.flip_position(
+                symbol=symbol, category=cat.value, scale=scale or 1.0
+            )
         elif action == "auto_sl_tp":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
             return bot.auto_sl_tp(
-                symbol=symbol, category=cat.value,
-                sl_pct=sl_pct, tp_pct=tp_pct,
-                use_atr=use_atr or False, atr_mult=atr_mult or 1.5,
+                symbol=symbol,
+                category=cat.value,
+                sl_pct=sl_pct,
+                tp_pct=tp_pct,
+                use_atr=use_atr or False,
+                atr_mult=atr_mult or 1.5,
             )
         elif action == "move_sl_to_breakeven":
             if not symbol:
                 return {"status": "error", "msg": "symbol is required"}
             return bot.move_sl_to_breakeven(
-                symbol=symbol, category=cat.value, offset_pct=offset_pct or 0.001,
+                symbol=symbol,
+                category=cat.value,
+                offset_pct=offset_pct or 0.001,
             )
         elif action == "get_all_positions_summary":
             return bot.get_all_positions_summary(category=cat.value)
@@ -10497,11 +12549,20 @@ def run(
         # ══════════════════════════════════════════════════════
         elif action == "journal_record_trade":
             if not symbol or not side or entry_price is None or qty is None:
-                return {"status": "error", "msg": "symbol, side, entry_price (use --entry-price), and qty required"}
+                return {
+                    "status": "error",
+                    "msg": "symbol, side, entry_price (use --entry-price), and qty required",
+                }
             return bot.journal_record_trade(
-                symbol=symbol, side=side, entry_price=entry_price, qty=qty,
-                exit_price=exit_price, strategy=strategy or "",
-                tags=tags or "", notes=trade_notes or "", category=cat.value,
+                symbol=symbol,
+                side=side,
+                entry_price=entry_price,
+                qty=qty,
+                exit_price=exit_price,
+                strategy=strategy or "",
+                tags=tags or "",
+                notes=trade_notes or "",
+                category=cat.value,
             )
         elif action == "journal_close_trade":
             if not trade_id or exit_price is None:
@@ -10509,7 +12570,10 @@ def run(
             return bot.journal_close_trade(trade_id=trade_id, exit_price=exit_price)
         elif action == "journal_get_trades":
             return bot.journal_get_trades(
-                symbol=symbol, strategy=strategy, status=journal_status, limit=limit or 50,
+                symbol=symbol,
+                strategy=strategy,
+                status=journal_status,
+                limit=limit or 50,
             )
         elif action == "journal_performance":
             return bot.journal_performance(symbol=symbol, strategy=strategy)
@@ -10517,7 +12581,10 @@ def run(
             return bot.journal_export()
         elif action == "journal_import":
             if not _parsed_journal:
-                return {"status": "error", "msg": "journal_data (JSON string of trade dicts) required"}
+                return {
+                    "status": "error",
+                    "msg": "journal_data (JSON string of trade dicts) required",
+                }
             return bot.journal_import(trades=_parsed_journal)
 
         # ══════════════════════════════════════════════════════
@@ -10526,21 +12593,44 @@ def run(
         elif action == "adaptive_position_size":
             if not symbol or not side:
                 return {"status": "error", "msg": "symbol and side required"}
-            return bot.get_adaptive_position_size(symbol=symbol, side=side, risk_usdt=risk_usdt or 5.0, category=cat)
+            return bot.get_adaptive_position_size(
+                symbol=symbol, side=side, risk_usdt=risk_usdt or 5.0, category=cat
+            )
         elif action == "fixed_fractional_size":
-            if not symbol or price is None or stop_loss is None or account_balance is None:
-                return {"status": "error", "msg": "symbol, price (entry), stop_loss, and account_balance required"}
-            return bot.get_fixed_fractional_size(account_balance=account_balance, risk_fraction=risk_fraction or 0.02, entry_price=price, sl_price=stop_loss, symbol=symbol, category=cat)
+            if (
+                not symbol
+                or price is None
+                or stop_loss is None
+                or account_balance is None
+            ):
+                return {
+                    "status": "error",
+                    "msg": "symbol, price (entry), stop_loss, and account_balance required",
+                }
+            return bot.get_fixed_fractional_size(
+                account_balance=account_balance,
+                risk_fraction=risk_fraction or 0.02,
+                entry_price=price,
+                sl_price=stop_loss,
+                symbol=symbol,
+                category=cat,
+            )
         elif action == "anti_martingale_size":
             if qty is None:
                 return {"status": "error", "msg": "qty (base_qty) required"}
-            return bot.get_anti_martingale_size(base_qty=qty, consecutive_wins=consecutive_wins or 0, consecutive_losses=consecutive_losses or 0)
+            return bot.get_anti_martingale_size(
+                base_qty=qty,
+                consecutive_wins=consecutive_wins or 0,
+                consecutive_losses=consecutive_losses or 0,
+            )
         elif action == "portfolio_heat":
             return bot.get_portfolio_heat(category=cat)
         elif action == "max_position":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.calculate_max_position(symbol=symbol, side=side or "Buy", category=cat)
+            return bot.calculate_max_position(
+                symbol=symbol, side=side or "Buy", category=cat
+            )
 
         # ══════════════════════════════════════════════════════
         # PROFIT-MAXIMIZING STRATEGIES
@@ -10548,39 +12638,75 @@ def run(
         elif action == "momentum_sniper":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.macro_momentum_sniper(symbol=symbol, risk_usdt=risk_usdt or 5.0, category=cat)
+            return bot.macro_momentum_sniper(
+                symbol=symbol, risk_usdt=risk_usdt or 5.0, category=cat
+            )
         elif action == "mean_reversion_scalp":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.macro_mean_reversion_scalp(symbol=symbol, risk_usdt=risk_usdt or 5.0, category=cat)
+            return bot.macro_mean_reversion_scalp(
+                symbol=symbol, risk_usdt=risk_usdt or 5.0, category=cat
+            )
         elif action == "funding_arb_scan":
-            return bot.macro_funding_arb_scan(top_n=top_n or 10, min_rate=min_rate or 0.0005, category=cat)
+            return bot.macro_funding_arb_scan(
+                top_n=top_n or 10, min_rate=min_rate or 0.0005, category=cat
+            )
         elif action == "smart_dca":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.macro_smart_dca(symbol=symbol, total_usdt=total_usdt or 100.0, num_levels=num_levels or 5, dip_pct=dip_pct or 1.0, category=cat)
+            return bot.macro_smart_dca(
+                symbol=symbol,
+                total_usdt=total_usdt or 100.0,
+                num_levels=num_levels or 5,
+                dip_pct=dip_pct or 1.0,
+                category=cat,
+            )
         elif action == "liquidity_sweep":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.macro_liquidity_sweep(symbol=symbol, risk_usdt=risk_usdt or 5.0, depth=depth or 50, category=cat)
+            return bot.macro_liquidity_sweep(
+                symbol=symbol,
+                risk_usdt=risk_usdt or 5.0,
+                depth=depth or 50,
+                category=cat,
+            )
 
         # ══════════════════════════════════════════════════════
         # 25 IMPORTANT FUNCTIONS
         # ══════════════════════════════════════════════════════
         elif action == "risk_reward_analysis":
             if price is None or stop_loss is None or take_profit is None or qty is None:
-                return {"status": "error", "msg": "price (entry), stop_loss, take_profit, and qty required"}
-            return bot.get_risk_reward_analysis(entry_price=price, stop_loss=stop_loss, take_profit=take_profit, qty=qty, fee_rate=fee_rate or 0.0006)
+                return {
+                    "status": "error",
+                    "msg": "price (entry), stop_loss, take_profit, and qty required",
+                }
+            return bot.get_risk_reward_analysis(
+                entry_price=price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                qty=qty,
+                fee_rate=fee_rate or 0.0006,
+            )
         elif action == "liquidation_price":
             if price is None or leverage is None or not side:
-                return {"status": "error", "msg": "price (entry), leverage, and side required"}
-            return bot.get_liquidation_price(entry_price=price, leverage=float(leverage), side=side, maint_margin_rate=maint_margin_rate or 0.004)
+                return {
+                    "status": "error",
+                    "msg": "price (entry), leverage, and side required",
+                }
+            return bot.get_liquidation_price(
+                entry_price=price,
+                leverage=float(leverage),
+                side=side,
+                maint_margin_rate=maint_margin_rate or 0.004,
+            )
         elif action == "drawdown_analysis":
             return bot.get_drawdown_analysis(category=cat, limit=limit or 50)
         elif action == "support_resistance":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.get_support_resistance(symbol=symbol, lookback=limit or 100, category=cat)
+            return bot.get_support_resistance(
+                symbol=symbol, lookback=limit or 100, category=cat
+            )
         elif action == "market_regime":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
@@ -10591,16 +12717,38 @@ def run(
             return bot.get_entry_timing(symbol=symbol, side=side, category=cat)
         elif action == "scale_into":
             if not symbol or not side or qty is None:
-                return {"status": "error", "msg": "symbol, side, and qty (total_qty) required"}
-            return bot.scale_into_position(symbol=symbol, side=side, total_qty=qty, num_entries=num_entries or 3, spacing_pct=spacing_pct or 0.5, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol, side, and qty (total_qty) required",
+                }
+            return bot.scale_into_position(
+                symbol=symbol,
+                side=side,
+                total_qty=qty,
+                num_entries=num_entries or 3,
+                spacing_pct=spacing_pct or 0.5,
+                category=cat,
+            )
         elif action == "scale_out":
             if not symbol or not side or qty is None:
-                return {"status": "error", "msg": "symbol, side, and qty (total_qty) required"}
-            return bot.scale_out_position(symbol=symbol, side=side, total_qty=qty, num_exits=num_exits or 3, tp_spacing_pct=tp_spacing_pct or 1.0, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol, side, and qty (total_qty) required",
+                }
+            return bot.scale_out_position(
+                symbol=symbol,
+                side=side,
+                total_qty=qty,
+                num_exits=num_exits or 3,
+                tp_spacing_pct=tp_spacing_pct or 1.0,
+                category=cat,
+            )
         elif action == "hedge_position":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.hedge_position(symbol=symbol, hedge_pct=hedge_pct or 50.0, category=cat)
+            return bot.hedge_position(
+                symbol=symbol, hedge_pct=hedge_pct or 50.0, category=cat
+            )
         elif action == "multi_timeframe_signals":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
@@ -10624,9 +12772,26 @@ def run(
                 trades_per_day=trades_per_day or 3,
             )
         elif action == "trade_checklist":
-            if not symbol or not side or price is None or stop_loss is None or take_profit is None:
-                return {"status": "error", "msg": "symbol, side, price (entry), stop_loss, take_profit required"}
-            return bot.get_trade_checklist(symbol=symbol, side=side, entry_price=price, stop_loss=stop_loss, take_profit=take_profit, risk_usdt=risk_usdt or 5.0, category=cat)
+            if (
+                not symbol
+                or not side
+                or price is None
+                or stop_loss is None
+                or take_profit is None
+            ):
+                return {
+                    "status": "error",
+                    "msg": "symbol, side, price (entry), stop_loss, take_profit required",
+                }
+            return bot.get_trade_checklist(
+                symbol=symbol,
+                side=side,
+                entry_price=price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_usdt=risk_usdt or 5.0,
+                category=cat,
+            )
         elif action == "auto_leverage":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
@@ -10636,7 +12801,9 @@ def run(
         elif action == "divergence_signals":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.detect_divergence_signals(symbol=symbol, lookback=max(limit or 100, 100), category=cat)
+            return bot.detect_divergence_signals(
+                symbol=symbol, lookback=max(limit or 100, 100), category=cat
+            )
         elif action == "optimal_entry_zones":
             if not symbol or not side:
                 return {"status": "error", "msg": "symbol and side required"}
@@ -10647,13 +12814,20 @@ def run(
             return bot.get_spread_analysis(symbol=symbol, category=cat)
         elif action == "correlation_analysis":
             if not symbols or len(symbols) < 2:
-                return {"status": "error", "msg": "symbols (list of 2+ symbols) required"}
-            return bot.get_correlation_analysis(symbols=symbols, interval=interval or "60", lookback=limit or 50, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbols (list of 2+ symbols) required",
+                }
+            return bot.get_correlation_analysis(
+                symbols=symbols,
+                interval=interval or "60",
+                lookback=limit or 50,
+                category=cat,
+            )
         elif action == "smart_trailing_stop":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
             return bot.smart_trailing_stop(symbol=symbol, category=cat)
-
 
         # ══════════════════════════════════════════════════════
         # MISSING V5 ENDPOINTS
@@ -10665,7 +12839,9 @@ def run(
         elif action == "set_tpsl_mode":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.set_tpsl_mode(symbol=symbol, tp_sl_mode=tp_sl_mode or "Full", category=cat)
+            return bot.set_tpsl_mode(
+                symbol=symbol, tp_sl_mode=tp_sl_mode or "Full", category=cat
+            )
         elif action == "add_reduce_margin":
             if not symbol or margin is None:
                 return {"status": "error", "msg": "symbol and margin required"}
@@ -10673,9 +12849,21 @@ def run(
         elif action == "set_auto_add_margin":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return bot.set_auto_add_margin(symbol=symbol, auto_add=auto_add_margin if auto_add_margin is not None else True, category=cat)
+            return bot.set_auto_add_margin(
+                symbol=symbol,
+                auto_add=auto_add_margin if auto_add_margin is not None else True,
+                category=cat,
+            )
         elif action == "get_executions":
-            return {"executions": bot.get_executions(symbol=symbol, category=cat, limit=limit or 50, start_time=start_time, end_time=end_time)}
+            return {
+                "executions": bot.get_executions(
+                    symbol=symbol,
+                    category=cat,
+                    limit=limit or 50,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+            }
         elif action == "confirm_risk_limit":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
@@ -10683,19 +12871,38 @@ def run(
         elif action == "set_collateral_coin":
             if not coin:
                 return {"status": "error", "msg": "coin required"}
-            return bot.set_collateral_coin(coin=coin, switch=collateral_switch if collateral_switch is not None else True)
+            return bot.set_collateral_coin(
+                coin=coin,
+                switch=collateral_switch if collateral_switch is not None else True,
+            )
         elif action == "get_withdrawable_amount":
             if not coin:
                 return {"status": "error", "msg": "coin required"}
-            return bot.get_withdrawable_amount(coin=coin, account_type=account_type or "FUND")
+            return bot.get_withdrawable_amount(
+                coin=coin, account_type=account_type or "FUND"
+            )
         elif action == "get_historical_klines":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return {"klines": bot.get_historical_klines(symbol=symbol, interval=interval or "D", limit=limit or 200, category=cat)}
+            return {
+                "klines": bot.get_historical_klines(
+                    symbol=symbol,
+                    interval=interval or "D",
+                    limit=limit or 200,
+                    category=cat,
+                )
+            }
         elif action == "get_premium_index_kline":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            return {"klines": bot.get_premium_index_kline(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)}
+            return {
+                "klines": bot.get_premium_index_kline(
+                    symbol=symbol,
+                    interval=interval or "60",
+                    limit=limit or 200,
+                    category=cat,
+                )
+            }
 
         # ══════════════════════════════════════════════════════
         # STANDALONE INDICATORS
@@ -10703,36 +12910,67 @@ def run(
         elif action == "calculate_rsi":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "interval": interval or "60", "rsi": bot.calculate_rsi(closes, period=int(sl_pct or 14))}
+            return {
+                "symbol": symbol,
+                "interval": interval or "60",
+                "rsi": bot.calculate_rsi(closes, period=int(sl_pct or 14)),
+            }
         elif action == "calculate_ema":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "interval": interval or "60", "ema": bot.calculate_ema(closes, period=int(sl_pct or 20))}
+            return {
+                "symbol": symbol,
+                "interval": interval or "60",
+                "ema": bot.calculate_ema(closes, period=int(sl_pct or 20)),
+            }
         elif action == "calculate_atr":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             # Build ohlcv list as expected by the method
-            ohlcv_list = [{"high": float(k[2]), "low": float(k[3]), "close": float(k[4])} for k in klines]
+            ohlcv_list = [
+                {"high": float(k[2]), "low": float(k[3]), "close": float(k[4])}
+                for k in klines
+            ]
             period = int(sl_pct) if sl_pct else 14
             return {"symbol": symbol, "atr": bot.calculate_atr(ohlcv_list, period)}
         elif action == "calculate_obv":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10750,7 +12988,12 @@ def run(
         elif action == "calculate_mfi":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10758,11 +13001,21 @@ def run(
             lows = [float(k[3]) for k in klines]
             closes = [float(k[4]) for k in klines]
             volumes = [float(k[5]) for k in klines]
-            return {"symbol": symbol, "mfi": bot.calculate_mfi(highs, lows, closes, volumes, period=int(sl_pct or 14))}
+            return {
+                "symbol": symbol,
+                "mfi": bot.calculate_mfi(
+                    highs, lows, closes, volumes, period=int(sl_pct or 14)
+                ),
+            }
         elif action == "calculate_cmf":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10770,22 +13023,42 @@ def run(
             lows = [float(k[3]) for k in klines]
             closes = [float(k[4]) for k in klines]
             volumes = [float(k[5]) for k in klines]
-            return {"symbol": symbol, "cmf": bot.calculate_cmf(highs, lows, closes, volumes, period=int(sl_pct or 20))}
+            return {
+                "symbol": symbol,
+                "cmf": bot.calculate_cmf(
+                    highs, lows, closes, volumes, period=int(sl_pct or 20)
+                ),
+            }
         elif action == "calculate_williams_r":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "williams_r": bot.calculate_williams_r(highs, lows, closes, period=int(sl_pct or 14))}
+            return {
+                "symbol": symbol,
+                "williams_r": bot.calculate_williams_r(
+                    highs, lows, closes, period=int(sl_pct or 14)
+                ),
+            }
         elif action == "calculate_parabolic_sar":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10796,7 +13069,12 @@ def run(
         elif action == "calculate_keltner_channels":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10807,47 +13085,86 @@ def run(
         elif action == "calculate_roc":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "roc": bot.calculate_roc(closes, period=int(sl_pct or 12))}
+            return {
+                "symbol": symbol,
+                "roc": bot.calculate_roc(closes, period=int(sl_pct or 12)),
+            }
         elif action == "calculate_trix":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "trix": bot.calculate_trix(closes, period=int(sl_pct or 15))}
+            return {
+                "symbol": symbol,
+                "trix": bot.calculate_trix(closes, period=int(sl_pct or 15)),
+            }
         elif action == "calculate_ultimate_oscillator":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "ultimate_oscillator": bot.calculate_ultimate_oscillator(highs, lows, closes)}
+            return {
+                "symbol": symbol,
+                "ultimate_oscillator": bot.calculate_ultimate_oscillator(
+                    highs, lows, closes
+                ),
+            }
         elif action == "calculate_choppiness_index":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "choppiness_index": bot.calculate_choppiness_index(highs, lows, closes)}
+            return {
+                "symbol": symbol,
+                "choppiness_index": bot.calculate_choppiness_index(highs, lows, closes),
+            }
         elif action == "calculate_aroon":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10857,34 +13174,63 @@ def run(
         elif action == "calculate_dpo":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "dpo": bot.calculate_dpo(closes, period=int(sl_pct or 20))}
+            return {
+                "symbol": symbol,
+                "dpo": bot.calculate_dpo(closes, period=int(sl_pct or 20)),
+            }
         elif action == "calculate_hma":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "hma": bot.calculate_hma(closes, period=int(sl_pct or 20))}
+            return {
+                "symbol": symbol,
+                "hma": bot.calculate_hma(closes, period=int(sl_pct or 20)),
+            }
         elif action == "calculate_zlema":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "zlema": bot.calculate_zlema(closes, period=int(sl_pct or 20))}
+            return {
+                "symbol": symbol,
+                "zlema": bot.calculate_zlema(closes, period=int(sl_pct or 20)),
+            }
         elif action == "calculate_supertrend":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10895,7 +13241,12 @@ def run(
         elif action == "calculate_elder_ray":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10906,27 +13257,48 @@ def run(
         elif action == "calculate_vwma":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
             volumes = [float(k[5]) for k in klines]
-            return {"symbol": symbol, "vwma": bot.calculate_vwma(closes, volumes, period=int(sl_pct or 20))}
+            return {
+                "symbol": symbol,
+                "vwma": bot.calculate_vwma(closes, volumes, period=int(sl_pct or 20)),
+            }
         elif action == "calculate_awesome_oscillator":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
-            return {"symbol": symbol, "awesome_oscillator": bot.calculate_awesome_oscillator(highs, lows)}
+            return {
+                "symbol": symbol,
+                "awesome_oscillator": bot.calculate_awesome_oscillator(highs, lows),
+            }
         elif action == "calculate_accumulation_distribution":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10934,11 +13306,21 @@ def run(
             lows = [float(k[3]) for k in klines]
             closes = [float(k[4]) for k in klines]
             volumes = [float(k[5]) for k in klines]
-            return {"symbol": symbol, "accumulation_distribution": bot.calculate_accumulation_distribution(highs, lows, closes, volumes)}
+            return {
+                "symbol": symbol,
+                "accumulation_distribution": bot.calculate_accumulation_distribution(
+                    highs, lows, closes, volumes
+                ),
+            }
         elif action == "calculate_heikin_ashi":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10950,7 +13332,12 @@ def run(
         elif action == "calculate_renko":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
@@ -10958,12 +13345,24 @@ def run(
             return bot.calculate_renko(closes, brick_size=brick_size)
         elif action == "calculate_pivot_points":
             if price is None or qty is None or sl_price is None:
-                return {"status": "error", "msg": "price (High), qty (Low), sl_price (Close) required"}
+                return {
+                    "status": "error",
+                    "msg": "price (High), qty (Low), sl_price (Close) required",
+                }
             return bot.calculate_pivot_points(high=price, low=qty, close=sl_price)
         elif action == "calculate_position_risk":
             if not symbol or price is None or qty is None or stop_loss is None:
-                return {"status": "error", "msg": "symbol, price, qty, stop_loss required"}
-            return bot.calculate_position_risk(symbol=symbol, entry_price=price, qty=qty, stop_loss=stop_loss, category=cat)
+                return {
+                    "status": "error",
+                    "msg": "symbol, price, qty, stop_loss required",
+                }
+            return bot.calculate_position_risk(
+                symbol=symbol,
+                entry_price=price,
+                qty=qty,
+                stop_loss=stop_loss,
+                category=cat,
+            )
         elif action == "calculate_compound_growth":
             return bot.calculate_compound_growth(
                 starting_capital=starting_capital or 100.0,
@@ -10975,30 +13374,56 @@ def run(
         elif action == "calculate_linear_regression":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "linear_regression_slope": bot.calculate_linear_regression_slope(closes, period=int(sl_pct or 20))}
+            return {
+                "symbol": symbol,
+                "linear_regression_slope": bot.calculate_linear_regression_slope(
+                    closes, period=int(sl_pct or 20)
+                ),
+            }
         elif action == "calculate_stddev":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
-            return {"symbol": symbol, "stddev": bot.calculate_stddev(closes, period=int(sl_pct or 20))}
+            return {
+                "symbol": symbol,
+                "stddev": bot.calculate_stddev(closes, period=int(sl_pct or 20)),
+            }
         elif action == "calculate_vroc":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             volumes = [float(k[5]) for k in klines]
-            return {"symbol": symbol, "vroc": bot.calculate_vroc(volumes, period=int(sl_pct or 14))}
+            return {
+                "symbol": symbol,
+                "vroc": bot.calculate_vroc(volumes, period=int(sl_pct or 14)),
+            }
         elif action == "calculate_kelly_criterion_standalone":
             # Calculate win_loss_ratio from tp_pct and sl_pct
             avg_win = float(tp_pct) if tp_pct else 2.0
@@ -11015,15 +13440,35 @@ def run(
         elif action == "calculate_bollinger_bandwidth":
             if not symbol:
                 return {"status": "error", "msg": "symbol required"}
-            klines = bot.get_klines(symbol=symbol, interval=interval or "60", limit=limit or 200, category=cat)
+            klines = bot.get_klines(
+                symbol=symbol,
+                interval=interval or "60",
+                limit=limit or 200,
+                category=cat,
+            )
             if not klines:
                 return {"status": "error", "msg": "No kline data"}
             klines.reverse()
             closes = [float(k[4]) for k in klines]
             bb = bot.calculate_bollinger_bands(closes, period=int(sl_pct or 20))
-            if isinstance(bb, dict) and "upper" in bb and "lower" in bb and "middle" in bb:
-                bw = (bb["upper"] - bb["lower"]) / bb["middle"] * 100 if bb["middle"] else 0
-                return {"symbol": symbol, "bollinger_bandwidth": round(bw, 4), "upper": bb["upper"], "lower": bb["lower"], "middle": bb["middle"]}
+            if (
+                isinstance(bb, dict)
+                and "upper" in bb
+                and "lower" in bb
+                and "middle" in bb
+            ):
+                bw = (
+                    (bb["upper"] - bb["lower"]) / bb["middle"] * 100
+                    if bb["middle"]
+                    else 0
+                )
+                return {
+                    "symbol": symbol,
+                    "bollinger_bandwidth": round(bw, 4),
+                    "upper": bb["upper"],
+                    "lower": bb["lower"],
+                    "middle": bb["middle"],
+                }
             return {"symbol": symbol, "bollinger_bands": bb}
 
         else:
@@ -11061,89 +13506,266 @@ Examples:
         """,
     )
 
-    parser.add_argument("--config",          default="trading_config.json", help="Path to JSON configuration file")
-    parser.add_argument("--action",          required=True,                help="Action to perform")
-    parser.add_argument("--symbol",                                        help="Trading symbol e.g. BTCUSDT")
-    parser.add_argument("--side",                                          help="Buy | Sell")
-    parser.add_argument("--qty",             type=float,                   help="Order quantity")
-    parser.add_argument("--price",           type=float,                   help="Order / entry price")
-    parser.add_argument("--order-type",      dest="order_type",            help="Limit | Market | LimitMaker | Stop | StopLimit")
-    parser.add_argument("--category",        default="linear",             help="linear | inverse | spot | option")
-    parser.add_argument("--order-id",        dest="order_id",              help="Order ID")
-    parser.add_argument("--stop-loss",       dest="stop_loss", type=float, help="Stop loss price")
-    parser.add_argument("--take-profit",     dest="take_profit", type=float, help="Take profit price")
-    parser.add_argument("--trailing-stop",   dest="trailing_stop", type=float, help="Trailing stop distance")
-    parser.add_argument("--reduce-only",     dest="reduce_only", action="store_true")
-    parser.add_argument("--time-in-force",   dest="time_in_force", default="GTC")
-    parser.add_argument("--position-idx",    dest="position_idx", type=int, default=0)
-    parser.add_argument("--client-oid",      dest="client_oid")
-    parser.add_argument("--leverage",        type=int)
-    parser.add_argument("--buy-leverage",    dest="buy_leverage", type=int)
-    parser.add_argument("--sell-leverage",   dest="sell_leverage", type=int)
-    parser.add_argument("--account-type",    dest="account_type", default="UNIFIED")
-    parser.add_argument("--limit",           type=int, default=25)
-    parser.add_argument("--interval",        default="1")
-    parser.add_argument("--interval-time",   dest="interval_time", default="5min")
-    parser.add_argument("--strong-threshold", dest="strong_threshold", type=float, default=0.20)
-    parser.add_argument("--mild-threshold",   dest="mild_threshold", type=float, default=0.08)
-    parser.add_argument("--sl-pct",          dest="sl_pct", type=float, help="Stop loss percentage or smooth_k for Stoch RSI")
-    parser.add_argument("--tp-pct",          dest="tp_pct", type=float, help="Take profit percentage or smooth_d for Stoch RSI")
-    parser.add_argument("--risk-usdt",       dest="risk_usdt", type=float)
-    parser.add_argument("--sl-price",        dest="sl_price", type=float)
-    parser.add_argument("--fee-rate",        dest="fee_rate", type=float, help="Fee rate for breakeven/profit calc")
-    parser.add_argument("--funding-rate",    dest="funding_rate", type=float, help="Funding rate for breakeven calc")
-    parser.add_argument("--holding-hours",   dest="holding_hours", type=float, help="Hours holding position")
-    parser.add_argument("--holding-periods", dest="holding_periods", type=int, help="Number of 8h funding periods")
-    parser.add_argument("--slices",          type=int, default=5)
-    parser.add_argument("--delay",           type=float)
-    parser.add_argument("--start-time",      dest="start_time", type=int, help="Start timestamp in milliseconds")
-    parser.add_argument("--end-time",        dest="end_time", type=int, help="End timestamp in milliseconds")
-    parser.add_argument("--total-usdt",      dest="total_usdt", type=float, help="Total USDT for DCA/grid/TWAP")
-    parser.add_argument("--num-orders",      dest="num_orders", type=int, help="Number of DCA orders")
-    parser.add_argument("--num-grids",       dest="num_grids", type=int, help="Number of grid levels")
-    parser.add_argument("--upper-price",     dest="upper_price", type=float, help="Upper price for grid")
-    parser.add_argument("--lower-price",     dest="lower_price", type=float, help="Lower price for grid")
-    parser.add_argument("--rr-ratio",        dest="rr_ratio", type=float, help="Risk-reward ratio")
-    parser.add_argument("--atr-mult",        dest="atr_mult", type=float, help="ATR multiplier for SL")
-    parser.add_argument("--duration-minutes", dest="duration_minutes", type=int, help="TWAP duration")
-    parser.add_argument("--num-slices",      dest="num_slices", type=int, help="TWAP slices")
-    parser.add_argument("--min-rate",        dest="min_rate", type=float, help="Min funding rate filter")
-    parser.add_argument("--top-n",           dest="top_n", type=int, help="Top N results")
-    parser.add_argument("--price-range-pct", dest="price_range_pct", type=float, help="Price range pct for DCA")
-    parser.add_argument("--coin",            help="Coin for transfers/balance")
-    parser.add_argument("--amount",          help="Amount for transfers")
-    parser.add_argument("--from-account",    dest="from_account", help="Source account for transfer")
-    parser.add_argument("--to-account",      dest="to_account", help="Dest account for transfer")
-    parser.add_argument("--risk-id",         dest="risk_id", type=int, help="Risk limit tier ID")
-    parser.add_argument("--currency",        help="Currency filter")
-    parser.add_argument("--depth",           type=int, help="L2 orderbook depth")
-    parser.add_argument("--period",          type=int, help="Historical volatility period")
-    parser.add_argument("--output",          help="Output file path")
-    parser.add_argument("--orders-file",     dest="orders_file", help="JSON file with batch order list")
+    parser.add_argument(
+        "--config",
+        default="trading_config.json",
+        help="Path to JSON configuration file",
+    )
+    parser.add_argument("--action", required=True, help="Action to perform")
+    parser.add_argument("--symbol", help="Trading symbol e.g. BTCUSDT")
+    parser.add_argument("--side", help="Buy | Sell")
+    parser.add_argument("--qty", type=float, help="Order quantity")
+    parser.add_argument("--price", type=float, help="Order / entry price")
+    parser.add_argument(
+        "--order-type",
+        dest="order_type",
+        help="Limit | Market | LimitMaker | Stop | StopLimit",
+    )
+    parser.add_argument(
+        "--category", default="linear", help="linear | inverse | spot | option"
+    )
+    parser.add_argument("--order-id", dest="order_id", help="Order ID")
+    parser.add_argument(
+        "--stop-loss", dest="stop_loss", type=float, help="Stop loss price"
+    )
+    parser.add_argument(
+        "--take-profit", dest="take_profit", type=float, help="Take profit price"
+    )
+    parser.add_argument(
+        "--trailing-stop",
+        dest="trailing_stop",
+        type=float,
+        help="Trailing stop distance",
+    )
+    parser.add_argument("--reduce-only", dest="reduce_only", action="store_true")
+    parser.add_argument("--time-in-force", dest="time_in_force", default="GTC")
+    parser.add_argument("--position-idx", dest="position_idx", type=int, default=0)
+    parser.add_argument("--client-oid", dest="client_oid")
+    parser.add_argument("--leverage", type=int)
+    parser.add_argument("--buy-leverage", dest="buy_leverage", type=int)
+    parser.add_argument("--sell-leverage", dest="sell_leverage", type=int)
+    parser.add_argument("--account-type", dest="account_type", default="UNIFIED")
+    parser.add_argument("--limit", type=int, default=25)
+    parser.add_argument("--interval", default="1")
+    parser.add_argument("--interval-time", dest="interval_time", default="5min")
+    parser.add_argument(
+        "--strong-threshold", dest="strong_threshold", type=float, default=0.20
+    )
+    parser.add_argument(
+        "--mild-threshold", dest="mild_threshold", type=float, default=0.08
+    )
+    parser.add_argument(
+        "--sl-pct",
+        dest="sl_pct",
+        type=float,
+        help="Stop loss percentage or smooth_k for Stoch RSI",
+    )
+    parser.add_argument(
+        "--tp-pct",
+        dest="tp_pct",
+        type=float,
+        help="Take profit percentage or smooth_d for Stoch RSI",
+    )
+    parser.add_argument("--risk-usdt", dest="risk_usdt", type=float)
+    parser.add_argument("--sl-price", dest="sl_price", type=float)
+    parser.add_argument(
+        "--fee-rate",
+        dest="fee_rate",
+        type=float,
+        help="Fee rate for breakeven/profit calc",
+    )
+    parser.add_argument(
+        "--funding-rate",
+        dest="funding_rate",
+        type=float,
+        help="Funding rate for breakeven calc",
+    )
+    parser.add_argument(
+        "--holding-hours",
+        dest="holding_hours",
+        type=float,
+        help="Hours holding position",
+    )
+    parser.add_argument(
+        "--holding-periods",
+        dest="holding_periods",
+        type=int,
+        help="Number of 8h funding periods",
+    )
+    parser.add_argument("--slices", type=int, default=5)
+    parser.add_argument("--delay", type=float)
+    parser.add_argument(
+        "--start-time",
+        dest="start_time",
+        type=int,
+        help="Start timestamp in milliseconds",
+    )
+    parser.add_argument(
+        "--end-time", dest="end_time", type=int, help="End timestamp in milliseconds"
+    )
+    parser.add_argument(
+        "--total-usdt",
+        dest="total_usdt",
+        type=float,
+        help="Total USDT for DCA/grid/TWAP",
+    )
+    parser.add_argument(
+        "--num-orders", dest="num_orders", type=int, help="Number of DCA orders"
+    )
+    parser.add_argument(
+        "--num-grids", dest="num_grids", type=int, help="Number of grid levels"
+    )
+    parser.add_argument(
+        "--upper-price", dest="upper_price", type=float, help="Upper price for grid"
+    )
+    parser.add_argument(
+        "--lower-price", dest="lower_price", type=float, help="Lower price for grid"
+    )
+    parser.add_argument(
+        "--rr-ratio", dest="rr_ratio", type=float, help="Risk-reward ratio"
+    )
+    parser.add_argument(
+        "--atr-mult", dest="atr_mult", type=float, help="ATR multiplier for SL"
+    )
+    parser.add_argument(
+        "--duration-minutes", dest="duration_minutes", type=int, help="TWAP duration"
+    )
+    parser.add_argument("--num-slices", dest="num_slices", type=int, help="TWAP slices")
+    parser.add_argument(
+        "--min-rate", dest="min_rate", type=float, help="Min funding rate filter"
+    )
+    parser.add_argument("--top-n", dest="top_n", type=int, help="Top N results")
+    parser.add_argument(
+        "--price-range-pct",
+        dest="price_range_pct",
+        type=float,
+        help="Price range pct for DCA",
+    )
+    parser.add_argument("--coin", help="Coin for transfers/balance")
+    parser.add_argument("--amount", help="Amount for transfers")
+    parser.add_argument(
+        "--from-account", dest="from_account", help="Source account for transfer"
+    )
+    parser.add_argument(
+        "--to-account", dest="to_account", help="Dest account for transfer"
+    )
+    parser.add_argument(
+        "--risk-id", dest="risk_id", type=int, help="Risk limit tier ID"
+    )
+    parser.add_argument("--currency", help="Currency filter")
+    parser.add_argument("--depth", type=int, help="L2 orderbook depth")
+    parser.add_argument("--period", type=int, help="Historical volatility period")
+    parser.add_argument("--output", help="Output file path")
+    parser.add_argument(
+        "--orders-file", dest="orders_file", help="JSON file with batch order list"
+    )
     # ── New params for 30 new actions ────────────────────────
-    parser.add_argument("--num-levels",      dest="num_levels", type=int, help="Number of DCA/scale levels")
-    parser.add_argument("--num-entries",     dest="num_entries", type=int, help="Number of scale-in entries")
-    parser.add_argument("--num-exits",       dest="num_exits", type=int, help="Number of scale-out exits")
-    parser.add_argument("--spacing-pct",     dest="spacing_pct", type=float, help="Price spacing pct for scale entries")
-    parser.add_argument("--tp-spacing-pct",  dest="tp_spacing_pct", type=float, help="TP spacing pct for scale exits")
-    parser.add_argument("--hedge-pct",       dest="hedge_pct", type=float, help="Hedge percentage of position")
-    parser.add_argument("--dip-pct",         dest="dip_pct", type=float, help="Dip spacing pct for smart DCA")
-    parser.add_argument("--symbols",         nargs="+", help="List of symbols for correlation analysis")
-    parser.add_argument("--risk-fraction",   dest="risk_fraction", type=float, help="Risk fraction for fixed fractional sizing")
-    parser.add_argument("--consecutive-wins", dest="consecutive_wins", type=int, help="Consecutive wins for anti-martingale")
-    parser.add_argument("--consecutive-losses", dest="consecutive_losses", type=int, help="Consecutive losses for anti-martingale")
-    parser.add_argument("--daily-return-pct", dest="daily_return_pct", type=float, help="Daily return pct for compound growth")
-    parser.add_argument("--days",            type=int, help="Number of days for compound growth projection")
-    parser.add_argument("--win-rate-pct",    dest="win_rate_pct", type=float, help="Win rate pct for compound growth")
-    parser.add_argument("--trades-per-day",  dest="trades_per_day", type=int, help="Trades per day for compound growth")
-    parser.add_argument("--starting-capital", dest="starting_capital", type=float, help="Starting capital for compound growth")
-    parser.add_argument("--maint-margin-rate", dest="maint_margin_rate", type=float, help="Maintenance margin rate for liquidation calc")
-    parser.add_argument("--account-balance", dest="account_balance", type=float, help="Account balance for fixed fractional sizing")
-    parser.add_argument("--margin",          help="Margin to add/reduce for isolated positions")
-    parser.add_argument("--auto-add-margin", dest="auto_add_margin", action="store_true", help="Enable auto-add-margin")
-    parser.add_argument("--tp-sl-mode",      dest="tp_sl_mode", help="TP/SL mode: Full or Partial")
-    parser.add_argument("--collateral-switch", dest="collateral_switch", action="store_true", help="Toggle coin as collateral")
-    parser.add_argument("--brick-size",      dest="brick_size", type=float, help="Renko brick size")
+    parser.add_argument(
+        "--num-levels", dest="num_levels", type=int, help="Number of DCA/scale levels"
+    )
+    parser.add_argument(
+        "--num-entries", dest="num_entries", type=int, help="Number of scale-in entries"
+    )
+    parser.add_argument(
+        "--num-exits", dest="num_exits", type=int, help="Number of scale-out exits"
+    )
+    parser.add_argument(
+        "--spacing-pct",
+        dest="spacing_pct",
+        type=float,
+        help="Price spacing pct for scale entries",
+    )
+    parser.add_argument(
+        "--tp-spacing-pct",
+        dest="tp_spacing_pct",
+        type=float,
+        help="TP spacing pct for scale exits",
+    )
+    parser.add_argument(
+        "--hedge-pct", dest="hedge_pct", type=float, help="Hedge percentage of position"
+    )
+    parser.add_argument(
+        "--dip-pct", dest="dip_pct", type=float, help="Dip spacing pct for smart DCA"
+    )
+    parser.add_argument(
+        "--symbols", nargs="+", help="List of symbols for correlation analysis"
+    )
+    parser.add_argument(
+        "--risk-fraction",
+        dest="risk_fraction",
+        type=float,
+        help="Risk fraction for fixed fractional sizing",
+    )
+    parser.add_argument(
+        "--consecutive-wins",
+        dest="consecutive_wins",
+        type=int,
+        help="Consecutive wins for anti-martingale",
+    )
+    parser.add_argument(
+        "--consecutive-losses",
+        dest="consecutive_losses",
+        type=int,
+        help="Consecutive losses for anti-martingale",
+    )
+    parser.add_argument(
+        "--daily-return-pct",
+        dest="daily_return_pct",
+        type=float,
+        help="Daily return pct for compound growth",
+    )
+    parser.add_argument(
+        "--days", type=int, help="Number of days for compound growth projection"
+    )
+    parser.add_argument(
+        "--win-rate-pct",
+        dest="win_rate_pct",
+        type=float,
+        help="Win rate pct for compound growth",
+    )
+    parser.add_argument(
+        "--trades-per-day",
+        dest="trades_per_day",
+        type=int,
+        help="Trades per day for compound growth",
+    )
+    parser.add_argument(
+        "--starting-capital",
+        dest="starting_capital",
+        type=float,
+        help="Starting capital for compound growth",
+    )
+    parser.add_argument(
+        "--maint-margin-rate",
+        dest="maint_margin_rate",
+        type=float,
+        help="Maintenance margin rate for liquidation calc",
+    )
+    parser.add_argument(
+        "--account-balance",
+        dest="account_balance",
+        type=float,
+        help="Account balance for fixed fractional sizing",
+    )
+    parser.add_argument("--margin", help="Margin to add/reduce for isolated positions")
+    parser.add_argument(
+        "--auto-add-margin",
+        dest="auto_add_margin",
+        action="store_true",
+        help="Enable auto-add-margin",
+    )
+    parser.add_argument(
+        "--tp-sl-mode", dest="tp_sl_mode", help="TP/SL mode: Full or Partial"
+    )
+    parser.add_argument(
+        "--collateral-switch",
+        dest="collateral_switch",
+        action="store_true",
+        help="Toggle coin as collateral",
+    )
+    parser.add_argument(
+        "--brick-size", dest="brick_size", type=float, help="Renko brick size"
+    )
 
     args = parser.parse_args()
 
@@ -11157,68 +13779,86 @@ Examples:
             orders_data = json.load(f)
 
     result = run(
-        action=args.action, symbol=args.symbol, side=args.side,
-        qty=args.qty, price=args.price, order_type=args.order_type,
-        category=args.category, order_id=args.order_id,
-        stop_loss=args.stop_loss, take_profit=args.take_profit,
-        trailing_stop=args.trailing_stop, reduce_only=args.reduce_only,
-        time_in_force=args.time_in_force, position_idx=args.position_idx,
-        client_oid=args.client_oid, leverage=args.leverage,
-        buy_leverage=args.buy_leverage, sell_leverage=args.sell_leverage,
-        account_type=args.account_type, limit=args.limit,
-        interval=args.interval, interval_time=args.interval_time,
-        strong_threshold=args.strong_threshold, mild_threshold=args.mild_threshold,
-        sl_pct=args.sl_pct, tp_pct=args.tp_pct, risk_usdt=args.risk_usdt,
-        sl_price=args.sl_price, orders=orders_data,
-        slices=args.slices, delay=args.delay,
-        start_time=args.start_time, end_time=args.end_time,
-        fee_rate=getattr(args, 'fee_rate', None),
-        funding_rate=getattr(args, 'funding_rate', None),
-        holding_hours=getattr(args, 'holding_hours', None),
-        holding_periods=getattr(args, 'holding_periods', None),
-        total_usdt=getattr(args, 'total_usdt', None),
-        num_orders=getattr(args, 'num_orders', None),
-        num_grids=getattr(args, 'num_grids', None),
-        upper_price=getattr(args, 'upper_price', None),
-        lower_price=getattr(args, 'lower_price', None),
-        rr_ratio=getattr(args, 'rr_ratio', None),
-        atr_mult=getattr(args, 'atr_mult', None),
-        duration_minutes=getattr(args, 'duration_minutes', None),
-        num_slices=getattr(args, 'num_slices', None),
-        min_rate=getattr(args, 'min_rate', None),
-        top_n=getattr(args, 'top_n', None),
-        price_range_pct=getattr(args, 'price_range_pct', None),
-        coin=getattr(args, 'coin', None),
-        amount=getattr(args, 'amount', None),
-        from_account=getattr(args, 'from_account', None),
-        to_account=getattr(args, 'to_account', None),
-        risk_id=getattr(args, 'risk_id', None),
-        currency=getattr(args, 'currency', None),
-        depth=getattr(args, 'depth', None),
-        period=getattr(args, 'period', None),
-        num_levels=getattr(args, 'num_levels', None),
-        num_entries=getattr(args, 'num_entries', None),
-        num_exits=getattr(args, 'num_exits', None),
-        spacing_pct=getattr(args, 'spacing_pct', None),
-        tp_spacing_pct=getattr(args, 'tp_spacing_pct', None),
-        hedge_pct=getattr(args, 'hedge_pct', None),
-        dip_pct=getattr(args, 'dip_pct', None),
-        symbols=getattr(args, 'symbols', None),
-        risk_fraction=getattr(args, 'risk_fraction', None),
-        consecutive_wins=getattr(args, 'consecutive_wins', None),
-        consecutive_losses=getattr(args, 'consecutive_losses', None),
-        daily_return_pct=getattr(args, 'daily_return_pct', None),
-        days=getattr(args, 'days', None),
-        win_rate_pct=getattr(args, 'win_rate_pct', None),
-        trades_per_day=getattr(args, 'trades_per_day', None),
-        starting_capital=getattr(args, 'starting_capital', None),
-        maint_margin_rate=getattr(args, 'maint_margin_rate', None),
-        account_balance=getattr(args, 'account_balance', None),
-        margin=getattr(args, 'margin', None),
-        auto_add_margin=getattr(args, 'auto_add_margin', None),
-        tp_sl_mode=getattr(args, 'tp_sl_mode', None),
-        collateral_switch=getattr(args, 'collateral_switch', None),
-        brick_size=getattr(args, 'brick_size', None),
+        action=args.action,
+        symbol=args.symbol,
+        side=args.side,
+        qty=args.qty,
+        price=args.price,
+        order_type=args.order_type,
+        category=args.category,
+        order_id=args.order_id,
+        stop_loss=args.stop_loss,
+        take_profit=args.take_profit,
+        trailing_stop=args.trailing_stop,
+        reduce_only=args.reduce_only,
+        time_in_force=args.time_in_force,
+        position_idx=args.position_idx,
+        client_oid=args.client_oid,
+        leverage=args.leverage,
+        buy_leverage=args.buy_leverage,
+        sell_leverage=args.sell_leverage,
+        account_type=args.account_type,
+        limit=args.limit,
+        interval=args.interval,
+        interval_time=args.interval_time,
+        strong_threshold=args.strong_threshold,
+        mild_threshold=args.mild_threshold,
+        sl_pct=args.sl_pct,
+        tp_pct=args.tp_pct,
+        risk_usdt=args.risk_usdt,
+        sl_price=args.sl_price,
+        orders=orders_data,
+        slices=args.slices,
+        delay=args.delay,
+        start_time=args.start_time,
+        end_time=args.end_time,
+        fee_rate=getattr(args, "fee_rate", None),
+        funding_rate=getattr(args, "funding_rate", None),
+        holding_hours=getattr(args, "holding_hours", None),
+        holding_periods=getattr(args, "holding_periods", None),
+        total_usdt=getattr(args, "total_usdt", None),
+        num_orders=getattr(args, "num_orders", None),
+        num_grids=getattr(args, "num_grids", None),
+        upper_price=getattr(args, "upper_price", None),
+        lower_price=getattr(args, "lower_price", None),
+        rr_ratio=getattr(args, "rr_ratio", None),
+        atr_mult=getattr(args, "atr_mult", None),
+        duration_minutes=getattr(args, "duration_minutes", None),
+        num_slices=getattr(args, "num_slices", None),
+        min_rate=getattr(args, "min_rate", None),
+        top_n=getattr(args, "top_n", None),
+        price_range_pct=getattr(args, "price_range_pct", None),
+        coin=getattr(args, "coin", None),
+        amount=getattr(args, "amount", None),
+        from_account=getattr(args, "from_account", None),
+        to_account=getattr(args, "to_account", None),
+        risk_id=getattr(args, "risk_id", None),
+        currency=getattr(args, "currency", None),
+        depth=getattr(args, "depth", None),
+        period=getattr(args, "period", None),
+        num_levels=getattr(args, "num_levels", None),
+        num_entries=getattr(args, "num_entries", None),
+        num_exits=getattr(args, "num_exits", None),
+        spacing_pct=getattr(args, "spacing_pct", None),
+        tp_spacing_pct=getattr(args, "tp_spacing_pct", None),
+        hedge_pct=getattr(args, "hedge_pct", None),
+        dip_pct=getattr(args, "dip_pct", None),
+        symbols=getattr(args, "symbols", None),
+        risk_fraction=getattr(args, "risk_fraction", None),
+        consecutive_wins=getattr(args, "consecutive_wins", None),
+        consecutive_losses=getattr(args, "consecutive_losses", None),
+        daily_return_pct=getattr(args, "daily_return_pct", None),
+        days=getattr(args, "days", None),
+        win_rate_pct=getattr(args, "win_rate_pct", None),
+        trades_per_day=getattr(args, "trades_per_day", None),
+        starting_capital=getattr(args, "starting_capital", None),
+        maint_margin_rate=getattr(args, "maint_margin_rate", None),
+        account_balance=getattr(args, "account_balance", None),
+        margin=getattr(args, "margin", None),
+        auto_add_margin=getattr(args, "auto_add_margin", None),
+        tp_sl_mode=getattr(args, "tp_sl_mode", None),
+        collateral_switch=getattr(args, "collateral_switch", None),
+        brick_size=getattr(args, "brick_size", None),
     )
 
     output_path = args.output or os.environ.get("LLM_OUTPUT")

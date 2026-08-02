@@ -72,9 +72,7 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
 
 def _strip_ansi(text: str) -> str:
@@ -82,7 +80,10 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
 def _cprint(text: str, no_color: bool = False, end: str = "\n") -> None:
@@ -157,6 +158,7 @@ def _run_subprocess(
 # Step 1: Video download via lux
 # ---------------------------------------------------------------------------
 
+
 def _run_lux_download(
     url: str,
     output_dir: Path,
@@ -202,7 +204,9 @@ def _run_lux_download(
         }
 
     # Find the most recently created file in output_dir (lux names after the video)
-    candidates = [p for p in output_dir.iterdir() if p.is_file() and not p.name.endswith(".gif")]
+    candidates = [
+        p for p in output_dir.iterdir() if p.is_file() and not p.name.endswith(".gif")
+    ]
     if not candidates:
         return {
             "success": False,
@@ -227,6 +231,7 @@ def _run_lux_download(
 # Step 2: Frame extraction via gen_thumbs (or ffmpeg directly)
 # ---------------------------------------------------------------------------
 
+
 def _run_gen_thumbs(
     video_path: str,
     frames_dir: Path,
@@ -243,20 +248,37 @@ def _run_gen_thumbs(
     gen_thumbs_path = Path(__file__).resolve().parent / "gen_thumbs.py"
     if not gen_thumbs_path.is_file():
         return _run_ffmpeg_thumbs(
-            video_path, frames_dir, max_frames, interval, width, fmt, start, end, verbose, no_color
+            video_path,
+            frames_dir,
+            max_frames,
+            interval,
+            width,
+            fmt,
+            start,
+            end,
+            verbose,
+            no_color,
         )
 
     cmd = [
         sys.executable,
         str(gen_thumbs_path),
-        "--input", video_path,
-        "--output_dir", str(frames_dir),
-        "--max_frames", str(max_frames),
-        "--interval", str(interval),
-        "--width", str(width),
-        "--format", fmt,
-        "--start", start,
-        "--end", end,
+        "--input",
+        video_path,
+        "--output_dir",
+        str(frames_dir),
+        "--max_frames",
+        str(max_frames),
+        "--interval",
+        str(interval),
+        "--width",
+        str(width),
+        "--format",
+        fmt,
+        "--start",
+        start,
+        "--end",
+        end,
     ]
     if verbose:
         cmd.append("--verbose")
@@ -265,12 +287,19 @@ def _run_gen_thumbs(
 
     if verbose:
         if stdout:
-            _cprint(f"{DIM}[gen_thumbs stdout] {stdout.strip()[:500]}{RESET}", no_color=no_color)
+            _cprint(
+                f"{DIM}[gen_thumbs stdout] {stdout.strip()[:500]}{RESET}",
+                no_color=no_color,
+            )
         if stderr:
-            _cprint(f"{DIM}[gen_thumbs stderr] {stderr.strip()[:500]}{RESET}", no_color=no_color)
+            _cprint(
+                f"{DIM}[gen_thumbs stderr] {stderr.strip()[:500]}{RESET}",
+                no_color=no_color,
+            )
 
     frames = sorted(
-        p for p in frames_dir.rglob("*")
+        p
+        for p in frames_dir.rglob("*")
         if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
     )
     if not frames:
@@ -318,11 +347,16 @@ def _run_ffmpeg_thumbs(
     cmd = [
         "ffmpeg",
         "-y",
-        "-loglevel", "error",
-        "-ss", start,
-        "-i", video_path,
-        "-vf", f"fps={fps_value},scale={width}:-1",
-        "-frames:v", str(max_frames),
+        "-loglevel",
+        "error",
+        "-ss",
+        start,
+        "-i",
+        video_path,
+        "-vf",
+        f"fps={fps_value},scale={width}:-1",
+        "-frames:v",
+        str(max_frames),
         pattern,
     ]
     if end and end != "00:00:00":
@@ -332,8 +366,17 @@ def _run_ffmpeg_thumbs(
         cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", start]
         if end and end != "00:00:00":
             cmd.extend(["-to", end])
-        cmd.extend(["-i", video_path, "-vf", f"fps={fps_value},scale={width}:-1",
-                    "-frames:v", str(max_frames), pattern])
+        cmd.extend(
+            [
+                "-i",
+                video_path,
+                "-vf",
+                f"fps={fps_value},scale={width}:-1",
+                "-frames:v",
+                str(max_frames),
+                pattern,
+            ]
+        )
 
     rc, stdout, stderr = _run_subprocess(cmd, timeout=180, verbose=verbose)
 
@@ -341,7 +384,8 @@ def _run_ffmpeg_thumbs(
         _cprint(f"{DIM}[ffmpeg] {stderr.strip()[:500]}{RESET}", no_color=no_color)
 
     frames = sorted(
-        p for p in frames_dir.rglob("*")
+        p
+        for p in frames_dir.rglob("*")
         if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
     )
     if not frames:
@@ -362,6 +406,7 @@ def _run_ffmpeg_thumbs(
 # ---------------------------------------------------------------------------
 # Step 3: GIF creation via ffmpeg (preferred) → gifsicle optimize (optional)
 # ---------------------------------------------------------------------------
+
 
 def _build_gif_direct(
     video_path: str,
@@ -406,17 +451,24 @@ def _build_gif_direct(
     cmd.extend(["-i", video_path])
     if end and end != "00:00:00":
         cmd.extend(["-to", end])
-    cmd.extend([
-        "-vf", palette_filters,
-        "-frames:v", str(max_frames),
-        "-loop", str(loopcount),
-        str(output_gif),
-    ])
+    cmd.extend(
+        [
+            "-vf",
+            palette_filters,
+            "-frames:v",
+            str(max_frames),
+            "-loop",
+            str(loopcount),
+            str(output_gif),
+        ]
+    )
 
     rc, stdout, stderr = _run_subprocess(cmd, timeout=300, verbose=verbose)
 
     if verbose and stderr:
-        _cprint(f"{DIM}[ffmpeg-gif stderr] {stderr.strip()[:500]}{RESET}", no_color=no_color)
+        _cprint(
+            f"{DIM}[ffmpeg-gif stderr] {stderr.strip()[:500]}{RESET}", no_color=no_color
+        )
 
     if not output_gif.is_file() or rc != 0:
         return {
@@ -479,18 +531,33 @@ def _run_gif_make(
         filters.append(f"[{i}:v][p{i}]paletteuse[v{i}]")
     filters.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1[v]")
 
-    cmd = ["ffmpeg", "-y", "-loglevel", "error", *inputs,
-           "-filter_complex", ";".join(filters),
-           "-map", "[v]",
-           "-loop", str(loopcount),
-           str(output_gif)]
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        *inputs,
+        "-filter_complex",
+        ";".join(filters),
+        "-map",
+        "[v]",
+        "-loop",
+        str(loopcount),
+        str(output_gif),
+    ]
 
     if verbose:
-        _cprint(f"{DIM}[ffmpeg-merge] {n} frames via concat+paletteuse{RESET}", no_color=no_color)
+        _cprint(
+            f"{DIM}[ffmpeg-merge] {n} frames via concat+paletteuse{RESET}",
+            no_color=no_color,
+        )
 
     proc = subprocess.run(cmd, capture_output=True, timeout=300)
     if verbose and proc.stderr:
-        _cprint(f"{DIM}[ffmpeg-merge stderr] {proc.stderr.decode('utf-8', errors='replace')[:300]}{RESET}", no_color=no_color)
+        _cprint(
+            f"{DIM}[ffmpeg-merge stderr] {proc.stderr.decode('utf-8', errors='replace')[:300]}{RESET}",
+            no_color=no_color,
+        )
 
     if not output_gif.is_file() or proc.returncode != 0:
         err = proc.stderr.decode("utf-8", errors="replace") if proc.stderr else ""
@@ -503,7 +570,9 @@ def _run_gif_make(
     size = output_gif.stat().st_size
 
     # Optional post-processing with gifsicle (optimize, lossy, colors)
-    if _check_binary("gifsicle") and (optimize is not None or lossy is not None or colors is not None):
+    if _check_binary("gifsicle") and (
+        optimize is not None or lossy is not None or colors is not None
+    ):
         post_cmd = ["gifsicle"]
         if optimize is not None:
             post_cmd.append(f"--optimize={optimize}")
@@ -520,9 +589,18 @@ def _run_gif_make(
     if _check_binary("gifsicle") and delay > 0:
         try:
             subprocess.run(
-                ["gifsicle", "--delay", str(delay), "--loopcount", str(loopcount),
-                 "-o", str(output_gif), str(output_gif)],
-                capture_output=True, timeout=60,
+                [
+                    "gifsicle",
+                    "--delay",
+                    str(delay),
+                    "--loopcount",
+                    str(loopcount),
+                    "-o",
+                    str(output_gif),
+                    str(output_gif),
+                ],
+                capture_output=True,
+                timeout=60,
             )
         except Exception:
             pass
@@ -558,11 +636,16 @@ def _run_gif_tool(
     cmd = [
         sys.executable,
         str(gif_tool_path),
-        "--input-files", *frames,
-        "--output-file", str(output_gif),
-        "--mode", "merge",
-        "--delay", str(delay),
-        "--loopcount", str(loopcount),
+        "--input-files",
+        *frames,
+        "--output-file",
+        str(output_gif),
+        "--mode",
+        "merge",
+        "--delay",
+        str(delay),
+        "--loopcount",
+        str(loopcount),
     ]
     if optimize is not None:
         cmd.extend(["--optimize", str(optimize)])
@@ -575,9 +658,15 @@ def _run_gif_tool(
 
     if verbose:
         if stdout:
-            _cprint(f"{DIM}[gif_tool stdout] {stdout.strip()[:500]}{RESET}", no_color=no_color)
+            _cprint(
+                f"{DIM}[gif_tool stdout] {stdout.strip()[:500]}{RESET}",
+                no_color=no_color,
+            )
         if stderr:
-            _cprint(f"{DIM}[gif_tool stderr] {stderr.strip()[:500]}{RESET}", no_color=no_color)
+            _cprint(
+                f"{DIM}[gif_tool stderr] {stderr.strip()[:500]}{RESET}",
+                no_color=no_color,
+            )
 
     if not output_gif.is_file() or rc != 0:
         return {
@@ -599,6 +688,7 @@ def _run_gif_tool(
 # ---------------------------------------------------------------------------
 # Main orchestration
 # ---------------------------------------------------------------------------
+
 
 def execute_tool(
     url: str,
@@ -729,7 +819,10 @@ def execute_tool(
 
     # Step 1: download
     if verbose:
-        _cprint(f"\n{NEON_PINK}━━ Step 1/3: Downloading video via lux ━━{RESET}", no_color=no_color)
+        _cprint(
+            f"\n{NEON_PINK}━━ Step 1/3: Downloading video via lux ━━{RESET}",
+            no_color=no_color,
+        )
 
     dl = _run_lux_download(
         url=url,
@@ -758,7 +851,10 @@ def execute_tool(
     # Fast path: build GIF directly from video using ffmpeg palettegen (highest quality)
     if gif_method == "ffmpeg":
         if verbose:
-            _cprint(f"\n{NEON_PINK}━━ Step 2/2: Building GIF directly (ffmpeg palettegen) ━━{RESET}", no_color=no_color)
+            _cprint(
+                f"\n{NEON_PINK}━━ Step 2/2: Building GIF directly (ffmpeg palettegen) ━━{RESET}",
+                no_color=no_color,
+            )
 
         gf = _build_gif_direct(
             video_path=video_path,
@@ -787,7 +883,10 @@ def execute_tool(
             }
 
         if verbose:
-            _cprint(f"{NEON_GREEN}✔ GIF created: {gf['gif_path']} ({gf['file_size_bytes']} bytes){RESET}", no_color=no_color)
+            _cprint(
+                f"{NEON_GREEN}✔ GIF created: {gf['gif_path']} ({gf['file_size_bytes']} bytes){RESET}",
+                no_color=no_color,
+            )
 
         duration_ms = round((time.monotonic() - start_time) * 1000, 2)
         return {
@@ -805,7 +904,7 @@ def execute_tool(
                 "tool": "vid2gif",
                 "version": __version__,
                 "is_termux": "com.termux" in os.environ.get("PREFIX", "")
-                                  or Path("/data/data/com.termux").exists(),
+                or Path("/data/data/com.termux").exists(),
             },
             "duration_ms": duration_ms,
             "exit_code": EXIT_SUCCESS,
@@ -813,7 +912,9 @@ def execute_tool(
 
     # Step 2: extract frames (only for "frames" / "tool" methods)
     if verbose:
-        _cprint(f"\n{NEON_PINK}━━ Step 2/3: Extracting frames ━━{RESET}", no_color=no_color)
+        _cprint(
+            f"\n{NEON_PINK}━━ Step 2/3: Extracting frames ━━{RESET}", no_color=no_color
+        )
 
     # Clean old frames to avoid mixing with previous runs
     for old in frames_dir.iterdir():
@@ -848,7 +949,10 @@ def execute_tool(
 
     frame_count = th["frame_count"]
     if verbose:
-        _cprint(f"{NEON_GREEN}✔ Extracted {frame_count} frames → {frames_dir}{RESET}", no_color=no_color)
+        _cprint(
+            f"{NEON_GREEN}✔ Extracted {frame_count} frames → {frames_dir}{RESET}",
+            no_color=no_color,
+        )
 
     # Step 3: build GIF
     if verbose:
@@ -893,7 +997,10 @@ def execute_tool(
         }
 
     if verbose:
-        _cprint(f"{NEON_GREEN}✔ GIF created: {gf['gif_path']} ({gf['file_size_bytes']} bytes){RESET}", no_color=no_color)
+        _cprint(
+            f"{NEON_GREEN}✔ GIF created: {gf['gif_path']} ({gf['file_size_bytes']} bytes){RESET}",
+            no_color=no_color,
+        )
 
     # Cleanup
     if not keep_frames:
@@ -924,7 +1031,7 @@ def execute_tool(
             "tool": "vid2gif",
             "version": __version__,
             "is_termux": "com.termux" in os.environ.get("PREFIX", "")
-                              or Path("/data/data/com.termux").exists(),
+            or Path("/data/data/com.termux").exists(),
         },
         "duration_ms": duration_ms,
         "exit_code": EXIT_SUCCESS,
@@ -942,26 +1049,42 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [VIDEO→GIF ORCHESTRATOR v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [VIDEO→GIF ORCHESTRATOR v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
 
     if data.get("dry_run"):
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_YELLOW}DRY RUN — no execution performed{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_YELLOW}DRY RUN — no execution performed{RESET}"
+        )
         plan = data.get("plan", {})
         for k, v in plan.items():
             _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}{k}:{RESET} {v}")
     else:
         if data.get("url"):
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}URL:{RESET}        {data['url']}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}URL:{RESET}        {data['url']}"
+            )
         if data.get("video_path"):
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Video:{RESET}      {data['video_path']}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Video:{RESET}      {data['video_path']}"
+            )
         if data.get("gif_path"):
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}GIF:{RESET}        {NEON_GREEN}{data['gif_path']}{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}GIF:{RESET}        {NEON_GREEN}{data['gif_path']}{RESET}"
+            )
         if data.get("file_size_bytes") is not None:
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Size:{RESET}       {data['file_size_bytes']} bytes")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Size:{RESET}       {data['file_size_bytes']} bytes"
+            )
         if data.get("frame_count"):
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Frames:{RESET}     {NEON_YELLOW}{data['frame_count']}{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}   {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Frames:{RESET}     {NEON_YELLOW}{data['frame_count']}{RESET}"
+            )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}   {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+        )
 
     if not success and data.get("error"):
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -1045,27 +1168,88 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="vid2gif.py",
         description=f"AIChat Video-to-GIF Orchestrator v{__version__}",
     )
-    parser.add_argument("--url", "-u", required=True, help="Source video URL (http/https)")
-    parser.add_argument("--output-dir", help="Directory for GIF + intermediate files (default: ~/vid2gif)")
-    parser.add_argument("--gif-name", help="Output GIF filename (default: derived from URL)")
-    parser.add_argument("--max-frames", type=int, default=30, help="Max frames to extract (default: 30)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Seconds between frames (default: 1.0)")
-    parser.add_argument("--width", type=int, default=480, help="Frame width in pixels (default: 480)")
-    parser.add_argument("--format", default="png", choices=["png", "jpg", "webp"], help="Intermediate frame format (default: png)")
-    parser.add_argument("--delay", type=int, default=8, help="Frame delay in 1/100ths of a second (default: 8)")
-    parser.add_argument("--loopcount", type=int, default=0, help="GIF loop count (0=forever, default: 0)")
-    parser.add_argument("--optimize", type=int, choices=[1, 2, 3], help="Gifsicle optimization level (1-3)")
+    parser.add_argument(
+        "--url", "-u", required=True, help="Source video URL (http/https)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        help="Directory for GIF + intermediate files (default: ~/vid2gif)",
+    )
+    parser.add_argument(
+        "--gif-name", help="Output GIF filename (default: derived from URL)"
+    )
+    parser.add_argument(
+        "--max-frames", type=int, default=30, help="Max frames to extract (default: 30)"
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Seconds between frames (default: 1.0)",
+    )
+    parser.add_argument(
+        "--width", type=int, default=480, help="Frame width in pixels (default: 480)"
+    )
+    parser.add_argument(
+        "--format",
+        default="png",
+        choices=["png", "jpg", "webp"],
+        help="Intermediate frame format (default: png)",
+    )
+    parser.add_argument(
+        "--delay",
+        type=int,
+        default=8,
+        help="Frame delay in 1/100ths of a second (default: 8)",
+    )
+    parser.add_argument(
+        "--loopcount",
+        type=int,
+        default=0,
+        help="GIF loop count (0=forever, default: 0)",
+    )
+    parser.add_argument(
+        "--optimize",
+        type=int,
+        choices=[1, 2, 3],
+        help="Gifsicle optimization level (1-3)",
+    )
     parser.add_argument("--lossy", type=int, help="Gifsicle lossiness (1-200)")
     parser.add_argument("--colors", type=int, help="Reduce palette to N colors (2-256)")
-    parser.add_argument("--start", default="00:00:00", help="Start time HH:MM:SS or seconds")
-    parser.add_argument("--end", default="00:00:00", help="End time HH:MM:SS or seconds (00:00:00 = full video)")
-    parser.add_argument("--keep-frames", action="store_true", help="Keep extracted frames after GIF creation")
-    parser.add_argument("--audio-only", action="store_true", help="Download audio-only track")
-    parser.add_argument("--use-aria2", action="store_true", help="Use aria2 for faster downloads")
-    parser.add_argument("--timeout", type=int, default=300, help="Total operation timeout in seconds (default: 300)")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
-    parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
-    parser.add_argument("--dry-run", action="store_true", help="Print plan but do not execute")
+    parser.add_argument(
+        "--start", default="00:00:00", help="Start time HH:MM:SS or seconds"
+    )
+    parser.add_argument(
+        "--end",
+        default="00:00:00",
+        help="End time HH:MM:SS or seconds (00:00:00 = full video)",
+    )
+    parser.add_argument(
+        "--keep-frames",
+        action="store_true",
+        help="Keep extracted frames after GIF creation",
+    )
+    parser.add_argument(
+        "--audio-only", action="store_true", help="Download audio-only track"
+    )
+    parser.add_argument(
+        "--use-aria2", action="store_true", help="Use aria2 for faster downloads"
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Total operation timeout in seconds (default: 300)",
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable debug logging"
+    )
+    parser.add_argument(
+        "--no-color", action="store_true", help="Disable ANSI color output"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print plan but do not execute"
+    )
     parser.add_argument(
         "--gif-method",
         dest="gif_method",

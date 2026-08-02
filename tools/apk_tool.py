@@ -38,22 +38,22 @@ import subprocess
 import sys
 import time
 import zipfile
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Optional, Tuple
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
+    "run",
     "sanitize_path",
-    "__version__",
 ]
 
 # ==============================================================================
@@ -120,19 +120,25 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-NEON_LIME    = "\033[38;5;82m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+NEON_LIME = "\033[38;5;82m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-BOX_TL = "╭"; BOX_TR = "╮"; BOX_BL = "╰"; BOX_BR = "╯"
-BOX_V  = "│"; BOX_H  = "─"; BOX_LT = "├"; BOX_RT = "┤"
+BOX_TL = "╭"
+BOX_TR = "╮"
+BOX_BL = "╰"
+BOX_BR = "╯"
+BOX_V = "│"
+BOX_H = "─"
+BOX_LT = "├"
+BOX_RT = "┤"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -152,7 +158,10 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
 def get_width() -> int:
@@ -164,7 +173,9 @@ def get_width() -> int:
         return 68
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text to stderr by default."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -188,28 +199,48 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = BOX_H * box_w
 
     _cprint(f"{NEON_PURPLE}{BOX_TL}{border}{BOX_TR}{RESET}")
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_PINK}{icon} [APK TOOL v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_PINK}{icon} [APK TOOL v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}{BOX_LT}{border}{BOX_RT}{RESET}")
     _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Action:{RESET}   {action}")
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Target:{RESET}   {data.get('target', 'N/A')}")
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Target:{RESET}   {data.get('target', 'N/A')}"
+    )
     if data.get("output"):
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Output:{RESET}   {NEON_GREEN}{data.get('output')}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Output:{RESET}   {NEON_GREEN}{data.get('output')}{RESET}"
+        )
 
     if action == "info" and success and "package_info" in data:
         pkg = data["package_info"]
         _cprint(f"{NEON_PURPLE}{BOX_LT}{border}{BOX_RT}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}App Name:{RESET} {NEON_YELLOW}{pkg.get('label', 'N/A')}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Package:{RESET}  {NEON_LIME}{pkg.get('package_name', 'N/A')}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Version:{RESET}  {pkg.get('version_name', 'N/A')} (Code: {pkg.get('version_code', 'N/A')})")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}SDK Bounds:{RESET} Min {pkg.get('min_sdk', 'N/A')} | Target {pkg.get('target_sdk', 'N/A')}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}App Name:{RESET} {NEON_YELLOW}{pkg.get('label', 'N/A')}{RESET}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Package:{RESET}  {NEON_LIME}{pkg.get('package_name', 'N/A')}{RESET}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Version:{RESET}  {pkg.get('version_name', 'N/A')} (Code: {pkg.get('version_code', 'N/A')})"
+        )
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}SDK Bounds:{RESET} Min {pkg.get('min_sdk', 'N/A')} | Target {pkg.get('target_sdk', 'N/A')}"
+        )
         if pkg.get("native_abis"):
-            _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Native ABIs:{RESET} {', '.join(pkg.get('native_abis'))}")
+            _cprint(
+                f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Native ABIs:{RESET} {', '.join(pkg.get('native_abis'))}"
+            )
 
-    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}{BOX_LT}{border}{BOX_RT}{RESET}")
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error:{RESET}    {data['error']}")
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error:{RESET}    {data['error']}"
+        )
 
     _cprint(f"{NEON_PURPLE}{BOX_BL}{border}{BOX_BR}{RESET}")
 
@@ -217,6 +248,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
@@ -240,7 +272,8 @@ def get_execution_context() -> dict[str, Any]:
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
         "termux_prefix": termux_prefix,
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
@@ -252,7 +285,10 @@ def sanitize_path() -> None:
         if not p:
             continue
         norm = os.path.normpath(p)
-        if norm.endswith(os.path.join("llm-functions", "bin")) or os.path.basename(norm) == "llm-functions-bin":
+        if (
+            norm.endswith(os.path.join("llm-functions", "bin"))
+            or os.path.basename(norm) == "llm-functions-bin"
+        ):
             continue
         parts.append(p)
     os.environ["PATH"] = os.pathsep.join(parts)
@@ -264,9 +300,9 @@ def _redact_passwords(text: str, pass_val: str) -> str:
         return ""
     if pass_val and len(pass_val) > 1:
         text = text.replace(pass_val, "****")
-    text = re.sub(r'(--ks-pass\s+pass:)[^\s]+', r'\1****', text)
-    text = re.sub(r'(-storepass\s+)[^\s]+', r'\1****', text)
-    text = re.sub(r'(-keypass\s+)[^\s]+', r'\1****', text)
+    text = re.sub(r"(--ks-pass\s+pass:)[^\s]+", r"\1****", text)
+    text = re.sub(r"(-storepass\s+)[^\s]+", r"\1****", text)
+    text = re.sub(r"(-keypass\s+)[^\s]+", r"\1****", text)
     return text
 
 
@@ -288,7 +324,12 @@ def _find_binary(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
-def _run_cmd(cmd: list[str], cwd: Optional[str] = None, timeout: int = 300, pass_to_redact: str = "") -> tuple[int, str, str]:
+def _run_cmd(
+    cmd: list[str],
+    cwd: Optional[str] = None,
+    timeout: int = 300,
+    pass_to_redact: str = "",
+) -> tuple[int, str, str]:
     """Run a subprocess cleanly with timeout, process group isolation, and credential redaction."""
     preexec = os.setsid if hasattr(os, "setsid") else None
     try:
@@ -302,7 +343,11 @@ def _run_cmd(cmd: list[str], cwd: Optional[str] = None, timeout: int = 300, pass
         )
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
-            return proc.returncode, _redact_passwords(stdout.strip(), pass_to_redact), _redact_passwords(stderr.strip(), pass_to_redact)
+            return (
+                proc.returncode,
+                _redact_passwords(stdout.strip(), pass_to_redact),
+                _redact_passwords(stderr.strip(), pass_to_redact),
+            )
         except subprocess.TimeoutExpired:
             if hasattr(os, "killpg") and preexec is not None:
                 try:
@@ -321,6 +366,7 @@ def _run_cmd(cmd: list[str], cwd: Optional[str] = None, timeout: int = 300, pass
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     """Caching utility with TTL support."""
@@ -390,6 +436,7 @@ class GracefulShutdown:
 # SECTION 5: Core APK Action Handlers
 # ==============================================================================
 
+
 def _action_info(target_path: Path) -> Tuple[bool, Any]:
     """Inspect APK manifest badging and structure using aapt2/aapt or fallback inspection."""
     if not target_path.is_file():
@@ -410,18 +457,24 @@ def _action_info(target_path: Path) -> Tuple[bool, Any]:
                     m_pkg = re.search(r"name='([^']+)'", line)
                     m_ver_code = re.search(r"versionCode='([^']+)'", line)
                     m_ver_name = re.search(r"versionName='([^']+)'", line)
-                    if m_pkg: pkg_info["package_name"] = m_pkg.group(1)
-                    if m_ver_code: pkg_info["version_code"] = m_ver_code.group(1)
-                    if m_ver_name: pkg_info["version_name"] = m_ver_name.group(1)
+                    if m_pkg:
+                        pkg_info["package_name"] = m_pkg.group(1)
+                    if m_ver_code:
+                        pkg_info["version_code"] = m_ver_code.group(1)
+                    if m_ver_name:
+                        pkg_info["version_name"] = m_ver_name.group(1)
                 elif line.startswith("application-label:"):
                     m_label = re.search(r"application-label:'([^']+)'", line)
-                    if m_label: pkg_info["label"] = m_label.group(1)
+                    if m_label:
+                        pkg_info["label"] = m_label.group(1)
                 elif line.startswith("sdkVersion:"):
                     m_sdk = re.search(r"sdkVersion:'([^']+)'", line)
-                    if m_sdk: pkg_info["min_sdk"] = m_sdk.group(1)
+                    if m_sdk:
+                        pkg_info["min_sdk"] = m_sdk.group(1)
                 elif line.startswith("targetSdkVersion:"):
                     m_target = re.search(r"targetSdkVersion:'([^']+)'", line)
-                    if m_target: pkg_info["target_sdk"] = m_target.group(1)
+                    if m_target:
+                        pkg_info["target_sdk"] = m_target.group(1)
 
             permissions = re.findall(r"uses-permission: name='([^']+)'", stdout)
             pkg_info["permissions_count"] = len(permissions)
@@ -448,41 +501,60 @@ def _action_info(target_path: Path) -> Tuple[bool, Any]:
             pkg_info["has_native_libs"] = len(abis) > 0
 
             if not aapt_bin:
-                pkg_info["notice"] = "Basic inspection (Install 'aapt2' or 'aapt' via 'pkg install aapt' for full badging)"
+                pkg_info["notice"] = (
+                    "Basic inspection (Install 'aapt2' or 'aapt' via 'pkg install aapt' for full badging)"
+                )
             return True, pkg_info
     except Exception as exc:
         return False, f"Failed to inspect APK file: {exc}"
 
 
-def _action_decompile(target_path: Path, output_path: Optional[Path]) -> Tuple[bool, Any]:
+def _action_decompile(
+    target_path: Path, output_path: Optional[Path]
+) -> Tuple[bool, Any]:
     """Decompile an APK file into a project directory using apktool."""
     if not target_path.is_file():
         return False, f"Decompile target must be an APK file: {target_path}"
 
     apktool_bin = _find_binary("apktool")
     if not apktool_bin:
-        return False, "apktool binary not found in Termux. Install with: pkg install apktool"
+        return (
+            False,
+            "apktool binary not found in Termux. Install with: pkg install apktool",
+        )
 
     out_dir = output_path or (target_path.parent / f"{target_path.stem}_src")
     cmd = [apktool_bin, "d", "-f", "-o", str(out_dir), str(target_path)]
 
     code, stdout, stderr = _run_cmd(cmd, timeout=300)
     if code == 0 and out_dir.is_dir():
-        return True, {"decompiled_to": str(out_dir), "output": stdout or "Decompiled successfully."}
+        return True, {
+            "decompiled_to": str(out_dir),
+            "output": stdout or "Decompiled successfully.",
+        }
     return False, stderr or stdout or "Apktool decompilation failed."
 
 
 def _action_build(target_path: Path, output_path: Optional[Path]) -> Tuple[bool, Any]:
     """Build/compile a decompiled directory structure into an APK using apktool."""
     if not target_path.is_dir():
-        return False, f"Build target must be a decompiled project directory: {target_path}"
+        return (
+            False,
+            f"Build target must be a decompiled project directory: {target_path}",
+        )
 
     if not (target_path / "apktool.yml").is_file():
-        return False, f"Target directory is missing 'apktool.yml'. Is this a valid apktool project? {target_path}"
+        return (
+            False,
+            f"Target directory is missing 'apktool.yml'. Is this a valid apktool project? {target_path}",
+        )
 
     apktool_bin = _find_binary("apktool")
     if not apktool_bin:
-        return False, "apktool binary not found in Termux. Install with: pkg install apktool"
+        return (
+            False,
+            "apktool binary not found in Termux. Install with: pkg install apktool",
+        )
 
     out_apk = output_path or (target_path.parent / f"{target_path.name}_unsigned.apk")
     cmd = [apktool_bin, "b", str(target_path), "-o", str(out_apk)]
@@ -501,15 +573,25 @@ def _generate_debug_keystore(ks_path: Path) -> bool:
 
     ks_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        keytool_bin, "-genkey", "-v",
-        "-keystore", str(ks_path),
-        "-alias", "androiddebugkey",
-        "-keyalg", "RSA",
-        "-keysize", "2048",
-        "-validity", "10000",
-        "-storepass", "android",
-        "-keypass", "android",
-        "-dname", "CN=Android Debug,O=Android,C=US",
+        keytool_bin,
+        "-genkey",
+        "-v",
+        "-keystore",
+        str(ks_path),
+        "-alias",
+        "androiddebugkey",
+        "-keyalg",
+        "RSA",
+        "-keysize",
+        "2048",
+        "-validity",
+        "10000",
+        "-storepass",
+        "android",
+        "-keypass",
+        "android",
+        "-dname",
+        "CN=Android Debug,O=Android,C=US",
     ]
     code, _, _ = _run_cmd(cmd, pass_to_redact="android")
     return code == 0 and ks_path.is_file()
@@ -528,7 +610,10 @@ def _action_sign(
 
     apksigner_bin = _find_binary("apksigner")
     if not apksigner_bin:
-        return False, "apksigner binary not found in Termux. Install with: pkg install apksigner"
+        return (
+            False,
+            "apksigner binary not found in Termux. Install with: pkg install apksigner",
+        )
 
     out_apk = output_path or (target_path.parent / f"{target_path.stem}_signed.apk")
     working_apk = target_path
@@ -538,7 +623,14 @@ def _action_sign(
         zipalign_bin = _find_binary("zipalign")
         if zipalign_bin:
             aligned_apk = target_path.parent / f"{target_path.stem}_aligned.apk"
-            cmd_align = [zipalign_bin, "-f", "-v", "4", str(target_path), str(aligned_apk)]
+            cmd_align = [
+                zipalign_bin,
+                "-f",
+                "-v",
+                "4",
+                str(target_path),
+                str(aligned_apk),
+            ]
             c_align, _, err_align = _run_cmd(cmd_align)
             if c_align == 0 and aligned_apk.is_file():
                 working_apk = aligned_apk
@@ -549,19 +641,30 @@ def _action_sign(
     ks_file = keystore or (Path.home() / ".android" / "debug.keystore")
     if not ks_file.is_file():
         if not _generate_debug_keystore(ks_file):
-            return False, f"Keystore not found and generation failed: {ks_file} (Install 'openjdk-17' for keytool)"
+            return (
+                False,
+                f"Keystore not found and generation failed: {ks_file} (Install 'openjdk-17' for keytool)",
+            )
 
     cmd_sign = [
-        apksigner_bin, "sign",
-        "--ks", str(ks_file),
-        "--ks-pass", f"pass:{ks_pass}",
-        "--out", str(out_apk),
+        apksigner_bin,
+        "sign",
+        "--ks",
+        str(ks_file),
+        "--ks-pass",
+        f"pass:{ks_pass}",
+        "--out",
+        str(out_apk),
         str(working_apk),
     ]
 
     code, stdout, stderr = _run_cmd(cmd_sign, pass_to_redact=ks_pass)
     if code == 0 and out_apk.is_file():
-        return True, {"signed_apk": str(out_apk), "keystore_used": str(ks_file), "aligned": align}
+        return True, {
+            "signed_apk": str(out_apk),
+            "keystore_used": str(ks_file),
+            "aligned": align,
+        }
     return False, stderr or stdout or "APKSigner signing failed."
 
 
@@ -613,7 +716,9 @@ def _action_create(
     <string name="app_name">{app_name}</string>
 </resources>
 """
-    (target_path / "res" / "values" / "strings.xml").write_text(strings_content, encoding="utf-8")
+    (target_path / "res" / "values" / "strings.xml").write_text(
+        strings_content, encoding="utf-8"
+    )
 
     # apktool.yml
     apktool_yaml = f"""!!brut.androlib.meta.MetaInfo
@@ -651,19 +756,27 @@ versionInfo:
     return-void
 .end method
 """
-    (target_path / "smali" / pkg_dir / "MainActivity.smali").write_text(smali_content, encoding="utf-8")
+    (target_path / "smali" / pkg_dir / "MainActivity.smali").write_text(
+        smali_content, encoding="utf-8"
+    )
 
     return True, {
         "created_project": str(target_path),
         "package_name": package_name,
         "app_name": app_name,
-        "structure": ["AndroidManifest.xml", "res/values/strings.xml", "apktool.yml", f"smali/{pkg_dir}/MainActivity.smali"],
+        "structure": [
+            "AndroidManifest.xml",
+            "res/values/strings.xml",
+            "apktool.yml",
+            f"smali/{pkg_dir}/MainActivity.smali",
+        ],
     }
 
 
 # ==============================================================================
 # SECTION 6: Primary Master Tool Execution Logic
 # ==============================================================================
+
 
 def execute_tool(
     target: str,
@@ -691,7 +804,9 @@ def execute_tool(
     base_cwd = get_builtin_var("__cwd__") or os.getcwd()
     target_path = (Path(base_cwd) / target).expanduser().resolve()
     output_path = (Path(base_cwd) / output).expanduser().resolve() if output else None
-    keystore_path = (Path(base_cwd) / keystore).expanduser().resolve() if keystore else None
+    keystore_path = (
+        (Path(base_cwd) / keystore).expanduser().resolve() if keystore else None
+    )
     action_key = action.lower().strip()
 
     cache = ToolCache()
@@ -715,7 +830,9 @@ def execute_tool(
         elif action_key in ("build", "compile"):
             ok, payload = _action_build(target_path, output_path)
         elif action_key == "sign":
-            ok, payload = _action_sign(target_path, output_path, keystore_path, ks_pass, align)
+            ok, payload = _action_sign(
+                target_path, output_path, keystore_path, ks_pass, align
+            )
         elif action_key == "create":
             ok, payload = _action_create(target_path, package_name, app_name)
         else:
@@ -744,7 +861,14 @@ def execute_tool(
             "success": True,
             "action": action_key,
             "target": str(target_path),
-            "output": str(output_path) if output_path else (payload.get("decompiled_to") or payload.get("built_apk") or payload.get("signed_apk") or payload.get("created_project")),
+            "output": str(output_path)
+            if output_path
+            else (
+                payload.get("decompiled_to")
+                or payload.get("built_apk")
+                or payload.get("signed_apk")
+                or payload.get("created_project")
+            ),
             "details": payload,
             "lines_count": len(raw_json_str.splitlines()),
             "bytes_count": len(raw_json_str.encode("utf-8")),
@@ -783,10 +907,13 @@ def execute_tool(
 # SECTION 7: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write JSON output to LLM_OUTPUT destination safely."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -807,6 +934,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 8: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     target: str,
@@ -861,25 +989,29 @@ def run(
 # SECTION 9: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="apk_tool.py",
         description=f"Pyrmethus Termux APK Operations Tool v{__version__}",
     )
     parser.add_argument(
-        "--target", "-t",
+        "--target",
+        "-t",
         required=True,
         metavar="PATH",
         help="Target APK file or project directory (required)",
     )
     parser.add_argument(
-        "--action", "-a",
+        "--action",
+        "-a",
         default="info",
         choices=["decompile", "build", "sign", "info", "create"],
         help="APK operation action (default: info)",
     )
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         metavar="PATH",
         help="Output APK file or destination directory",
     )
@@ -933,7 +1065,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

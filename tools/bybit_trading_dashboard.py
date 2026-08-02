@@ -16,21 +16,26 @@ Environment Variables:
   TOR_SOCKS_PORT=9050 - Tor SOCKS proxy port
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 from utils import bybit_base
 
 
-def run(symbols: str = "BTCUSDT,ETHUSDT,TRUMPUSDT", testnet: bool = None, use_tor: bool = None):
+def run(
+    symbols: str = "BTCUSDT,ETHUSDT,TRUMPUSDT",
+    testnet: bool = None,
+    use_tor: bool = None,
+):
     config = bybit_base.get_config()
     if testnet is not None:
         config["testnet"] = testnet
     if use_tor is not None:
         config["use_tor"] = use_tor
-    
+
     # Display connection info
     if config.get("use_tor"):
         print(f"[Dashboard] Using Tor proxy: {bybit_base.TOR_PROXIES}")
@@ -127,11 +132,20 @@ def run(symbols: str = "BTCUSDT,ETHUSDT,TRUMPUSDT", testnet: bool = None, use_to
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Unified Trading Dashboard")
-    parser.add_argument("--symbols", default="BTCUSDT,ETHUSDT,TRUMPUSDT", 
-                        help="Comma-separated symbols to watch")
-    parser.add_argument("--testnet", type=lambda x: str(x).lower() == "true", 
-                        help="Use testnet (default: from .env)")
-    parser.add_argument("--use_tor", type=lambda x: str(x).lower() == "true", 
-                        help="Route traffic through Tor (default: from .env)")
+    parser.add_argument(
+        "--symbols",
+        default="BTCUSDT,ETHUSDT,TRUMPUSDT",
+        help="Comma-separated symbols to watch",
+    )
+    parser.add_argument(
+        "--testnet",
+        type=lambda x: str(x).lower() == "true",
+        help="Use testnet (default: from .env)",
+    )
+    parser.add_argument(
+        "--use_tor",
+        type=lambda x: str(x).lower() == "true",
+        help="Route traffic through Tor (default: from .env)",
+    )
     args = parser.parse_args()
     print(run(args.symbols, args.testnet, args.use_tor))

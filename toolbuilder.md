@@ -238,6 +238,7 @@ import sys
 import argparse
 from typing import List, Optional
 
+
 def run(
     string: str,
     string_optional: Optional[str] = None,
@@ -253,12 +254,15 @@ def run(
         "string_optional": string_optional,
         "boolean": boolean,
         "integer": integer,
-        "array": array or []
+        "array": array or [],
     }
+
 
 if __name__ == "__main__":
     # 1. Parse JSON input directly if passed by aichat's tool dispatcher
-    if len(sys.argv) > 1 and (sys.argv[1].startswith("{") or sys.argv[1].startswith("[")):
+    if len(sys.argv) > 1 and (
+        sys.argv[1].startswith("{") or sys.argv[1].startswith("[")
+    ):
         try:
             kwargs = json.loads(sys.argv[1])
             if isinstance(kwargs, dict):
@@ -268,7 +272,11 @@ if __name__ == "__main__":
             print(json.dumps(result))
             sys.exit(0)
         except Exception as err:
-            print(json.dumps({"success": False, "error": f"JSON argument parse error: {err}"}))
+            print(
+                json.dumps(
+                    {"success": False, "error": f"JSON argument parse error: {err}"}
+                )
+            )
             sys.exit(1)
 
     # 2. Fallback to standard command-line flags (for direct testing in terminal)
@@ -278,14 +286,14 @@ if __name__ == "__main__":
     parser.add_argument("--boolean", action="store_true", help="Boolean flag")
     parser.add_argument("--integer", type=int, default=0, help="Integer parameter")
     parser.add_argument("--array", action="append", help="Array parameter (repeatable)")
-    
+
     args = parser.parse_args()
     result = run(
         string=args.string,
         string_optional=args.string_optional,
         boolean=args.boolean,
         integer=args.integer,
-        array=args.array
+        array=args.array,
     )
     print(json.dumps(result))
 ```

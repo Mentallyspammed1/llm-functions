@@ -1,7 +1,10 @@
 import sys
+
 sys.path.append(".")
-from tools.bybit_terminal import BybitRealm
 import json
+
+from tools.bybit_terminal import BybitRealm
+
 realm = BybitRealm()
 print("--- BALANCE ---")
 print(json.dumps(realm.get_wallet_balance(), indent=2))

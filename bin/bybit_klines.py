@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-import os, sys
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 """Get candlestick/kline data from Bybit exchange."""
 import os
 import sys
+
 
 def run(
     category: str = "linear",
@@ -23,30 +26,34 @@ def run(
         limit: Limit number of results (default: 200)
     """
     import requests
-    
+
     use_tor = os.environ.get("BYBIT_USE_TOR", "true").lower() == "true"
     testnet = os.environ.get("BYBIT_TESTNET", "true").lower() == "true"
-    
+
     base_url = "https://api-testnet.bybit.com" if testnet else "https://api.bybit.com"
     url = f"{base_url}/v5/market/klines"
-    
+
     params = {
         "category": category,
         "symbol": symbol,
         "interval": interval,
-        "limit": limit
+        "limit": limit,
     }
     if start:
         params["start"] = start
     if end:
         params["end"] = end
-    
-    proxies = {"http": "socks5://127.0.0.1:9050", "https": "socks5://127.0.0.1:9050"} if use_tor else None
-    
+
+    proxies = (
+        {"http": "socks5://127.0.0.1:9050", "https": "socks5://127.0.0.1:9050"}
+        if use_tor
+        else None
+    )
+
     try:
         response = requests.get(url, params=params, proxies=proxies, timeout=30)
         data = response.json()
-        
+
         if data.get("retCode") == 0:
             klines = data.get("result", {}).get("list", [])
             return {"success": True, "count": len(klines), "klines": klines[:10]}
@@ -55,10 +62,11 @@ def run(
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 if __name__ == "__main__":
     import json
     from argparse import ArgumentParser
-    
+
     parser = ArgumentParser(description="Get klines from Bybit")
     parser.add_argument("--category", default="linear")
     parser.add_argument("--symbol", default="BTCUSDT")
@@ -67,13 +75,13 @@ if __name__ == "__main__":
     parser.add_argument("--end", default=None)
     parser.add_argument("--limit", default="200")
     args = parser.parse_args()
-    
+
     result = run(
         category=args.category,
         symbol=args.symbol,
         interval=args.interval,
         start=args.start,
         end=args.end,
-        limit=args.limit
+        limit=args.limit,
     )
     print(json.dumps(result, indent=2))

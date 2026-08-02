@@ -121,10 +121,15 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Check if stderr is connected to an interactive TTY."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print formatted ANSI text to target stream."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -179,10 +184,18 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         f"{status_color}{BOLD}{status_symbol} {status_text}{RESET} {DIM}[{mode}]{RESET}"
     )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}        {NEON_YELLOW}{data.get('query', 'N/A')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}        {data.get('count', 0)}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Downloads:{RESET}    {NEON_GREEN}{data.get('download_count', 0)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}        {NEON_YELLOW}{data.get('query', 'N/A')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}        {data.get('count', 0)}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Downloads:{RESET}    {NEON_GREEN}{data.get('download_count', 0)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -191,14 +204,18 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     results = data.get("results", [])
     if results:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Search Results Preview ({len(results)}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Search Results Preview ({len(results)}):{RESET}"
+        )
         for res in results[:5]:
             title = res.get("title", "Untitled")[:48]
             url = res.get("url", "")[:50]
             _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {BOLD}{title}{RESET}")
             _cprint(f"{NEON_PURPLE}│{RESET}     {DIM}{url}{RESET}")
         if len(results) > 5:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(results) - 5} more results{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(results) - 5} more results{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -233,7 +250,7 @@ def _unwrap_brave_redirect(url: str) -> str:
     if "/g?r=" in url or "search.brave.com/g?" in url:
         parsed = urllib.parse.urlparse(url)
         qs = urllib.parse.parse_qs(parsed.query)
-        if "r" in qs and qs["r"]:
+        if qs.get("r"):
             return qs["r"][0]
     return url
 
@@ -299,7 +316,10 @@ class BraveSearchEngine:
             self._log(f"Initialized in API mode (endpoint: {self.api_endpoint})")
         else:
             self.html_endpoint = "https://search.brave.com/search"
-            self._log("Initialized in HTML scraping mode" + (" (forced)" if force_html else " (no API key)"))
+            self._log(
+                "Initialized in HTML scraping mode"
+                + (" (forced)" if force_html else " (no API key)")
+            )
 
     def _log(self, message: str) -> None:
         if self.verbose:
@@ -332,9 +352,13 @@ class BraveSearchEngine:
         self._rate_limit_wait()
 
         if self.use_api:
-            return self._fetch_via_api(query, count, offset, language, country, safe_search)
+            return self._fetch_via_api(
+                query, count, offset, language, country, safe_search
+            )
         else:
-            return self._fetch_via_html(query, count, offset, language, country, safe_search)
+            return self._fetch_via_html(
+                query, count, offset, language, country, safe_search
+            )
 
     def _fetch_via_api(
         self,
@@ -372,7 +396,9 @@ class BraveSearchEngine:
                     if attempt < 3:
                         time.sleep(min(retry_after, 30))
                         continue
-                    raise RuntimeError(f"Rate limited after retries. Retry-After: {retry_after}s")
+                    raise RuntimeError(
+                        f"Rate limited after retries. Retry-After: {retry_after}s"
+                    )
 
                 resp.raise_for_status()
 
@@ -424,7 +450,9 @@ class BraveSearchEngine:
                     if attempt < max_retries:
                         time.sleep(min(retry_after, 30))
                         continue
-                    raise RuntimeError(f"Rate limited after retries. Retry-After: {retry_after}s")
+                    raise RuntimeError(
+                        f"Rate limited after retries. Retry-After: {retry_after}s"
+                    )
                 resp.raise_for_status()
 
                 if not resp.encoding or resp.encoding.lower() == "iso-8859-1":
@@ -436,20 +464,26 @@ class BraveSearchEngine:
                 last_err = exc
                 self._log(f"HTML attempt {attempt} failed: {exc}")
                 if attempt < max_retries:
-                    backoff = 2 ** attempt
+                    backoff = 2**attempt
                     self._log(f"Retrying in {backoff}s...")
                     time.sleep(backoff)
 
-        raise RuntimeError(f"HTML request failed after {max_retries} retries: {last_err}")
+        raise RuntimeError(
+            f"HTML request failed after {max_retries} retries: {last_err}"
+        )
 
-    def parse_results(self, raw_response: str, mode: str, max_results: int) -> List[Dict[str, Any]]:
+    def parse_results(
+        self, raw_response: str, mode: str, max_results: int
+    ) -> List[Dict[str, Any]]:
         """Parse search results from API JSON or HTML."""
         if mode == "api":
             return self._parse_api_results(raw_response, max_results)
         else:
             return self._parse_html_results(raw_response, max_results)
 
-    def _parse_api_results(self, json_text: str, max_results: int) -> List[Dict[str, Any]]:
+    def _parse_api_results(
+        self, json_text: str, max_results: int
+    ) -> List[Dict[str, Any]]:
         """Parse official Brave Search API JSON response."""
         results: List[Dict[str, Any]] = []
         seen_urls: Set[str] = set()
@@ -475,7 +509,9 @@ class BraveSearchEngine:
                     {
                         "title": item.get("title", "Untitled"),
                         "url": url,
-                        "description": _clean_snippet_text(item.get("description", "No description available")),
+                        "description": _clean_snippet_text(
+                            item.get("description", "No description available")
+                        ),
                         "position": idx + 1,
                         "age": item.get("age", ""),
                         "language": item.get("language", ""),
@@ -525,7 +561,9 @@ class BraveSearchEngine:
                 if "@graph" in data and isinstance(data["@graph"], list):
                     for sub in data["@graph"]:
                         nodes.extend(_extract_json_ld_nodes(sub))
-                elif "itemListElement" in data and isinstance(data["itemListElement"], list):
+                elif "itemListElement" in data and isinstance(
+                    data["itemListElement"], list
+                ):
                     nodes.extend(data["itemListElement"])
                 elif data.get("@type") in ("SearchResult", "WebPage", "Article"):
                     nodes.append(data)
@@ -550,9 +588,13 @@ class BraveSearchEngine:
                         seen_urls.add(valid_url)
                         results.append(
                             {
-                                "title": item.get("name") or item.get("headline") or "Untitled",
+                                "title": item.get("name")
+                                or item.get("headline")
+                                or "Untitled",
                                 "url": valid_url,
-                                "description": _clean_snippet_text(item.get("description", "No description available")),
+                                "description": _clean_snippet_text(
+                                    item.get("description", "No description available")
+                                ),
                                 "position": len(results) + 1,
                                 "source": "json-ld",
                             }
@@ -575,14 +617,16 @@ class BraveSearchEngine:
             if len(results) >= max_results:
                 break
 
-            title_tag = (
-                snippet.find("a", class_=re.compile(r"result-title|heading|title|snippet-title", re.I))
-                or snippet.find("a", href=True)
-            )
+            title_tag = snippet.find(
+                "a",
+                class_=re.compile(r"result-title|heading|title|snippet-title", re.I),
+            ) or snippet.find("a", href=True)
             if not title_tag or not title_tag.get("href"):
                 continue
 
-            full_url = urllib.parse.urljoin("https://search.brave.com", title_tag["href"])
+            full_url = urllib.parse.urljoin(
+                "https://search.brave.com", title_tag["href"]
+            )
             valid_url = _is_valid_url(full_url)
             if not valid_url:
                 continue
@@ -592,9 +636,15 @@ class BraveSearchEngine:
 
             desc_tag = snippet.find(
                 ["div", "p", "span"],
-                class_=re.compile(r"snippet-description|description|body|snippet-content", re.I),
+                class_=re.compile(
+                    r"snippet-description|description|body|snippet-content", re.I
+                ),
             )
-            raw_desc = desc_tag.get_text(strip=True) if desc_tag else "No description available"
+            raw_desc = (
+                desc_tag.get_text(strip=True)
+                if desc_tag
+                else "No description available"
+            )
 
             results.append(
                 {
@@ -703,6 +753,7 @@ class BraveSearchEngine:
 # SECTION 4: Core Execution Controller
 # ==============================================================================
 
+
 def execute_tool(
     query: str,
     count: int = 10,
@@ -754,7 +805,9 @@ def execute_tool(
             safe_search=safe_search,
         )
 
-        all_results = engine.parse_results(raw_response, fetch_mode, max_results=count_val + offset_val)
+        all_results = engine.parse_results(
+            raw_response, fetch_mode, max_results=count_val + offset_val
+        )
         results = all_results[offset_val : offset_val + count_val]
 
         if not results:
@@ -826,9 +879,15 @@ def execute_tool(
                 result_payload["raw_json"] = raw_response[:100_000]
             else:
                 # For HTML, sanitize
-                sanitized = re.sub(r"<script[^>]*>[\s\S]*?</script>", "", raw_response, flags=re.I)
-                sanitized = re.sub(r"<style[^>]*>[\s\S]*?</style>", "", sanitized, flags=re.I)
-                sanitized = re.sub(r"data:image/[^;]+;base64,[a-zA-Z0-9+/=]+", "", sanitized)
+                sanitized = re.sub(
+                    r"<script[^>]*>[\s\S]*?</script>", "", raw_response, flags=re.I
+                )
+                sanitized = re.sub(
+                    r"<style[^>]*>[\s\S]*?</style>", "", sanitized, flags=re.I
+                )
+                sanitized = re.sub(
+                    r"data:image/[^;]+;base64,[a-zA-Z0-9+/=]+", "", sanitized
+                )
                 result_payload["raw_html"] = sanitized[:100_000]
 
         termux_toast(f"Search complete: {len(results)} results ({fetch_mode})", "green")
@@ -837,7 +896,11 @@ def execute_tool(
     except RuntimeError as exc:
         duration_ms = round((time.monotonic() - start_time) * 1000, 2)
         err_msg = str(exc)
-        exit_code = EXIT_RATE_LIMITED if "rate limited" in err_msg.lower() or "429" in err_msg else EXIT_ERROR
+        exit_code = (
+            EXIT_RATE_LIMITED
+            if "rate limited" in err_msg.lower() or "429" in err_msg
+            else EXIT_ERROR
+        )
         termux_toast(f"Search error: {err_msg[:40]}", "red")
         return {
             "success": False,
@@ -866,10 +929,13 @@ def execute_tool(
 # SECTION 5: Output Routing & Entry Points
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write JSON output payload to target LLM destination."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -928,26 +994,30 @@ def run(
 # SECTION 6: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="brave_intel.py",
         description=f"AIChat Brave Search Engine v{__version__} (API + HTML Fallback)",
     )
     parser.add_argument(
-        "--query", "-q",
+        "--query",
+        "-q",
         required=True,
         metavar="STRING",
         help="Search query term (required)",
     )
     parser.add_argument(
-        "--count", "-c",
+        "--count",
+        "-c",
         type=int,
         default=10,
         metavar="NUM",
         help="Number of search results (default: 10, max: 50)",
     )
     parser.add_argument(
-        "--offset", "-o",
+        "--offset",
+        "-o",
         type=int,
         default=0,
         metavar="NUM",
@@ -961,12 +1031,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Request timeout in seconds (default: 15)",
     )
     parser.add_argument(
-        "--language", "-l",
+        "--language",
+        "-l",
         metavar="LANG",
         help="Language code filter (e.g. en, es, zh-CN)",
     )
     parser.add_argument(
-        "--country", "-r",
+        "--country",
+        "-r",
         metavar="COUNTRY",
         help="Country code filter (e.g. us, uk, jp)",
     )
@@ -1022,7 +1094,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

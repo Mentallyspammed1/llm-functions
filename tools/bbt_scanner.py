@@ -22,23 +22,19 @@
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import hashlib
 import json
 import logging
-import math
 import os
 import pickle
-import platform
 import re
-import signal
 import statistics
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, List, Literal, Optional
 
 import requests
 
@@ -82,15 +78,15 @@ class ToolJSONEncoder(json.JSONEncoder):
             return str(obj)
 
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -104,10 +100,15 @@ def _is_tty() -> bool:
         return False
     if os.environ.get("FORCE_COLOR"):
         return True
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -127,18 +128,32 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [BYBIT HIGH-CONFLUENCE MARKET SCANNER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [BYBIT HIGH-CONFLUENCE MARKET SCANNER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Interval:{RESET} {data.get('interval', '15')}m  |  {NEON_CYAN}Scanned Pairs:{RESET} {NEON_YELLOW}{data.get('total_scanned', 0)}{RESET}  |  {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}")
-    
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Interval:{RESET} {data.get('interval', '15')}m  |  {NEON_CYAN}Scanned Pairs:{RESET} {NEON_YELLOW}{data.get('total_scanned', 0)}{RESET}  |  {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
+
     signals = data.get("top_signals", [])
     if signals:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Top Profit Opportunities ({len(signals)}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Top Profit Opportunities ({len(signals)}):{RESET}"
+        )
         for idx, sig in enumerate(signals, 1):
-            dir_color = NEON_GREEN if sig["direction"] == "BUY" else (NEON_RED if sig["direction"] == "SELL" else NEON_YELLOW)
-            _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}#{idx}{RESET} {NEON_CYAN}{sig['symbol']:<10}{RESET} {dir_color}{sig['direction']:<4}{RESET} | Score: {NEON_YELLOW}{sig['score']:.1f}/100{RESET} | Entry: {sig['entry']:.4f}")
-            _cprint(f"{NEON_PURPLE}│{RESET}    {DIM}SL: {sig['stop_loss']:.4f} | TP: {sig['take_profit']:.4f} | Reason: {sig['reason']}{RESET}")
+            dir_color = (
+                NEON_GREEN
+                if sig["direction"] == "BUY"
+                else (NEON_RED if sig["direction"] == "SELL" else NEON_YELLOW)
+            )
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {BOLD}#{idx}{RESET} {NEON_CYAN}{sig['symbol']:<10}{RESET} {dir_color}{sig['direction']:<4}{RESET} | Score: {NEON_YELLOW}{sig['score']:.1f}/100{RESET} | Entry: {sig['entry']:.4f}"
+            )
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}    {DIM}SL: {sig['stop_loss']:.4f} | TP: {sig['take_profit']:.4f} | Reason: {sig['reason']}{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -180,15 +195,19 @@ class ToolCache:
                 tmp_file.unlink(missing_ok=True)
 
 
-def fetch_top_turnover_symbols(min_volume: float = 10000000.0, limit: int = 30) -> List[dict]:
+def fetch_top_turnover_symbols(
+    min_volume: float = 10000000.0, limit: int = 30
+) -> List[dict]:
     url = "https://api.bybit.com/v5/market/tickers?category=linear"
     try:
         resp = requests.get(url, timeout=10).json()
         if resp.get("retCode") == 0:
             tickers = resp.get("result", {}).get("list", [])
             valid = [
-                t for t in tickers
-                if t.get("symbol", "").endswith("USDT") and float(t.get("turnover24h", 0)) >= min_volume
+                t
+                for t in tickers
+                if t.get("symbol", "").endswith("USDT")
+                and float(t.get("turnover24h", 0)) >= min_volume
             ]
             valid.sort(key=lambda x: float(x.get("turnover24h", 0)), reverse=True)
             return valid[:limit]
@@ -210,20 +229,22 @@ def fetch_klines(symbol: str, interval: str = "15", limit: int = 100) -> List[li
     return []
 
 
-def analyze_symbol_confluence(symbol: str, ticker: dict, interval: str = "15") -> Optional[dict]:
+def analyze_symbol_confluence(
+    symbol: str, ticker: dict, interval: str = "15"
+) -> Optional[dict]:
     klines = fetch_klines(symbol, interval=interval, limit=100)
     if len(klines) < 30:
         return None
 
     closes = [float(k[4]) for k in klines]
-    highs  = [float(k[2]) for k in klines]
-    lows   = [float(k[3]) for k in klines]
-    volumes= [float(k[5]) for k in klines]
+    highs = [float(k[2]) for k in klines]
+    lows = [float(k[3]) for k in klines]
+    volumes = [float(k[5]) for k in klines]
 
     curr_price = closes[-1]
 
     # 1. RSI (14)
-    deltas = [closes[i+1] - closes[i] for i in range(len(closes)-1)]
+    deltas = [closes[i + 1] - closes[i] for i in range(len(closes) - 1)]
     gains = [d if d > 0 else 0 for d in deltas[-14:]]
     losses = [-d if d < 0 else 0 for d in deltas[-14:]]
     avg_gain = sum(gains) / 14
@@ -243,7 +264,14 @@ def analyze_symbol_confluence(symbol: str, ticker: dict, interval: str = "15") -
     ema50 = get_ema(closes, 50)
 
     # 3. ATR (14)
-    trs = [max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])) for i in range(1, len(closes))]
+    trs = [
+        max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+        for i in range(1, len(closes))
+    ]
     atr = sum(trs[-14:]) / 14 if trs else curr_price * 0.01
 
     # 4. Bollinger Bands
@@ -371,7 +399,9 @@ def execute_tool(
 
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
         sys.stdout.flush()
@@ -410,11 +440,20 @@ def run(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="bbt_scanner.py", description=f"Bybit High-Confluence Market Scanner v{__version__}")
+    parser = argparse.ArgumentParser(
+        prog="bbt_scanner.py",
+        description=f"Bybit High-Confluence Market Scanner v{__version__}",
+    )
     parser.add_argument("--symbols", help="Comma-separated symbol list")
-    parser.add_argument("--interval", default="15", help="Kline timeframe (default: 15)")
-    parser.add_argument("--min-volume", type=float, default=10000000.0, help="Minimum 24h turnover USD")
-    parser.add_argument("--limit", type=int, default=5, help="Number of top signals to return")
+    parser.add_argument(
+        "--interval", default="15", help="Kline timeframe (default: 15)"
+    )
+    parser.add_argument(
+        "--min-volume", type=float, default=10000000.0, help="Minimum 24h turnover USD"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=5, help="Number of top signals to return"
+    )
     parser.add_argument("--mode", choices=["summary", "detailed"], default="summary")
     parser.add_argument("--use-cache", action="store_true")
     parser.add_argument("--no-color", action="store_true")

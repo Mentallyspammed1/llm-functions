@@ -6,15 +6,14 @@ Requires: termux-api, requests, termux-location, termux-telephony-deviceinfo
 
 import argparse
 import json
-import os
+import subprocess
 import sys
 import time
-import subprocess
-import urllib.request
 import urllib.parse
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, asdict
+import urllib.request
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 # Configuration
 CONFIG_DIR = Path.home() / ".config" / "get_my_location"
@@ -37,6 +36,7 @@ DEFAULT_USER_AGENT = "Termux-Location/1.0"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 OPEN_ELEVATION_URL = "https://api.open-elevation.com/api/v1/lookup"
+
 
 @dataclass
 class LocationData:
@@ -61,6 +61,7 @@ class LocationData:
     wind_speed: Optional[float] = None
     wind_deg: Optional[int] = None
 
+
 class LocationProvider:
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
@@ -82,7 +83,7 @@ class LocationProvider:
 
     def save_config(self, config: Dict[str, Any]):
         try:
-            with open(CONFIG_FILE, 'w') as f:
+            with open(CONFIG_FILE, "w") as f:
                 json.dump(config, f, indent=2)
         except Exception as e:
             self.log(f"Config save error: {e}", "ERROR")
@@ -92,11 +93,15 @@ class LocationProvider:
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             print(f"{timestamp} [{level}] {msg}", file=sys.stderr)
 
-    def get_termux_location(self, provider: str, timeout: int) -> Optional[Dict[str, Any]]:
+    def get_termux_location(
+        self, provider: str, timeout: int
+    ) -> Optional[Dict[str, Any]]:
         """Get location using termux-location command."""
         try:
             cmd = ["termux-location", "-p", provider, "-r", "once"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout
+            )
             if result.returncode == 0 and result.stdout.strip():
                 return json.loads(result.stdout)
             else:
@@ -107,7 +112,9 @@ class LocationProvider:
             self.log(f"termux-location error: {e}", "WARN")
         return None
 
-    def get_location_with_fallbacks(self, provider: str, fallbacks: str, timeout: int) -> Optional[Dict[str, Any]]:
+    def get_location_with_fallbacks(
+        self, provider: str, fallbacks: str, timeout: int
+    ) -> Optional[Dict[str, Any]]:
         """Try primary provider, then fallbacks."""
         providers = [provider] + [f.strip() for f in fallbacks.split(",") if f.strip()]
         for p in providers:
@@ -118,14 +125,16 @@ class LocationProvider:
                 return loc
         return None
 
-    def reverse_geocode(self, lat: float, lon: float, timeout: int, user_agent: str) -> Optional[Dict[str, Any]]:
+    def reverse_geocode(
+        self, lat: float, lon: float, timeout: int, user_agent: str
+    ) -> Optional[Dict[str, Any]]:
         """Get address from coordinates using Nominatim."""
         params = {
             "lat": lat,
             "lon": lon,
             "format": "json",
             "addressdetails": 1,
-            "accept-language": "en"
+            "accept-language": "en",
         }
         url = f"{NOMINATIM_URL}?{urllib.parse.urlencode(params)}"
         headers = {"User-Agent": user_agent}
@@ -139,7 +148,9 @@ class LocationProvider:
             self.log(f"Reverse geocode error: {e}", "WARN")
         return None
 
-    def get_weather(self, lat: float, lon: float, timeout: int, user_agent: str, unit: str) -> Optional[Dict[str, Any]]:
+    def get_weather(
+        self, lat: float, lon: float, timeout: int, user_agent: str, unit: str
+    ) -> Optional[Dict[str, Any]]:
         """Get weather from OpenWeatherMap (requires API key in config)."""
         api_key = self.config.get("openweather_api_key")
         if not api_key:
@@ -147,12 +158,7 @@ class LocationProvider:
             return None
 
         units = "metric" if unit == "celsius" else "imperial"
-        params = {
-            "lat": lat,
-            "lon": lon,
-            "appid": api_key,
-            "units": units
-        }
+        params = {"lat": lat, "lon": lon, "appid": api_key, "units": units}
         url = f"{OPENWEATHER_URL}?{urllib.parse.urlencode(params)}"
         headers = {"User-Agent": user_agent}
 
@@ -164,7 +170,9 @@ class LocationProvider:
             self.log(f"Weather API error: {e}", "WARN")
         return None
 
-    def get_elevation(self, lat: float, lon: float, timeout: int, user_agent: str) -> Optional[float]:
+    def get_elevation(
+        self, lat: float, lon: float, timeout: int, user_agent: str
+    ) -> Optional[float]:
         """Get elevation from Open-Elevation API."""
         params = {"locations": f"{lat},{lon}"}
         url = f"{OPEN_ELEVATION_URL}?{urllib.parse.urlencode(params)}"
@@ -196,11 +204,8 @@ class LocationProvider:
     def save_cache(self, data: LocationData):
         """Save location to cache."""
         try:
-            cache = {
-                "timestamp": time.time(),
-                "data": asdict(data)
-            }
-            with open(CACHE_FILE, 'w') as f:
+            cache = {"timestamp": time.time(), "data": asdict(data)}
+            with open(CACHE_FILE, "w") as f:
                 json.dump(cache, f)
         except Exception as e:
             self.log(f"Cache save error: {e}", "WARN")
@@ -211,10 +216,18 @@ class LocationProvider:
             return json.dumps(asdict(data), indent=2)
 
         lines = []
-        lines.append(f"📍 Location: {data.latitude:.{args.precision}f}, {data.longitude:.{args.precision}f}")
+        lines.append(
+            f"📍 Location: {data.latitude:.{args.precision}f}, {data.longitude:.{args.precision}f}"
+        )
         lines.append(f"   Provider: {data.provider}")
-        lines.append(f"   Accuracy: {data.accuracy:.1f}m" if data.accuracy else "   Accuracy: N/A")
-        lines.append(f"   Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(data.timestamp))}")
+        lines.append(
+            f"   Accuracy: {data.accuracy:.1f}m"
+            if data.accuracy
+            else "   Accuracy: N/A"
+        )
+        lines.append(
+            f"   Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(data.timestamp))}"
+        )
 
         if data.altitude is not None:
             alt = data.altitude
@@ -280,14 +293,26 @@ class LocationProvider:
         # Handle dry run
         if args.dry_run:
             data = LocationData(
-                latitude=37.7749, longitude=-122.4194,
-                altitude=10.0, accuracy=5.0, speed=0.0, bearing=0.0,
-                provider="gps", timestamp=int(time.time()),
-                address="San Francisco, CA, USA", city="San Francisco",
-                state="California", country="USA", postal_code="94102",
-                timezone="America/Los_Angeles", temperature=20.0,
-                humidity=65, pressure=1013, weather_desc="Clear sky",
-                wind_speed=3.0, wind_deg=180
+                latitude=37.7749,
+                longitude=-122.4194,
+                altitude=10.0,
+                accuracy=5.0,
+                speed=0.0,
+                bearing=0.0,
+                provider="gps",
+                timestamp=int(time.time()),
+                address="San Francisco, CA, USA",
+                city="San Francisco",
+                state="California",
+                country="USA",
+                postal_code="94102",
+                timezone="America/Los_Angeles",
+                temperature=20.0,
+                humidity=65,
+                pressure=1013,
+                weather_desc="Clear sky",
+                wind_speed=3.0,
+                wind_deg=180,
             )
             print(self.format_output(data, args))
             return 0
@@ -305,7 +330,9 @@ class LocationProvider:
                 return 0
 
         # Get location
-        loc = self.get_location_with_fallbacks(args.provider, args.fallbacks, args.timeout)
+        loc = self.get_location_with_fallbacks(
+            args.provider, args.fallbacks, args.timeout
+        )
         if not loc:
             print("ERROR: Could not get location from any provider", file=sys.stderr)
             return 1
@@ -319,12 +346,14 @@ class LocationProvider:
             speed=loc.get("speed"),
             bearing=loc.get("bearing"),
             provider=loc.get("provider", args.provider),
-            timestamp=loc.get("timestamp", int(time.time() * 1000)) // 1000
+            timestamp=loc.get("timestamp", int(time.time() * 1000)) // 1000,
         )
 
         # Reverse geocode
         if not args.no_address:
-            addr_data = self.reverse_geocode(data.latitude, data.longitude, args.timeout, args.user_agent)
+            addr_data = self.reverse_geocode(
+                data.latitude, data.longitude, args.timeout, args.user_agent
+            )
             if addr_data:
                 data.address = addr_data.get("display_name")
                 addr = addr_data.get("address", {})
@@ -335,11 +364,15 @@ class LocationProvider:
 
         # Get elevation if not provided
         if data.altitude is None and not args.no_elevation:
-            data.altitude = self.get_elevation(data.latitude, data.longitude, args.timeout, args.user_agent)
+            data.altitude = self.get_elevation(
+                data.latitude, data.longitude, args.timeout, args.user_agent
+            )
 
         # Get weather
         if not args.no_weather:
-            weather = self.get_weather(data.latitude, data.longitude, args.timeout, args.user_agent, args.unit)
+            weather = self.get_weather(
+                data.latitude, data.longitude, args.timeout, args.user_agent, args.unit
+            )
             if weather:
                 main = weather.get("main", {})
                 data.temperature = main.get("temp")
@@ -363,7 +396,7 @@ class LocationProvider:
         # Handle output file
         if args.output:
             try:
-                with open(args.output, 'w') as f:
+                with open(args.output, "w") as f:
                     f.write(output)
                 self.log(f"Output written to {args.output}")
             except Exception as e:
@@ -390,7 +423,9 @@ class LocationProvider:
     def share_output(self, text: str):
         """Share output via termux-share."""
         try:
-            subprocess.run(["termux-share", "-t", "text/plain", "-c", text], check=False)
+            subprocess.run(
+                ["termux-share", "-t", "text/plain", "-c", text], check=False
+            )
         except Exception:
             pass
 
@@ -412,49 +447,85 @@ Examples:
 Config file: ~/.config/get_my_location/config.json
   Add OpenWeatherMap API key for weather:
   {"openweather_api_key": "YOUR_API_KEY"}
-"""
+""",
     )
-    parser.add_argument("-p", "--provider", default=DEFAULT_PROVIDER,
-                        choices=["gps", "network", "cell"],
-                        help=f"Location provider (default: {DEFAULT_PROVIDER})")
-    parser.add_argument("-f", "--fallbacks", default=DEFAULT_FALLBACKS,
-                        help=f"Comma-separated fallback providers (default: {DEFAULT_FALLBACKS})")
-    parser.add_argument("-u", "--unit", default=DEFAULT_UNIT,
-                        choices=["celsius", "fahrenheit"],
-                        help=f"Temperature unit (default: {DEFAULT_UNIT})")
-    parser.add_argument("-s", "--speed-unit", default=DEFAULT_SPEED_UNIT,
-                        choices=["ms", "kmh", "mph"],
-                        help=f"Speed unit (default: {DEFAULT_SPEED_UNIT})")
-    parser.add_argument("-a", "--alt-unit", default=DEFAULT_ALT_UNIT,
-                        choices=["meters", "feet"],
-                        help=f"Altitude unit (default: {DEFAULT_ALT_UNIT})")
-    parser.add_argument("--precision", type=int, default=DEFAULT_PRECISION,
-                        help=f"Decimal places for coordinates (default: {DEFAULT_PRECISION})")
-    parser.add_argument("-t", "--timeout", type=int, default=DEFAULT_TIMEOUT,
-                        help=f"Timeout in seconds (default: {DEFAULT_TIMEOUT})")
-    parser.add_argument("--user-agent", default=DEFAULT_USER_AGENT,
-                        help=f"User-Agent header (default: {DEFAULT_USER_AGENT})")
-    parser.add_argument("--no-address", action="store_true",
-                        help="Skip reverse geocoding")
-    parser.add_argument("--no-weather", action="store_true",
-                        help="Skip weather lookup")
-    parser.add_argument("--no-elevation", action="store_true",
-                        help="Skip elevation lookup")
-    parser.add_argument("--no-cache", action="store_true",
-                        help="Disable caching")
-    parser.add_argument("--force-refresh", action="store_true",
-                        help="Force fresh location (ignore cache)")
+    parser.add_argument(
+        "-p",
+        "--provider",
+        default=DEFAULT_PROVIDER,
+        choices=["gps", "network", "cell"],
+        help=f"Location provider (default: {DEFAULT_PROVIDER})",
+    )
+    parser.add_argument(
+        "-f",
+        "--fallbacks",
+        default=DEFAULT_FALLBACKS,
+        help=f"Comma-separated fallback providers (default: {DEFAULT_FALLBACKS})",
+    )
+    parser.add_argument(
+        "-u",
+        "--unit",
+        default=DEFAULT_UNIT,
+        choices=["celsius", "fahrenheit"],
+        help=f"Temperature unit (default: {DEFAULT_UNIT})",
+    )
+    parser.add_argument(
+        "-s",
+        "--speed-unit",
+        default=DEFAULT_SPEED_UNIT,
+        choices=["ms", "kmh", "mph"],
+        help=f"Speed unit (default: {DEFAULT_SPEED_UNIT})",
+    )
+    parser.add_argument(
+        "-a",
+        "--alt-unit",
+        default=DEFAULT_ALT_UNIT,
+        choices=["meters", "feet"],
+        help=f"Altitude unit (default: {DEFAULT_ALT_UNIT})",
+    )
+    parser.add_argument(
+        "--precision",
+        type=int,
+        default=DEFAULT_PRECISION,
+        help=f"Decimal places for coordinates (default: {DEFAULT_PRECISION})",
+    )
+    parser.add_argument(
+        "-t",
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
+        help=f"Timeout in seconds (default: {DEFAULT_TIMEOUT})",
+    )
+    parser.add_argument(
+        "--user-agent",
+        default=DEFAULT_USER_AGENT,
+        help=f"User-Agent header (default: {DEFAULT_USER_AGENT})",
+    )
+    parser.add_argument(
+        "--no-address", action="store_true", help="Skip reverse geocoding"
+    )
+    parser.add_argument("--no-weather", action="store_true", help="Skip weather lookup")
+    parser.add_argument(
+        "--no-elevation", action="store_true", help="Skip elevation lookup"
+    )
+    parser.add_argument("--no-cache", action="store_true", help="Disable caching")
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Force fresh location (ignore cache)",
+    )
     parser.add_argument("-o", "--output", help="Write output to file")
-    parser.add_argument("--open", action="store_true",
-                        help="Open location in Google Maps")
-    parser.add_argument("--share", action="store_true",
-                        help="Share output via termux-share")
-    parser.add_argument("--json", action="store_true",
-                        help="Output as JSON")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Use dummy data for testing")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                        help="Verbose logging")
+    parser.add_argument(
+        "--open", action="store_true", help="Open location in Google Maps"
+    )
+    parser.add_argument(
+        "--share", action="store_true", help="Share output via termux-share"
+    )
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Use dummy data for testing"
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     return parser
 
 

@@ -27,7 +27,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 __version__ = "1.1.0"
 
@@ -35,15 +35,15 @@ __version__ = "1.1.0"
 # SECTION 1: Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[mGKHF]")
 
@@ -83,33 +83,61 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [TODO REVIEW & GENERATOR TOOL]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [TODO REVIEW & GENERATOR TOOL]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target:{RESET}         {data.get('target', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Files Scanned:{RESET}  {NEON_YELLOW}{data.get('files_scanned', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}High Priority:{RESET}  {NEON_RED}{data.get('high_count', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Med Priority:{RESET}   {NEON_YELLOW}{data.get('medium_count', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Low Priority:{RESET}   {NEON_GREEN}{data.get('low_count', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Markdown File:{RESET}  {data.get('written_file', 'Not Written')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}       {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target:{RESET}         {data.get('target', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Files Scanned:{RESET}  {NEON_YELLOW}{data.get('files_scanned', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}High Priority:{RESET}  {NEON_RED}{data.get('high_count', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Med Priority:{RESET}   {NEON_YELLOW}{data.get('medium_count', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Low Priority:{RESET}   {NEON_GREEN}{data.get('low_count', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Markdown File:{RESET}  {data.get('written_file', 'Not Written')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}       {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}          {data['error']}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}          {data['error']}"
+        )
 
     tasks = data.get("tasks", [])
     if tasks:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Actionable TODO Tasks Preview ({len(tasks)}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Actionable TODO Tasks Preview ({len(tasks)}):{RESET}"
+        )
         for task in tasks[:8]:
             pri = task.get("priority", "LOW")
-            pri_color = NEON_RED if pri == "HIGH" else (NEON_YELLOW if pri == "MEDIUM" else NEON_GREEN)
-            rel_file = task.get('file', '')
+            pri_color = (
+                NEON_RED
+                if pri == "HIGH"
+                else (NEON_YELLOW if pri == "MEDIUM" else NEON_GREEN)
+            )
+            rel_file = task.get("file", "")
             if len(rel_file) > 22:
                 rel_file = "..." + rel_file[-19:]
-            _cprint(f"{NEON_PURPLE}│{RESET}   {pri_color}[{pri:<6}]{RESET} {rel_file}:{task.get('line', 0)} — {task.get('title')}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {pri_color}[{pri:<6}]{RESET} {rel_file}:{task.get('line', 0)} — {task.get('title')}"
+            )
         if len(tasks) > 8:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(tasks) - 8} more tasks{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(tasks) - 8} more tasks{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -119,8 +147,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 
 INLINE_COMMENT_REGEX = re.compile(
-    r"\b(TODO|FIXME|BUG|HACK|XXX|OPTIMIZE|NOTE)\b\s*[:|-]?\s*(.*)",
-    re.IGNORECASE
+    r"\b(TODO|FIXME|BUG|HACK|XXX|OPTIMIZE|NOTE)\b\s*[:|-]?\s*(.*)", re.IGNORECASE
 )
 
 HARDCODED_URL_REGEX = re.compile(r"https?://[a-zA-Z0-9.\-_]+(?::\d+)?/[^\s'\"]+")
@@ -138,81 +165,92 @@ class CodeSmellTodoAnalyzer(ast.NodeVisitor):
         if len(node.body) == 1 and isinstance(node.body[0], (ast.Pass, ast.Expr)):
             stmt = node.body[0]
             is_stub = isinstance(stmt, ast.Pass) or (
-                isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and stmt.value.value == ...
+                isinstance(stmt, ast.Expr)
+                and isinstance(stmt.value, ast.Constant)
+                and stmt.value.value == ...
             )
             if is_stub:
-                self.tasks.append({
-                    "file": self.file_path,
-                    "line": node.lineno,
-                    "type": "STUB_FUNCTION",
-                    "priority": "HIGH",
-                    "title": f"Implement stubbed function '{node.name}'",
-                    "details": f"Function '{node.name}' contains only a pass/ellipsis stub. Needs complete implementation logic.",
-                    "recommendation": f"Add functional implementation and tests for '{node.name}'."
-                })
+                self.tasks.append(
+                    {
+                        "file": self.file_path,
+                        "line": node.lineno,
+                        "type": "STUB_FUNCTION",
+                        "priority": "HIGH",
+                        "title": f"Implement stubbed function '{node.name}'",
+                        "details": f"Function '{node.name}' contains only a pass/ellipsis stub. Needs complete implementation logic.",
+                        "recommendation": f"Add functional implementation and tests for '{node.name}'.",
+                    }
+                )
 
         # 2. Long Function Check (> 40 lines)
         func_len = (node.end_lineno or node.lineno) - node.lineno
         if func_len > 40:
-            self.tasks.append({
-                "file": self.file_path,
-                "line": node.lineno,
-                "type": "COMPLEX_FUNCTION",
-                "priority": "MEDIUM",
-                "title": f"Refactor long function '{node.name}' ({func_len} lines)",
-                "details": f"Function '{node.name}' spans {func_len} lines. High complexity increases bug risk.",
-                "recommendation": f"Break down '{node.name}' into smaller, modular helper functions."
-            })
+            self.tasks.append(
+                {
+                    "file": self.file_path,
+                    "line": node.lineno,
+                    "type": "COMPLEX_FUNCTION",
+                    "priority": "MEDIUM",
+                    "title": f"Refactor long function '{node.name}' ({func_len} lines)",
+                    "details": f"Function '{node.name}' spans {func_len} lines. High complexity increases bug risk.",
+                    "recommendation": f"Break down '{node.name}' into smaller, modular helper functions.",
+                }
+            )
 
         # 3. Missing Docstring in Public Functions
         if not node.name.startswith("_") and not ast.get_docstring(node):
-            self.tasks.append({
-                "file": self.file_path,
-                "line": node.lineno,
-                "type": "MISSING_DOCS",
-                "priority": "LOW",
-                "title": f"Add docstring documentation for public function '{node.name}'",
-                "details": f"Function '{node.name}' is exported or public but missing documentation.",
-                "recommendation": f"Add args, returns, and description docstring to '{node.name}'."
-            })
+            self.tasks.append(
+                {
+                    "file": self.file_path,
+                    "line": node.lineno,
+                    "type": "MISSING_DOCS",
+                    "priority": "LOW",
+                    "title": f"Add docstring documentation for public function '{node.name}'",
+                    "details": f"Function '{node.name}' is exported or public but missing documentation.",
+                    "recommendation": f"Add args, returns, and description docstring to '{node.name}'.",
+                }
+            )
 
         self.generic_visit(node)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         # 4. Bare except or pass in exception handler
         if node.type is None:
-            self.tasks.append({
-                "file": self.file_path,
-                "line": node.lineno,
-                "type": "UNHANDLED_EXCEPTION",
-                "priority": "HIGH",
-                "title": "Fix dangerous bare except block",
-                "details": "Bare 'except:' suppresses system interrupts and unexpected errors without logging.",
-                "recommendation": "Catch explicit Exception types and add proper error logging/handling."
-            })
+            self.tasks.append(
+                {
+                    "file": self.file_path,
+                    "line": node.lineno,
+                    "type": "UNHANDLED_EXCEPTION",
+                    "priority": "HIGH",
+                    "title": "Fix dangerous bare except block",
+                    "details": "Bare 'except:' suppresses system interrupts and unexpected errors without logging.",
+                    "recommendation": "Catch explicit Exception types and add proper error logging/handling.",
+                }
+            )
         elif len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
-            self.tasks.append({
-                "file": self.file_path,
-                "line": node.lineno,
-                "type": "SILENT_EXCEPTION",
-                "priority": "HIGH",
-                "title": "Fix silent exception suppression (except pass)",
-                "details": "Exception block silently ignores caught errors using 'pass'.",
-                "recommendation": "Log caught exceptions or handle fallback recovery logic."
-            })
+            self.tasks.append(
+                {
+                    "file": self.file_path,
+                    "line": node.lineno,
+                    "type": "SILENT_EXCEPTION",
+                    "priority": "HIGH",
+                    "title": "Fix silent exception suppression (except pass)",
+                    "details": "Exception block silently ignores caught errors using 'pass'.",
+                    "recommendation": "Log caught exceptions or handle fallback recovery logic.",
+                }
+            )
 
         self.generic_visit(node)
 
 
 def _scan_file_for_todos(
-    file_path: Path,
-    include_generated: bool
+    file_path: Path, include_generated: bool
 ) -> list[dict[str, Any]]:
     """Scan file lines for inline comments and analyze code for task creation."""
     tasks: list[dict[str, Any]] = []
 
     try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(file_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
         content = "".join(lines)
@@ -223,33 +261,41 @@ def _scan_file_for_todos(
             if match:
                 tag = match.group(1).upper()
                 text = match.group(2).strip() or "No additional comment provided."
-                
+
                 # Assign Priority based on comment tag
-                priority = "HIGH" if tag in ("BUG", "FIXME") else ("MEDIUM" if tag in ("TODO", "HACK") else "LOW")
-                
-                tasks.append({
-                    "file": str(file_path),
-                    "line": idx,
-                    "type": f"INLINE_{tag}",
-                    "priority": priority,
-                    "title": f"[{tag}] {text[:50]}",
-                    "details": text,
-                    "recommendation": f"Address inline {tag} marker at line {idx}."
-                })
+                priority = (
+                    "HIGH"
+                    if tag in ("BUG", "FIXME")
+                    else ("MEDIUM" if tag in ("TODO", "HACK") else "LOW")
+                )
+
+                tasks.append(
+                    {
+                        "file": str(file_path),
+                        "line": idx,
+                        "type": f"INLINE_{tag}",
+                        "priority": priority,
+                        "title": f"[{tag}] {text[:50]}",
+                        "details": text,
+                        "recommendation": f"Address inline {tag} marker at line {idx}.",
+                    }
+                )
 
             # Hardcoded Endpoint / URL Check
             if include_generated and HARDCODED_URL_REGEX.search(line):
                 url_match = HARDCODED_URL_REGEX.search(line)
                 url_str = url_match.group(0) if url_match else "URL"
-                tasks.append({
-                    "file": str(file_path),
-                    "line": idx,
-                    "type": "HARDCODED_CONFIG",
-                    "priority": "LOW",
-                    "title": f"Extract hardcoded URL endpoint '{url_str[:30]}...'",
-                    "details": f"Hardcoded URL found in source code: {url_str}",
-                    "recommendation": "Extract endpoint URL into environment variables or config file."
-                })
+                tasks.append(
+                    {
+                        "file": str(file_path),
+                        "line": idx,
+                        "type": "HARDCODED_CONFIG",
+                        "priority": "LOW",
+                        "title": f"Extract hardcoded URL endpoint '{url_str[:30]}...'",
+                        "details": f"Hardcoded URL found in source code: {url_str}",
+                        "recommendation": "Extract endpoint URL into environment variables or config file.",
+                    }
+                )
 
         # 2. Code Smell Auto-Generation via AST (for Python)
         if include_generated and file_path.suffix == ".py":
@@ -262,23 +308,23 @@ def _scan_file_for_todos(
                 pass
 
     except Exception as err:
-        tasks.append({
-            "file": str(file_path),
-            "line": 1,
-            "type": "FILE_READ_ERROR",
-            "priority": "HIGH",
-            "title": f"Fix unreadable file '{file_path.name}'",
-            "details": f"Error reading file during review: {err}",
-            "recommendation": "Verify file permissions and text encoding."
-        })
+        tasks.append(
+            {
+                "file": str(file_path),
+                "line": 1,
+                "type": "FILE_READ_ERROR",
+                "priority": "HIGH",
+                "title": f"Fix unreadable file '{file_path.name}'",
+                "details": f"Error reading file during review: {err}",
+                "recommendation": "Verify file permissions and text encoding.",
+            }
+        )
 
     return tasks
 
 
 def _generate_markdown_report(
-    tasks: list[dict[str, Any]],
-    target_path: Path,
-    out_file: Path
+    tasks: list[dict[str, Any]], target_path: Path, out_file: Path
 ) -> None:
     """Write structured Markdown TODO roadmap to output file."""
     high_tasks = [t for t in tasks if t.get("priority") == "HIGH"]
@@ -297,7 +343,9 @@ def _generate_markdown_report(
         "",
     ]
 
-    def _render_task_section(section_title: str, task_list: list[dict[str, Any]], icon: str):
+    def _render_task_section(
+        section_title: str, task_list: list[dict[str, Any]], icon: str
+    ):
         lines.append(f"## {icon} {section_title} ({len(task_list)})")
         if not task_list:
             lines.append("*No items in this category.*\n")
@@ -345,17 +393,27 @@ def execute_tool(
         return {
             "success": False,
             "error": f"Target path does not exist: {target}",
-            "exit_code": 1
+            "exit_code": 1,
         }
 
-    ignored_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
+    ignored_dirs = {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        "venv",
+        ".venv",
+        "dist",
+        "build",
+    }
     files_to_scan: list[Path] = []
 
     if target_path.is_file():
         files_to_scan.append(target_path)
     else:
         for root, dirs, files in os.walk(target_path):
-            dirs[:] = [d for d in dirs if d not in ignored_dirs and not d.startswith(".")]
+            dirs[:] = [
+                d for d in dirs if d not in ignored_dirs and not d.startswith(".")
+            ]
             for f in files:
                 files_to_scan.append(Path(root) / f)
 
@@ -369,7 +427,11 @@ def execute_tool(
     min_pri_str = min_priority.upper()
     min_weight = pri_weight.get(min_pri_str, 0)
 
-    filtered_tasks = [t for t in all_tasks if pri_weight.get(t.get("priority", "LOW"), 0) >= min_weight]
+    filtered_tasks = [
+        t
+        for t in all_tasks
+        if pri_weight.get(t.get("priority", "LOW"), 0) >= min_weight
+    ]
 
     # Count tasks by priority
     high_count = sum(1 for t in filtered_tasks if t.get("priority") == "HIGH")
@@ -395,13 +457,14 @@ def execute_tool(
         "written_file": written_dest,
         "tasks": filtered_tasks,
         "duration_ms": duration_ms,
-        "exit_code": 0
+        "exit_code": 0,
     }
 
 
 # ==============================================================================
 # SECTION 3: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
+
 
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination."""
@@ -427,6 +490,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # SECTION 4: Function Entry Point for AIChat
 # ==============================================================================
 
+
 def run(
     target: str,
     todo_file: str = "TODO.md",
@@ -449,7 +513,7 @@ def run(
         no_color=no_color,
         verbose=verbose,
     )
-    
+
     print_human_readable_ui(result, no_color=no_color)
     write_llm_output(result)
 
@@ -458,13 +522,15 @@ def run(
 # SECTION 5: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="todo_reviewer.py",
         description=f"AIChat TODO Review & Task Generator Tool v{__version__}",
     )
     parser.add_argument(
-        "--target", "-t",
+        "--target",
+        "-t",
         required=True,
         metavar="PATH",
         help="Target file or directory path to review (required)",
@@ -505,7 +571,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",
@@ -524,7 +591,7 @@ if __name__ == "__main__":
         no_color=args.no_color,
         verbose=args.verbose,
     )
-    
+
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)
     sys.exit(res.get("exit_code", 0))
