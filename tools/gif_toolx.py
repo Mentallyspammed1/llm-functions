@@ -73,7 +73,7 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
 
-_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-\\\~])|\033\[[0-9;?]*[a-zA-Z]")
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-\\~])|\033\[[0-9;?]*[a-zA-Z]")
 
 
 def _strip_ansi(text: str) -> str:
@@ -959,7 +959,7 @@ def execute_tool(
         if theoretical_max < max_frames:
             if verbose:
                 _cprint(
-                    f"{NEON_YELLOW}Clamping max_frames {max_frames} → {theoretical_max} (video only has \\\~{usable:.1f}s usable){RESET}",
+                    f"{NEON_YELLOW}Clamping max_frames {max_frames} → {theoretical_max} (video only has ~{usable:.1f}s usable){RESET}",
                     no_color=no_color,
                 )
             max_frames = theoretical_max
@@ -1299,7 +1299,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-dir",
-        help="Directory for GIF + intermediate files (default: \\\~/vid2gif)",
+        help="Directory for GIF + intermediate files (default: ~/vid2gif)",
     )
     parser.add_argument(
         "--gif-name", help="Output GIF filename (default: derived from URL)"

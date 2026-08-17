@@ -466,7 +466,7 @@ def _searx_cache_path() -> str:
     custom = os.environ.get("SEARXNG_CACHE_FILE", "").strip()
     if custom:
         return custom
-    home = os.path.expanduser(r"\~")
+    home = os.path.expanduser("~")
     return os.path.join(home, ".cache", "webx_searxng_good.json")
 
 
