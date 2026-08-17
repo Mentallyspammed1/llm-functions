@@ -47,7 +47,6 @@ scientific_calculator.py
 file_todo.py
 task_manager.py
 json_tool.py
-str_replace_editor.py
 file_review.py
 media_harmonizer.py
 optimizer.py
@@ -67,7 +66,6 @@ memory_tool.py
 mapper_extractor.py
 file_summarizer.py
 clipboard.sh
-system_info.py
 url_metadata.py
 find_port.sh
 git_summary.py
@@ -88,3 +86,17 @@ apk_tool.py
 repo_search.py
 gif_tool.py
 code_snapshot.py
+vid2gif.py
+telegram_tool.py
+gif_toolx.py
+dns_tool.py
+sqlite_intel.py
+rest_client.py
+archive_tool.py
+docker_intel.py
+audio_transcriber.py
+trurl_query.py
+sys_unified.py
+
+location_manager.py
+search_tool.py

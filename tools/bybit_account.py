@@ -18,12 +18,14 @@ TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 USE_TOR = os.getenv("USE_TOR", "false").lower() == "true"
 TOR_PROXY = os.getenv("TOR_PROXY", "socks5h://127.0.0.1:9050")
 
-session = HTTP(
-    testnet=TESTNET,
-    api_key=os.getenv("BYBIT_API_KEY"),
-    api_secret=os.getenv("BYBIT_API_SECRET"),
-    proxy=TOR_PROXY if USE_TOR else None,
-)
+http_kwargs = {
+    "testnet": TESTNET,
+    "api_key": os.getenv("BYBIT_API_KEY"),
+    "api_secret": os.getenv("BYBIT_API_SECRET"),
+}
+if USE_TOR:
+    http_kwargs["proxies"] = {"http": TOR_PROXY, "https": TOR_PROXY}
+session = HTTP(**http_kwargs)
 
 
 # @cmd Get wallet balance

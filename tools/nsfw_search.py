@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.0.0
+# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.0.1
 # Unified Header Analysis · Multi-Backend OSINT Image Search · Video Scraper Engine
 #
 # @describe Unified OSINT, Media Intelligence, and Video Search Platform (Pyrmethus Edition)
@@ -49,10 +49,13 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
+from contextlib import suppress
 import csv
 import datetime
 import hashlib
 import html
+import ipaddress
 import json
 import logging
 import os
@@ -63,10 +66,12 @@ import socket
 import ssl
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from pathlib import Path
@@ -142,7 +147,7 @@ except ImportError:
 # CONSTANTS & CONFIGURATION
 # ==============================================================================
 
-__version__ = "4.0.0"
+__version__ = "4.0.1"
 
 EXIT_SUCCESS = 0
 EXIT_ERROR = 1
@@ -163,6 +168,12 @@ _DEFAULT_WORKERS = int(os.environ.get("OSINT_WORKERS", "4"))
 _DEFAULT_MEDIA_DIR = os.environ.get("OSINT_MEDIA_DIR", "~/osint_media/")
 _DEFAULT_CACHE_DIR = os.environ.get("OSINT_CACHE_DIR", "~/.osint_cache/")
 _CACHE_TTL = int(os.environ.get("OSINT_CACHE_TTL", "3600"))
+
+_MAX_DOWNLOAD_BYTES = max(
+    1_048_576,
+    int(os.environ.get("OSINT_MAX_DOWNLOAD_BYTES", str(100 * 1024 * 1024))),
+)
+_STREAM_CHUNK_SIZE = 128 * 1024
 
 _USER_AGENTS: List[str] = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -392,7 +403,7 @@ class ToolJSONEncoder(json.JSONEncoder):
 
 
 def _validate_sandbox(path: Path) -> bool:
-    """Validate path lies within allowed user/system sandbox locations."""
+    """Return True only when path resolves safely beneath an allowed root."""
     allowed_roots: list[Path] = [
         Path.home().resolve(),
         Path("/tmp").resolve(),
@@ -401,20 +412,26 @@ def _validate_sandbox(path: Path) -> bool:
 
     prefix = os.environ.get("PREFIX")
     if prefix:
-        allowed_roots.append(Path(prefix).resolve())
-        allowed_roots.append((Path(prefix) / "tmp").resolve())
+        prefix_path = Path(prefix).expanduser().resolve()
+        allowed_roots.extend((prefix_path, prefix_path / "tmp"))
 
     llm_root = os.environ.get("LLM_ROOT_DIR")
     if llm_root:
-        allowed_roots.append(Path(llm_root).resolve())
+        allowed_roots.append(Path(llm_root).expanduser().resolve())
 
-    if Path("/data/data/com.termux").exists():
-        allowed_roots.append(Path("/data/data/com.termux").resolve())
+    termux_root = Path("/data/data/com.termux")
+    if termux_root.exists():
+        allowed_roots.append(termux_root.resolve())
 
     try:
-        resolved = path.resolve()
-        s = str(resolved)
-        return any(s.startswith(str(root)) for root in allowed_roots)
+        resolved = path.expanduser().resolve()
+        for root in allowed_roots:
+            try:
+                resolved.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
     except OSError:
         return False
 
@@ -428,7 +445,7 @@ def _coerce_bool(v: Any) -> bool:
 def _coerce_timeout(v: Any, default: float = _REQUEST_TIMEOUT) -> float:
     try:
         return max(0.5, min(float(v), 120.0))
-    except:
+    except Exception:
         return default
 
 
@@ -440,48 +457,111 @@ def _has_image_ext(url: str) -> bool:
     return bool(_IMAGE_EXTS.search(url.split("?", maxsplit=1)[0]))
 
 
+def _canonical_url(url: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+        scheme = parsed.scheme.lower()
+        host = (parsed.hostname or "").lower()
+        port = parsed.port
+
+        if port and not (
+            (scheme == "http" and port == 80)
+            or (scheme == "https" and port == 443)
+        ):
+            host = f"{host}:{port}"
+
+        path = urllib.parse.quote(
+            urllib.parse.unquote(parsed.path or "/"),
+            safe="/:@!$&'()*+,;=-._~",
+        )
+        return urllib.parse.urlunsplit((scheme, host, path, parsed.query, ""))
+    except Exception:
+        return url.strip()
+
+
 def _safe_filename(url: str, fallback_ext: str = "jpg") -> str:
-    name = url.rsplit("/", maxsplit=1)[-1].split("?", maxsplit=1)[0]
-    name = urllib.parse.unquote(name)
-    name = re.sub(r'[\\/*?:"<>|\x00-\x1f]', "_", name)[:160].strip(" .")
+    parsed = urllib.parse.urlparse(url)
+    name = urllib.parse.unquote(Path(parsed.path).name)
+    name = re.sub(r'[\\/*?:"<>|\x00-\x1f]', "_", name).strip(" .")
+    name = name[:140]
+
+    ext_match = _IMAGE_EXTS.search(parsed.path)
+    ext = ext_match.group(1).lower() if ext_match else fallback_ext.lower()
+
     if not name or _WINDOWS_RESERVED.match(name):
-        ext = fallback_ext
-        m = _IMAGE_EXTS.search(url)
-        if m:
-            ext = m.group(1)
-        name = f"img_{hashlib.md5(url.encode()).hexdigest()[:12]}.{ext}"
-    if "." not in name:
-        name = f"{name}.{fallback_ext}"
-    return name
+        name = "media"
+
+    stem = Path(name).stem or "media"
+    suffix = Path(name).suffix.lower().lstrip(".")
+    if suffix not in ("jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "tif", "tiff"):
+        suffix = ext
+
+    digest = hashlib.sha256(url.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return f"{stem[:120]}_{digest}.{suffix}"
+
+
+def _is_private_or_special_ip(value: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(value)
+        return any(
+            (
+                addr.is_private,
+                addr.is_loopback,
+                addr.is_link_local,
+                addr.is_multicast,
+                addr.is_reserved,
+                addr.is_unspecified,
+            )
+        )
+    except ValueError:
+        return False
 
 
 def _validate_url(url: str) -> Optional[str]:
     try:
-        p = urllib.parse.urlparse(url)
-        if p.scheme not in ("http", "https"):
+        p = urllib.parse.urlparse((url or "").strip())
+
+        if p.scheme.lower() not in ("http", "https"):
             return f"Unsupported scheme '{p.scheme}'. Only http/https allowed."
-        if not p.netloc:
+
+        if not p.hostname:
             return "URL missing host/netloc."
 
-        host = p.hostname or ""
-        # SSRF Guard for internal addresses in default mode
-        if not _DEBUG:
-            if host.lower() in (
-                "localhost",
-                "127.0.0.1",
-                "0.0.0.0",
-                "::1",
-                "169.254.169.254",
-            ):
-                return "Access to local/loopback IP address blocked for security."
-            if (
-                host.startswith("10.")
-                or host.startswith("192.168.")
-                or (
-                    host.startswith("172.") and 16 <= int(host.split(".")[1] or 0) <= 31
+        if p.username or p.password:
+            return "URLs containing embedded credentials are not allowed."
+
+        host = p.hostname.rstrip(".").lower()
+        if len(url) > 8192:
+            return "URL exceeds maximum supported length."
+
+        if _DEBUG:
+            return None
+
+        if host in ("localhost", "localhost.localdomain"):
+            return "Access to localhost is blocked for security."
+
+        if _is_private_or_special_ip(host):
+            return "Access to private, loopback, link-local, or reserved IPs is blocked."
+
+        try:
+            resolved_ips = {
+                info[4][0]
+                for info in socket.getaddrinfo(
+                    host,
+                    p.port or (443 if p.scheme == "https" else 80),
+                    type=socket.SOCK_STREAM,
                 )
-            ):
-                return "Access to private network IP address blocked for security."
+            }
+        except socket.gaierror:
+            return f"Unable to resolve host '{host}'."
+
+        if not resolved_ips:
+            return f"Unable to resolve host '{host}'."
+
+        for address in resolved_ips:
+            if _is_private_or_special_ip(address):
+                return "Host resolves to a private, loopback, link-local, or reserved IP."
+
         return None
     except Exception as e:
         return f"URL parse error: {e}"
@@ -548,8 +628,6 @@ class RateLimitState:
     """Thread-safe per-backend rate limiter with randomized jitter."""
 
     def __init__(self, min_interval: float = _RATE_INTERVAL):
-        import threading
-
         self._lock = threading.Lock()
         self.last: float = 0.0
         self.min_interval = min_interval
@@ -564,7 +642,7 @@ class RateLimitState:
             self.last = time.monotonic()
 
 
-_rl_lock = concurrent.futures.thread.threading.Lock()
+_rl_lock = threading.Lock()
 _rl: Dict[str, RateLimitState] = {
     "yandex": RateLimitState(1.5),
     "bing": RateLimitState(1.2),
@@ -601,7 +679,10 @@ class HttpCache:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _key_path(self, url: str, method: str = "GET") -> Path:
-        digest = hashlib.sha256(f"{method}::{url}".encode()).hexdigest()
+        normalized_url = _canonical_url(url)
+        digest = hashlib.sha256(
+            f"{method.upper()}::{normalized_url}".encode("utf-8", errors="replace")
+        ).hexdigest()
         return self.root / digest[:2] / digest
 
     def get(self, url: str, method: str = "GET") -> Optional[bytes]:
@@ -618,16 +699,20 @@ class HttpCache:
         return None
 
     def put(self, url: str, data: bytes, method: str = "GET") -> None:
+        if not data or len(data) > _MAX_DOWNLOAD_BYTES:
+            return
+
         p = self._key_path(url, method)
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(f".tmp_{random.randint(1000, 9999)}")
+        tmp = p.with_name(f"{p.name}.{uuid.uuid4().hex}.tmp")
+
         try:
             tmp.write_bytes(data)
             tmp.replace(p)
             _debug(f"[cache] PUT {len(data):,} B {url[:60]}")
-        except Exception as e:
-            if tmp.exists():
-                tmp.unlink(missing_ok=True)
+        except OSError as e:
+            with suppress(OSError):
+                tmp.unlink()
             _debug(f"[cache] PUT failed: {e}")
 
 
@@ -662,7 +747,7 @@ class ToolCache:
     def set(self, key_data: str, value: Any) -> None:
         key = self._make_key(key_data)
         cache_file = self.cache_dir / f"{key}.json"
-        tmp_file = cache_file.with_suffix(f".tmp_{random.randint(1000, 9999)}")
+        tmp_file = cache_file.with_name(f"{cache_file.name}.{uuid.uuid4().hex}.tmp")
         if _validate_sandbox(cache_file):
             try:
                 with open(tmp_file, "w", encoding="utf-8") as f:
@@ -772,9 +857,10 @@ def _fetch_json(
     url: str,
     headers: Optional[Dict[str, str]] = None,
     backend: str = "generic",
+    use_cache: bool = True,
     **kw: Any,
 ) -> Optional[Any]:
-    raw = _fetch(url, headers=headers, backend=backend, **kw)
+    raw = _fetch(url, headers=headers, backend=backend, use_cache=use_cache, **kw)
     if raw is None:
         return None
     try:
@@ -955,10 +1041,11 @@ def _format_headers_pretty(result: dict) -> str:
 
 
 # ==============================================================================
-# OSINT SEARCH BACKENDS
+# OSINT SEARCH BACKENDS (UPGRADED FOR RELIABLE RESULTS)
 # ==============================================================================
 
 _YANDEX_PATS = [
+    re.compile(r'&quot;origUrl&quot;\s*:\s*&quot;(https?://[^&"]+?)&quot;', re.I),
     re.compile(
         r'"origUrl"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I
     ),
@@ -971,12 +1058,18 @@ _YANDEX_PATS = [
 ]
 
 
-def _backend_yandex(query: str, limit: int) -> Tuple[List[dict], str]:
+def _backend_yandex(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    eq = f"{query} -hentai -anime -3d -drawn"
+    eq = query
 
-    for page in range(10):
+    for page in range(max(1, start_page) - 1, max(1, start_page) - 1 + max(1, max_pages)):
         if len(results) >= limit:
             break
         params = {
@@ -993,16 +1086,22 @@ def _backend_yandex(query: str, limit: int) -> Tuple[List[dict], str]:
                 "Cookie": "fyandex=0;yp=1800000000.szm.1_00_0;",
             },
             backend="yandex",
+            use_cache=use_cache,
         )
         if raw is None:
             break
         body = raw.decode("utf-8", errors="replace")
+        if "showcaptcha" in body.lower():
+            _warn("[yandex] CAPTCHA challenge encountered. Consider rotating IP/backend.")
+            break
+
         found = 0
         for pat in _YANDEX_PATS:
             for m in pat.finditer(body):
-                u = urllib.parse.unquote(m.group(1) if pat.groups else m.group(0))
-                if u.startswith("http") and u not in seen:
-                    seen.add(u)
+                u = html.unescape(urllib.parse.unquote(m.group(1) if pat.groups else m.group(0)))
+                canonical = _canonical_url(u)
+                if u.startswith("http") and canonical not in seen:
+                    seen.add(canonical)
                     results.append(_make_image_result("yandex", u, u, len(results)))
                     found += 1
                     if len(results) >= limit:
@@ -1016,28 +1115,36 @@ def _backend_yandex(query: str, limit: int) -> Tuple[List[dict], str]:
 
 
 _BING_PATS = [
-    re.compile(r'&quot;murl&quot;:&quot;(https?://[^&"]+?)&quot;'),
-    re.compile(r'"murl"\s*:\s*"(https?://[^"]+)"'),
-    re.compile(r'data-src="(https?://[^"]+?\.(?:jpe?g|png|gif|webp))"'),
+    re.compile(r'&quot;murl&quot;:&quot;(https?://[^&"]+?)&quot;', re.I),
+    re.compile(r'"murl"\s*:\s*"(https?://[^"]+)"', re.I),
+    re.compile(r'data-src="(https?://[^"]+?\.(?:jpe?g|png|gif|webp))"', re.I),
 ]
 
 
-def _backend_bing(query: str, limit: int) -> Tuple[List[dict], str]:
+def _backend_bing(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    first = 1
+    first = max(1, start_page) * 35 - 34
 
-    for _ in range(10):
+    for _ in range(max(1, max_pages)):
         if len(results) >= limit:
             break
+        # Upgraded: adlt=off ensures unrestricted/NSFW search queries return results
         params = {"q": query, "first": str(first), "count": "35", "adlt": "off"}
         raw = _fetch(
             "https://www.bing.com/images/search?" + urllib.parse.urlencode(params),
             headers={
                 "Referer": "https://www.bing.com/",
-                "Cookie": "SRCHHPGUSR=ADLT=OFF;",
+                "Cookie": "SRCHHPGUSR=ADLT=OFF; B3=off;",
             },
             backend="bing",
+            use_cache=use_cache,
         )
         if raw is None:
             break
@@ -1045,9 +1152,10 @@ def _backend_bing(query: str, limit: int) -> Tuple[List[dict], str]:
         found = 0
         for pat in _BING_PATS:
             for m in pat.finditer(html_str):
-                u = urllib.parse.unquote(m.group(1))
-                if u.startswith("http") and u not in seen and _has_image_ext(u):
-                    seen.add(u)
+                u = html.unescape(urllib.parse.unquote(m.group(1)))
+                canonical = _canonical_url(u)
+                if u.startswith("http") and canonical not in seen and _has_image_ext(u):
+                    seen.add(canonical)
                     results.append(_make_image_result("bing", u, u, len(results)))
                     found += 1
                     if len(results) >= limit:
@@ -1062,20 +1170,20 @@ def _backend_bing(query: str, limit: int) -> Tuple[List[dict], str]:
 
 
 def _backend_bing_dl(
-    query: str, limit: int, media_dir: str = _DEFAULT_MEDIA_DIR
+    query: str, limit: int, media_dir: str = _DEFAULT_MEDIA_DIR, **kwargs: Any
 ) -> Tuple[List[dict], str]:
     if not _BING_DL_AVAILABLE or _BING_DL_FN is None:
         _warn(f"bing_dl unavailable ({_BING_DL_ERR}), falling back to bing")
-        return _backend_bing(query, limit)
+        return _backend_bing(query, limit, **kwargs)
 
     target = Path(media_dir).expanduser()
     if not _validate_sandbox(target):
         target = Path(_DEFAULT_MEDIA_DIR).expanduser()
     target.mkdir(parents=True, exist_ok=True)
 
-    kwargs: Dict[str, Any] = {"limit": limit, "output_dir": str(target)}
+    dl_kwargs: Dict[str, Any] = {"limit": limit, "output_dir": str(target)}
     try:
-        _BING_DL_FN(query, **kwargs)
+        _BING_DL_FN(query, **dl_kwargs)
     except Exception as e:
         _warn(f"[bing_dl] Execution error: {e}")
 
@@ -1108,19 +1216,29 @@ def _backend_bing_dl(
     return results[:limit], "bing_dl"
 
 
-def _backend_e621(query: str, limit: int) -> Tuple[List[dict], str]:
+def _backend_e621(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    page, per = 1, min(limit, 100)
+    page = max(1, start_page)
+    per = min(limit, 100)
+    fetched_pages = 0
 
-    while len(results) < limit:
-        params = {"tags": f"{query} type:gif", "limit": str(per), "page": str(page)}
+    while len(results) < limit and fetched_pages < max_pages:
+        # Upgraded: Removed forced "type:gif" so general queries return records
+        params = {"tags": query, "limit": str(per), "page": str(page)}
         data = _fetch_json(
             "https://e621.net/posts.json?" + urllib.parse.urlencode(params),
-            headers={"User-Agent": "PyrmethusOSINT/4.0"},
+            headers={"User-Agent": f"PyrmethusOSINT/4.0 (by user_{random.randint(100,999)})"},
             backend="e621",
+            use_cache=use_cache,
         )
-        if not data:
+        if not data or not isinstance(data, dict):
             break
         posts = data.get("posts", [])
         if not posts:
@@ -1128,8 +1246,9 @@ def _backend_e621(query: str, limit: int) -> Tuple[List[dict], str]:
         for item in posts:
             f = item.get("file", {})
             furl = f.get("url")
-            if furl and furl not in seen:
-                seen.add(furl)
+            canonical = _canonical_url(furl or "")
+            if furl and canonical not in seen:
+                seen.add(canonical)
                 results.append(
                     _make_image_result(
                         "e621",
@@ -1145,16 +1264,25 @@ def _backend_e621(query: str, limit: int) -> Tuple[List[dict], str]:
         if len(posts) < per:
             break
         page += 1
+        fetched_pages += 1
 
     return results[:limit], "e621"
 
 
-def _backend_rule34(query: str, limit: int) -> Tuple[List[dict], str]:
+def _backend_rule34(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    pid, per = 0, min(limit, 100)
+    pid = max(0, start_page - 1)
+    per = min(limit, 100)
+    fetched_pages = 0
 
-    while len(results) < limit:
+    while len(results) < limit and fetched_pages < max_pages:
         params = {
             "page": "dapi",
             "s": "post",
@@ -1168,13 +1296,15 @@ def _backend_rule34(query: str, limit: int) -> Tuple[List[dict], str]:
             "https://api.rule34.xxx/index.php?" + urllib.parse.urlencode(params),
             headers={"Referer": "https://rule34.xxx/"},
             backend="rule34",
+            use_cache=use_cache,
         )
         if not data or not isinstance(data, list):
             break
         for item in data:
             furl = item.get("file_url") or item.get("sample_url")
-            if furl and furl not in seen:
-                seen.add(furl)
+            canonical = _canonical_url(furl or "")
+            if furl and canonical not in seen:
+                seen.add(canonical)
                 results.append(
                     _make_image_result(
                         "rule34",
@@ -1190,28 +1320,42 @@ def _backend_rule34(query: str, limit: int) -> Tuple[List[dict], str]:
         if len(data) < per:
             break
         pid += 1
+        fetched_pages += 1
 
     return results[:limit], "rule34"
 
 
-def _backend_danbooru(query: str, limit: int) -> Tuple[List[dict], str]:
+def _backend_danbooru(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    page, per = 1, min(limit, 200)
+    page = max(1, start_page)
+    per = min(limit, 200)
+    fetched_pages = 0
 
-    while len(results) < limit:
-        params = {"tags": query, "limit": str(per), "page": str(page)}
+    # Upgraded: Sanitize query to max 2 tags for anonymous API compliance
+    clean_query = " ".join(query.split()[:2])
+
+    while len(results) < limit and fetched_pages < max_pages:
+        params = {"tags": clean_query, "limit": str(per), "page": str(page)}
         data = _fetch_json(
             "https://danbooru.donmai.us/posts.json?" + urllib.parse.urlencode(params),
             headers={"Referer": "https://danbooru.donmai.us/"},
             backend="danbooru",
+            use_cache=use_cache,
         )
         if not data or not isinstance(data, list):
             break
         for item in data:
             furl = item.get("file_url") or item.get("large_file_url")
-            if furl and furl not in seen:
-                seen.add(furl)
+            canonical = _canonical_url(furl or "")
+            if furl and canonical not in seen:
+                seen.add(canonical)
                 results.append(
                     _make_image_result(
                         "danbooru",
@@ -1227,6 +1371,7 @@ def _backend_danbooru(query: str, limit: int) -> Tuple[List[dict], str]:
         if len(data) < per:
             break
         page += 1
+        fetched_pages += 1
 
     return results[:limit], "danbooru"
 
@@ -1296,7 +1441,12 @@ ENGINE_MAP: dict[str, dict[str, Any]] = {
 
 
 def _execute_vsearch(
-    query: str, engine: str, limit: int = 20, page: int = 1, timeout: int = 15
+    query: str,
+    engine: str,
+    limit: int = 20,
+    page: int = 1,
+    timeout: int = 15,
+    use_cache: bool = True,
 ) -> list[dict[str, Any]]:
     if not BS4_AVAILABLE:
         _warn("BeautifulSoup4 not installed — vsearch falling back to pattern matching")
@@ -1309,7 +1459,9 @@ def _execute_vsearch(
     )
     target_url = urllib.parse.urljoin(base_url, search_path)
 
-    raw = _fetch(target_url, timeout=timeout, backend="vsearch")
+    raw = _fetch(
+        target_url, timeout=timeout, backend="vsearch", use_cache=use_cache
+    )
     if not raw:
         return []
 
@@ -1374,82 +1526,165 @@ def _verify_url_headers(
     ignore_ssl: bool = False,
     timeout: float = _REQUEST_TIMEOUT,
 ) -> dict:
-    if not url.startswith("http"):
-        return {"verified": False, "verify_error": "Non-HTTP URL"}
-    try:
-        ctx = _build_ssl_ctx(ignore_ssl)
-        req = urllib.request.Request(url, headers={"User-Agent": _ua()}, method="HEAD")
-        _get_rate_limiter("headers").wait()
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-            hdrs = _normalise_headers(dict(r.info()))
-            ct = hdrs.get("content-type", "")
-            cl = hdrs.get("content-length", "unknown")
-            code = r.getcode()
-            ok = not mime_check or _is_image_content_type(ct)
+    validation_error = _validate_url(url)
+    if validation_error:
+        return {"verified": False, "verify_error": validation_error}
+
+    ctx = _build_ssl_ctx(ignore_ssl)
+    headers = {"User-Agent": _ua(), "Accept": "*/*"}
+
+    for method, extra_headers in (
+        ("HEAD", {}),
+        ("GET", {"Range": "bytes=0-0"}),
+    ):
+        try:
+            req_headers = dict(headers)
+            req_headers.update(extra_headers)
+            req = urllib.request.Request(url, headers=req_headers, method=method)
+
+            _get_rate_limiter("headers").wait()
+            with urllib.request.urlopen(
+                req, timeout=_coerce_timeout(timeout), context=ctx
+            ) as response:
+                hdrs = _normalise_headers(dict(response.info()))
+                content_type = hdrs.get("content-type", "")
+                content_length = hdrs.get("content-length", "unknown")
+                mime_ok = _is_image_content_type(content_type)
+
+                return {
+                    "verified": not mime_check or mime_ok,
+                    "verify_status": response.getcode(),
+                    "content_type": content_type,
+                    "content_length": content_length,
+                    "mime_ok": mime_ok,
+                    "verify_method": method,
+                }
+        except urllib.error.HTTPError as e:
+            if method == "HEAD" and e.code in (403, 405, 501):
+                continue
             return {
-                "verified": ok,
-                "verify_status": code,
-                "content_type": ct,
-                "content_length": cl,
-                "mime_ok": _is_image_content_type(ct),
+                "verified": False,
+                "verify_status": e.code,
+                "verify_error": str(e),
             }
-    except Exception as e:
-        return {"verified": False, "verify_error": str(e)}
+        except Exception as e:
+            if method == "HEAD":
+                continue
+            return {"verified": False, "verify_error": str(e)}
+
+    return {
+        "verified": False,
+        "verify_error": "HEAD and ranged GET verification failed",
+    }
 
 
 def _download_single(
-    res: dict, folder: str, mime_check: bool = False, ignore_ssl: bool = False
+    res: dict,
+    folder: str,
+    mime_check: bool = False,
+    ignore_ssl: bool = False,
 ) -> dict:
     url = res.get("url") or res.get("img_url") or ""
-    if not url.startswith("http"):
-        res["dl_error"] = "Non-HTTP URL"
+    validation_error = _validate_url(url)
+
+    if validation_error:
+        res["dl_error"] = validation_error
         return res
 
-    fname = _safe_filename(url)
-    path = os.path.join(folder, fname)
+    target_dir = Path(folder).expanduser()
+    if not _validate_sandbox(target_dir):
+        res["dl_error"] = "Download path is outside approved sandbox locations."
+        return res
 
-    if os.path.exists(path) and os.path.getsize(path) > 0:
-        res["local_path"] = path
+    target_dir.mkdir(parents=True, exist_ok=True)
+    path = target_dir / _safe_filename(url)
+
+    if path.exists() and path.stat().st_size > 0:
+        res["local_path"] = str(path)
         res["dl_skipped"] = True
         return res
 
-    raw = _fetch(
-        url,
-        timeout=_DOWNLOAD_TIMEOUT,
-        backend="generic",
-        ignore_ssl=ignore_ssl,
-        use_cache=False,
-    )
-    if raw is None:
-        res["dl_error"] = "Fetch failed"
-        return res
-
-    if mime_check and len(raw) >= 12:
-        magic = raw[:12]
-        is_media = any(
-            [
-                magic[:3] == b"\xff\xd8\xff",  # JPEG
-                magic[:8] == b"\x89PNG\r\n\x1a\n",  # PNG
-                magic[:6] in (b"GIF87a", b"GIF89a"),  # GIF
-                magic[:4] == b"RIFF" and raw[8:12] == b"WEBP",  # WEBP
-                b"ftyp" in magic,  # MP4/AVIF
-                magic[:2] == b"BM",  # BMP
-            ]
-        )
-        if not is_media:
-            res["dl_error"] = "Magic byte check failed"
-            return res
+    ctx = _build_ssl_ctx(ignore_ssl)
+    temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.part")
 
     try:
-        os.makedirs(folder, exist_ok=True)
-        with open(path, "wb") as fh:
-            fh.write(raw)
-        res["local_path"] = path
-        res["dl_bytes"] = len(raw)
-    except OSError as e:
-        res["dl_error"] = str(e)
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": _ua(),
+                "Accept": "image/avif,image/webp,image/apng,image/*,video/*,*/*;q=0.8",
+                "Connection": "close",
+            },
+            method="GET",
+        )
 
-    return res
+        _get_rate_limiter("generic").wait()
+        with urllib.request.urlopen(
+            req, timeout=_DOWNLOAD_TIMEOUT, context=ctx
+        ) as response:
+            headers = _normalise_headers(dict(response.info()))
+            content_type = headers.get("content-type", "")
+            content_length = headers.get("content-length", "")
+
+            if mime_check and not _is_image_content_type(content_type):
+                res["dl_error"] = f"Content-Type rejected: {content_type or 'missing'}"
+                return res
+
+            if content_length.isdigit() and int(content_length) > _MAX_DOWNLOAD_BYTES:
+                res["dl_error"] = (
+                    f"Content-Length exceeds {_MAX_DOWNLOAD_BYTES} byte limit"
+                )
+                return res
+
+            total = 0
+            magic = b""
+
+            with open(temp_path, "wb") as out:
+                while True:
+                    chunk = response.read(_STREAM_CHUNK_SIZE)
+                    if not chunk:
+                        break
+
+                    if len(magic) < 32:
+                        magic += chunk[: 32 - len(magic)]
+
+                    total += len(chunk)
+                    if total > _MAX_DOWNLOAD_BYTES:
+                        raise ToolError(
+                            f"Download exceeded {_MAX_DOWNLOAD_BYTES} byte limit"
+                        )
+
+                    out.write(chunk)
+
+        if mime_check:
+            is_media = any(
+                (
+                    magic[:3] == b"\xff\xd8\xff",
+                    magic[:8] == b"\x89PNG\r\n\x1a\n",
+                    magic[:6] in (b"GIF87a", b"GIF89a"),
+                    magic[:4] == b"RIFF" and magic[8:12] == b"WEBP",
+                    b"ftyp" in magic,
+                    magic[:2] == b"BM",
+                    magic[:4] in (b"II*\x00", b"MM\x00*"),
+                )
+            )
+            if not is_media:
+                res["dl_error"] = "Magic-byte check failed"
+                return res
+
+        temp_path.replace(path)
+        res["local_path"] = str(path)
+        res["dl_bytes"] = total
+        res["content_type"] = content_type
+        return res
+
+    except Exception as e:
+        res["dl_error"] = str(e)
+        return res
+    finally:
+        with suppress(OSError):
+            if temp_path.exists():
+                temp_path.unlink()
 
 
 def _parallel_download(
@@ -1459,28 +1694,43 @@ def _parallel_download(
     mime_check: bool = False,
     ignore_ssl: bool = False,
 ) -> Tuple[List[dict], dict]:
-    os.makedirs(folder, exist_ok=True)
-    ok = fail = skipped = 0
-    updated: List[dict] = []
-    max_w = min(32, max(1, workers))
+    target = Path(folder).expanduser()
+    target.mkdir(parents=True, exist_ok=True)
 
-    with ThreadPoolExecutor(max_workers=max_w) as pool:
-        futures = {
-            pool.submit(_download_single, res, folder, mime_check, ignore_ssl): res
-            for res in results
+    max_workers = min(32, max(1, int(workers or 1)))
+    updated: List[Optional[dict]] = [None] * len(results)
+
+    ok = fail = skipped = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_map = {
+            pool.submit(
+                _download_single, result, str(target), mime_check, ignore_ssl
+            ): idx
+            for idx, result in enumerate(results)
         }
-        for fut in as_completed(futures):
-            r = fut.result()
-            updated.append(r)
-            if r.get("dl_skipped"):
+
+        for future in as_completed(future_map):
+            idx = future_map[future]
+            try:
+                item = future.result()
+            except Exception as e:
+                item = dict(results[idx])
+                item["dl_error"] = str(e)
+
+            updated[idx] = item
+
+            if item.get("dl_skipped"):
                 skipped += 1
-            elif r.get("local_path"):
+            elif item.get("local_path"):
                 ok += 1
             else:
                 fail += 1
 
-    stats = {"dl_ok": ok, "dl_fail": fail, "dl_skipped": skipped}
-    return updated, stats
+    return (
+        [item for item in updated if item is not None],
+        {"dl_ok": ok, "dl_fail": fail, "dl_skipped": skipped},
+    )
 
 
 # ==============================================================================
@@ -1538,21 +1788,34 @@ h1{{color:#bb86fc;font-size:22px}}
 
 
 def _csv_report(results: list[dict], out_path: Path) -> str:
+    if not _validate_sandbox(out_path):
+        _err(f"CSV path {out_path} outside sandbox.")
+        return str(out_path)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["ID", "Title", "URL", "Page URL", "Source", "Local Path"])
-        for r in results:
-            writer.writerow(
-                [
-                    r.get("id"),
-                    r.get("title"),
-                    r.get("url"),
-                    r.get("page_url"),
-                    r.get("source"),
-                    r.get("local_path", ""),
-                ]
-            )
+    temp_path = out_path.with_name(f"{out_path.name}.{uuid.uuid4().hex}.tmp")
+
+    try:
+        with open(temp_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["ID", "Title", "URL", "Page URL", "Source", "Local Path"])
+            for r in results:
+                writer.writerow(
+                    [
+                        r.get("id"),
+                        r.get("title"),
+                        r.get("url"),
+                        r.get("page_url"),
+                        r.get("source"),
+                        r.get("local_path", ""),
+                    ]
+                )
+        temp_path.replace(out_path)
+    finally:
+        with suppress(OSError):
+            if temp_path.exists():
+                temp_path.unlink()
+
     return str(out_path)
 
 
@@ -1564,6 +1827,7 @@ def _csv_report(results: list[dict], out_path: Path) -> str:
 def _search_mode(
     query: str,
     limit: int = 15,
+    page: int = 1,
     platform: Optional[str] = None,
     deep: bool = False,
     tags: Optional[List[str]] = None,
@@ -1575,27 +1839,37 @@ def _search_mode(
     ignore_ssl: bool = False,
     workers: int = _DEFAULT_WORKERS,
     timeout: float = _REQUEST_TIMEOUT,
+    use_cache: bool = True,
 ) -> dict:
     q = (query or "").strip()
     if tags:
         q = q + " " + " ".join(t for t in tags if t)
     if platform:
         q = f"site:{platform} {q}"
-    limit = max(1, min(limit, 1000))
+
+    requested_limit = max(1, min(int(limit), 1000))
+    page_limit = 10 if _coerce_bool(deep) else 1
+    start_page = max(1, int(page))
 
     key = backend.lower().strip()
     results: List[dict] = []
     used = key
 
+    backend_kwargs = {
+        "start_page": start_page,
+        "max_pages": page_limit,
+        "use_cache": use_cache,
+    }
+
     if key == "bing_dl":
-        results, used = _backend_bing_dl(q, limit, media_dir)
+        results, used = _backend_bing_dl(q, requested_limit, media_dir, **backend_kwargs)
     elif key in _BACKENDS:
-        results, used = _BACKENDS[key](q, limit)
+        results, used = _BACKENDS[key](q, requested_limit, **backend_kwargs)
     else:
-        results, used = _backend_yandex(q, limit)
+        results, used = _backend_yandex(q, requested_limit, **backend_kwargs)
 
     if not results and key == "yandex":
-        results, used = _backend_bing(q, limit)
+        results, used = _backend_bing(q, requested_limit, **backend_kwargs)
 
     if verify_headers and results:
         verified: List[dict] = []
@@ -1627,7 +1901,7 @@ def _search_mode(
         data={
             "parameters": {
                 "query": query,
-                "limit": limit,
+                "limit": requested_limit,
                 "backend": used,
                 "download": download,
             },
@@ -1672,9 +1946,16 @@ def run(
     csv: Optional[str] = None,
     **kwargs: Any,
 ) -> dict:
-    global _cache
-    if cache_dir != _DEFAULT_CACHE_DIR:
-        _cache = HttpCache(cache_dir, ttl=cache_ttl)
+    global _cache, _DEBUG, _IGNORE_SSL
+
+    _DEBUG = _coerce_bool(verbose)
+    _IGNORE_SSL = _coerce_bool(ignore_ssl)
+
+    safe_cache_ttl = max(0, min(int(cache_ttl or _CACHE_TTL), 7 * 24 * 3600))
+    safe_cache_dir = str(Path(cache_dir or _DEFAULT_CACHE_DIR).expanduser())
+
+    if safe_cache_dir != str(_cache.root) or safe_cache_ttl != _cache.ttl:
+        _cache = HttpCache(safe_cache_dir, ttl=safe_cache_ttl)
 
     mode = (mode or "search").lower().strip()
 
@@ -1704,7 +1985,12 @@ def run(
                 False, "vsearch", error="--query is required for vsearch mode"
             )
         vresults = _execute_vsearch(
-            query=query, engine=engine, limit=limit, page=page, timeout=int(timeout)
+            query=query,
+            engine=engine,
+            limit=limit,
+            page=page,
+            timeout=int(timeout),
+            use_cache=_coerce_bool(use_cache),
         )
         if download_thumbs:
             target = str(Path(media_dir).expanduser())
@@ -1732,6 +2018,7 @@ def run(
         res = _search_mode(
             query=query,
             limit=limit,
+            page=page,
             platform=platform,
             deep=deep,
             tags=tags,
@@ -1743,11 +2030,25 @@ def run(
             ignore_ssl=ignore_ssl,
             workers=workers,
             timeout=timeout,
+            use_cache=_coerce_bool(use_cache),
         )
         _persist(res, save, html, csv)
         return res
 
     return _envelope(False, "unknown", error=f"Unknown mode '{mode}'")
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+
+    try:
+        temp_path.write_text(content, encoding="utf-8")
+        temp_path.replace(path)
+    finally:
+        with suppress(OSError):
+            if temp_path.exists():
+                temp_path.unlink()
 
 
 def _persist(
@@ -1757,12 +2058,11 @@ def _persist(
         try:
             sp = Path(save).expanduser()
             if _validate_sandbox(sp):
-                sp.parent.mkdir(parents=True, exist_ok=True)
-                sp.write_text(
+                _atomic_write_text(
+                    sp,
                     json.dumps(
                         result, indent=2, ensure_ascii=False, cls=ToolJSONEncoder
                     ),
-                    encoding="utf-8",
                 )
         except Exception as e:
             _err(f"JSON save error: {e}")
@@ -1771,8 +2071,7 @@ def _persist(
         try:
             hp = Path(html_path).expanduser()
             if _validate_sandbox(hp):
-                hp.parent.mkdir(parents=True, exist_ok=True)
-                hp.write_text(_html_report(result), encoding="utf-8")
+                _atomic_write_text(hp, _html_report(result))
         except Exception as e:
             _err(f"HTML save error: {e}")
 
@@ -1831,7 +2130,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(
         prog="osint",
-        description="Pyrmethus Master OSINT & Media Intelligence Engine v4.0.0",
+        description="Pyrmethus Master OSINT & Media Intelligence Engine v4.0.1",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 

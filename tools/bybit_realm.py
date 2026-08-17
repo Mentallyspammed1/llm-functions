@@ -63,7 +63,7 @@ from dotenv import load_dotenv
 
 # Fix 36: Consolidate dotenv loads
 dotenv_path = Path(__file__).parent / ".env"
-load_dotenv(dotenv_path=dotenv_path, override=True)
+load_dotenv(dotenv_path=dotenv_path, override=False)  # Never override shell-exported vars
 
 # Fix 50: Guard logging
 if not logging.getLogger().hasHandlers():
@@ -75,9 +75,15 @@ if not logging.getLogger().hasHandlers():
 logger = logging.getLogger("BybitRealm")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════════════════════════
+def _get_bybit_realm_credentials() -> tuple[str, str]:
+    raw_k = os.getenv("BYBIT_API_KEY", "").strip()
+    raw_s = os.getenv("BYBIT_API_SECRET", "").strip()
+    if len(raw_k) > len(raw_s) and len(raw_k) > 25 and len(raw_s) < 25:
+        return raw_s, raw_k
+    return raw_k, raw_s
+
+_BYBIT_CREDS = _get_bybit_realm_credentials()
+
 @dataclass
 class TradingConfig:
     """
@@ -87,8 +93,8 @@ class TradingConfig:
     """
 
     # ── API Credentials ──────────────────────────────────────────────────────
-    api_key: str = field(default_factory=lambda: os.getenv("BYBIT_API_KEY", ""))
-    api_secret: str = field(default_factory=lambda: os.getenv("BYBIT_API_SECRET", ""))
+    api_key: str = field(default_factory=lambda: _BYBIT_CREDS[0])
+    api_secret: str = field(default_factory=lambda: _BYBIT_CREDS[1])
     testnet: bool = field(
         default_factory=lambda: (
             os.getenv("BYBIT_USE_TESTNET", "false").lower() == "true"
@@ -116,7 +122,7 @@ class TradingConfig:
         default_factory=lambda: int(os.getenv("REQUEST_TIMEOUT", "15"))
     )
     max_retries: int = field(default_factory=lambda: int(os.getenv("MAX_RETRIES", "3")))
-    recv_window: int = 30000
+    recv_window: int = 5000
 
     # ── Rate Limiting ────────────────────────────────────────────────────────
     rate_limit_per_second: int = field(
@@ -275,7 +281,10 @@ class GeoProxyManager:
                 )
 
         # Use proxy_utils for consistent proxy configuration
-        proxies = proxy_utils.get_proxies()
+        proxies = proxy_utils.get_proxies() if proxy_utils else {}
+        if not proxies or proxies == {"http": None, "https": None}:
+            p_env = os.getenv("BYBIT_TOR_PROXY") or os.getenv("BYBIT_PROXY_URL") or os.getenv("PROXY_URL") or "socks5h://127.0.0.1:9050"
+            proxies = {"http": p_env, "https": p_env}
         self.session.proxies = proxies
 
         proxy_url = proxies.get("https", "unknown")
@@ -435,10 +444,10 @@ class BybitRealm:
     def sync_server_time(self):
         """Fix 20: Calculate drift once during init to prevent signature errors."""
         server_time_resp = self.health_check()
-        server_time = int(server_time_resp.get("timeSecond", 0)) * 1000
+        res_data = server_time_resp.get("result", server_time_resp) if isinstance(server_time_resp, dict) else {}
+        server_time = int(res_data.get("timeSecond", 0)) * 1000
         if server_time == 0:
-            # Fallback to timeNano if timeSecond is missing
-            server_time = int(server_time_resp.get("timeNano", 0)) // 1_000_000
+            server_time = int(res_data.get("timeNano", 0)) // 1_000_000
 
         local_time = int(time.time() * 1000)
         if server_time > 0:

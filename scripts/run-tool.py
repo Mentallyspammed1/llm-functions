@@ -150,6 +150,18 @@ def run(
     func = getattr(mod, tool_func)
     tool_data = _coerce_types(func, tool_data)
 
+    # Filter out unexpected kwargs if function doesn't accept **kwargs
+    try:
+        sig = inspect.signature(func)
+        has_varkw = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+        if not has_varkw:
+            valid_args = set(sig.parameters.keys())
+            tool_data = {k: v for k, v in tool_data.items() if k in valid_args}
+    except Exception:
+        pass
+
     try:
         value = func(**tool_data)
     except TypeError as exc:

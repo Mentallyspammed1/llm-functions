@@ -76,5 +76,31 @@
     "provider": "gps",
     "label": "test_location",
     "timestamp": "2026-07-30T21:17:30.208963"
+  },
+  {
+    "latitude": 38.641110000000005,
+    "longitude": -90.26802833333335,
+    "altitude": 82.19999999999999,
+    "accuracy": 12.699999809265137,
+    "vertical_accuracy": 9.899999618530273,
+    "bearing": 322.1600036621094,
+    "speed": 1.2523192167282104,
+    "elapsedMs": 110,
+    "provider": "gps",
+    "label": "forest park hammock spot",
+    "timestamp": "2026-08-09T14:11:55.595262"
+  },
+  {
+    "latitude": 38.684781666666666,
+    "longitude": -90.30241166666669,
+    "altitude": 108.80000000000001,
+    "accuracy": 12.600000381469727,
+    "vertical_accuracy": 86.0,
+    "bearing": 0.0,
+    "speed": 0.0,
+    "elapsedMs": 150,
+    "provider": "gps",
+    "label": "rock road metrolink",
+    "timestamp": "2026-08-09T18:59:22.812348"
   }
 ]

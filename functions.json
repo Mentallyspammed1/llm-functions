@@ -1,5 +1,45 @@
 [
   {
+    "name": "free_search",
+    "description": "Performs fast, API-free web searches by parsing DuckDuckGo HTML and Lite endpoints with URL normalization and backoff jitter.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query term (required)"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Number of search results to return (default: 10, max: 30)"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout in seconds (default: 15)"
+        },
+        "max_retries": {
+          "type": "integer",
+          "description": "Maximum retries on failure (default: 3)"
+        },
+        "filter_spam": {
+          "type": "boolean",
+          "description": "Filter out low-quality or empty search results"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
     "name": "bs",
     "description": "Performs Brave Search queries, parses multi-tier results, and downloads pages concurrently.",
     "parameters": {
@@ -78,7 +118,7 @@
           "description": "Custom download directory"
         },
         "max_file_size": {
-          "type": "string",
+          "type": "integer",
           "description": "Maximum file size to download in bytes (default: 10485760)"
         },
         "download": {
@@ -203,7 +243,11 @@
         },
         "unit": {
           "type": "string",
-          "description": "Output unit: Mbps or Kbps (default: Mbps)"
+          "description": "Output unit: Mbps or Kbps (default: Mbps)",
+          "enum": [
+            "Mbps",
+            "Kbps"
+          ]
         },
         "verbose": {
           "type": "boolean",
@@ -263,7 +307,7 @@
           "description": "Maximum concurrent download threads (default: 3)"
         },
         "rate_limit": {
-          "type": "integer",
+          "type": "number",
           "description": "Max requests per second (0 = unlimited, default: 0)"
         },
         "download": {
@@ -658,14 +702,19 @@
         },
         "output_format": {
           "type": "string",
-          "description": "Output format: json, html, csv (default: json)"
+          "description": "Output format: json, html, csv (default: json)",
+          "enum": [
+            "json",
+            "html",
+            "csv"
+          ]
         },
         "proxy": {
           "type": "string",
           "description": "Proxy server URL (http/https/socks5)"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "HTTP timeout in seconds (default: 15)"
         },
         "custom_ua": {
@@ -677,7 +726,7 @@
           "description": "Custom cache folder location"
         },
         "cache_ttl": {
-          "type": "string",
+          "type": "integer",
           "description": "Result cache TTL in seconds (default: 3600)"
         },
         "exclude_words": {
@@ -742,7 +791,12 @@
         },
         "format": {
           "type": "string",
-          "description": "Output format: text, json, markdown (default: text)"
+          "description": "Output format: text, json, markdown (default: text)",
+          "enum": [
+            "text",
+            "json",
+            "markdown"
+          ]
         },
         "target_selector": {
           "type": "string",
@@ -794,22 +848,26 @@
         },
         "mode": {
           "type": "string",
-          "description": "Execution mode: summary/detailed (default: summary)"
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
         },
         "engine": {
           "type": "string",
           "description": "Search mode: web/instant/hybrid (default: web)"
         },
         "use_cache": {
-          "type": "string",
+          "type": "boolean",
           "description": "Enable result caching for repeated queries"
         },
         "no_color": {
-          "type": "string",
+          "type": "boolean",
           "description": "Disable ANSI color output"
         },
         "verbose": {
-          "type": "string",
+          "type": "boolean",
           "description": "Enable detailed debug log output"
         },
         "log_file": {
@@ -821,7 +879,7 @@
           "description": "Output format for LLM: json|jsonl|csv|md (default: json)"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Request timeout in seconds (default: 15)"
         },
         "workers": {
@@ -889,7 +947,7 @@
           "description": "Output format: detailed, compact, json, parsed. [default: detailed]"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Request timeout in seconds (1-60). [default: 15]"
         },
         "max_retries": {
@@ -897,7 +955,7 @@
           "description": "Maximum retry attempts (0-5). [default: 2]"
         },
         "cache_ttl": {
-          "type": "string",
+          "type": "integer",
           "description": "Cache TTL in seconds (0=disabled, max=3600). [default: 300]"
         },
         "pages": {
@@ -905,7 +963,7 @@
           "description": "Number of result pages to fetch (1-10). [default: 1]"
         },
         "rate_limit_delay": {
-          "type": "string",
+          "type": "integer",
           "description": "Delay between API requests (0-10). [default: 1]"
         },
         "export_format": {
@@ -1017,7 +1075,7 @@
           "description": "Maximum images to download (1-100). [default: 5]"
         },
         "download_timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Per-image download timeout (5-120). [default: 30]"
         },
         "download_workers": {
@@ -1025,11 +1083,11 @@
           "description": "Concurrent download workers (1-10). [default: 3]"
         },
         "image_min_width": {
-          "type": "string",
+          "type": "integer",
           "description": "Minimum image width in pixels. [default: 0]"
         },
         "image_min_height": {
-          "type": "string",
+          "type": "integer",
           "description": "Minimum image height in pixels. [default: 0]"
         },
         "download_images": {
@@ -1178,7 +1236,29 @@
         },
         "mode": {
           "type": "string",
-          "description": "Execution mode (use --list-modes to inspect all 20 modes) (default: dns-lookup)"
+          "description": "Execution mode (use --list-modes to inspect all 20 modes) (default: dns-lookup)",
+          "enum": [
+            "sniff",
+            "wifi-scan",
+            "wifi-mon",
+            "port-scan",
+            "banner-grab",
+            "arp-scan",
+            "lte-info",
+            "interfaces",
+            "parse-pcap",
+            "dns-lookup",
+            "ping-sweep",
+            "traceroute",
+            "mac-vendor",
+            "ssl-inspect",
+            "http-headers",
+            "net-stats",
+            "syn-scan",
+            "eapol-detect",
+            "dhcp-detect",
+            "check-deps"
+          ]
         },
         "ports": {
           "type": "string",
@@ -1193,7 +1273,7 @@
           "description": "Protocol or keyword filter (e.g., tcp, udp, icmp, dns, eapol, deauth)"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Timeout in seconds for operations (default: 10)"
         },
         "output_pcap": {
@@ -1201,8 +1281,11 @@
           "description": "Path to export captured raw packets to .pcap format"
         },
         "env_var": {
-          "type": "string",
-          "description": "<KEY=VALUE>          Custom environment variable (repeatable)"
+          "type": "array",
+          "description": "Custom environment variable (repeatable)",
+          "items": {
+            "type": "string"
+          }
         },
         "force": {
           "type": "boolean",
@@ -1250,7 +1333,28 @@
         },
         "mode": {
           "type": "string",
-          "description": "Mode: status/folders/devices/folder-status/pause-folder/resume-folder/connections/rescan/conflicts/events/errors/needed/config/rclone-remotes/rclone-about/rclone-ls/rclone-sync/rclone-rc/check-deps (default: status)"
+          "description": "Mode: status/folders/devices/folder-status/pause-folder/resume-folder/connections/rescan/conflicts/events/errors/needed/config/rclone-remotes/rclone-about/rclone-ls/rclone-sync/rclone-rc/check-deps (default: status)",
+          "enum": [
+            "status",
+            "folders",
+            "devices",
+            "folder-status",
+            "pause-folder",
+            "resume-folder",
+            "connections",
+            "rescan",
+            "conflicts",
+            "events",
+            "errors",
+            "needed",
+            "config",
+            "rclone-remotes",
+            "rclone-about",
+            "rclone-ls",
+            "rclone-sync",
+            "rclone-rc",
+            "check-deps"
+          ]
         },
         "api_key": {
           "type": "string",
@@ -1273,7 +1377,7 @@
           "description": "Maximum items/events/files to return (default: 50)"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Timeout in seconds for API and CLI calls (default: 15)"
         },
         "insecure": {
@@ -1285,8 +1389,11 @@
           "description": "Run Rclone sync operations in simulation mode"
         },
         "env_var": {
-          "type": "string",
-          "description": "<KEY=VALUE>          Custom environment variable (repeatable)"
+          "type": "array",
+          "description": "Custom environment variable (repeatable)",
+          "items": {
+            "type": "string"
+          }
         },
         "use_cache": {
           "type": "boolean",
@@ -1322,7 +1429,7 @@
           "description": "HEAD | GET | OPTIONS (default: HEAD)"
         },
         "follow_redirects": {
-          "type": "string",
+          "type": "boolean",
           "description": "Follow HTTP redirects (default: true)"
         },
         "output": {
@@ -1354,8 +1461,11 @@
           "description": "Restrict to domain"
         },
         "tags": {
-          "type": "string",
-          "description": "Extra tag (repeatable)"
+          "type": "array",
+          "description": "Extra tag (repeatable)",
+          "items": {
+            "type": "string"
+          }
         },
         "save": {
           "type": "string",
@@ -1398,7 +1508,7 @@
           "description": "Custom User-Agent header"
         },
         "timeout": {
-          "type": "string",
+          "type": "number",
           "description": "Request timeout in seconds (default: 10)"
         },
         "ignore_ssl": {
@@ -1410,7 +1520,7 @@
           "description": "On-disk HTTP cache dir (default: ~/.osint_cache/)"
         },
         "cache_ttl": {
-          "type": "string",
+          "type": "integer",
           "description": "Cache TTL in seconds (default: 3600)"
         },
         "workers": {
@@ -1557,6 +1667,194 @@
       "properties": {
         "action": {
           "type": "string",
+          "enum": [
+            "health_check",
+            "connection_health",
+            "reset_circuit",
+            "renew_tor_circuit",
+            "get_server_time",
+            "place_order",
+            "amend_order",
+            "cancel_order",
+            "cancel_all_orders",
+            "get_open_orders",
+            "get_order_history",
+            "batch_orders",
+            "iceberg_order",
+            "place_trailing_stop_order",
+            "calculate_trailing_stop_levels",
+            "get_trailing_stop_status",
+            "place_conditional_order",
+            "batch_amend_orders",
+            "batch_cancel_orders",
+            "get_positions",
+            "get_wallet_balance",
+            "set_leverage",
+            "set_trading_stop",
+            "get_fee_rate",
+            "get_transaction_log",
+            "get_trade_history",
+            "switch_margin_mode",
+            "switch_position_mode",
+            "get_account_info",
+            "get_api_key_info",
+            "get_borrow_history",
+            "get_collateral_info",
+            "get_coin_greeks",
+            "internal_transfer",
+            "get_coin_balance",
+            "get_ticker",
+            "get_24hr_ticker",
+            "get_orderbook",
+            "get_klines",
+            "get_recent_trades",
+            "get_open_interest",
+            "get_liquidations",
+            "get_funding_rate",
+            "get_funding_rate_history",
+            "get_long_short_ratio",
+            "get_mark_price",
+            "get_index_price",
+            "get_price_bands",
+            "get_instruments_info",
+            "get_risk_limit",
+            "set_risk_limit",
+            "get_insurance_pool",
+            "get_delivery_price",
+            "get_historical_volatility",
+            "get_l2_orderbook_analysis",
+            "get_market_momentum",
+            "get_market_health",
+            "get_trend_analysis",
+            "calculate_bollinger_bands",
+            "calculate_macd",
+            "calculate_stoch_rsi",
+            "calculate_cci",
+            "calculate_donchian_channels",
+            "calculate_adx",
+            "calculate_fib_pivots",
+            "calculate_vwap",
+            "calculate_ichimoku_cloud",
+            "calculate_kelly_criterion",
+            "calculate_trade_pnl",
+            "calculate_profit_target",
+            "calculate_sl_tp",
+            "calculate_position_size",
+            "calculate_volatility_adjusted_size",
+            "calculate_breakeven",
+            "calculate_breakeven_with_fees",
+            "calculate_profit_after_fees",
+            "get_pnl_history",
+            "get_pnl_report",
+            "macro_dca_plan",
+            "macro_grid_plan",
+            "macro_scalp_momentum",
+            "macro_mean_reversion",
+            "macro_funding_arb",
+            "macro_twap",
+            "macro_breakout",
+            "macro_portfolio_summary",
+            "macro_smart_entry",
+            "macro_microprofit_scalp",
+            "volume_profile",
+            "volume_divergence",
+            "orderbook_heatmap",
+            "orderflow_analysis",
+            "comprehensive_trend_analysis",
+            "get_instrument_precision",
+            "validate_order_params",
+            "calculate_fee_adjusted_targets",
+            "get_min_order_value",
+            "get_position_detail",
+            "scale_position",
+            "close_position",
+            "flip_position",
+            "auto_sl_tp",
+            "move_sl_to_breakeven",
+            "get_all_positions_summary",
+            "journal_record_trade",
+            "journal_close_trade",
+            "journal_get_trades",
+            "journal_performance",
+            "journal_export",
+            "journal_import",
+            "adaptive_position_size",
+            "fixed_fractional_size",
+            "anti_martingale_size",
+            "portfolio_heat",
+            "max_position",
+            "momentum_sniper",
+            "mean_reversion_scalp",
+            "funding_arb_scan",
+            "smart_dca",
+            "liquidity_sweep",
+            "risk_reward_analysis",
+            "liquidation_price",
+            "drawdown_analysis",
+            "support_resistance",
+            "market_regime",
+            "entry_timing",
+            "scale_into",
+            "scale_out",
+            "hedge_position",
+            "multi_timeframe_signals",
+            "market_session",
+            "whale_detection",
+            "fear_greed",
+            "compound_growth",
+            "trade_checklist",
+            "auto_leverage",
+            "unrealized_pnl",
+            "divergence_signals",
+            "optimal_entry_zones",
+            "spread_analysis",
+            "correlation_analysis",
+            "smart_trailing_stop",
+            "batch_place_orders",
+            "set_tpsl_mode",
+            "add_reduce_margin",
+            "set_auto_add_margin",
+            "get_executions",
+            "confirm_risk_limit",
+            "set_collateral_coin",
+            "get_withdrawable_amount",
+            "get_historical_klines",
+            "get_premium_index_kline",
+            "calculate_rsi",
+            "calculate_ema",
+            "calculate_atr",
+            "calculate_obv",
+            "calculate_cvd",
+            "calculate_mfi",
+            "calculate_cmf",
+            "calculate_williams_r",
+            "calculate_parabolic_sar",
+            "calculate_keltner_channels",
+            "calculate_roc",
+            "calculate_trix",
+            "calculate_ultimate_oscillator",
+            "calculate_choppiness_index",
+            "calculate_aroon",
+            "calculate_dpo",
+            "calculate_hma",
+            "calculate_zlema",
+            "calculate_supertrend",
+            "calculate_elder_ray",
+            "calculate_vwma",
+            "calculate_awesome_oscillator",
+            "calculate_accumulation_distribution",
+            "calculate_heikin_ashi",
+            "calculate_renko",
+            "calculate_pivot_points",
+            "calculate_position_risk",
+            "calculate_compound_growth",
+            "calculate_linear_regression",
+            "calculate_stddev",
+            "calculate_vroc",
+            "calculate_kelly_criterion_standalone",
+            "calculate_max_position",
+            "calculate_bollinger_bandwidth"
+          ],
           "description": ""
         },
         "symbol": {
@@ -1565,22 +1863,37 @@
         },
         "side": {
           "type": "string",
+          "enum": [
+            "Buy",
+            "Sell"
+          ],
           "description": ""
         },
         "qty": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "order_type": {
           "type": "string",
+          "enum": [
+            "Limit",
+            "Market",
+            "LimitMaker"
+          ],
           "description": ""
         },
         "category": {
           "type": "string",
+          "enum": [
+            "linear",
+            "inverse",
+            "spot",
+            "option"
+          ],
           "description": ""
         },
         "order_id": {
@@ -1588,27 +1901,33 @@
           "description": ""
         },
         "stop_loss": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "take_profit": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "trailing_stop": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "reduce_only": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "time_in_force": {
           "type": "string",
+          "enum": [
+            "GTC",
+            "IOC",
+            "FOK",
+            "PostOnly"
+          ],
           "description": ""
         },
         "position_idx": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "client_oid": {
@@ -1616,15 +1935,15 @@
           "description": ""
         },
         "leverage": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "buy_leverage": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "sell_leverage": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "account_type": {
@@ -1632,7 +1951,7 @@
           "description": ""
         },
         "limit": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "interval": {
@@ -1644,43 +1963,43 @@
           "description": ""
         },
         "strong_threshold": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "mild_threshold": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "sl_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "tp_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "risk_usdt": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "sl_price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "fee_rate": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "funding_rate": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "holding_hours": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "holding_periods": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "orders": {
@@ -1688,47 +2007,47 @@
           "description": ""
         },
         "slices": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "delay": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "start_time": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "end_time": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "scale_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "reduce": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "scale": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "use_atr": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "offset_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "entry_price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "exit_price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "strategy": {
@@ -1756,51 +2075,51 @@
           "description": ""
         },
         "total_usdt": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "num_orders": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "num_grids": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "upper_price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "lower_price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "rr_ratio": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "atr_mult": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "duration_minutes": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "num_slices": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "min_rate": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "top_n": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "price_range_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "coin": {
@@ -1820,7 +2139,7 @@
           "description": ""
         },
         "risk_id": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "currency": {
@@ -1828,95 +2147,103 @@
           "description": ""
         },
         "trigger_price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "trigger_by": {
           "type": "string",
+          "enum": [
+            "LastPrice",
+            "IndexPrice",
+            "MarkPrice"
+          ],
           "description": ""
         },
         "depth": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "period": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "num_bins": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "num_levels": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "num_entries": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "num_exits": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "spacing_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "tp_spacing_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "hedge_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "dip_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "symbols": {
-          "type": "string",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
           "description": ""
         },
         "risk_fraction": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "consecutive_wins": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "consecutive_losses": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "daily_return_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "days": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "win_rate_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "trades_per_day": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "starting_capital": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "maint_margin_rate": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "account_balance": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "margin": {
@@ -1924,19 +2251,23 @@
           "description": ""
         },
         "auto_add_margin": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "tp_sl_mode": {
           "type": "string",
+          "enum": [
+            "Full",
+            "Partial"
+          ],
           "description": ""
         },
         "collateral_switch": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "brick_size": {
-          "type": "string",
+          "type": "number",
           "description": ""
         }
       },
@@ -2087,7 +2418,7 @@
           "description": "Time interval (1,5,15,60,120,240,D,W,M)"
         },
         "limit": {
-          "type": "string",
+          "type": "integer",
           "description": "Number of results (default: 25)"
         },
         "leverage": {
@@ -2095,7 +2426,7 @@
           "description": "Leverage value"
         },
         "mode": {
-          "type": "string",
+          "type": "integer",
           "description": "Position mode (0=One-Way, 3=Hedge)"
         },
         "action": {
@@ -2103,15 +2434,15 @@
           "description": "[be|close] Position manager action"
         },
         "profit_usdt": {
-          "type": "string",
+          "type": "integer",
           "description": "Profit threshold in USDT"
         },
         "tp_usdt": {
-          "type": "string",
+          "type": "integer",
           "description": "Take profit in USDT"
         },
         "sl_usdt": {
-          "type": "string",
+          "type": "integer",
           "description": "Stop loss in USDT"
         },
         "order_id": {
@@ -2168,7 +2499,7 @@
       "properties": {
         "action": {
           "type": "string",
-          "description": "health_check, get_wallet_balance, get_account_info, get_positions, get_position_risk, get_fee_rate, set_leverage, set_trading_stop, set_position_mode, get_executions, get_pnl_history, panic_close, bulk_update_tp_sl, get_account_summary, get_pnl_summary, update_trailing_stop, set_tp_sl, check_risk_limit, check_balance, close_position, get_open_positions_summary, send_telegram_alert, export_trade_history, calculate_rsi, calculate_sma, calculate_ema, calculate_macd, calculate_bollinger_bands, calculate_vwap, calculate_atr, calculate_stoch, scan_scalping_opportunities, place_order, amend_order, cancel_order, cancel_all_orders, get_open_orders, get_order_history, batch_place_orders, place_smart_trade, get_ticker, get_orderbook, get_klines, get_recent_trades, get_instruments_info, get_funding_rate, get_open_interest, get_volatility_index, get_orderbook_analysis, get_volume_at_price, get_market_regime, scan_symbols, get_journal, calculate_support_resistance_levels, calculate_fibonacci_levels, calculate_volume_profile, calculate_orderflow_delta, calculate_market_depth_profile, detect_high_confluence_levels, deep_level_sort, calculate_sr_levels, generate_market_depth_report, calculate_limit_micro_profit, calculate_depth_weighted_profit, calculate_all_indicators, calculate_hma, calculate_fractals, calculate_pivot_points, calculate_klinger, calculate_cmf, calculate_adx_with_di, calculate_elder_ray_index, calculate_kst, calculate_tema, calculate_ehler_rsi, calculate_ehler_stochastic, calculate_vwma, calculate_bollinger_bands_pb, calculate_roc, calculate_mfi, calculate_williams_r, analyze_symbol, place_breakeven_order"
+          "description": "health_check, get_wallet_balance, get_account_info, get_positions, get_position_risk, get_fee_rate, set_leverage, set_trading_stop, set_position_mode, get_executions, get_pnl_history, panic_close, bulk_update_tp_sl, get_account_summary, get_pnl_summary, update_trailing_stop, set_tp_sl, check_risk_limit, check_balance, close_position, get_open_positions_summary, send_telegram_alert, export_trade_history, calculate_rsi, calculate_sma, calculate_ema, calculate_macd, calculate_bollinger_bands, calculate_vwap, calculate_atr, calculate_stoch, scan_scalping_opportunities, place_order, amend_order, cancel_order, cancel_all_orders, get_open_orders, get_order_history, batch_place_orders, place_smart_trade, get_ticker, get_orderbook, get_klines, get_recent_trades, get_instruments_info, get_funding_rate, get_open_interest, get_volatility_index, get_orderbook_analysis, get_volume_at_price, get_market_regime, scan_symbols, get_journal, calculate_support_resistance_levels, calculate_fibonacci_levels, calculate_volume_profile, calculate_orderflow_delta, calculate_market_depth_profile, detect_high_confluence_levels, deep_level_sort, calculate_sr_levels, generate_market_depth_report, calculate_limit_micro_profit, calculate_depth_weighted_profit, calculate_all_indicators, calculate_hma, calculate_fractals, calculate_pivot_points, calculate_klinger, calculate_cmf, calculate_adx_with_di, calculate_elder_ray_index, calculate_kst, calculate_tema, calculate_ehler_rsi, calculate_ehler_stochastic, calculate_vwma, calculate_bollinger_bands_pb, calculate_roc, calculate_mfi, calculate_williams_r, analyze_symbol, place_breakeven_order, get_asset_info, transfer_funds, get_transfer_history, set_margin_mode, get_borrow_history"
         },
         "symbol": {
           "type": "string",
@@ -2176,14 +2507,18 @@
         },
         "side": {
           "type": "string",
-          "description": "Buy, Sell"
+          "description": "Buy, Sell",
+          "enum": [
+            "Buy",
+            "Sell"
+          ]
         },
         "qty": {
-          "type": "integer",
+          "type": "number",
           "description": "Order quantity"
         },
         "price": {
-          "type": "integer",
+          "type": "number",
           "description": "Order price"
         },
         "category": {
@@ -2191,11 +2526,11 @@
           "description": "linear, spot, inverse (default: linear)"
         },
         "stop_loss": {
-          "type": "integer",
+          "type": "number",
           "description": "Stop loss price"
         },
         "take_profit": {
-          "type": "integer",
+          "type": "number",
           "description": "Take profit price"
         },
         "leverage": {
@@ -2243,7 +2578,7 @@
           "description": "Custom proxy URL to test"
         },
         "timeout": {
-          "type": "integer",
+          "type": "number",
           "description": "Connection test timeout in seconds (default: 3.0)"
         },
         "no_color": {
@@ -2309,7 +2644,7 @@
           "description": "Required side: Buy or Sell."
         },
         "qty": {
-          "type": "string",
+          "type": "integer",
           "description": "Required quantity (base asset)."
         },
         "use_vwap_entry": {
@@ -2352,6 +2687,34 @@
       "properties": {
         "action": {
           "type": "string",
+          "enum": [
+            "health_check",
+            "get_wallet_balance",
+            "get_positions",
+            "set_leverage",
+            "manage_position",
+            "place_order",
+            "cancel_all_orders",
+            "get_open_orders",
+            "get_orderbook_analysis",
+            "get_mark_price",
+            "get_ticker",
+            "get_klines",
+            "calculate_rsi",
+            "calculate_ema",
+            "calculate_micro_profit",
+            "macro_basic_scalp",
+            "macro_leverage_momentum",
+            "macro_wall_surfing",
+            "get_fee_rate",
+            "get_market_regime",
+            "get_confluence",
+            "calculate_usdt_targets",
+            "get_account_summary",
+            "panic_close",
+            "check_equity_guard",
+            "get_dashboard"
+          ],
           "description": ""
         },
         "symbol": {
@@ -2360,14 +2723,18 @@
         },
         "side": {
           "type": "string",
+          "enum": [
+            "Buy",
+            "Sell"
+          ],
           "description": ""
         },
         "qty": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "order_type": {
@@ -2379,11 +2746,11 @@
           "description": ""
         },
         "stop_loss": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "take_profit": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "time_in_force": {
@@ -2395,39 +2762,39 @@
           "description": ""
         },
         "leverage": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "profit_usdt": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "fee_rate": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "target": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "maker_fee": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "taker_fee": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "risk_reward": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "kelly_win": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "limit": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "interval": {
@@ -2435,7 +2802,7 @@
           "description": ""
         },
         "iceberg_slices": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         }
       },
@@ -2473,6 +2840,36 @@
       "properties": {
         "action": {
           "type": "string",
+          "enum": [
+            "health_check",
+            "get_wallet_balance",
+            "get_positions",
+            "set_leverage",
+            "manage_position",
+            "place_order",
+            "cancel_all_orders",
+            "get_open_orders",
+            "get_orderbook_analysis",
+            "get_mark_price",
+            "get_ticker",
+            "get_klines",
+            "calculate_rsi",
+            "calculate_ema",
+            "calculate_micro_profit",
+            "macro_basic_scalp",
+            "macro_leverage_momentum",
+            "macro_wall_surfing",
+            "macro_smart_scalp",
+            "macro_micro_profit_10c",
+            "get_fee_rate",
+            "get_market_regime",
+            "get_confluence",
+            "calculate_usdt_targets",
+            "get_account_summary",
+            "panic_close",
+            "check_equity_guard",
+            "place_order_with_targets"
+          ],
           "description": ""
         },
         "symbol": {
@@ -2481,14 +2878,18 @@
         },
         "side": {
           "type": "string",
+          "enum": [
+            "Buy",
+            "Sell"
+          ],
           "description": ""
         },
         "qty": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "order_type": {
@@ -2500,11 +2901,11 @@
           "description": ""
         },
         "stop_loss": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "take_profit": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "time_in_force": {
@@ -2516,39 +2917,39 @@
           "description": ""
         },
         "leverage": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "profit_usdt": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "fee_rate": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "target": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "maker_fee": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "taker_fee": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "risk_reward": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "kelly_win": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "limit": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "interval": {
@@ -2556,7 +2957,7 @@
           "description": ""
         },
         "iceberg_slices": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         }
       },
@@ -2697,11 +3098,11 @@
           "description": "linear, inverse, spot (default: linear)"
         },
         "atr_mult": {
-          "type": "integer",
+          "type": "number",
           "description": "ATR multiplier for default SL (default: 2.0)"
         },
         "slippage_bps": {
-          "type": "integer",
+          "type": "number",
           "description": "Extra slippage buffer in bps for market entry (default: 5)"
         },
         "reduce_only": {
@@ -2742,11 +3143,11 @@
           "description": "Action to perform: be, close (default: be)"
         },
         "profit_usdt": {
-          "type": "integer",
+          "type": "number",
           "description": "Target USDT net profit threshold to trigger action (default: 50)"
         },
         "fee_rate": {
-          "type": "integer",
+          "type": "number",
           "description": "Estimated taker fee rate for roundtrip calculation (default: 0.0006)"
         },
         "category": {
@@ -2853,14 +3254,18 @@
         },
         "side": {
           "type": "string",
+          "enum": [
+            "Buy",
+            "Sell"
+          ],
           "description": ""
         },
         "qty": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "order_type": {
@@ -2880,11 +3285,11 @@
           "description": ""
         },
         "reduce_only": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "trigger_price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "trigger_by": {
@@ -2900,31 +3305,31 @@
           "description": ""
         },
         "stop_loss": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "take_profit": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "trailing_stop": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "tp_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "sl_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "trailing_stop_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "leverage": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "category": {
@@ -2932,11 +3337,11 @@
           "description": ""
         },
         "depth": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "limit": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "interval": {
@@ -2944,19 +3349,22 @@
           "description": ""
         },
         "lookback": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "wall_multiplier": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "symbols": {
-          "type": "string",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
           "description": ""
         },
         "include_regime": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "settle_coin": {
@@ -2968,7 +3376,10 @@
           "description": ""
         },
         "orders": {
-          "type": "string",
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
           "description": ""
         },
         "journal_symbol": {
@@ -2976,7 +3387,7 @@
           "description": ""
         },
         "journal_limit": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         }
       },
@@ -3033,7 +3444,7 @@
           "description": "move_breakeven, lock_profit, partial_close, dca_ladder"
         },
         "percent": {
-          "type": "integer",
+          "type": "number",
           "description": "Percentage of position to close (default: 50.0)"
         },
         "dca_steps": {
@@ -3041,11 +3452,11 @@
           "description": "Number of DCA limit orders (default: 3)"
         },
         "dca_range_pct": {
-          "type": "integer",
+          "type": "number",
           "description": "Price depth % range for DCA ladder (default: 1.5)"
         },
         "total_qty": {
-          "type": "integer",
+          "type": "number",
           "description": "Total quantity for DCA ladder"
         },
         "side": {
@@ -3082,7 +3493,7 @@
           "description": "Kline timeframe: 1, 5, 15, 60, 240, D (default: 15)"
         },
         "min_volume": {
-          "type": "integer",
+          "type": "number",
           "description": "Minimum 24h USDT turnover filter (default: 10000000)"
         },
         "limit": {
@@ -3091,7 +3502,11 @@
         },
         "mode": {
           "type": "string",
-          "description": "Execution mode: summary/detailed (default: summary)"
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
         },
         "use_cache": {
           "type": "boolean",
@@ -3123,19 +3538,19 @@
           "description": "Target pair for max_order_calc (e.g. BTCUSDT)"
         },
         "risk_pct": {
-          "type": "integer",
+          "type": "number",
           "description": "Target trade risk % of equity (default: 1.0)"
         },
         "sl_dist_pct": {
-          "type": "integer",
+          "type": "number",
           "description": "Assumed Stop Loss distance % for order sizing (default: 2.0)"
         },
         "no_color": {
-          "type": "string",
+          "type": "boolean",
           "description": "Disable ANSI color output"
         },
         "verbose": {
-          "type": "string",
+          "type": "boolean",
           "description": "Enable detailed debug log output"
         }
       }
@@ -3149,6 +3564,63 @@
       "properties": {
         "action": {
           "type": "string",
+          "enum": [
+            "health_check",
+            "connection_health",
+            "place_order",
+            "amend_order",
+            "cancel_order",
+            "cancel_all_orders",
+            "get_open_orders",
+            "get_order_history",
+            "get_positions",
+            "get_wallet_balance",
+            "set_leverage",
+            "set_trading_stop",
+            "get_ticker",
+            "get_orderbook",
+            "get_klines",
+            "get_recent_trades",
+            "get_open_interest",
+            "get_liquidations",
+            "get_market_momentum",
+            "get_market_health",
+            "get_trend_analysis",
+            "get_funding_rate",
+            "get_long_short_ratio",
+            "get_transaction_log",
+            "calculate_bollinger_bands",
+            "calculate_macd",
+            "calculate_stoch_rsi",
+            "calculate_cci",
+            "calculate_donchian_channels",
+            "calculate_adx",
+            "calculate_kelly_criterion",
+            "calculate_fib_pivots",
+            "calculate_trade_pnl",
+            "calculate_profit_target",
+            "calculate_sl_tp",
+            "calculate_position_size",
+            "calculate_volatility_adjusted_size",
+            "place_trailing_stop_order",
+            "calculate_trailing_stop_levels",
+            "get_trailing_stop_status",
+            "calculate_vwap",
+            "calculate_ichimoku_cloud",
+            "get_pnl_history",
+            "get_pnl_report",
+            "get_fee_rate",
+            "switch_margin_mode",
+            "switch_position_mode",
+            "batch_orders",
+            "iceberg_order",
+            "reset_circuit",
+            "renew_tor_circuit",
+            "calculate_stoch_oscillator",
+            "calculate_mfi",
+            "calculate_obv",
+            "calculate_ema"
+          ],
           "description": ""
         },
         "symbol": {
@@ -3157,22 +3629,39 @@
         },
         "side": {
           "type": "string",
+          "enum": [
+            "Buy",
+            "Sell"
+          ],
           "description": ""
         },
         "qty": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "order_type": {
           "type": "string",
+          "enum": [
+            "Limit",
+            "Market",
+            "LimitMaker",
+            "Stop",
+            "StopLimit"
+          ],
           "description": ""
         },
         "category": {
           "type": "string",
+          "enum": [
+            "linear",
+            "inverse",
+            "spot",
+            "option"
+          ],
           "description": ""
         },
         "order_id": {
@@ -3180,27 +3669,33 @@
           "description": ""
         },
         "stop_loss": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "take_profit": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "trailing_stop": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "reduce_only": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "time_in_force": {
           "type": "string",
+          "enum": [
+            "GTC",
+            "IOC",
+            "FOK",
+            "PostOnly"
+          ],
           "description": ""
         },
         "position_idx": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "client_oid": {
@@ -3208,15 +3703,15 @@
           "description": ""
         },
         "leverage": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "buy_leverage": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "sell_leverage": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "account_type": {
@@ -3224,7 +3719,7 @@
           "description": ""
         },
         "limit": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "interval": {
@@ -3236,47 +3731,50 @@
           "description": ""
         },
         "strong_threshold": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "mild_threshold": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "sl_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "tp_pct": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "risk_usdt": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "sl_price": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "orders": {
-          "type": "string",
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
           "description": ""
         },
         "slices": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "delay": {
-          "type": "string",
+          "type": "number",
           "description": ""
         },
         "start_time": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "end_time": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "output": {
@@ -3354,8 +3852,11 @@
           "description": "Working directory for the command (default: current dir)"
         },
         "env": {
-          "type": "string",
-          "description": "<KEY=VALUE>              Extra environment variable (repeatable)"
+          "type": "array",
+          "description": "Extra environment variable (repeatable)",
+          "items": {
+            "type": "string"
+          }
         },
         "shell": {
           "type": "string",
@@ -3395,7 +3896,13 @@
         },
         "mode": {
           "type": "string",
-          "description": "Operation mode: eval/stats/matrix/convert (default: eval)"
+          "description": "Operation mode: eval/stats/matrix/convert (default: eval)",
+          "enum": [
+            "eval",
+            "stats",
+            "matrix",
+            "convert"
+          ]
         },
         "data": {
           "type": "string",
@@ -3507,7 +4014,7 @@
           "description": "JSON file to store tasks (default: tasks.json)"
         },
         "wakeup": {
-          "type": "string",
+          "type": "integer",
           "description": "Set a background wakeup timer in minutes for the task"
         },
         "schedule": {
@@ -3519,7 +4026,7 @@
           "description": "Agent prompt to auto-execute via aichat upon wakeup"
         },
         "recurring": {
-          "type": "string",
+          "type": "integer",
           "description": "Make the wakeup timer recurring every N minutes"
         },
         "depends_on": {
@@ -3531,11 +4038,11 @@
           "description": "Webhook URL to POST when agent finishes"
         },
         "retry_count": {
-          "type": "string",
+          "type": "integer",
           "description": "Number of times to retry agent prompt on failure"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Timeout in seconds for agent execution"
         },
         "auto_subtasks": {
@@ -3559,11 +4066,11 @@
           "description": "Only trigger agent if this shell command exits with 0"
         },
         "max_runs": {
-          "type": "string",
+          "type": "integer",
           "description": "Terminate recurring task after N successful runs"
         },
         "jitter": {
-          "type": "string",
+          "type": "integer",
           "description": "Add random jitter to the wakeup timer"
         },
         "escalate_on_fail": {
@@ -3595,7 +4102,7 @@
           "description": "Comma-separated tags (e.g., trading,urgent)"
         },
         "priority_boost": {
-          "type": "string",
+          "type": "integer",
           "description": "Boost task to HIGH priority after N minutes"
         },
         "no_color": {
@@ -3627,11 +4134,11 @@
           "description": ""
         },
         "indent": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "sort_keys": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         }
       },
@@ -3640,87 +4147,6 @@
         "action",
         "indent",
         "sort_keys"
-      ]
-    }
-  },
-  {
-    "name": "str_replace_editor",
-    "description": "A robust file editor tool supporting view, literal/regex search,",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "action": {
-          "type": "string",
-          "description": "Operation: view, replace, count, write, batch (required)"
-        },
-        "file_path": {
-          "type": "string",
-          "description": "Path to the target file (required)"
-        },
-        "search": {
-          "type": "string",
-          "description": "Search string/pattern (required for replace/count)"
-        },
-        "replacement": {
-          "type": "string",
-          "description": "Replacement string (required for replace)"
-        },
-        "content": {
-          "type": "string",
-          "description": "New content for write action"
-        },
-        "edits": {
-          "type": "string",
-          "description": "JSON array string or file path for batch replacements"
-        },
-        "start_line": {
-          "type": "integer",
-          "description": "Starting line (1-based) for view"
-        },
-        "end_line": {
-          "type": "integer",
-          "description": "Ending line for view"
-        },
-        "encoding": {
-          "type": "string",
-          "description": "Specify file encoding (default: utf-8)"
-        },
-        "backup": {
-          "type": "boolean",
-          "description": "Create timestamped .bak before modifying"
-        },
-        "no_color": {
-          "type": "boolean",
-          "description": "Disable ANSI color output"
-        },
-        "verbose": {
-          "type": "boolean",
-          "description": "Enable detailed debug logging"
-        },
-        "regex": {
-          "type": "boolean",
-          "description": "Treat search as regex pattern"
-        },
-        "dry_run": {
-          "type": "boolean",
-          "description": "Simulate replace (no file write)"
-        },
-        "ignore_case": {
-          "type": "boolean",
-          "description": "Case-insensitive search/replace"
-        },
-        "decode_escapes": {
-          "type": "boolean",
-          "description": "Decode \\n, \\t, \\r in search/replacement strings"
-        },
-        "dotall": {
-          "type": "boolean",
-          "description": "Treat . in regex as matching newlines (re.DOTALL)"
-        }
-      },
-      "required": [
-        "action",
-        "file_path"
       ]
     }
   },
@@ -3811,11 +4237,11 @@
           "description": "Target storage path to inspect (default: /)"
         },
         "interval": {
-          "type": "string",
+          "type": "integer",
           "description": "Refresh interval in seconds when running in watch daemon mode (default: 5)"
         },
         "cpu_threshold": {
-          "type": "string",
+          "type": "number",
           "description": "CPU load percentage threshold to flag heavy processes (default: 80.0)"
         },
         "watch": {
@@ -3915,125 +4341,105 @@
   },
   {
     "name": "gen_thumbs",
-    "description": "Generate video thumbnails (local paths or URLs) via ffmpeg.",
+    "description": "Master AI tool for native FFmpeg thumbnail extraction, montage grid building, and timestamp-to-query mapping without OpenCV/PySceneDetect dependencies.",
     "parameters": {
       "type": "object",
       "properties": {
-        "input": {
+        "target": {
           "type": "string",
-          "description": "One or more video paths or URLs (separated by commas or newlines)."
+          "description": "Target video file path or URL (required)"
+        },
+        "query": {
+          "type": "string",
+          "description": "Semantic query text to search across video scenes"
         },
         "output_dir": {
           "type": "string",
-          "description": "Directory where thumbnail images are written (default: thumbnails)."
+          "description": "Directory where thumbnails and keyframes are written (default: thumbnails)"
         },
         "interval": {
-          "type": "string",
-          "description": "Seconds between each captured frame (default: 10)."
+          "type": "number",
+          "description": "Seconds between each captured frame for thumbnail generation (default: 10.0)"
         },
         "width": {
-          "type": "string",
-          "description": "Thumbnail width in pixels; height scales automatically (default: 320)."
+          "type": "integer",
+          "description": "Thumbnail width in pixels; height scales automatically (default: 320)"
         },
         "format": {
           "type": "string",
-          "description": "Output image format (png, jpg, webp) (default: png)."
+          "description": "Output image format: png, jpg, webp (default: png)"
         },
         "start": {
           "type": "string",
-          "description": "Start time as HH:MM:SS or seconds (default: 00:00:00)."
+          "description": "Start time as HH:MM:SS or seconds (default: 00:00:00)"
         },
         "end": {
           "type": "string",
-          "description": "End time as HH:MM:SS or seconds (default: 00:00:00)."
+          "description": "End time as HH:MM:SS or seconds (default: 00:00:00)"
         },
         "max_frames": {
-          "type": "string",
-          "description": "Maximum number of thumbnails per input (default: 10)."
+          "type": "integer",
+          "description": "Maximum number of extracted thumbnail frames (default: 15)"
         },
         "timestamps": {
           "type": "string",
-          "description": "Comma-separated specific timestamps (HH:MM:SS or seconds) to capture."
+          "description": "Comma-specific timestamps (HH:MM:SS or seconds) to capture"
         },
         "percentages": {
           "type": "string",
-          "description": "Comma-separated percentages (0-100) of video duration to capture."
+          "description": "Comma-separated percentages (0-100) of video duration to capture"
         },
-        "keyframes": {
+        "montage": {
           "type": "string",
-          "description": "Capture at keyframes only (I-frames) within time range."
-        },
-        "scene_threshold": {
-          "type": "string",
-          "description": "Scene change detection threshold (0.1-1.0, requires ffmpeg scene filter)."
-        },
-        "force_keyframes": {
-          "type": "string",
-          "description": "Force keyframes at exact timestamps (re-encodes for precise seeking)."
-        },
-        "manifest": {
-          "type": "string",
-          "description": "Output JSON manifest with capture details."
-        },
-        "progress": {
-          "type": "string",
-          "description": "Show progress bar for long operations."
-        },
-        "montage_bg": {
-          "type": "string",
-          "description": "Montage background color (default: white)."
-        },
-        "tile_spacing": {
-          "type": "string",
-          "description": "Montage tile spacing in pixels (default: 2)."
-        },
-        "font": {
-          "type": "string",
-          "description": "Optional path to font file for timestamp overlay."
-        },
-        "font_size": {
-          "type": "string",
-          "description": "Font size for timestamp overlay (default: 14)."
-        },
-        "font_color": {
-          "type": "string",
-          "description": "Font color for timestamp overlay (default: white)."
-        },
-        "box_color": {
-          "type": "string",
-          "description": "Box background color for timestamp overlay (default: black)."
-        },
-        "box_opacity": {
-          "type": "string",
-          "description": "Box background opacity for timestamp overlay (0.0 to 1.0) (default: 0.5)."
-        },
-        "position": {
-          "type": "string",
-          "description": "Position of timestamp overlay (tl, tr, bl, br) (default: bl)."
+          "description": "Generate image grid montage, e.g. 2x3 or 3x3"
         },
         "quality": {
-          "type": "string",
-          "description": "JPEG/WebP quality (1-100) or PNG compression (1-9) (default: 80)."
+          "type": "integer",
+          "description": "JPEG/WebP quality (1-100) or PNG compression level (1-9) (default: 80)"
+        },
+        "keyframes": {
+          "type": "boolean",
+          "description": "Capture at keyframes only (I-frames) within time range"
+        },
+        "force_keyframes": {
+          "type": "boolean",
+          "description": "Force keyframes at exact timestamps (re-encodes for precise seeking)"
         },
         "add_timestamps": {
           "type": "boolean",
-          "description": "If set, draw the capture time on each thumbnail."
+          "description": "Draw the capture time overlay on each generated thumbnail"
         },
         "strip_metadata": {
           "type": "boolean",
-          "description": "If set, strip EXIF metadata from output thumbnails."
+          "description": "Strip EXIF metadata from output thumbnails"
         },
         "only_montage": {
           "type": "boolean",
-          "description": "If set, clean up intermediate frames and only keep the montage grid."
+          "description": "Clean up intermediate frames and keep only the montage grid"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for expensive video processing operations"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear tool cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
         },
         "verbose": {
           "type": "boolean",
-          "description": "Enable verbose logging to stderr."
+          "description": "Enable detailed debug log output"
         }
       },
       "required": [
-        "input"
+        "target"
       ]
     }
   },
@@ -4048,7 +4454,7 @@
           "description": "Output filename (default: photo_YYYYMMDD_HHMMSS.jpg)"
         },
         "camera_id": {
-          "type": "string",
+          "type": "integer",
           "description": "Camera: 0=rear 1=front (default: 0)"
         },
         "save_dir": {
@@ -4056,7 +4462,7 @@
           "description": "Central save directory (default: ~/Pictures/CameraSnaps)"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Max seconds to wait for capture (default: 20)"
         },
         "quality": {
@@ -4080,7 +4486,7 @@
           "description": "Resize image e.g. 1280x720 (requires ImageMagick)"
         },
         "rotate": {
-          "type": "string",
+          "type": "integer",
           "description": "Rotate image: 90, 180, 270 (requires ImageMagick)"
         },
         "annotate": {
@@ -4104,12 +4510,12 @@
           "description": "Burst mode: take N photos rapidly (default: 1)"
         },
         "burst_delay": {
-          "type": "string",
+          "type": "integer",
           "description": "Delay between burst shots ms (default: 500)"
         },
         "filter": {
           "type": "string",
-          "description": "Apply filter: grayscale, sepia, blur, sharpen, edge"
+          "description": "Apply filter: grayscale, sepia, blur, sharpen,"
         },
         "watermark": {
           "type": "string",
@@ -4128,8 +4534,11 @@
           "description": "Convert after capture: webp, png, jpg, heic"
         },
         "tag": {
-          "type": "string",
-          "description": "<KEY=VALUE>           Custom metadata tag (repeatable)"
+          "type": "array",
+          "description": "Custom metadata tag (repeatable)",
+          "items": {
+            "type": "string"
+          }
         },
         "album": {
           "type": "string",
@@ -4232,45 +4641,69 @@
   },
   {
     "name": "edit",
-    "description": "File editing and manipulation tool with security restrictions.",
+    "description": "Unified file editing and directory manipulation tool supporting view,",
     "parameters": {
       "type": "object",
       "properties": {
         "operation": {
           "type": "string",
-          "description": "Operation to perform (required)"
+          "description": "Operation: read, view, write, replace, append, prepend, insert_line, delete_line, replace_lines, search, count, copy, move, delete, info, create_dir, list_dir, diff, truncate, set_permissions, normalize_line_endings, revert_to_backup, list_backups, grep_dir, file_hash, word_count, find_files, head, tail, compare_files, archive, extract, template_write, batch, batch_edit, read_lines"
+        },
+        "action": {
+          "type": "string",
+          "description": "Alias for --operation"
         },
         "file_path": {
           "type": "string",
-          "description": "Primary file or directory path"
+          "description": "Primary target file or directory path"
+        },
+        "target": {
+          "type": "string",
+          "description": "Alias for --file-path"
         },
         "target_path": {
           "type": "string",
-          "description": "Secondary path (copy/move/diff target)"
+          "description": "Secondary target path (copy/move/diff/archive target)"
         },
         "content": {
           "type": "string",
-          "description": "Content to write/append/insert"
+          "description": "Content to write/append/prepend/insert"
+        },
+        "search": {
+          "type": "string",
+          "description": "Text or regex pattern to search for"
         },
         "search_text": {
           "type": "string",
-          "description": "Text to search for (replace/search ops)"
-        },
-        "replacement": {
-          "type": "string",
-          "description": "Replacement text"
+          "description": "Alias for --search"
         },
         "pattern": {
           "type": "string",
-          "description": "Search pattern (search/grep_dir)"
+          "description": "Alias for --search"
+        },
+        "replacement": {
+          "type": "string",
+          "description": "Replacement string for replace operations"
+        },
+        "edits": {
+          "type": "string",
+          "description": "JSON array string or file path for batch_edit mode"
+        },
+        "ops": {
+          "type": "string",
+          "description": "JSON array string or file path for batch mode"
+        },
+        "line": {
+          "type": "integer",
+          "description": "Line number (1-based) for line operations"
         },
         "line_number": {
           "type": "integer",
-          "description": "Line number for insert/delete"
+          "description": "Alias for --line"
         },
         "start_line": {
           "type": "integer",
-          "description": "Start line for range operations"
+          "description": "Start line (1-based) for range operations"
         },
         "end_line": {
           "type": "integer",
@@ -4278,7 +4711,7 @@
         },
         "encoding": {
           "type": "string",
-          "description": "File encoding (default: utf-8)"
+          "description": "File encoding (default: auto-detect, fallback utf-8)"
         },
         "max_size": {
           "type": "integer",
@@ -4288,41 +4721,45 @@
           "type": "integer",
           "description": "Max write size in bytes"
         },
-        "line_context": {
+        "max_file_bytes": {
           "type": "integer",
-          "description": "Context lines for search results"
+          "description": "Maximum allowed file size guard"
         },
-        "sort_by": {
-          "type": "string",
-          "description": "Sort field for list_dir (name/size/modified)"
+        "max_replacements": {
+          "type": "integer",
+          "description": "Limit replacements (0=none, negative=unlimited)"
+        },
+        "max_backups": {
+          "type": "integer",
+          "description": "Maximum backup count (default: 15)"
+        },
+        "max_matches": {
+          "type": "integer",
+          "description": "Maximum search matches (default: 1000)"
         },
         "context_lines": {
           "type": "integer",
-          "description": "Context lines for diff"
+          "description": "Context lines for diff / search"
+        },
+        "line_context": {
+          "type": "integer",
+          "description": "Alias for --context-lines"
         },
         "truncate_size": {
           "type": "integer",
           "description": "Size for truncate operation"
         },
-        "max_backups": {
-          "type": "integer",
-          "description": "Maximum backup count"
-        },
-        "max_matches": {
-          "type": "integer",
-          "description": "Maximum search matches"
-        },
         "mode": {
           "type": "string",
-          "description": "Permission mode (octal) or compare mode"
+          "description": "Octal permission mode (e.g. 644, 755)"
         },
         "to_type": {
           "type": "string",
-          "description": "Line ending type: lf or crlf"
+          "description": "Line ending conversion target: lf or crlf"
         },
         "backup_timestamp": {
           "type": "string",
-          "description": "Backup timestamp for revert"
+          "description": "Backup timestamp for revert operation"
         },
         "algorithm": {
           "type": "string",
@@ -4330,7 +4767,7 @@
         },
         "n_lines": {
           "type": "integer",
-          "description": "Lines for head/tail operations"
+          "description": "Line count for head/tail operations"
         },
         "compare_mode": {
           "type": "string",
@@ -4338,19 +4775,23 @@
         },
         "compression": {
           "type": "string",
-          "description": "Archive compression type"
+          "description": "Archive compression: deflate, store, bz2, lzma"
         },
         "password": {
           "type": "string",
-          "description": "Archive password"
+          "description": "Archive password for extraction"
         },
         "undefined_var": {
           "type": "string",
-          "description": "Template undefined var: error/keep/empty"
+          "description": "Template undefined variable rule: error/keep/empty"
         },
         "file_pattern": {
           "type": "string",
-          "description": "File pattern for find/grep"
+          "description": "File glob pattern filter (default: *)"
+        },
+        "exclude_pattern": {
+          "type": "string",
+          "description": "Exclude glob pattern for grep/find"
         },
         "min_size": {
           "type": "integer",
@@ -4362,11 +4803,11 @@
         },
         "modified_after": {
           "type": "string",
-          "description": "Modified after (unix timestamp)"
+          "description": "Modified after (Unix timestamp)"
         },
         "modified_before": {
           "type": "string",
-          "description": "Modified before (unix timestamp)"
+          "description": "Modified before (Unix timestamp)"
         },
         "file_type": {
           "type": "string",
@@ -4374,76 +4815,141 @@
         },
         "max_results": {
           "type": "integer",
-          "description": "Maximum find results"
+          "description": "Maximum search results limit"
+        },
+        "max_depth": {
+          "type": "integer",
+          "description": "Maximum recursion depth (0=unlimited)"
+        },
+        "sort_by": {
+          "type": "string",
+          "description": "Directory sort field (name/size/modified/type)"
         },
         "var": {
           "type": "string",
-          "description": "<KEY=VALUE>               Template variable (repeatable)"
+          "description": "Template variable (repeatable)"
         },
-        "ops": {
+        "env_var": {
           "type": "string",
-          "description": "JSON array of operations for batch mode"
+          "description": "Custom environment variable override (repeatable)"
         },
-        "edits": {
-          "type": "string",
-          "description": "JSON array of edits for batch_edit mode"
+        "timeout": {
+          "type": "number",
+          "description": "Operation timeout in seconds (default: 300)"
         },
-        "use_regex": {
+        "regex": {
           "type": "boolean",
           "description": "Use regex for pattern matching"
         },
-        "no_global": {
+        "use_regex": {
           "type": "boolean",
-          "description": "Only replace first occurrence"
+          "description": "Alias for --regex"
+        },
+        "ignore_case": {
+          "type": "boolean",
+          "description": "Enable case-insensitive matching"
         },
         "case_insensitive": {
           "type": "boolean",
-          "description": "Case-insensitive matching"
+          "description": "Alias for --ignore-case"
+        },
+        "no_global": {
+          "type": "boolean",
+          "description": "Replace only first match occurrence"
+        },
+        "decode_escapes": {
+          "type": "boolean",
+          "description": "Decode escape sequences (\\n, \\t, \\r, \\xHH, \\uXXXX)"
+        },
+        "dotall": {
+          "type": "boolean",
+          "description": "Treat . in regex as matching newlines (re.DOTALL)"
+        },
+        "preserve_newlines": {
+          "type": "boolean",
+          "description": "Preserve original line ending style (default)"
+        },
+        "no_preserve_newlines": {
+          "type": "boolean",
+          "description": "Do not preserve original line ending style"
+        },
+        "backup": {
+          "type": "boolean",
+          "description": "Create timestamped .bak backup file before editing"
+        },
+        "no_backup": {
+          "type": "boolean",
+          "description": "Disable automatic backup creation"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate mutations without writing to disk"
         },
         "show_lines": {
           "type": "boolean",
-          "description": "Show line numbers in output"
+          "description": "Include line array in read output"
+        },
+        "no_lines": {
+          "type": "boolean",
+          "description": "Suppress line array in read output"
         },
         "add_newline": {
           "type": "boolean",
           "description": "Append newline to written content"
         },
-        "create_parents": {
+        "no_add_newline": {
           "type": "boolean",
-          "description": "Create parent directories"
-        },
-        "preserve_metadata": {
-          "type": "boolean",
-          "description": "Preserve file metadata on copy"
+          "description": "Do not append trailing newline"
         },
         "include_hidden": {
           "type": "boolean",
-          "description": "Include hidden files"
+          "description": "Include hidden files and dot-directories"
         },
         "descending": {
           "type": "boolean",
-          "description": "Sort in descending order"
+          "description": "Sort directory listing in descending order"
         },
         "parents": {
           "type": "boolean",
-          "description": "Create parent dirs for create_dir"
+          "description": "Create parent directories when needed"
         },
         "recursive": {
           "type": "boolean",
-          "description": "Recursive operation"
+          "description": "Process directories recursively"
         },
-        "verbose": {
+        "preserve_metadata": {
           "type": "boolean",
-          "description": "Enable verbose/debug logging"
+          "description": "Preserve metadata on file copy"
         },
         "continue_on_error": {
           "type": "boolean",
-          "description": "Continue batch on error instead of stopping"
+          "description": "Continue batch execution on error"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        },
+        "stdin": {
+          "type": "boolean",
+          "description": "Read content from stdin"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Overwrite without confirmation"
+        },
+        "version": {
+          "type": "boolean",
+          "description": "Print version and exit"
         }
-      },
-      "required": [
-        "operation"
-      ]
+      }
     }
   },
   {
@@ -4594,7 +5100,7 @@
         },
         "var": {
           "type": "string",
-          "description": "<KEY=VALUE>               Template variable (repeatable)"
+          "description": "Template variable (repeatable)"
         },
         "ops": {
           "type": "string",
@@ -4851,8 +5357,11 @@
           "description": "Working directory for code execution"
         },
         "env_var": {
-          "type": "string",
-          "description": "<KEY=VALUE>          Custom environment variable (repeatable)"
+          "type": "array",
+          "description": "Custom environment variable (repeatable)",
+          "items": {
+            "type": "string"
+          }
         },
         "use_cache": {
           "type": "boolean",
@@ -4915,7 +5424,7 @@
           "description": "Importance/priority rating 1-10 (default: 5)"
         },
         "ttl": {
-          "type": "string",
+          "type": "integer",
           "description": "Time-to-live in seconds for auto-expiration"
         },
         "metadata": {
@@ -4927,7 +5436,7 @@
           "description": "Analytics mode: summary, patterns, trends, recommendations, health (default: summary)"
         },
         "days": {
-          "type": "string",
+          "type": "integer",
           "description": "Days window for analytics or cleanup retention (default: 30)"
         },
         "limit": {
@@ -4967,7 +5476,7 @@
           "description": ""
         },
         "precision": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "output": {
@@ -5021,14 +5530,6 @@
     }
   },
   {
-    "name": "system_info",
-    "description": "Get expanded system + Termux-API + live memory & virtual-swap dynamics with luminous Termux-optimized clarity.",
-    "parameters": {
-      "type": "object",
-      "properties": {}
-    }
-  },
-  {
     "name": "url_metadata",
     "description": "Extract URL title.",
     "parameters": {
@@ -5071,7 +5572,11 @@
         },
         "mode": {
           "type": "string",
-          "description": "Execution mode: summary/detailed (default: summary)"
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
         },
         "use_cache": {
           "type": "boolean",
@@ -5115,7 +5620,7 @@
           "description": "Altitude representation unit: meters, feet (default: meters)"
         },
         "precision": {
-          "type": "string",
+          "type": "integer",
           "description": "Decimal places to round coordinates (default: 6)"
         },
         "user_agent": {
@@ -5123,7 +5628,7 @@
           "description": "HTTP User-Agent header for API requests"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Subprocess and connection timeouts in seconds (default: 15)"
         },
         "output": {
@@ -5131,11 +5636,11 @@
           "description": "Write output report directly to this file"
         },
         "lat": {
-          "type": "string",
+          "type": "number",
           "description": "Coordinate latitude override (mocks GPS location query)"
         },
         "lon": {
-          "type": "string",
+          "type": "number",
           "description": "Coordinate longitude override (mocks GPS location query)"
         },
         "loop_delay": {
@@ -5184,15 +5689,15 @@
           "description": "Custom User-Agent string."
         },
         "timeout": {
-          "type": "string",
+          "type": "number",
           "description": "Request timeout in seconds (default: 10)."
         },
         "ignore_ssl": {
-          "type": "string",
+          "type": "boolean",
           "description": "If true, bypass SSL certificate verification."
         },
         "follow_redirects": {
-          "type": "string",
+          "type": "boolean",
           "description": "If true, follow redirects (default: true)."
         },
         "output": {
@@ -5256,7 +5761,7 @@
           "description": ""
         },
         "port": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         }
       },
@@ -5285,7 +5790,7 @@
           "description": "HEAD | GET | OPTIONS (default: HEAD)"
         },
         "follow_redirects": {
-          "type": "string",
+          "type": "boolean",
           "description": "Follow HTTP redirects (default: true)"
         },
         "output": {
@@ -5317,8 +5822,11 @@
           "description": "Restrict to domain"
         },
         "tags": {
-          "type": "string",
-          "description": "Extra tag (repeatable)"
+          "type": "array",
+          "description": "Extra tag (repeatable)",
+          "items": {
+            "type": "string"
+          }
         },
         "save": {
           "type": "string",
@@ -5361,7 +5869,7 @@
           "description": "Custom User-Agent header"
         },
         "timeout": {
-          "type": "string",
+          "type": "number",
           "description": "Request timeout in seconds (default: 10)"
         },
         "ignore_ssl": {
@@ -5373,7 +5881,7 @@
           "description": "On-disk HTTP cache dir (default: ~/.osint_cache/)"
         },
         "cache_ttl": {
-          "type": "string",
+          "type": "integer",
           "description": "Cache TTL in seconds (default: 3600)"
         },
         "workers": {
@@ -5410,19 +5918,19 @@
           "description": ""
         },
         "ignore_case": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "max_matches": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "context_lines": {
-          "type": "string",
+          "type": "integer",
           "description": ""
         },
         "use_regex": {
-          "type": "string",
+          "type": "boolean",
           "description": ""
         },
         "encoding": {
@@ -5449,7 +5957,15 @@
       "properties": {
         "action": {
           "type": "string",
-          "description": "Operation to perform: view, replace, count, patch (required)"
+          "description": "Operation to perform: view, replace, count, patch (required)",
+          "enum": [
+            "view",
+            "replace",
+            "count",
+            "patch",
+            "write",
+            "create"
+          ]
         },
         "file_path": {
           "type": "string",
@@ -5590,7 +6106,13 @@
         },
         "action": {
           "type": "string",
-          "description": "Action to perform: list/add/remove/audit (default: list)"
+          "description": "Action to perform: list/add/remove/audit (default: list)",
+          "enum": [
+            "list",
+            "add",
+            "remove",
+            "audit"
+          ]
         },
         "schedule": {
           "type": "string",
@@ -5606,7 +6128,11 @@
         },
         "mode": {
           "type": "string",
-          "description": "Execution mode: summary/detailed (default: summary)"
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
         },
         "limit": {
           "type": "integer",
@@ -5617,8 +6143,11 @@
           "description": "File glob pattern filter (e.g., *.log)"
         },
         "env_var": {
-          "type": "string",
-          "description": "<KEY=VALUE>          Custom environment variable (repeatable)"
+          "type": "array",
+          "description": "Custom environment variable (repeatable)",
+          "items": {
+            "type": "string"
+          }
         },
         "recursive": {
           "type": "boolean",
@@ -5650,11 +6179,24 @@
       "properties": {
         "action": {
           "type": "string",
-          "description": "Operation: repo-info/repo-list/repo-clone/issue-list/issue-create/pr-list/gist-list/gist-create/search/user-info/workflow-list (default: user-info)"
+          "description": "Operation: repo-info/repo-list/repo-clone/issue-list/issue-create/pr-list/gist-list/gist-create/search/user-info/workflow-list (default: user-info)",
+          "enum": [
+            "repo-info",
+            "repo-list",
+            "repo-clone",
+            "issue-list",
+            "issue-create",
+            "pr-list",
+            "gist-list",
+            "gist-create",
+            "search",
+            "user-info",
+            "workflow-list"
+          ]
         },
         "repo": {
           "type": "string",
-          "description": "<OWNER/REPO>           Target repository (e.g. octocat/Hello-World)"
+          "description": "Target repository (e.g. octocat/Hello-World)"
         },
         "query": {
           "type": "string",
@@ -5666,7 +6208,12 @@
         },
         "state": {
           "type": "string",
-          "description": "Filter state: open/closed/all (default: open)"
+          "description": "Filter state: open/closed/all (default: open)",
+          "enum": [
+            "open",
+            "closed",
+            "all"
+          ]
         },
         "limit": {
           "type": "integer",
@@ -5682,7 +6229,11 @@
         },
         "mode": {
           "type": "string",
-          "description": "Execution mode: summary/detailed (default: summary)"
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
         },
         "use_cache": {
           "type": "boolean",
@@ -5707,7 +6258,14 @@
       "properties": {
         "action": {
           "type": "string",
-          "description": "Operation: decompile/build/sign/info/create (default: info)"
+          "description": "Operation: decompile/build/sign/info/create (default: info)",
+          "enum": [
+            "decompile",
+            "build",
+            "sign",
+            "info",
+            "create"
+          ]
         },
         "target": {
           "type": "string",
@@ -5735,7 +6293,11 @@
         },
         "mode": {
           "type": "string",
-          "description": "Execution mode: summary/detailed (default: summary)"
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
         },
         "align": {
           "type": "boolean",
@@ -5803,14 +6365,18 @@
         },
         "mode": {
           "type": "string",
-          "description": "Execution mode: summary/detailed (default: summary)"
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
         },
         "ttl": {
-          "type": "string",
+          "type": "integer",
           "description": "Cache TTL in seconds (default: 3600)"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Network HTTP request timeout in seconds (default: 15)"
         },
         "include_forks": {
@@ -5971,7 +6537,13 @@
         },
         "theme": {
           "type": "string",
-          "description": "Neon theme: cyberpunk/matrix/synthwave/tokyo-night (default: cyberpunk)"
+          "description": "Neon theme: cyberpunk/matrix/synthwave/tokyo-night (default: cyberpunk)",
+          "enum": [
+            "cyberpunk",
+            "matrix",
+            "synthwave",
+            "tokyo-night"
+          ]
         },
         "language": {
           "type": "string",
@@ -6034,15 +6606,15 @@
           "description": "Output GIF filename (default: derived from URL)."
         },
         "max_frames": {
-          "type": "string",
+          "type": "integer",
           "description": "Maximum frames to extract from the video (default: 30)."
         },
         "interval": {
-          "type": "string",
+          "type": "number",
           "description": "Seconds between captured frames (default: 1.0)."
         },
         "width": {
-          "type": "string",
+          "type": "integer",
           "description": "Frame width in pixels (default: 480)."
         },
         "format": {
@@ -6050,35 +6622,35 @@
           "description": "Intermediate frame format: png, jpg, webp (default: png)."
         },
         "delay": {
-          "type": "string",
+          "type": "integer",
           "description": "Frame delay in 1/100ths of a second (default: 8)."
         },
         "loopcount": {
-          "type": "string",
+          "type": "integer",
           "description": "GIF loop count (0 = forever, default: 0)."
         },
         "optimize": {
-          "type": "string",
-          "description": "<1-3>              Gifsicle optimization level (1-3; optional)."
+          "type": "integer",
+          "description": "Gifsicle optimization level (1-3; optional)."
         },
         "lossy": {
-          "type": "string",
+          "type": "integer",
           "description": "Gifsicle lossiness (1-200; optional)."
         },
         "colors": {
-          "type": "string",
+          "type": "integer",
           "description": "Reduce palette to N colors (2-256; optional)."
         },
         "start": {
           "type": "string",
-          "description": "<HH:MM:SS|SEC>        Start time for frame extraction (default: 00:00:00)."
+          "description": "Start time for frame extraction (default: 00:00:00)."
         },
         "end": {
           "type": "string",
-          "description": "<HH:MM:SS|SEC>          End time for frame extraction (default: full video)."
+          "description": "End time for frame extraction (default: full video)."
         },
         "keep_frames": {
-          "type": "string",
+          "type": "boolean",
           "description": "Keep intermediate frames after GIF creation (default: delete)."
         },
         "audio_only": {
@@ -6104,6 +6676,876 @@
       },
       "required": [
         "url"
+      ]
+    }
+  },
+  {
+    "name": "telegram_tool",
+    "description": "Send styled notifications, media, and files via Telegram Bot API with automatic formatting and chunking.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "-m <MESSAGE>          Notification message content"
+        },
+        "title": {
+          "type": "string",
+          "description": "-t <TITLE>              Notification title or category header"
+        },
+        "file": {
+          "type": "string",
+          "description": "-f <PATH>                Path to file/media to attach"
+        },
+        "media_type": {
+          "type": "string",
+          "description": "Media type: auto, photo, document, audio, video (default: auto)",
+          "enum": [
+            "auto",
+            "photo",
+            "document",
+            "audio",
+            "video"
+          ]
+        },
+        "token": {
+          "type": "string",
+          "description": "Telegram Bot API Token (overrides env)"
+        },
+        "chat_id": {
+          "type": "string",
+          "description": "Telegram Chat ID (overrides env)"
+        },
+        "parse_mode": {
+          "type": "string",
+          "description": "Parse mode: html, markdown, markdownv2, plain (default: html)",
+          "enum": [
+            "html",
+            "markdown",
+            "markdownv2",
+            "plain"
+          ]
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Maximum execution timeout in seconds"
+        },
+        "silent": {
+          "type": "boolean",
+          "description": "Send silently without notification sound"
+        },
+        "disable_preview": {
+          "type": "boolean",
+          "description": "Disable web page link previews"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for duplicate notifications"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear tool cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "gif_toolx",
+    "description": "Orchestrate video-to-GIF conversion via lux → ffmpeg → gifsicle pipeline.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Source video URL (HTTP/HTTPS, supported by lux)."
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "Directory where the GIF and intermediate frames are written (default: \\\\\\~/vid2gif)."
+        },
+        "gif_name": {
+          "type": "string",
+          "description": "Output GIF filename (default: derived from URL)."
+        },
+        "max_frames": {
+          "type": "integer",
+          "description": "Maximum frames to extract from the video (default: 30)."
+        },
+        "interval": {
+          "type": "number",
+          "description": "Seconds between captured frames (default: 1.0)."
+        },
+        "width": {
+          "type": "integer",
+          "description": "Frame width in pixels (default: 480)."
+        },
+        "format": {
+          "type": "string",
+          "description": "Intermediate frame format: png, jpg, webp (default: png)."
+        },
+        "delay": {
+          "type": "integer",
+          "description": "Frame delay in 1/100ths of a second (default: 8)."
+        },
+        "loopcount": {
+          "type": "integer",
+          "description": "GIF loop count (0 = forever, default: 0)."
+        },
+        "optimize": {
+          "type": "integer",
+          "description": "Gifsicle optimization level (1-3; optional, defaults to 3 when used)."
+        },
+        "lossy": {
+          "type": "integer",
+          "description": "Gifsicle lossiness (1-200; optional)."
+        },
+        "colors": {
+          "type": "integer",
+          "description": "Reduce palette to N colors (2-256; optional)."
+        },
+        "start": {
+          "type": "string",
+          "description": "Start time for frame extraction (default: 00:00:00)."
+        },
+        "end": {
+          "type": "string",
+          "description": "End time for frame extraction (default: full video)."
+        },
+        "keep_frames": {
+          "type": "boolean",
+          "description": "Keep intermediate frames after GIF creation (default: delete)."
+        },
+        "audio_only": {
+          "type": "boolean",
+          "description": "Download audio-only track (passed to lux)."
+        },
+        "use_aria2": {
+          "type": "boolean",
+          "description": "Use aria2 for faster downloads (passed to lux)."
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output."
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Print all planned steps but do not execute."
+        },
+        "delete_video": {
+          "type": "boolean",
+          "description": "Delete the downloaded source video after successful GIF (default: keep)."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "dns_tool",
+    "description": "Comprehensive DNS query, reverse lookup, DoH inspector, and propagation checker tailored for Termux and Android environments.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "-d! <DOMAIN>           Target domain name or IP address (required)"
+        },
+        "type": {
+          "type": "string",
+          "description": "-t <TYPE>               Record type: A, AAAA, MX, TXT, NS, CNAME, SOA, PTR, CAA, ALL (default: A)",
+          "enum": [
+            "A",
+            "AAAA",
+            "MX",
+            "TXT",
+            "NS",
+            "CNAME",
+            "SOA",
+            "PTR",
+            "CAA",
+            "ALL"
+          ]
+        },
+        "provider": {
+          "type": "string",
+          "description": "-p <PROVIDER>       DNS provider: cloudflare, google, quad9, local, all (default: cloudflare)",
+          "enum": [
+            "cloudflare",
+            "google",
+            "quad9",
+            "local"
+          ]
+        },
+        "action": {
+          "type": "string",
+          "description": "-a <ACTION>           Execution action: query, reverse, doh, sys, propagate (default: query)",
+          "enum": [
+            "query",
+            "reverse",
+            "doh",
+            "sys",
+            "propagate"
+          ]
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for duplicate DNS lookups"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "sqlite_intel",
+    "description": "SQLite database inspector, schema explorer, query runner, and table exporter.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target SQLite database file path (required)"
+        },
+        "query": {
+          "type": "string",
+          "description": "SQL query to execute (SELECT/PRAGMA recommended)"
+        },
+        "table": {
+          "type": "string",
+          "description": "Inspect specific table schema and rows"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum rows to return (default: 100)"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Maximum execution timeout in seconds"
+        },
+        "export": {
+          "type": "string",
+          "description": "Export format: json/csv (default: json)"
+        },
+        "list_tables": {
+          "type": "boolean",
+          "description": "List all tables in the database"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for read queries"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "rest_client",
+    "description": "Structured REST API client supporting custom headers, JSON payloads, and response truncation.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target URL endpoint (required)"
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP Method: GET/POST/PUT/PATCH/DELETE (default: GET)",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS"
+          ]
+        },
+        "header": {
+          "type": "string",
+          "description": "Custom HTTP request header (repeatable)"
+        },
+        "data": {
+          "type": "string",
+          "description": "Request payload string or JSON body"
+        },
+        "param": {
+          "type": "string",
+          "description": "Query parameter (repeatable)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "timeout": {
+          "type": "number",
+          "description": "HTTP request timeout in seconds (default: 15.0)"
+        },
+        "save_to": {
+          "type": "string",
+          "description": "Save full response body to disk"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable caching for GET requests"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "archive_tool",
+    "description": "Inspect archive contents, extract specific files safely, and create compressed packages.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target archive or directory path (required)"
+        },
+        "action": {
+          "type": "string",
+          "description": "Operation: list/extract/compress (default: auto)",
+          "enum": [
+            "auto",
+            "list",
+            "extract",
+            "compress"
+          ]
+        },
+        "extract_to": {
+          "type": "string",
+          "description": "Destination directory for extraction"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "File glob pattern filter (e.g. *.py)"
+        },
+        "format": {
+          "type": "string",
+          "description": "Archive format for creation: zip/tar.gz/tar.bz2 (default: zip)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum items to process (default: 100)"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Maximum execution timeout in seconds"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for list operations"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "docker_intel",
+    "description": "Docker container inspector, status monitor, log tailer, and command runner.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target container ID or name"
+        },
+        "action": {
+          "type": "string",
+          "description": "Operation: list/logs/stats/inspect/exec (default: auto)",
+          "enum": [
+            "auto",
+            "list",
+            "logs",
+            "stats",
+            "inspect",
+            "exec"
+          ]
+        },
+        "cmd": {
+          "type": "string",
+          "description": "Command string to execute inside container"
+        },
+        "lines": {
+          "type": "integer",
+          "description": "Number of log lines to tail (default: 50)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum containers to process (default: 100)"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Maximum execution timeout in seconds"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for static inspection"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "audio_transcriber",
+    "description": "Audio inspector, track extractor, and speech-to-text transcriber using Whisper / ffmpeg.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target audio/video file path (required)"
+        },
+        "action": {
+          "type": "string",
+          "description": "Operation: transcribe/extract-audio/inspect (default: transcribe)",
+          "enum": [
+            "transcribe",
+            "extract-audio",
+            "inspect"
+          ]
+        },
+        "language": {
+          "type": "string",
+          "description": "Language code (e.g. en, es, auto)"
+        },
+        "model": {
+          "type": "string",
+          "description": "Whisper model size: tiny/base/small/medium (default: base)",
+          "enum": [
+            "tiny",
+            "base",
+            "small",
+            "medium",
+            "large"
+          ]
+        },
+        "output_text": {
+          "type": "string",
+          "description": "Save transcription to file path"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum characters to return (default: 5000)"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Maximum execution timeout in seconds"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for transcriptions"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "trurl_query",
+    "description": "Manipulate, clean, extract, format, and transform URL query parameters using trurl or native engine.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "-u <URL>                  Target URL to manipulate or query (required)"
+        },
+        "append": {
+          "type": "array",
+          "description": "-a <KEY=VAL>           Append a query parameter (repeatable)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "replace": {
+          "type": "array",
+          "description": "Replace an existing query parameter (repeatable)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "replace_append": {
+          "type": "array",
+          "description": "Replace parameter if present, otherwise append (repeatable)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "qtrim": {
+          "type": "array",
+          "description": "Remove query parameters matching exact name or wildcard (repeatable)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "get": {
+          "type": "string",
+          "description": "-g <FORMAT>               Extract component or parameter value (e.g., '{query:key}', '{query-all:key}', '{url}')"
+        },
+        "query_separator": {
+          "type": "string",
+          "description": "Query parameter separator character (default: &)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Maximum execution timeout in seconds"
+        },
+        "sort_query": {
+          "type": "boolean",
+          "description": "Alphabetically sort query parameters"
+        },
+        "json": {
+          "type": "boolean",
+          "description": "Output result in trurl-compatible structured JSON format"
+        },
+        "force_native": {
+          "type": "boolean",
+          "description": "Force native Python engine instead of system trurl binary"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for expensive operations"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear tool cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "sys_unified",
+    "description": "Main entry point for argc/aichat integration.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "location_manager",
+    "description": "Consolidates pin location tools and review pinned locations tools into a unified location manager.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Operation to perform: pin, review, or merge (default: review)",
+          "enum": [
+            "pin",
+            "review",
+            "merge"
+          ]
+        },
+        "location_id": {
+          "type": "string",
+          "description": "Identifier for a location entry"
+        },
+        "latitude": {
+          "type": "number",
+          "description": "Latitude coordinate for pinning"
+        },
+        "longitude": {
+          "type": "number",
+          "description": "Longitude coordinate for pinning"
+        },
+        "label": {
+          "type": "string",
+          "description": "Custom label or title for the location"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Additional descriptive notes for the pin"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum locations to process (default: 100)"
+        },
+        "file_pattern": {
+          "type": "string",
+          "description": "File glob pattern filter (e.g., *.json)"
+        },
+        "env_var": {
+          "type": "array",
+          "description": "Custom environment variable (repeatable)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "recursive": {
+          "type": "boolean",
+          "description": "Process location data recursively"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for expensive operations"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "search_tool",
+    "description": "Fast, full-featured CLI search tool combining find and grep capabilities with regex pattern matching, context lines, depth controls, and LLM output routing.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target file or directory path (required)"
+        },
+        "query": {
+          "type": "string",
+          "description": "Regex pattern or text query to search inside file contents"
+        },
+        "file_pattern": {
+          "type": "string",
+          "description": "Filename glob filter (e.g. *.py, *.md, config_*.json)"
+        },
+        "max_depth": {
+          "type": "integer",
+          "description": "Maximum directory recursion depth"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum matching lines/files to return (default: 100)"
+        },
+        "context_lines": {
+          "type": "integer",
+          "description": "Number of context lines before/after match (default: 0)"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Maximum execution timeout in seconds"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Output detail mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "env_var": {
+          "type": "string",
+          "description": "Custom environment variable (repeatable)"
+        },
+        "case_sensitive": {
+          "type": "boolean",
+          "description": "Enable case-sensitive regex matching"
+        },
+        "include_hidden": {
+          "type": "boolean",
+          "description": "Include hidden files and dot-directories (.git, .env, etc.)"
+        },
+        "files_only": {
+          "type": "boolean",
+          "description": "Return matching file paths only (skip line matches)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for expensive search queries"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
       ]
     }
   }

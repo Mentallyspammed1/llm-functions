@@ -253,9 +253,14 @@ def get_config(force_refresh: bool = False) -> dict[str, Any]:
         except (TypeError, ValueError):
             price_scale = _DEFAULT_PRICE_SCALE
 
+        k_raw = os.environ.get("BYBIT_API_KEY", "").strip()
+        s_raw = os.environ.get("BYBIT_API_SECRET", "").strip()
+        if len(k_raw) > len(s_raw) and len(k_raw) > 25 and len(s_raw) < 25:
+            k_raw, s_raw = s_raw, k_raw
+
         cfg: dict[str, Any] = {
-            "api_key": os.environ.get("BYBIT_API_KEY", "").strip(),
-            "api_secret": os.environ.get("BYBIT_API_SECRET", "").strip(),
+            "api_key": k_raw,
+            "api_secret": s_raw,
             "base_url": base_url,
             "backup_base_url": (_BASE_URL_BACKUP if not testnet else _BASE_URL_TESTNET),
             "testnet": testnet,

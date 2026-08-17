@@ -1,4 +1,3 @@
-
 from pathlib import Path
 
 file_path = Path('/data/data/com.termux/files/home/.config/aichat/llm-functions/tools/bybit_terminal.py')
@@ -28,5 +27,4 @@ for i in range(class_start_idx, len(remaining_lines)):
 
 # Insert methods
 new_lines = remaining_lines[:init_idx] + methods_to_move + remaining_lines[init_idx:]
-file_path.write_text('
-'.join(new_lines))
+file_path.write_text('\n'.join(new_lines))

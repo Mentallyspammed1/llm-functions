@@ -35,7 +35,7 @@
           "description": "Altitude representation unit: meters, feet (default: meters)"
         },
         "precision": {
-          "type": "string",
+          "type": "integer",
           "description": "Decimal places to round coordinates (default: 6)"
         },
         "user_agent": {
@@ -43,7 +43,7 @@
           "description": "HTTP User-Agent header for API requests"
         },
         "timeout": {
-          "type": "string",
+          "type": "integer",
           "description": "Subprocess and connection timeouts in seconds (default: 15)"
         },
         "output": {
@@ -51,11 +51,11 @@
           "description": "Write output report directly to this file"
         },
         "lat": {
-          "type": "string",
+          "type": "number",
           "description": "Coordinate latitude override (mocks GPS location query)"
         },
         "lon": {
-          "type": "string",
+          "type": "number",
           "description": "Coordinate longitude override (mocks GPS location query)"
         },
         "loop_delay": {

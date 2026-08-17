@@ -7,7 +7,7 @@
 #
 # @meta require-tools python3
 #
-# @option --action! <ENUM>               health_check, get_wallet_balance, get_account_info, get_positions, get_position_risk, get_fee_rate, set_leverage, set_trading_stop, set_position_mode, get_executions, get_pnl_history, panic_close, bulk_update_tp_sl, get_account_summary, get_pnl_summary, update_trailing_stop, set_tp_sl, check_risk_limit, check_balance, close_position, get_open_positions_summary, send_telegram_alert, export_trade_history, calculate_rsi, calculate_sma, calculate_ema, calculate_macd, calculate_bollinger_bands, calculate_vwap, calculate_atr, calculate_stoch, scan_scalping_opportunities, place_order, amend_order, cancel_order, cancel_all_orders, get_open_orders, get_order_history, batch_place_orders, place_smart_trade, get_ticker, get_orderbook, get_klines, get_recent_trades, get_instruments_info, get_funding_rate, get_open_interest, get_volatility_index, get_orderbook_analysis, get_volume_at_price, get_market_regime, scan_symbols, get_journal, calculate_support_resistance_levels, calculate_fibonacci_levels, calculate_volume_profile, calculate_orderflow_delta, calculate_market_depth_profile, detect_high_confluence_levels, deep_level_sort, calculate_sr_levels, generate_market_depth_report, calculate_limit_micro_profit, calculate_depth_weighted_profit, calculate_all_indicators, calculate_hma, calculate_fractals, calculate_pivot_points, calculate_klinger, calculate_cmf, calculate_adx_with_di, calculate_elder_ray_index, calculate_kst, calculate_tema, calculate_ehler_rsi, calculate_ehler_stochastic, calculate_vwma, calculate_bollinger_bands_pb, calculate_roc, calculate_mfi, calculate_williams_r, analyze_symbol, place_breakeven_order
+# @option --action! <ENUM>               health_check, get_wallet_balance, get_account_info, get_positions, get_position_risk, get_fee_rate, set_leverage, set_trading_stop, set_position_mode, get_executions, get_pnl_history, panic_close, bulk_update_tp_sl, get_account_summary, get_pnl_summary, update_trailing_stop, set_tp_sl, check_risk_limit, check_balance, close_position, get_open_positions_summary, send_telegram_alert, export_trade_history, calculate_rsi, calculate_sma, calculate_ema, calculate_macd, calculate_bollinger_bands, calculate_vwap, calculate_atr, calculate_stoch, scan_scalping_opportunities, place_order, amend_order, cancel_order, cancel_all_orders, get_open_orders, get_order_history, batch_place_orders, place_smart_trade, get_ticker, get_orderbook, get_klines, get_recent_trades, get_instruments_info, get_funding_rate, get_open_interest, get_volatility_index, get_orderbook_analysis, get_volume_at_price, get_market_regime, scan_symbols, get_journal, calculate_support_resistance_levels, calculate_fibonacci_levels, calculate_volume_profile, calculate_orderflow_delta, calculate_market_depth_profile, detect_high_confluence_levels, deep_level_sort, calculate_sr_levels, generate_market_depth_report, calculate_limit_micro_profit, calculate_depth_weighted_profit, calculate_all_indicators, calculate_hma, calculate_fractals, calculate_pivot_points, calculate_klinger, calculate_cmf, calculate_adx_with_di, calculate_elder_ray_index, calculate_kst, calculate_tema, calculate_ehler_rsi, calculate_ehler_stochastic, calculate_vwma, calculate_bollinger_bands_pb, calculate_roc, calculate_mfi, calculate_williams_r, analyze_symbol, place_breakeven_order, get_asset_info, transfer_funds, get_transfer_history, set_margin_mode, get_borrow_history
 # @option --symbol <TEXT>                Trading pair (e.g. BTCUSDT)
 # @option --side <ENUM>                  Buy, Sell
 # @option --qty <NUM>                    Order quantity
@@ -97,9 +97,9 @@ try:
 except ImportError:
     scientific_calculator = None
 
-load_dotenv(override=True)
+load_dotenv(override=False)  # Never override shell-exported vars
 dotenv_path = CURRENT_DIR.parent / ".env"
-load_dotenv(dotenv_path=dotenv_path, override=True)
+load_dotenv(dotenv_path=dotenv_path, override=False)  # Never override shell-exported vars
 
 logging.basicConfig(
     level=logging.INFO,
@@ -198,10 +198,17 @@ class InstrumentInfo:
     fetched_at: float = field(default_factory=time.time)
 
 
+def _get_api_credentials() -> Tuple[str, str]:
+    key = os.getenv("BYBIT_API_KEY", "").strip()
+    secret = os.getenv("BYBIT_API_SECRET", "").strip()
+    if len(key) > len(secret) and len(key) > 25 and len(secret) < 25:
+        key, secret = secret, key
+    return key, secret
+
 @dataclass
 class TradingConfig:
-    api_key: str = field(default_factory=lambda: os.getenv("BYBIT_API_KEY", ""))
-    api_secret: str = field(default_factory=lambda: os.getenv("BYBIT_API_SECRET", ""))
+    api_key: str = field(default_factory=lambda: _get_api_credentials()[0])
+    api_secret: str = field(default_factory=lambda: _get_api_credentials()[1])
     testnet: bool = field(
         default_factory=lambda: (
             os.getenv("BYBIT_USE_TESTNET", "false").lower() in ("true", "1")
@@ -507,6 +514,9 @@ class BybitRealm:
         self.session.headers.update({"Content-Type": "application/json"})
         if proxy_utils and self.config.use_proxy:
             self.session.proxies = proxy_utils.get_proxies()
+        elif os.getenv("BYBIT_TOR_PROXY") or os.getenv("BYBIT_PROXY_URL") or os.getenv("PROXY_URL"):
+            p_url = os.getenv("BYBIT_TOR_PROXY") or os.getenv("BYBIT_PROXY_URL") or os.getenv("PROXY_URL")
+            self.session.proxies = {"http": p_url, "https": p_url}
 
         self._limiter = RateLimiter()
         self.journal = TradeJournal(self.config.journal_path)
@@ -754,6 +764,40 @@ class BybitRealm:
             json_data={"category": category, "coin": coin.upper(), "mode": mode},
             signed=True,
         )
+
+    def get_asset_info(self, account_type: Optional[str] = None, coin: Optional[str] = None) -> dict:
+        params = {}
+        if account_type:
+            params["accountType"] = account_type
+        if coin:
+            params["coin"] = coin.upper()
+        return self._request("GET", "/v5/asset/transfer/query-asset-info", params=params, signed=True)
+
+    def transfer_funds(self, coin: str, amount: float, from_account: str, to_account: str) -> dict:
+        payload = {
+            "transferId": str(uuid.uuid4()),
+            "coin": coin.upper(),
+            "amount": str(amount),
+            "fromAccountType": from_account,
+            "toAccountType": to_account,
+        }
+        return self._request("POST", "/v5/asset/transfer/inter-transfer", json_data=payload, signed=True)
+
+    def get_transfer_history(self, coin: Optional[str] = None, limit: int = 50) -> dict:
+        params: dict = {"limit": limit}
+        if coin:
+            params["coin"] = coin.upper()
+        return self._request("GET", "/v5/asset/transfer/query-inter-transfer-list", params=params, signed=True)
+
+    def set_margin_mode(self, set_margin_mode: str = "REGULAR_MARGIN") -> dict:
+        payload = {"setMarginMode": set_margin_mode}
+        return self._request("POST", "/v5/account/set-margin-mode", json_data=payload, signed=True)
+
+    def get_borrow_history(self, currency: Optional[str] = None, limit: int = 50) -> dict:
+        params: dict = {"limit": limit}
+        if currency:
+            params["currency"] = currency.upper()
+        return self._request("GET", "/v5/account/borrow-history", params=params, signed=True)
 
     def get_executions(
         self, category: str = "linear", symbol: Optional[str] = None, limit: int = 50
@@ -2438,6 +2482,21 @@ def run(
             )
         elif action == "get_account_info":
             res = bot.get_account_info()
+        elif action == "get_asset_info":
+            res = bot.get_asset_info(account_type=kwargs.get("account_type"), coin=kwargs.get("coin"))
+        elif action == "transfer_funds":
+            res = bot.transfer_funds(
+                coin=kwargs.get("coin", "USDT"),
+                amount=float(qty or kwargs.get("amount", 0)),
+                from_account=kwargs.get("from_account", "UNIFIED"),
+                to_account=kwargs.get("to_account", "FUND"),
+            )
+        elif action == "get_transfer_history":
+            res = bot.get_transfer_history(coin=kwargs.get("coin"), limit=limit)
+        elif action == "set_margin_mode":
+            res = bot.set_margin_mode(set_margin_mode=kwargs.get("set_margin_mode", "REGULAR_MARGIN"))
+        elif action == "get_borrow_history":
+            res = bot.get_borrow_history(currency=kwargs.get("currency"), limit=limit)
         elif action == "get_positions":
             res = bot.get_positions(category=category, symbol=symbol)
         elif action == "get_position_risk":

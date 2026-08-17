@@ -75,7 +75,7 @@ import uuid
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv(override=True)
+load_dotenv(override=False)  # Never override shell-exported vars
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum

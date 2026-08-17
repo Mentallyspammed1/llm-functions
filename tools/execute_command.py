@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# execute_command.py — Pyrmethus Command Executor v2.2.0-ASCENDED
+# execute_command.py — Pyrmethus Command Executor v2.3.0-ASCENDED
 # argc/aichat compatible · Termux · Secure shell command execution · Native Caching
 #
 # @describe Execute arbitrary shell command and return full output with complete runtime metadata.
@@ -20,6 +20,8 @@
 # @flag   --verbose                      Show extra debug info (PATH, shell, env vars)
 #
 # @env LLM_OUTPUT=/dev/stdout            Output path for LLM integration
+# @env LLM_TOOL_CACHE_TTL=1h             Optional cache TTL override when --use-cache is enabled
+# @env EXECUTE_COMMAND_UI_LINES=20       Maximum lines shown in the interactive stderr preview
 # ==============================================================================
 
 from __future__ import annotations
@@ -28,25 +30,29 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import os
-import pickle
 import re
+import shlex
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from datetime import date, datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, Union
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 __all__ = [
     "ToolCache",
     "ToolError",
     "__version__",
     "duration_to_seconds",
+    "parse_duration",
     "execute_tool",
     "get_agent_var",
     "get_builtin_var",
@@ -55,6 +61,7 @@ __all__ = [
     "interpret_exit_code",
     "run",
     "run_command",
+    "run_command_full",
     "sanitize_path",
 ]
 
@@ -70,7 +77,13 @@ EXIT_PERMISSION_DENIED = 126
 EXIT_INVALID_INPUT = 127
 EXIT_INTERRUPTED = 130
 
-MAX_OUTPUT_BYTES = 20 * 1024 * 1024  # 20 MB memory safety cap
+try:
+    MAX_OUTPUT_BYTES = int(
+        os.environ.get("EXECUTE_COMMAND_MAX_OUTPUT_BYTES", 20 * 1024 * 1024)
+    )
+except (TypeError, ValueError):
+    MAX_OUTPUT_BYTES = 20 * 1024 * 1024
+MAX_OUTPUT_BYTES = max(0, MAX_OUTPUT_BYTES)
 
 
 class ToolError(Exception):
@@ -153,14 +166,17 @@ BOX_H = "─"
 BOX_LT = "├"
 BOX_RT = "┤"
 
-_NO_COLOR: bool = False
+_COLOR_OVERRIDE: Optional[bool] = None
+
 _ANSI_RE = re.compile(
     r"(?:"
-    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI sequences (ESC [ ...)
+    r"\x1b\[[0-?]*[ -/]*[@-~]"          # CSI sequences
     r"|"
-    r"\x1b[@-Z]"  # Single-char controls: ESC @ through ESC Z (NOT ESC [)
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)" # OSC sequences
     r"|"
-    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC sequences
+    r"\x1b[@-Z]"                         # Single-char controls
+    r"|"
+    r"\x1b\\"                            # ST
     r")"
 )
 
@@ -178,10 +194,32 @@ def _is_tty() -> bool:
     )
 
 
+def _env_truthy(name: str) -> bool:
+    """Return True if an environment variable is set to a truthy value."""
+    return os.environ.get(name, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
+
+
+def _color_enabled() -> bool:
+    """Determine whether ANSI colour output should be used."""
+    if _COLOR_OVERRIDE is not None:
+        return _COLOR_OVERRIDE
+    if "NO_COLOR" in os.environ:
+        return False
+    if _env_truthy("FORCE_COLOR"):
+        return True
+    return _is_tty()
+
+
 def _cprint(text: str, end: str = "\n", file: Any = None) -> None:
     """Print pre-formatted ANSI text to stderr by default to keep stdout pure for LLM JSON."""
     target = file or sys.stderr
-    if _NO_COLOR or not _is_tty():
+    if not _color_enabled():
         text = _strip_ansi(text)
     print(text, end=end, flush=True, file=target)
 
@@ -224,25 +262,48 @@ def get_execution_context() -> dict[str, Any]:
         "termux_prefix": termux_prefix,
         "is_termux": "com.termux" in termux_prefix
         or Path("/data/data/com.termux").exists(),
+        "python_version": sys.version.split()[0],
+        "platform": sys.platform,
+        "os_name": os.name,
+        "pid": os.getpid(),
     }
 
 
-def _parse_env_vars(env_vars: Optional[list[str]]) -> dict[str, str]:
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _parse_env_vars(
+    env_vars: Optional[list[str]], warnings: Optional[list[str]] = None
+) -> dict[str, str]:
     """Parse environment variables provided in KEY=VALUE format."""
-    if not env_vars:
-        return {}
     parsed: dict[str, str] = {}
+    if not env_vars:
+        return parsed
+
     for item in env_vars:
-        if "=" in item:
-            key, val = item.split("=", 1)
-            parsed[key.strip()] = val.strip()
+        if "=" not in item:
+            if warnings is not None:
+                warnings.append(
+                    f"Ignoring invalid --env value: {item!r} (expected KEY=VALUE)."
+                )
+            continue
+
+        key, val = item.split("=", 1)
+        key = key.strip()
+        val = val.strip()
+
+        if not _ENV_KEY_RE.match(key):
+            if warnings is not None:
+                warnings.append(f"Ignoring invalid environment variable name: {key!r}.")
+            continue
+
+        parsed[key] = val
+
     return parsed
 
 
 def sanitize_path() -> None:
-    """
-    Remove llm-functions/bin entries from PATH to prevent recursive shadowing.
-    """
+    """Remove llm-functions/bin entries from PATH to prevent recursive shadowing."""
     raw = os.environ.get("PATH", "")
     parts = []
     for p in raw.split(os.pathsep):
@@ -264,65 +325,118 @@ def sanitize_path() -> None:
 
 
 class ToolCache:
-    """Caching utility with TTL support for expensive operations."""
+    """JSON-backed caching utility with TTL support for expensive operations."""
+
+    SCHEMA_VERSION = 1
 
     def __init__(self, cache_dir: Optional[Path] = None) -> None:
         if cache_dir:
-            self.cache_dir = cache_dir
+            self.cache_dir = Path(cache_dir)
         elif "LLM_TOOL_CACHE_DIR" in os.environ:
             self.cache_dir = Path(os.environ["LLM_TOOL_CACHE_DIR"])
         else:
             self.cache_dir = Path.home() / ".cache" / "aichat_tools"
 
+        self._disabled = False
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
-            pass
+            self._disabled = True
 
     def _make_key(self, key_data: str) -> str:
         return hashlib.sha256(key_data.encode("utf-8")).hexdigest()
 
-    def get(self, key_data: str, ttl_seconds: int = 3600) -> Optional[Any]:
-        cache_file = self.cache_dir / f"{self._make_key(key_data)}.cache"
-        if not cache_file.exists():
+    def _cache_path(self, key_data: str) -> Path:
+        return self.cache_dir / f"{self._make_key(key_data)}.json"
+
+    def get(self, key_data: str, ttl_seconds: float = 3600.0) -> Optional[Any]:
+        """Return cached value if present and fresh, otherwise None."""
+        if self._disabled:
             return None
+
+        cache_file = self._cache_path(key_data)
         try:
-            mtime = cache_file.stat().st_mtime
-            if time.time() - mtime > ttl_seconds:
-                cache_file.unlink(missing_ok=True)
+            st = cache_file.stat()
+        except OSError:
+            return None
+
+        if time.time() - st.st_mtime > ttl_seconds:
+            try:
+                cache_file.unlink()
+            except OSError:
+                pass
+            return None
+
+        try:
+            with open(cache_file, "r", encoding="utf-8") as fp:
+                payload = json.load(fp)
+            if not isinstance(payload, dict):
                 return None
-            with open(cache_file, "rb") as fp:
-                return pickle.load(fp)
+            if payload.get("schema") != self.SCHEMA_VERSION:
+                return None
+            return payload.get("value")
         except Exception:
             return None
 
     def set(self, key_data: str, value: Any) -> None:
-        cache_file = self.cache_dir / f"{self._make_key(key_data)}.cache"
-        tmp_file = cache_file.with_suffix(f".tmp.{os.getpid()}_{time.time_ns()}")
+        """Atomically persist a cache entry as JSON."""
+        if self._disabled:
+            return
+
+        cache_file = self._cache_path(key_data)
+        tmp_file = cache_file.with_name(
+            f"{cache_file.name}.tmp.{os.getpid()}.{time.time_ns()}"
+        )
         try:
-            with open(tmp_file, "wb") as fp:
-                pickle.dump(value, fp)
+            payload = {
+                "schema": self.SCHEMA_VERSION,
+                "created": time.time(),
+                "value": value,
+            }
+            with open(tmp_file, "w", encoding="utf-8") as fp:
+                json.dump(payload, fp, ensure_ascii=False, cls=ToolJSONEncoder)
             tmp_file.replace(cache_file)
         except Exception:
-            if tmp_file.exists():
-                tmp_file.unlink(missing_ok=True)
+            try:
+                tmp_file.unlink()
+            except Exception:
+                pass
 
 
 class GracefulShutdown:
     """Signal handler for graceful cancellation of process group operations."""
 
-    def __init__(self) -> None:
+    def __init__(self, callback: Optional[Any] = None) -> None:
         self.interrupted = False
-        self._old_sigint = signal.signal(signal.SIGINT, self._handle_signal)
-        self._old_sigterm = signal.signal(signal.SIGTERM, self._handle_signal)
+        self.signum: Optional[int] = None
+        self._callback = callback
+        self._old: dict[int, Any] = {}
+
+        for sig_name in ("SIGINT", "SIGTERM"):
+            sig = getattr(signal, sig_name, None)
+            if sig is None:
+                continue
+            try:
+                self._old[sig] = signal.signal(sig, self._handle_signal)
+            except (ValueError, OSError):
+                pass
 
     def _handle_signal(self, signum: int, frame: Any) -> None:
         self.interrupted = True
+        self.signum = signum
+        if self._callback is not None:
+            try:
+                self._callback(signum)
+            except Exception:
+                pass
 
     def restore(self) -> None:
         """Restore previous signal handlers."""
-        signal.signal(signal.SIGINT, self._old_sigint)
-        signal.signal(signal.SIGTERM, self._old_sigterm)
+        for sig, old_handler in self._old.items():
+            try:
+                signal.signal(sig, old_handler)
+            except (ValueError, OSError):
+                pass
 
     def should_stop(self) -> bool:
         return self.interrupted
@@ -336,31 +450,75 @@ _DURATION_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]*)$")
 _UNIT_MULTIPLIERS: dict[str, float] = {
     "": 1.0,
     "s": 1.0,
+    "sec": 1.0,
+    "secs": 1.0,
+    "second": 1.0,
+    "seconds": 1.0,
     "ms": 0.001,
+    "msec": 0.001,
+    "msecs": 0.001,
+    "millisecond": 0.001,
+    "milliseconds": 0.001,
     "m": 60.0,
+    "min": 60.0,
+    "mins": 60.0,
+    "minute": 60.0,
+    "minutes": 60.0,
     "h": 3600.0,
+    "hr": 3600.0,
+    "hrs": 3600.0,
+    "hour": 3600.0,
+    "hours": 3600.0,
     "d": 86400.0,
+    "day": 86400.0,
+    "days": 86400.0,
+    "w": 604800.0,
+    "week": 604800.0,
+    "weeks": 604800.0,
 }
 
 
-def duration_to_seconds(raw: Union[str, int, float, None]) -> float:
-    """Convert duration string (e.g. '30s', '100ms', '1m', '2h') or number (seconds) to seconds float."""
+def parse_duration(raw: Any, default: Optional[float] = None) -> Optional[float]:
+    """Parse a duration value into seconds, raising ValueError on invalid input."""
     if raw is None:
-        return 0.0
-    # Handle numeric input (already in seconds)
+        return default
     if isinstance(raw, (int, float)):
-        return float(raw)
-    # Handle string input
-    raw = str(raw).strip()
-    m = _DURATION_RE.match(raw)
+        value = float(raw)
+        if not math.isfinite(value):
+            raise ValueError(f"Invalid duration: {raw!r}")
+        return value
+
+    text = str(raw).strip()
+    if not text:
+        return default
+
+    m = _DURATION_RE.match(text)
     if not m:
         try:
-            return float(raw)
-        except ValueError:
-            return 0.0
-    n = float(m.group(1))
+            value = float(text)
+        except ValueError as exc:
+            raise ValueError(f"Invalid duration: {raw!r}") from exc
+        if not math.isfinite(value):
+            raise ValueError(f"Invalid duration: {raw!r}")
+        return value
+
     unit = m.group(2).lower()
-    return n * _UNIT_MULTIPLIERS.get(unit, 1.0)
+    if unit not in _UNIT_MULTIPLIERS:
+        raise ValueError(f"Unknown duration unit in: {raw!r}")
+
+    value = float(m.group(1)) * _UNIT_MULTIPLIERS[unit]
+    if not math.isfinite(value):
+        raise ValueError(f"Invalid duration: {raw!r}")
+    return value
+
+
+def duration_to_seconds(raw: Union[str, int, float, None]) -> float:
+    """Convert duration string (e.g. '30s', '100ms', '1m', '2h') or number to seconds float."""
+    try:
+        parsed = parse_duration(raw, default=0.0)
+        return float(parsed if parsed is not None else 0.0)
+    except Exception:
+        return 0.0
 
 
 def seconds_to_human(sec: float) -> str:
@@ -396,58 +554,198 @@ def _find_binary(name: str) -> str:
     return shutil.which(name) or name
 
 
+def _ceil_seconds(value: float) -> int:
+    """Return a safe positive integer second count for network timeout flags."""
+    try:
+        return max(1, int(math.ceil(float(value))))
+    except Exception:
+        return 1
+
+
+def _safe_tokens(text: str) -> list[str]:
+    """Best-effort tokenizer for flag detection."""
+    try:
+        return shlex.split(text, posix=True)
+    except ValueError:
+        return text.split()
+
+
+def _has_long_flag(tokens: list[str], *flags: str) -> bool:
+    """Return True if any long flag is present as --flag or --flag=value."""
+    for token in tokens:
+        for flag in flags:
+            if token == flag or token.startswith(flag + "="):
+                return True
+    return False
+
+
+def _has_short_flag(tokens: list[str], letter: str) -> bool:
+    """Return True if a short flag letter appears in a clustered short option."""
+    for token in tokens:
+        if not token.startswith("-") or token.startswith("--") or len(token) <= 1:
+            continue
+        body = token[1:]
+        if body.lstrip("0123456789.") == "":
+            continue
+        if letter in body:
+            return True
+    return False
+
+
+def _split_shell_operators(cmd: str) -> list[tuple[str, bool]]:
+    """
+    Split command text into segments and operators while respecting quotes and escapes.
+
+    Returns a list of (text, is_operator) tuples.
+    """
+    segments: list[tuple[str, bool]] = []
+    current: list[str] = []
+    i = 0
+    n = len(cmd)
+    in_single = False
+    in_double = False
+    escaped = False
+
+    while i < n:
+        ch = cmd[i]
+
+        if escaped:
+            current.append(ch)
+            escaped = False
+            i += 1
+            continue
+
+        if ch == "\\" and not in_single:
+            current.append(ch)
+            escaped = True
+            i += 1
+            continue
+
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            current.append(ch)
+            i += 1
+            continue
+
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            current.append(ch)
+            i += 1
+            continue
+
+        if not in_single and not in_double:
+            op: Optional[str] = None
+
+            if ch == "&":
+                if i + 1 < n and cmd[i + 1] == "&":
+                    op = "&&"
+                elif i + 1 < n and cmd[i + 1] == ">":
+                    op = None  # preserve &> redirection as literal text
+                else:
+                    op = "&"
+            elif ch == "|":
+                if i + 1 < n and cmd[i + 1] == "|":
+                    op = "||"
+                else:
+                    op = "|"
+            elif ch == ";" or ch == "\n":
+                op = ch
+
+            if op is not None:
+                segments.append(("".join(current), False))
+                segments.append((op, True))
+                current = []
+                i += len(op)
+                continue
+
+        current.append(ch)
+        i += 1
+
+    segments.append(("".join(current), False))
+    return segments
+
+
+_CURL_BIN_RE = re.compile(r"^(?P<bin>(?:[^\s]+/)?curl)(?P<sep>\s|$)")
+_WGET_BIN_RE = re.compile(r"^(?P<bin>(?:[^\s]+/)?wget)(?P<sep>\s|$)")
+
+
 def _inject_curl_timeouts_single(
     cmd_segment: str, connect_timeout: float, max_time: float
 ) -> str:
     """Inject timeouts into a single command segment."""
+    if not cmd_segment.strip():
+        return cmd_segment
+
     stripped = cmd_segment.lstrip()
     leading = cmd_segment[: len(cmd_segment) - len(stripped)]
+    trailing = cmd_segment[len(cmd_segment.rstrip()) :]
+    tokens = _safe_tokens(stripped)
 
-    if re.match(r"^curl(\s|$)", stripped):
+    m = _CURL_BIN_RE.match(stripped)
+    if m:
+        bin_token = m.group("bin")
+        curl_bin = bin_token if "/" in bin_token else _find_binary("curl")
+        rest = stripped[m.end() :].lstrip()
+
         flags: list[str] = []
-        if "--connect-timeout" not in cmd_segment:
-            flags += ["--connect-timeout", str(int(connect_timeout))]
-        if "--max-time" not in cmd_segment:
-            flags += ["--max-time", str(int(max_time))]
-        if "--retry" not in cmd_segment:
+        if not _has_long_flag(tokens, "--connect-timeout"):
+            flags += ["--connect-timeout", str(_ceil_seconds(connect_timeout))]
+        if not _has_long_flag(tokens, "--max-time"):
+            flags += ["--max-time", str(_ceil_seconds(max_time))]
+        if not _has_long_flag(tokens, "--retry"):
             flags += ["--retry", "3", "--retry-delay", "2"]
-        silent_absent = (
-            "--silent" not in cmd_segment
-            and " -s " not in cmd_segment
-            and " -sS " not in cmd_segment
-            and not re.search(r"\s-[a-zA-Z]*s", cmd_segment)
+
+        silent_present = _has_long_flag(tokens, "--silent") or _has_short_flag(
+            tokens, "s"
         )
-        if silent_absent:
+        if not silent_present:
             flags.append("--silent")
 
-        curl_bin = _find_binary("curl")
-        rest = stripped[len("curl") :].lstrip()
-        return f"{leading}{curl_bin} {' '.join(flags)} {rest}".strip()
+        if flags:
+            return f"{leading}{curl_bin} {' '.join(flags)} {rest}".rstrip() + trailing
+        return f"{leading}{curl_bin} {rest}".rstrip() + trailing
 
-    if re.match(r"^wget(\s|$)", stripped) and "--timeout" not in cmd_segment:
-        wget_bin = _find_binary("wget")
-        rest = stripped[len("wget") :].lstrip()
-        extra = f"--timeout={int(max_time)}"
-        if "--no-verbose" not in cmd_segment and "-nv" not in cmd_segment:
-            extra += " --no-verbose"
-        return f"{leading}{wget_bin} {extra} {rest}".strip()
+    m = _WGET_BIN_RE.match(stripped)
+    if m:
+        bin_token = m.group("bin")
+        wget_bin = bin_token if "/" in bin_token else _find_binary("wget")
+        rest = stripped[m.end() :].lstrip()
+
+        extra: list[str] = []
+        if not (_has_long_flag(tokens, "--timeout") or _has_short_flag(tokens, "T")):
+            extra.append(f"--timeout={_ceil_seconds(max_time)}")
+
+        verbose_present = _has_long_flag(tokens, "--verbose") or _has_short_flag(
+            tokens, "v"
+        )
+        no_verbose_present = (
+            _has_long_flag(tokens, "--no-verbose") or "-nv" in tokens
+        )
+        if not no_verbose_present and not verbose_present:
+            extra.append("--no-verbose")
+
+        if extra:
+            return f"{leading}{wget_bin} {' '.join(extra)} {rest}".rstrip() + trailing
+        return f"{leading}{wget_bin} {rest}".rstrip() + trailing
 
     return cmd_segment
 
 
 def inject_curl_timeouts(cmd: str, connect_timeout: float, max_time: float) -> str:
     """Prepend missing network timeouts and retry settings into curl or wget across shell pipelines."""
-    # Split on shell separators safely while respecting pipeline segments
-    segments = re.split(r"(&&|\|\||;|\|)", cmd)
-    modified_segments = []
-    for seg in segments:
-        if seg.strip() in ("&&", "||", ";", "|"):
-            modified_segments.append(seg)
+    if not cmd:
+        return cmd
+
+    segments = _split_shell_operators(cmd)
+    modified: list[str] = []
+    for text, is_operator in segments:
+        if is_operator:
+            modified.append(text)
         else:
-            modified_segments.append(
-                _inject_curl_timeouts_single(seg, connect_timeout, max_time)
+            modified.append(
+                _inject_curl_timeouts_single(text, connect_timeout, max_time)
             )
-    return "".join(modified_segments)
+    return "".join(modified)
 
 
 _ICON_PATTERNS: list[tuple[str, str]] = [
@@ -530,7 +828,7 @@ def interpret_exit_code(code: int) -> str:
 
 _SHADOW_HINTS: list[tuple[str, str]] = [
     (
-        "invalid JSON data",
+        "invalid json data",
         "⚠️  HINT: Output contains 'invalid JSON data'. Command may be shadowed by an AIChat tool symlink. Use 'command <cmd>' or full path.",
     ),
     (
@@ -550,8 +848,9 @@ _SHADOW_HINTS: list[tuple[str, str]] = [
 
 def detect_shadowing_hint(output: str) -> Optional[str]:
     """Detect tool shadowing based on standard output strings."""
+    text = _strip_ansi(output or "").lower()
     for trigger, hint in _SHADOW_HINTS:
-        if trigger in output:
+        if trigger in text:
             return hint
     return None
 
@@ -569,101 +868,423 @@ def _truncate(text: str, max_len: int) -> str:
     return text if len(text) <= max_len else text[: max_len - 1] + "…"
 
 
+def _ui_max_lines() -> int:
+    raw = os.environ.get("EXECUTE_COMMAND_UI_LINES", "20")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 20
+    return max(0, min(value, 1000))
+
+
 def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> None:
     """Render a human-friendly box UI to stderr for interactive user sessions."""
-    if not _is_tty() or no_color:
+    if not _is_tty():
         return
 
-    success = data.get("success", False)
-    exit_code = data.get("exit_code", EXIT_ERROR)
-    cmd = data.get("command", "")
-    duration_ms = data.get("duration_ms", 0.0)
-    output = data.get("output", "")
-    hint = data.get("hint")
+    global _COLOR_OVERRIDE
+    previous_override = _COLOR_OVERRIDE
+    _COLOR_OVERRIDE = False if no_color else None
 
-    bw = max(get_width() - 4, 20)
-    border_str = _border(bw)
-    icon = get_cmd_icon(cmd)
-    display_cmd = _truncate(cmd, bw - 12)
+    try:
+        success = bool(data.get("success", False))
+        exit_code = int(data.get("exit_code", EXIT_ERROR))
+        cmd = str(data.get("command") or "")
+        duration_ms = data.get("duration_ms", 0.0)
+        output = str(data.get("output") or "")
+        hint = data.get("hint")
+        warnings = data.get("warnings")
+        if isinstance(warnings, str):
+            warnings = [warnings]
+        elif not isinstance(warnings, list):
+            warnings = []
 
-    status_color = NEON_GREEN if success else NEON_RED
-    status_symbol = "✓" if success else "✗"
-    status_text = "SUCCESS" if success else "FAILED"
+        bw = max(get_width() - 4, 20)
+        border_str = _border(bw)
+        icon = get_cmd_icon(cmd)
+        display_cmd = _truncate(cmd.replace("\n", " ⏎ "), bw - 12)
 
-    _cprint(f"{NEON_PURPLE}{BOX_TL}{border_str}{BOX_TR}{RESET}")
-    _cprint(
-        f"{NEON_PINK} {icon} {GLOW_CYAN}[EXEC v{__version__}]{RESET} "
-        f"{status_color}{BOLD}{status_symbol} {status_text}{RESET} "
-        f"{NEON_YELLOW}›{RESET} {BOLD}{display_cmd}{RESET}"
-    )
-    _cprint(
-        f"{NEON_PURPLE}{BOX_V}{RESET} "
-        f"{NEON_CYAN}Duration:{RESET} {NEON_LIME}{duration_ms}ms{RESET}  "
-        f"{NEON_CYAN}Exit:{RESET} {status_color}{exit_code}{RESET}  "
-        f"{NEON_CYAN}Cached:{RESET} {NEON_YELLOW}{data.get('cached', False)}{RESET}"
-    )
-    _cprint(f"{NEON_PURPLE}{BOX_LT}{border_str}{BOX_RT}{RESET}")
+        status_color = NEON_GREEN if success else NEON_RED
+        status_symbol = "✓" if success else "✗"
+        status_text = "SUCCESS" if success else "FAILED"
 
-    if hint:
-        _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}{hint}{RESET}")
-
-    if output.strip():
-        for line in output.splitlines():
-            _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {line}")
-    else:
+        _cprint(f"{NEON_PURPLE}{BOX_TL}{border_str}{BOX_TR}{RESET}")
         _cprint(
-            f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}(Command produced no stdout/stderr){RESET}"
+            f"{NEON_PINK} {icon} {GLOW_CYAN}[EXEC v{__version__}]{RESET} "
+            f"{status_color}{BOLD}{status_symbol} {status_text}{RESET} "
+            f"{NEON_YELLOW}›{RESET} {BOLD}{display_cmd}{RESET}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}{BOX_V}{RESET} "
+            f"{NEON_CYAN}Duration:{RESET} {NEON_LIME}{duration_ms}ms{RESET}  "
+            f"{NEON_CYAN}Exit:{RESET} {status_color}{exit_code}{RESET}  "
+            f"{NEON_CYAN}Cached:{RESET} {NEON_YELLOW}{data.get('cached', False)}{RESET}"
         )
 
-    if exit_code != 0:
+        if warnings:
+            _cprint(f"{NEON_PURPLE}{BOX_LT}{border_str}{BOX_RT}{RESET}")
+            for warning in warnings[:5]:
+                _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_ORANGE}{warning}{RESET}")
+
         _cprint(f"{NEON_PURPLE}{BOX_LT}{border_str}{BOX_RT}{RESET}")
-        _cprint(
-            f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error Info:{RESET} {interpret_exit_code(exit_code)}"
-        )
 
-    _cprint(f"{NEON_PURPLE}{BOX_BL}{border_str}{BOX_BR}{RESET}")
+        if hint:
+            _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}{hint}{RESET}")
+
+        if output.strip():
+            lines = output.rstrip("\n").splitlines()
+            limit = _ui_max_lines()
+            if limit <= 0:
+                _cprint(
+                    f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}… {len(lines)} output lines hidden by EXECUTE_COMMAND_UI_LINES{RESET}"
+                )
+            elif len(lines) > limit:
+                for line in lines[:limit]:
+                    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {line}")
+                _cprint(
+                    f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}… {len(lines) - limit} more lines{RESET}"
+                )
+            else:
+                for line in lines:
+                    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {line}")
+        else:
+            _cprint(
+                f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}(Command produced no stdout/stderr){RESET}"
+            )
+
+        if exit_code != 0:
+            _cprint(f"{NEON_PURPLE}{BOX_LT}{border_str}{BOX_RT}{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_RED}Error Info:{RESET} {interpret_exit_code(exit_code)}"
+            )
+
+        _cprint(f"{NEON_PURPLE}{BOX_BL}{border_str}{BOX_BR}{RESET}")
+    finally:
+        _COLOR_OVERRIDE = previous_override
 
 
 # ==============================================================================
 # SECTION 9: Shell Resolution & Core Execution Engine
 # ==============================================================================
 
-_SHELL_MAP: dict[str, list[str]] = {
-    "bash": ["/bin/bash", "-c"],
-    "sh": ["/bin/sh", "-c"],
-    "zsh": ["/bin/zsh", "-c"],
-}
-_TERMUX_PREFIX = os.environ.get("PREFIX", "/data/data/com.termux/files/usr") + "/bin"
-for _sh in ("bash", "sh", "zsh"):
-    _candidate = f"{_TERMUX_PREFIX}/{_sh}"
-    if Path(_candidate).is_file():
-        _SHELL_MAP[_sh][0] = _candidate
+logger = logging.getLogger("execute_command")
 
 
-def _resolve_shell(shell: str) -> list[str]:
-    """Return [executable, flag] for requested shell string."""
-    key = shell.lower()
-    if key in _SHELL_MAP:
-        return _SHELL_MAP[key]
-    if Path(shell).is_file():
-        return [shell, "-c"]
-    return ["/bin/sh", "-c"]
+def _configure_logging(verbose: bool) -> None:
+    """Configure tool-local logging without polluting global basicConfig."""
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        if not logger.handlers:
+            handler = logging.StreamHandler(sys.stderr)
+            handler.setFormatter(logging.Formatter("[DEBUG] %(message)s"))
+            logger.addHandler(handler)
+    else:
+        logger.setLevel(logging.WARNING)
 
 
-def _kill_process_group(process: subprocess.Popen) -> None:
-    """Safely terminate or kill process group with fallback."""
-    if process.poll() is not None:
+def _termux_bin() -> str:
+    return os.path.join(
+        os.environ.get("PREFIX", "/data/data/com.termux/files/usr"), "bin"
+    )
+
+
+def _shell_candidates(shell: str) -> list[str]:
+    key = (shell or "").lower()
+    if key in {"bash", "sh", "zsh"}:
+        return [
+            os.path.join(_termux_bin(), key),
+            f"/bin/{key}",
+            f"/usr/local/bin/{key}",
+            f"/usr/bin/{key}",
+            key,
+        ]
+    return [shell]
+
+
+def _resolve_shell(shell: str) -> tuple[list[str], Optional[str]]:
+    """Return ([executable, flag], warning) for requested shell string."""
+    requested = shell or "bash"
+
+    for candidate in _shell_candidates(requested):
+        if not candidate:
+            continue
+        try:
+            expanded = Path(candidate).expanduser()
+            if expanded.is_file() and os.access(expanded, os.X_OK):
+                return [str(expanded), "-c"], None
+        except OSError:
+            pass
+
+        which = shutil.which(candidate)
+        if which:
+            return [which, "-c"], None
+
+    fallback = "/bin/sh"
+    for candidate in (os.path.join(_termux_bin(), "sh"), "/bin/sh", "sh"):
+        try:
+            expanded = Path(candidate).expanduser()
+            if expanded.is_file() and os.access(expanded, os.X_OK):
+                fallback = str(expanded)
+                break
+        except OSError:
+            pass
+        which = shutil.which(candidate)
+        if which:
+            fallback = which
+            break
+
+    return [fallback, "-c"], f"Shell '{requested}' not found; falling back to {fallback}."
+
+
+def _signal_process_group(process: Optional[subprocess.Popen], sig: Optional[int]) -> None:
+    """Send a signal to a process group when possible, with process-level fallback."""
+    if process is None or sig is None or process.poll() is not None:
         return
+
     try:
         if hasattr(os, "killpg") and hasattr(os, "getpgid"):
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            os.killpg(os.getpgid(process.pid), sig)
+            return
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+    try:
+        if sig == getattr(signal, "SIGTERM", None):
+            process.terminate()
+        elif sig == getattr(signal, "SIGKILL", None) or sig == 9:
+            process.kill()
+        elif hasattr(process, "send_signal"):
+            process.send_signal(sig)
         else:
             process.kill()
-    except (ProcessLookupError, PermissionError, OSError):
+    except Exception:
         try:
             process.kill()
         except Exception:
             pass
+
+
+def _kill_process_group(process: Optional[subprocess.Popen]) -> None:
+    """Immediately kill process group with fallback."""
+    if process is None or process.poll() is not None:
+        return
+    sigkill = getattr(signal, "SIGKILL", None)
+    if sigkill is not None:
+        _signal_process_group(process, sigkill)
+    else:
+        try:
+            process.kill()
+        except Exception:
+            pass
+
+
+def _terminate_process_group(process: Optional[subprocess.Popen]) -> None:
+    """Gracefully terminate process group, escalating to kill if needed."""
+    if process is None or process.poll() is not None:
+        return
+
+    sigterm = getattr(signal, "SIGTERM", None)
+    if sigterm is None:
+        _kill_process_group(process)
+        return
+
+    _signal_process_group(process, sigterm)
+    try:
+        process.wait(timeout=0.4)
+    except Exception:
+        _kill_process_group(process)
+
+
+def _install_signal_handlers(handler: Any) -> dict[int, Any]:
+    """Install signal handlers when running in the main thread."""
+    old_handlers: dict[int, Any] = {}
+    try:
+        if threading.current_thread() is not threading.main_thread():
+            return old_handlers
+    except Exception:
+        return old_handlers
+
+    for sig_name in ("SIGINT", "SIGTERM"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            old_handlers[sig] = signal.signal(sig, handler)
+        except (ValueError, OSError):
+            pass
+    return old_handlers
+
+
+def _restore_signal_handlers(old_handlers: dict[int, Any]) -> None:
+    """Restore previously installed signal handlers."""
+    for sig, old_handler in old_handlers.items():
+        try:
+            signal.signal(sig, old_handler)
+        except (ValueError, OSError):
+            pass
+
+
+def run_command_full(
+    cmd: str,
+    timeout_sec: Optional[float],
+    shell: str = "bash",
+    cwd: Optional[str] = None,
+    extra_env: Optional[dict[str, str]] = None,
+    strip_ansi: bool = False,
+) -> dict[str, Any]:
+    """
+    Execute cmd via requested shell and return full low-level execution metadata.
+    """
+    warnings: list[str] = []
+    shell_cmd, shell_warning = _resolve_shell(shell)
+    if shell_warning:
+        warnings.append(shell_warning)
+
+    timeout_val: Optional[float]
+    if timeout_sec is None:
+        timeout_val = None
+    else:
+        try:
+            timeout_val = float(timeout_sec)
+            if not math.isfinite(timeout_val) or timeout_val <= 0:
+                warnings.append(
+                    "Timeout value is zero, negative, or non-finite; running without timeout."
+                )
+                timeout_val = None
+        except (TypeError, ValueError):
+            warnings.append(f"Invalid timeout value {timeout_sec!r}; running without timeout.")
+            timeout_val = None
+
+    env = {**os.environ, **(extra_env or {})}
+
+    output = ""
+    exit_code = EXIT_ERROR
+    truncated = False
+    bytes_count = 0
+    process: Optional[subprocess.Popen] = None
+    received_signal: Optional[int] = None
+    timed_out = False
+
+    def _signal_handler(signum: int, frame: Any) -> None:
+        nonlocal received_signal
+        received_signal = signum
+        if process is not None:
+            _kill_process_group(process)
+
+    old_handlers = _install_signal_handlers(_signal_handler)
+
+    try:
+        with tempfile.TemporaryFile(prefix=".execute_command_", suffix=".out") as out_file:
+            popen_kwargs: dict[str, Any] = {
+                "stdout": out_file,
+                "stderr": subprocess.STDOUT,
+                "stdin": subprocess.DEVNULL,
+                "cwd": cwd or None,
+                "env": env,
+            }
+            if os.name == "posix":
+                popen_kwargs["start_new_session"] = True
+
+            try:
+                process = subprocess.Popen([*shell_cmd, cmd], **popen_kwargs)
+            except FileNotFoundError:
+                output = f"[Shell binary not found: {shell_cmd[0]}]\n"
+                exit_code = EXIT_INVALID_INPUT
+            except PermissionError as exc:
+                output = f"[Permission denied executing shell: {shell_cmd[0]}: {exc}]\n"
+                exit_code = EXIT_PERMISSION_DENIED
+            except Exception as exc:
+                output = f"[Executor failure: {exc}]\n"
+                exit_code = EXIT_ERROR
+
+            if process is not None:
+                try:
+                    process.wait(timeout=timeout_val)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    _terminate_process_group(process)
+                    try:
+                        process.wait(timeout=2.0)
+                    except Exception:
+                        _kill_process_group(process)
+                        try:
+                            process.wait(timeout=2.0)
+                        except Exception:
+                            pass
+                except KeyboardInterrupt:
+                    received_signal = getattr(signal, "SIGINT", 2)
+                    _kill_process_group(process)
+                    try:
+                        process.wait(timeout=2.0)
+                    except Exception:
+                        pass
+                finally:
+                    if process.poll() is None:
+                        _kill_process_group(process)
+                        try:
+                            process.wait(timeout=1.0)
+                        except Exception:
+                            pass
+
+                    returncode = process.returncode
+                    out_file.seek(0)
+                    raw_bytes = out_file.read(MAX_OUTPUT_BYTES + 1)
+                    truncated = len(raw_bytes) > MAX_OUTPUT_BYTES
+                    if truncated:
+                        raw_bytes = (
+                            raw_bytes[:MAX_OUTPUT_BYTES]
+                            + b"\n... [Output truncated at output limit]\n"
+                        )
+
+                    output = raw_bytes.decode("utf-8", errors="replace")
+                    output = output.replace("\r\n", "\n").replace("\r", "\n")
+                    bytes_count = len(raw_bytes)
+
+                    if returncode is None:
+                        exit_code = EXIT_ERROR
+                    elif returncode < 0:
+                        exit_code = 128 + abs(returncode)
+                    else:
+                        exit_code = returncode
+
+                    if timed_out:
+                        suffix = timeout_val if timeout_val is not None else 0.0
+                        output += f"\n[Timed out after {suffix:.1f}s]\n"
+                        exit_code = EXIT_TIMEOUT
+
+                    if received_signal == getattr(signal, "SIGINT", None):
+                        output += "\n[Command execution interrupted by user]\n"
+                        exit_code = EXIT_INTERRUPTED
+                    elif received_signal == getattr(signal, "SIGTERM", None):
+                        output += "\n[Command execution terminated]\n"
+                        exit_code = 143
+
+    except Exception as exc:
+        output = f"[Executor failure: {exc}]\n"
+        exit_code = EXIT_ERROR
+    finally:
+        _restore_signal_handlers(old_handlers)
+
+    if strip_ansi:
+        output = _strip_ansi(output)
+
+    if output:
+        lines_count = len(output.splitlines())
+        if strip_ansi or bytes_count == 0:
+            bytes_count = len(output.encode("utf-8", errors="ignore"))
+    else:
+        lines_count = 0
+        bytes_count = 0
+
+    return {
+        "output": output,
+        "exit_code": exit_code,
+        "warnings": warnings,
+        "truncated": truncated,
+        "bytes_count": bytes_count,
+        "lines_count": lines_count,
+        "shell_cmd": shell_cmd,
+    }
 
 
 def run_command(
@@ -676,75 +1297,59 @@ def run_command(
 ) -> tuple[str, int]:
     """
     Execute cmd via requested shell returning (output, exit_code).
-    Handles process groups cleanly and enforces memory safety caps.
+    Kept for backward compatibility.
     """
-    shell_args = _resolve_shell(shell)
-    env = {**os.environ, **(extra_env or {})}
-    preexec = os.setsid if hasattr(os, "setsid") else None
-
-    process = None
-    try:
-        process = subprocess.Popen(
-            [*shell_args, cmd],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            preexec_fn=preexec,
-            cwd=cwd or None,
-            env=env,
-        )
-        try:
-            raw_bytes, _ = process.communicate(timeout=timeout_sec)
-            if len(raw_bytes) > MAX_OUTPUT_BYTES:
-                raw_bytes = (
-                    raw_bytes[:MAX_OUTPUT_BYTES]
-                    + b"\n... [Output truncated at 20MB limit]\n"
-                )
-            raw = raw_bytes.decode("utf-8", errors="replace")
-            output = raw.replace("\r\n", "\n").replace("\r", "\n")
-            exit_code = process.returncode
-        except subprocess.TimeoutExpired:
-            _kill_process_group(process)
-            try:
-                raw_bytes, _ = process.communicate()
-                partial = raw_bytes[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
-            except Exception:
-                partial = ""
-            output = partial + f"\n[Timed out after {timeout_sec:.1f}s]\n"
-            exit_code = EXIT_TIMEOUT
-
-    except FileNotFoundError:
-        output = f"[Shell binary not found: {shell_args[0]}]\n"
-        exit_code = EXIT_INVALID_INPUT
-
-    except KeyboardInterrupt:
-        if process is not None:
-            _kill_process_group(process)
-            try:
-                process.wait(timeout=1.0)
-            except Exception:
-                pass
-        output = "\n[Command execution interrupted by user]\n"
-        exit_code = EXIT_INTERRUPTED
-
-    except Exception as exc:
-        if process is not None:
-            _kill_process_group(process)
-            try:
-                process.wait()
-            except Exception:
-                pass
-        output = f"[Executor failure: {exc}]\n"
-        exit_code = EXIT_ERROR
-
-    if strip_ansi:
-        output = _strip_ansi(output)
-
-    return output, exit_code
+    result = run_command_full(
+        cmd=cmd,
+        timeout_sec=timeout_sec,
+        shell=shell,
+        cwd=cwd,
+        extra_env=extra_env,
+        strip_ansi=strip_ansi,
+    )
+    return result["output"], result["exit_code"]
 
 
 # ==============================================================================
 # SECTION 10: Primary Master Tool Execution Logic
 # ==============================================================================
+
+
+def _error_result(
+    message: str,
+    exit_code: int,
+    raw_command: str = "",
+    warnings: Optional[list[str]] = None,
+    shell: Optional[str] = None,
+    cwd: Optional[str] = None,
+) -> dict[str, Any]:
+    """Construct a standardized error result."""
+    now = datetime.now().astimezone().isoformat()
+    output_text = f"{message}\n"
+    return {
+        "success": False,
+        "error": message,
+        "command": raw_command,
+        "raw_command": raw_command,
+        "output": output_text,
+        "exit_code": exit_code,
+        "duration_ms": 0.0,
+        "lines_count": 1 if message else 0,
+        "bytes_count": len(output_text.encode("utf-8", errors="ignore")),
+        "truncated": False,
+        "hint": None,
+        "cached": False,
+        "shell": shell,
+        "shell_command": None,
+        "cwd": cwd or os.getcwd(),
+        "timeout_sec": None,
+        "connect_timeout_sec": None,
+        "max_time_sec": None,
+        "warnings": warnings or [],
+        "started_at": now,
+        "finished_at": now,
+        "context": get_execution_context(),
+    }
 
 
 def execute_tool(
@@ -763,47 +1368,142 @@ def execute_tool(
     """
     Core master tool execution context shared between API run() and CLI.
     """
-    global _NO_COLOR
-    _NO_COLOR = no_color or not _is_tty()
+    global _COLOR_OVERRIDE
+    _COLOR_OVERRIDE = False if no_color else None
+    _configure_logging(verbose)
+
     start_time = time.monotonic()
+    started_at = datetime.now().astimezone().isoformat()
+    warnings: list[str] = []
+
+    if command is None:
+        raw_command = ""
+    elif isinstance(command, str):
+        raw_command = command
+    else:
+        raw_command = str(command)
+
+    if not raw_command.strip():
+        return _error_result(
+            "Command must not be empty.",
+            EXIT_INVALID_INPUT,
+            raw_command=raw_command,
+            warnings=warnings,
+            shell=shell,
+        )
 
     if verbose:
-        logging.basicConfig(level=logging.DEBUG, format="[DEBUG] %(message)s")
-        logging.debug(f"Executing command: {command}")
+        logger.debug(f"Executing command: {raw_command}")
 
     sanitize_path()
 
-    ct_raw = connect_timeout or "10s"
-    mt_raw = max_time or timeout or "30s"
-    timeout_sec = duration_to_seconds(timeout) if timeout else None
-    ct_sec = duration_to_seconds(ct_raw)
-    mt_sec = duration_to_seconds(mt_raw)
+    try:
+        timeout_sec = parse_duration(timeout, default=None)
+    except ValueError as exc:
+        return _error_result(
+            str(exc),
+            EXIT_INVALID_INPUT,
+            raw_command=raw_command,
+            warnings=warnings,
+            shell=shell,
+        )
 
-    extra_env = _parse_env_vars(env)
-    cmd = inject_curl_timeouts(command, ct_sec, mt_sec)
+    try:
+        ct_sec = parse_duration(connect_timeout, default=10.0)
+    except ValueError as exc:
+        warnings.append(f"{exc}; using default 10s connect timeout.")
+        ct_sec = 10.0
+
+    try:
+        mt_sec = parse_duration(max_time, default=None)
+    except ValueError as exc:
+        warnings.append(f"{exc}; using default max-time.")
+        mt_sec = None
+
+    if timeout_sec is not None and (not math.isfinite(timeout_sec) or timeout_sec <= 0):
+        warnings.append("Timeout value is zero or negative; running without timeout.")
+        timeout_sec = None
+
+    if ct_sec is None or not math.isfinite(ct_sec) or ct_sec <= 0:
+        warnings.append("Connect timeout must be positive; using 10s.")
+        ct_sec = 10.0
+
+    if mt_sec is None or not math.isfinite(mt_sec) or mt_sec <= 0:
+        if timeout_sec is not None and math.isfinite(timeout_sec) and timeout_sec > 0:
+            mt_sec = timeout_sec
+        else:
+            mt_sec = 30.0
+
+    cache_ttl = 3600.0
+    try:
+        ttl_raw = os.environ.get(
+            "LLM_TOOL_CACHE_TTL", os.environ.get("EXECUTE_COMMAND_CACHE_TTL", "1h")
+        )
+        parsed_ttl = parse_duration(ttl_raw, default=3600.0)
+        if parsed_ttl is not None and math.isfinite(parsed_ttl) and parsed_ttl > 0:
+            cache_ttl = parsed_ttl
+        else:
+            cache_ttl = 3600.0
+    except ValueError:
+        warnings.append("Invalid cache TTL override; using 1h.")
+        cache_ttl = 3600.0
+
+    extra_env = _parse_env_vars(env, warnings)
+    cmd = inject_curl_timeouts(raw_command, ct_sec, mt_sec)
 
     cwd: Optional[str] = None
     if working_dir:
         base_dir = get_builtin_var("__cwd__") or os.getcwd()
-        wd = (Path(base_dir) / working_dir).expanduser().resolve()
-        if wd.is_dir():
-            cwd = str(wd)
-        elif verbose:
-            logging.debug(f"Working dir not found: {working_dir}, using default CWD.")
+        try:
+            wd = (Path(base_dir) / working_dir).expanduser().resolve()
+            if wd.is_dir():
+                cwd = str(wd)
+            else:
+                warnings.append(
+                    f"Working directory {working_dir!r} not found; using {os.getcwd()}."
+                )
+        except Exception as exc:
+            warnings.append(f"Could not resolve working directory {working_dir!r}: {exc}")
+
+    effective_cwd = cwd or os.getcwd()
 
     cache = ToolCache()
-    cache_key = f"{cmd}:{cwd}:{shell}:{timeout_sec}:{strip_ansi}:{extra_env}"
+    cache_key_data = json.dumps(
+        {
+            "cmd": cmd,
+            "cwd": effective_cwd,
+            "shell": shell,
+            "timeout": timeout_sec,
+            "strip_ansi": strip_ansi,
+            "env": extra_env,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+        cls=ToolJSONEncoder,
+    )
+
     if use_cache:
-        cached_result = cache.get(cache_key)
-        if cached_result is not None:
+        cached_result_raw = cache.get(cache_key_data, ttl_seconds=cache_ttl)
+        if cached_result_raw is not None:
             if verbose:
-                logging.debug("Cache hit for command execution!")
+                logger.debug("Cache hit for command execution.")
+            cached_result = (
+                dict(cached_result_raw)
+                if isinstance(cached_result_raw, dict)
+                else {"success": True, "output": str(cached_result_raw)}
+            )
             cached_result["cached"] = True
+            cached_warnings = cached_result.get("warnings", [])
+            if isinstance(cached_warnings, str):
+                cached_warnings = [cached_warnings]
+            elif not isinstance(cached_warnings, list):
+                cached_warnings = []
+            if "Served from cache." not in cached_warnings:
+                cached_warnings.append("Served from cache.")
+            cached_result["warnings"] = cached_warnings
             return cached_result
 
-    shutdown = GracefulShutdown()
-
-    output, exit_code = run_command(
+    full = run_command_full(
         cmd=cmd,
         timeout_sec=timeout_sec,
         shell=shell,
@@ -812,36 +1512,58 @@ def execute_tool(
         strip_ansi=strip_ansi,
     )
 
+    run_warnings = full.get("warnings", [])
+    if isinstance(run_warnings, str):
+        run_warnings = [run_warnings]
+    elif not isinstance(run_warnings, list):
+        run_warnings = [str(run_warnings)]
+
+    all_warnings = warnings + run_warnings
+    output = str(full.get("output", ""))
+    exit_code = int(full.get("exit_code", EXIT_ERROR))
     duration_ms = round((time.monotonic() - start_time) * 1000, 2)
+    finished_at = datetime.now().astimezone().isoformat()
+
     hint = detect_shadowing_hint(output)
-    lines_count = len(output.splitlines()) if output else 0
-    bytes_count = len(output.encode("utf-8"))
+    lines_count = int(
+        full.get("lines_count", len(output.splitlines()) if output else 0)
+    )
+    bytes_count = int(
+        full.get("bytes_count", len(output.encode("utf-8", errors="ignore")))
+    )
 
     result: dict[str, Any] = {
         "success": exit_code == EXIT_SUCCESS,
         "command": cmd,
-        "raw_command": command,
+        "raw_command": raw_command,
         "output": output,
         "exit_code": exit_code,
         "duration_ms": duration_ms,
         "lines_count": lines_count,
         "bytes_count": bytes_count,
+        "truncated": bool(full.get("truncated", False)),
         "hint": hint,
         "cached": False,
         "shell": shell,
-        "cwd": cwd or os.getcwd(),
+        "shell_command": full.get("shell_cmd"),
+        "cwd": effective_cwd,
+        "timeout_sec": timeout_sec,
+        "connect_timeout_sec": ct_sec,
+        "max_time_sec": mt_sec,
+        "warnings": all_warnings,
+        "started_at": started_at,
+        "finished_at": finished_at,
         "context": get_execution_context(),
     }
 
-    if shutdown.should_stop():
-        result["success"] = False
-        result["error"] = "Execution interrupted by signal."
-        result["exit_code"] = EXIT_INTERRUPTED
+    if verbose:
+        logger.debug(
+            f"Finished command with exit_code={exit_code} duration_ms={duration_ms}"
+        )
 
     if use_cache and result["success"]:
-        cache.set(cache_key, result)
+        cache.set(cache_key_data, result)
 
-    shutdown.restore()
     return result
 
 
@@ -850,27 +1572,68 @@ def execute_tool(
 # ==============================================================================
 
 
+def _safe_stream_write(stream: Any, payload: str) -> None:
+    """Write to a stream while tolerating broken pipes."""
+    try:
+        stream.write(payload)
+        stream.flush()
+    except BrokenPipeError:
+        pass
+    except OSError as exc:
+        try:
+            sys.stderr.write(f"Failed writing output stream: {exc}\n")
+        except Exception:
+            pass
+
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write structured execution output to LLM_OUTPUT destination."""
-    out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = (
-        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
-    )
+    out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout").strip() or "/dev/stdout"
 
-    direct_targets = {"/dev/stdout", "/dev/fd/1", "-", "/dev/stderr"}
-    if out_path in direct_targets:
-        sys.stdout.write(json_payload)
-        sys.stdout.flush()
-    else:
-        try:
-            p = Path(out_path).expanduser().resolve()
-            p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        json_payload = (
+            json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+        )
+    except Exception as exc:
+        json_payload = (
+            json.dumps(
+                {
+                    "success": False,
+                    "error": "JSON serialization failed",
+                    "detail": str(exc),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+    if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
+        _safe_stream_write(sys.stdout, json_payload)
+        return
+
+    if out_path in {"/dev/stderr", "/dev/fd/2"}:
+        _safe_stream_write(sys.stderr, json_payload)
+        return
+
+    try:
+        p = Path(out_path).expanduser().resolve()
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        mode = os.environ.get("LLM_OUTPUT_MODE", "a").lower()
+        if mode == "w":
+            tmp = p.with_name(f".{p.name}.{os.getpid()}.{time.time_ns()}.tmp")
+            with open(tmp, "w", encoding="utf-8") as fp:
+                fp.write(json_payload)
+            tmp.replace(p)
+        else:
             with open(p, "a", encoding="utf-8") as fp:
                 fp.write(json_payload)
-        except OSError as err:
+    except OSError as err:
+        try:
             sys.stderr.write(f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n")
-            sys.stdout.write(json_payload)
-            sys.stdout.flush()
+        except Exception:
+            pass
+        _safe_stream_write(sys.stdout, json_payload)
 
 
 # ==============================================================================
@@ -906,19 +1669,27 @@ def run(
         strip_ansi: Strip ANSI sequences from process output
         verbose: Enable detailed debug logging
     """
-    res = execute_tool(
-        command=command,
-        timeout=timeout,
-        connect_timeout=connect_timeout,
-        max_time=max_time,
-        working_dir=working_dir,
-        env=env,
-        shell=shell,
-        use_cache=use_cache,
-        no_color=no_color,
-        strip_ansi=strip_ansi,
-        verbose=verbose,
-    )
+    try:
+        res = execute_tool(
+            command=command,
+            timeout=timeout,
+            connect_timeout=connect_timeout,
+            max_time=max_time,
+            working_dir=working_dir,
+            env=env,
+            shell=shell,
+            use_cache=use_cache,
+            no_color=no_color,
+            strip_ansi=strip_ansi,
+            verbose=verbose,
+        )
+    except Exception as exc:
+        res = _error_result(
+            f"Unexpected tool failure: {exc}",
+            EXIT_ERROR,
+            raw_command=str(command or ""),
+            shell=shell,
+        )
 
     print_human_readable_ui(res, no_color=no_color)
     write_llm_output(res)
@@ -1015,20 +1786,30 @@ def _build_parser() -> argparse.ArgumentParser:
 
 if __name__ == "__main__":
     args = _build_parser().parse_args()
-    res = execute_tool(
-        command=args.command,
-        timeout=args.timeout,
-        connect_timeout=args.connect_timeout,
-        max_time=args.max_time,
-        working_dir=args.working_dir,
-        env=args.env,
-        shell=args.shell,
-        use_cache=args.use_cache,
-        no_color=args.no_color,
-        strip_ansi=args.strip_ansi,
-        verbose=args.verbose,
-    )
+
+    try:
+        res = execute_tool(
+            command=args.command,
+            timeout=args.timeout,
+            connect_timeout=args.connect_timeout,
+            max_time=args.max_time,
+            working_dir=args.working_dir,
+            env=args.env,
+            shell=args.shell,
+            use_cache=args.use_cache,
+            no_color=args.no_color,
+            strip_ansi=args.strip_ansi,
+            verbose=args.verbose,
+        )
+    except Exception as exc:
+        res = _error_result(
+            f"Unexpected tool failure: {exc}",
+            EXIT_ERROR,
+            raw_command=str(args.command or ""),
+            shell=args.shell,
+        )
 
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)
-    sys.exit(res.get("exit_code", EXIT_SUCCESS))
+    sys.exit(int(res.get("exit_code", EXIT_ERROR)))
+

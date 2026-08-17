@@ -155,7 +155,7 @@ def _run_subprocess(
 
 
 # ---------------------------------------------------------------------------
-# Step 1: Video download via lux
+# Step 1: Video download via lux (with pornhub-dl and yt-dlp fallbacks)
 # ---------------------------------------------------------------------------
 
 
@@ -168,62 +168,235 @@ def _run_lux_download(
     verbose: bool,
     no_color: bool,
 ) -> dict[str, Any]:
-    """Invoke lux CLI to download the video. Returns the discovered file path."""
-    if not _check_binary("lux"):
+    """
+    Invoke lux to download the video, with fallbacks to pornhub-dl (for Pornhub URLs)
+    and yt-dlp. Returns a dict with:
+        success (bool)
+        video_path (str) – absolute path to the downloaded file
+        all_candidates (list[str]) – every file created in output_dir
+        exit_code_rc (int) – return code of the last attempt that succeeded
+        stdout / stderr (str) – captured output of the last attempt
+        attempts (int) – how many times we tried
+        fallback_used (str, optional) – which fallback succeeded, if any
+    On failure, 'success' is False and 'error' contains a human‑readable message.
+    """
+    # Helper to run a download attempt and locate the output file.
+    def _run_attempt(
+        cmd: list[str],
+        attempt_name: str,
+        attempt_no: int,
+    ) -> dict[str, Any]:
+        if verbose:
+            _cprint(f"{DIM}[{attempt_name} attempt {attempt_no}] {' '.join(cmd)}{RESET}", no_color=no_color)
+            _cprint(f"{DIM}[{attempt_name} cwd] {output_dir}{RESET}", no_color=no_color)
+
+        rc, stdout, stderr = _run_subprocess(cmd, timeout=timeout, verbose=verbose)
+
+        if verbose:
+            if stdout:
+                _cprint(f"{DIM}[{attempt_name} stdout] {stdout.strip()[:500]}{RESET}", no_color=no_color)
+            if stderr:
+                _cprint(f"{DIM}[{attempt_name} stderr] {stderr.strip()[:500]}{RESET}", no_color=no_color)
+
+        # Try to extract an expected filename from output (lux/yt-dlp/pornhub-dl often print it)
+        expected_name = None
+        for line in (stdout + stderr).splitlines():
+            m = re.search(r"\[info\\]\s+([^\s]+\.(?:mp4|mkv|webm|mov|flv))", line, re.IGNORECASE)
+            if m:
+                expected_name = m.group(1)
+                break
+
+        # Build list of candidate files (ignore any .gif we might have created earlier)
+        candidates = [
+            p for p in output_dir.iterdir()
+            if p.is_file() and not p.name.lower().endswith(".gif")
+        ]
+
+        if expected_name:
+            expected_path = output_dir / expected_name
+            if expected_path.is_file() and expected_path.stat().st_size > 0:
+                return {
+                    "success": True,
+                    "video_path": str(expected_path.resolve()),
+                    "all_candidates": [str(p.resolve()) for p in candidates],
+                    "exit_code_rc": rc,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                }
+            if verbose:
+                _cprint(
+                    f"{NEON_RED}{attempt_name} reported success but expected file "
+                    f"'{expected_name}' is missing or zero‑size.{RESET}",
+                    no_color=no_color,
+                )
+        else:
+            # No explicit filename – fall back to the newest file.
+            if candidates:
+                candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                newest = candidates[0]
+                if newest.stat().st_size > 0:
+                    return {
+                        "success": True,
+                        "video_path": str(newest.resolve()),
+                        "all_candidates": [str(p.resolve()) for p in candidates],
+                        "exit_code_rc": rc,
+                        "stdout": stdout,
+                        "stderr": stderr,
+                    }
+                if verbose:
+                    _cprint(
+                        f"{NEON_RED}{attempt_name} produced a file but it is zero‑size: {newest.name}{RESET}",
+                        no_color=no_color,
+                    )
+            else:
+                if verbose:
+                    _cprint(f"{NEON_RED}{attempt_name} produced no output files at all.{RESET}", no_color=no_color)
+
+        # Attempt failed.
         return {
             "success": False,
-            "error": "lux binary not found in PATH. Install lux (e.g. `pkg install lux` or `pip install lux`).",
-            "exit_code": EXIT_FILE_NOT_FOUND,
-        }
-
-    cmd = ["lux", "-o", str(output_dir), url]
-    if audio_only:
-        cmd.append("--audio-only")
-    if use_aria2:
-        cmd.append("--aria2")
-
-    rc, stdout, stderr = _run_subprocess(cmd, timeout=timeout, verbose=verbose)
-
-    if rc != 0 and not stdout and not stderr:
-        # Don't fail just because lux returns non-zero on post-completion
-        pass
-
-    if verbose:
-        if stdout:
-            _cprint(f"{DIM}[lux stdout] {stdout.strip()}{RESET}", no_color=no_color)
-        if stderr:
-            _cprint(f"{DIM}[lux stderr] {stderr.strip()}{RESET}", no_color=no_color)
-
-    if rc != 0 and not any(output_dir.glob("*")):
-        return {
-            "success": False,
-            "error": f"lux download failed (rc={rc}): {(stderr or stdout).strip()[:500]}",
-            "exit_code": EXIT_DOWNLOAD_FAILED,
-            "stdout": stdout,
-            "stderr": stderr,
-        }
-
-    # Find the most recently created file in output_dir (lux names after the video)
-    candidates = [
-        p for p in output_dir.iterdir() if p.is_file() and not p.name.endswith(".gif")
-    ]
-    if not candidates:
-        return {
-            "success": False,
-            "error": "lux reported success but no output file was found.",
-            "exit_code": EXIT_DOWNLOAD_FAILED,
+            "error": (
+                f"{attempt_name} attempt {attempt_no} failed (rc={rc}). "
+                f"Expected file: {expected_name or '<any>'}. "
+                f"Stderr: {stderr.strip()[:200] if stderr else '(none)'}"
+            ),
             "exit_code_rc": rc,
             "stdout": stdout,
             "stderr": stderr,
         }
 
-    # Prefer the most recently modified file
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    # -----------------------------------------------------------------
+    # 1) Try lux first
+    # -----------------------------------------------------------------
+    lux_available = _check_binary("lux") is not None
+    lux_result = None
+    if lux_available:
+        # Retry loop for lux (max 3 attempts)
+        max_attempts = 3
+        backoff_base = 2
+        for attempt in range(1, max_attempts + 1):
+            cmd = ["lux", "-o", str(output_dir), url]
+            if audio_only:
+                cmd.append("--audio-only")
+            if use_aria2:
+                cmd.append("--aria2")
+            lux_result = _run_attempt(cmd, "lux", attempt)
+            if lux_result.get("success"):
+                break
+            if attempt < max_attempts:
+                wait_time = backoff_base ** (attempt - 1)
+                if verbose:
+                    _cprint(
+                        f"{NEON_YELLOW}lux attempt {attempt} failed; retrying in {wait_time}s…{RESET}",
+                        no_color=no_color,
+                    )
+                time.sleep(wait_time)
+
+    # -----------------------------------------------------------------
+    # 2) If lux failed and URL looks like Pornhub, try pornhub-dl
+    # -----------------------------------------------------------------
+    pornhub_result = None
+    if not (lux_result and lux_result.get("success")):
+        if "pornhub.com" in url.lower() and _check_binary("pornhub-dl"):
+            max_attempts = 3
+            backoff_base = 2
+            for attempt in range(1, max_attempts + 1):
+                cmd = ["pornhub-dl", "-o", str(output_dir), url]
+                if audio_only:
+                    # pornhub-dl doesn't have an explicit audio‑only flag; we fallback to yt-dlp later
+                    pass
+                if use_aria2:
+                    # pornhub-dl doesn't expose aria2; we ignore for now
+                    pass
+                pornhub_result = _run_attempt(cmd, "pornhub-dl", attempt)
+                if pornhub_result.get("success"):
+                    break
+                if attempt < max_attempts:
+                    wait_time = backoff_base ** (attempt - 1)
+                    if verbose:
+                        _cprint(
+                            f"{NEON_YELLOW}pornhub-dl attempt {attempt} failed; retrying in {wait_time}s…{RESET}",
+                            no_color=no_color,
+                        )
+                    time.sleep(wait_time)
+
+    # -----------------------------------------------------------------
+    # 3) Fallback to yt-dlp if still unsuccessful
+    # -----------------------------------------------------------------
+    ytdlp_result = None
+    if not ((lux_result and lux_result.get("success")) or (pornhub_result and pornhub_result.get("success"))):
+        if _check_binary("yt-dlp"):
+            max_attempts = 3
+            backoff_base = 2
+            for attempt in range(1, max_attempts + 1):
+                cmd = [
+                    "yt-dlp",
+                    "-o",
+                    str(output_dir / "%(title)s.%(ext)s"),
+                    url,
+                ]
+                if audio_only:
+                    cmd.extend(["-x", "--audio-format", "best"])
+                if use_aria2:
+                    cmd.extend(["--downloader", "aria2c"])
+                ytdlp_result = _run_attempt(cmd, "yt-dlp", attempt)
+                if ytdlp_result.get("success"):
+                    break
+                if attempt < max_attempts:
+                    wait_time = backoff_base ** (attempt - 1)
+                    if verbose:
+                        _cprint(
+                            f"{NEON_YELLOW}yt-dlp attempt {attempt} failed; retrying in {wait_time}s…{RESET}",
+                            no_color=no_color,
+                        )
+                    time.sleep(wait_time)
+
+    # -----------------------------------------------------------------
+    # Determine which attempt succeeded and return appropriate dict
+    # -----------------------------------------------------------------
+    successful = None
+    used_fallback = None
+    if lux_result and lux_result.get("success"):
+        successful = lux_result
+    elif pornhub_result and pornhub_result.get("success"):
+        successful = pornhub_result
+        used_fallback = "pornhub-dl"
+    elif ytdlp_result and ytdlp_result.get("success"):
+        successful = ytdlp_result
+        used_fallback = "yt-dlp"
+
+    if successful:
+        # Attach fallback info if we used one
+        if used_fallback:
+            successful["fallback_used"] = used_fallback
+        return successful
+
+    # -----------------------------------------------------------------
+    # All attempts failed – return the most informative error
+    # -----------------------------------------------------------------
+    # Prefer lux error if we tried it, else pornhub-dl, else yt-dlp
+    error_source = None
+    if lux_result:
+        error_source = lux_result
+    elif pornhub_result:
+        error_source = pornhub_result
+    elif ytdlp_result:
+        error_source = ytdlp_result
+    else:
+        # No downloader available at all
+        return {
+            "success": False,
+            "stage": "download",
+            "error": "No supported downloader (lux, pornhub-dl, yt-dlp) found in PATH.",
+            "exit_code": EXIT_FILE_NOT_FOUND,
+        }
+
     return {
-        "success": True,
-        "video_path": str(candidates[0].resolve()),
-        "all_candidates": [str(p.resolve()) for p in candidates],
-        "exit_code_rc": rc,
+        "success": False,
+        "stage": "download",
+        "error": error_source.get("error", "Unknown download error"),
+        "exit_code": error_source.get("exit_code_rc", EXIT_DOWNLOAD_FAILED),
+        "step_result": error_source,  # keep full debug info
     }
 
 
@@ -360,10 +533,15 @@ def _run_ffmpeg_thumbs(
         pattern,
     ]
     if end and end != "00:00:00":
-        cmd[cmd.index("-i") + 1] = video_path  # ensure correct position
-        cmd[cmd.index("-ss") + 1] = start
         # Insert -to before -i
-        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", start]
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-ss",
+            start,
+        ]
         if end and end != "00:00:00":
             cmd.extend(["-to", end])
         cmd.extend(
@@ -422,11 +600,7 @@ def _build_gif_direct(
     verbose: bool,
     no_color: bool,
 ) -> dict[str, Any]:
-    """Build animated GIF directly from video using ffmpeg palettegen + paletteuse.
-
-    This is the highest-quality method because ffmpeg generates a shared palette
-    that best represents the source frames before encoding.
-    """
+    """Build animated GIF directly from video using ffmpeg palettegen + paletteuse (highest quality)."""
     if not _check_binary("ffmpeg"):
         return {
             "success": False,
@@ -467,7 +641,8 @@ def _build_gif_direct(
 
     if verbose and stderr:
         _cprint(
-            f"{DIM}[ffmpeg-gif stderr] {stderr.strip()[:500]}{RESET}", no_color=no_color
+            f"{DIM}[ffmpeg-gif stderr] {stderr.strip()[:500]}{RESET}",
+            no_color=no_color,
         )
 
     if not output_gif.is_file() or rc != 0:
@@ -498,13 +673,7 @@ def _run_gif_make(
     verbose: bool,
     no_color: bool,
 ) -> dict[str, Any]:
-    """Build animated GIF from PNG frames using a two-step pipeline:
-
-    1. ffmpeg: convert each PNG → single-frame GIF (palette-aware)
-    2. gifsicle: merge the single-frame GIFs into a multi-frame animated GIF)
-
-    Final optimization pass with gifsicle if --optimize/--lossy/--colors is requested.
-    """
+    """Build animated GIF from PNG frames using ffmpeg concat + palettegen/paletteuse, then optional gifsicle optimization."""
     if not _check_binary("gifsicle"):
         return {
             "success": False,
@@ -820,7 +989,7 @@ def execute_tool(
     # Step 1: download
     if verbose:
         _cprint(
-            f"\n{NEON_PINK}━━ Step 1/3: Downloading video via lux ━━{RESET}",
+            f"\n{NEON_PINK}━━ Step 1/3: Downloading video via lux (with fallbacks) ━━{RESET}",
             no_color=no_color,
         )
 
@@ -913,7 +1082,8 @@ def execute_tool(
     # Step 2: extract frames (only for "frames" / "tool" methods)
     if verbose:
         _cprint(
-            f"\n{NEON_PINK}━━ Step 2/3: Extracting frames ━━{RESET}", no_color=no_color
+            f"\n{NEON_PINK}━━ Step 2/3: Extracting frames ━━{RESET}",
+            no_color=no_color,
         )
 
     # Clean old frames to avoid mixing with previous runs
@@ -1014,8 +1184,7 @@ def execute_tool(
         except OSError:
             pass
 
-    # Drop the source video unless told to keep it (we keep it by default
-    # so the user can re-run with different GIF params without re-downloading)
+    # Keep the source video by default (so user can re‑run with different GIF params)
     duration_ms = round((time.monotonic() - start_time) * 1000, 2)
     return {
         "success": True,
@@ -1134,7 +1303,7 @@ def run(
     dry_run: bool = False,
     gif_method: str = "ffmpeg",
 ) -> None:
-    """End-to-end video-to-GIF orchestrator."""
+    """End‑to‑end video‑to‑GIF orchestrator."""
     res = execute_tool(
         url=url,
         output_dir=output_dir,
