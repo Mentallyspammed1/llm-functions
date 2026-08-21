@@ -2,7 +2,7 @@
 """Get wallet balance from Bybit exchange."""
 
 
-def run_tool(
+def run(
     account_type: str = "UNIFIED",
 ):
     """Get wallet balance from Bybit V5 API
@@ -31,5 +31,5 @@ if __name__ == "__main__":
     parser.add_argument("--account-type", default="UNIFIED")
     args = parser.parse_args()
 
-    result = run_tool(account_type=args.account_type)
+    result = run(account_type=args.account_type)
     print(json.dumps(result, indent=2))

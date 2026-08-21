@@ -52,7 +52,7 @@ def _bollinger_bands(data, period=20):
     return {"upper": sma + (2 * std_dev), "middle": sma, "lower": sma - (2 * std_dev)}
 
 
-def run_tool(symbol: str = "BTCUSDT", interval: str = "60", limit: int = 100):
+def run(symbol: str = "BTCUSDT", interval: str = "60", limit: int = 100):
     """Get technical indicators for a symbol on Bybit V5 API
     Args:
         symbol: Symbol name
@@ -117,4 +117,4 @@ if __name__ == "__main__":
     parser.add_argument("--interval", default="60")
     parser.add_argument("--limit", type=int, default=100)
     args = parser.parse_args()
-    print(json.dumps(run_tool(args.symbol, args.interval, args.limit), indent=2))
+    print(json.dumps(run(args.symbol, args.interval, args.limit), indent=2))

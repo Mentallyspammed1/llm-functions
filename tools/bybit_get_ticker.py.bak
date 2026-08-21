@@ -7,7 +7,7 @@ import bybit_core
 import requests
 
 
-def run(
+def run_tool(
     category: Literal["linear", "inverse", "option", "spot"],
     symbol: Optional[str] = None,
     use_tor: bool = True,
@@ -43,4 +43,4 @@ if __name__ == "__main__":
         "--use-tor", type=lambda x: str(x).lower() == "true", default=True
     )
     args = parser.parse_args()
-    print(run(args.category, args.symbol, use_tor=args.use_tor))
+    print(run_tool(args.category, args.symbol, use_tor=args.use_tor))

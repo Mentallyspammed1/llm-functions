@@ -8,7 +8,7 @@ import json
 import os
 
 
-def run_tool(
+def run(
     symbol: str = "BTCUSDT",
     limit: int = 50,
 ) -> dict:
@@ -168,5 +168,5 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=50)
     args = parser.parse_args()
 
-    result = run_tool(symbol=args.symbol, limit=args.limit)
+    result = run(symbol=args.symbol, limit=args.limit)
     print(json.dumps(result, indent=2))

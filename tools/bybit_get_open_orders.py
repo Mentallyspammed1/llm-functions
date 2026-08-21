@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 import bybit_base
 
 
-def run_tool(
+def run(
     category: str,
     symbol: Optional[str] = None,
     testnet: Optional[bool] = None,
@@ -84,7 +84,7 @@ JSON Data:
 
 def run(**kwargs):
     """Entry point for the tool runner."""
-    return run_tool(**kwargs)
+    return run(**kwargs)
 
 
 if __name__ == "__main__":
@@ -94,4 +94,4 @@ if __name__ == "__main__":
     parser.add_argument("--testnet", type=lambda x: str(x).lower() == "true")
     parser.add_argument("--use-tor", type=lambda x: str(x).lower() == "true")
     args = parser.parse_args()
-    print(run_tool(args.category, args.symbol, args.testnet, args.use_tor))
+    print(run(args.category, args.symbol, args.testnet, args.use_tor))

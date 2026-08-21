@@ -7,7 +7,7 @@ import bybit_core
 import bybit_turso_logger
 
 
-def run_tool(
+def run(
     category: str = "linear",
     symbol: str = "BTCUSDT",
     order_id: Optional[str] = None,
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(
         json.dumps(
-            run_tool(args.category, args.symbol, args.order_id, args.order_link_id),
+            run(args.category, args.symbol, args.order_id, args.order_link_id),
             indent=2,
         )
     )

@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 import bybit_base
 
 
-def run_tool(
+def run(
     symbol: Optional[str] = None,
     include_orders: bool = False,
     testnet: Optional[bool] = None,
@@ -107,4 +107,4 @@ if __name__ == "__main__":
     parser.add_argument("--testnet", type=lambda x: str(x).lower() == "true")
     parser.add_argument("--use-tor", type=lambda x: str(x).lower() == "true")
     args = parser.parse_args()
-    print(run_tool(args.symbol, args.include_orders, args.testnet, args.use_tor))
+    print(run(args.symbol, args.include_orders, args.testnet, args.use_tor))

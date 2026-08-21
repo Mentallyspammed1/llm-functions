@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 import os
 
 
-def run_tool(
+def run(
     category: str = "linear",
     symbol: str = "BTCUSDT",
     leverage: str = "10",
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     parser.add_argument("--leverage", default="10")
     args = parser.parse_args()
 
-    result = run_tool(
+    result = run(
         category=args.category, symbol=args.symbol, leverage=args.leverage
     )
     print(json.dumps(result, indent=2))
