@@ -42,6 +42,7 @@ bbt_quick_trade.py
 bbt_scanner.py
 bbt_risk.py
 pyrm_term.py
+bybit_live.py
 # tools
 execute_command.py
 scientific_calculator.py
