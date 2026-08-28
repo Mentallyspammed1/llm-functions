@@ -16,7 +16,7 @@ import re
 import sys
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 TOOL_ENTRY_FUNC = "run"
 
@@ -298,9 +298,8 @@ def parse_docstring(docstring: str) -> Tuple[str, Dict[str, Tuple[str, str]]]:
                 raw_params.append(stripped_line)
             elif stripped_line:
                 break
-        else:
-            if stripped_line:
-                description += f"\n{stripped_line}"
+        elif stripped_line:
+            description += f"\n{stripped_line}"
 
     params = {}
     for raw_param in raw_params:

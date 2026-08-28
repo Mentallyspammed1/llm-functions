@@ -85,7 +85,6 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple
 import requests
 
 # Third-party
-import socks  # PySocks
 import websocket
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -333,7 +332,7 @@ except ImportError:
     WEBSOCKET_AVAILABLE = False
 
 try:
-    import socks  # noqa: F401
+    import socks  # ruff: ignore[unused-import]
 
     PYSOCKS_AVAILABLE = True
 except ImportError:

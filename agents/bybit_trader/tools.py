@@ -3,6 +3,7 @@
 Agent-specific tools for BybitTrader agent.
 """
 
+
 def get_scalp_signal(symbol, interval="1", limit=10):
     """
     Placeholder for a scalping signal based on recent price action.
@@ -14,6 +15,7 @@ def get_scalp_signal(symbol, interval="1", limit=10):
         "confidence": 0.8,
         "reason": "Placeholder scalping signal"
     }
+
 
 def calculate_micro_profit(symbol, side, qty, use_vwap_entry=False):
     """
@@ -27,6 +29,7 @@ def calculate_micro_profit(symbol, side, qty, use_vwap_entry=False):
         "note": "Placeholder micro profit calculation"
     }
 
+
 def run(action=None, symbol=None, interval="1", limit=10, side=None, qty=None, use_vwap_entry=False):
     """
     Main entry point for the agent tool.
@@ -37,6 +40,7 @@ def run(action=None, symbol=None, interval="1", limit=10, side=None, qty=None, u
         return calculate_micro_profit(symbol or "BTCUSDT", side or "Buy", qty or 0.001, use_vwap_entry)
     else:
         return {"error": f"Unknown action: {action}"}
+
 
 if __name__ == "__main__":
     import argparse

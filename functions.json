@@ -40,6 +40,35 @@
     }
   },
   {
+    "name": "yandex_search",
+    "description": "Search Yandex Web and Yandex Images without paid APIs or third-party Python dependencies.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "fetch": {
+          "type": "boolean",
+          "description": "Fetch source pages for image/web results and extract text."
+        },
+        "deep": {
+          "type": "boolean",
+          "description": "Search additional query variants and merge results."
+        },
+        "markdown": {
+          "type": "boolean",
+          "description": "Return human-readable Markdown."
+        },
+        "include_html": {
+          "type": "boolean",
+          "description": "Include a bounded HTML diagnostic field."
+        },
+        "no_verify_ssl": {
+          "type": "boolean",
+          "description": "Disable TLS certificate verification."
+        }
+      }
+    }
+  },
+  {
     "name": "bs",
     "description": "Performs Brave Search queries, parses multi-tier results, and downloads pages concurrently.",
     "parameters": {
@@ -893,6 +922,46 @@
     }
   },
   {
+    "name": "ddg_search_lite",
+    "description": "Search the web without paid APIs or third-party Python dependencies.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query. Supports normal search-engine operators."
+        },
+        "deep": {
+          "type": "boolean",
+          "description": "Search several query variants and merge/deduplicate results."
+        },
+        "fetch": {
+          "type": "boolean",
+          "description": "Fetch result pages and include compact page text."
+        },
+        "json": {
+          "type": "boolean",
+          "description": "Return structured JSON (default)."
+        },
+        "markdown": {
+          "type": "boolean",
+          "description": "Return human-readable Markdown."
+        },
+        "raw": {
+          "type": "boolean",
+          "description": "Return the parsed search-engine text for diagnostics."
+        },
+        "no_verify_ssl": {
+          "type": "boolean",
+          "description": "Disable TLS certificate verification."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
     "name": "pyrm_search",
     "description": "Perform advanced web search using Google Custom Search API with",
     "parameters": {
@@ -1616,6 +1685,493 @@
       "required": [
         "action"
       ]
+    }
+  },
+  {
+    "name": "bbps",
+    "description": "Enterprise Bybit USDT-Linear microstructure scalper with native v5 REST HMAC-SHA256 signing,",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "symbols": {
+          "type": "string",
+          "description": "Comma-separated trading pairs (default: BTCUSDT,ETHUSDT,BNBUSDT,ADAUSDT,SOLUSDT)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Single trading pair override (takes precedence if provided)"
+        },
+        "side": {
+          "type": "string",
+          "description": "Order side for single-symbol mode: Buy/Sell (optional: auto if omitted)"
+        },
+        "target": {
+          "type": "string",
+          "description": "Target profit per trade in USDT (default: 0.02)"
+        },
+        "target_profit": {
+          "type": "string",
+          "description": "Alias for --target"
+        },
+        "leverage": {
+          "type": "string",
+          "description": "Account leverage multiplier (default: 50, max: 100)"
+        },
+        "pos_value": {
+          "type": "string",
+          "description": "Fixed position notional value cap in USDT (default: 50.0)"
+        },
+        "pos_pct": {
+          "type": "string",
+          "description": "Position equity percentage sizing (0.0 to 100.0, default: 0.0)"
+        },
+        "spread_max_bps": {
+          "type": "string",
+          "description": "Maximum allowable spread in basis points (default: 15.0)"
+        },
+        "max_positions": {
+          "type": "integer",
+          "description": "Maximum simultaneous open positions (default: 1)"
+        },
+        "max_workers": {
+          "type": "integer",
+          "description": "Concurrent market analysis worker threads (default: 5)"
+        },
+        "cooldown": {
+          "type": "number",
+          "description": "Per-symbol trade cooldown in seconds (default: 120)"
+        },
+        "loop_delay": {
+          "type": "number",
+          "description": "Cycle sleep interval when loop is enabled (default: 30)"
+        },
+        "risk_reward": {
+          "type": "string",
+          "description": "Risk to reward ratio multiplier (default: 1.0)"
+        },
+        "trailing_stop": {
+          "type": "string",
+          "description": "Trailing stop distance in price or bps (e.g. 0.05 or 10bps)"
+        },
+        "max_loss_trade": {
+          "type": "string",
+          "description": "Hard stop-loss limit per trade in USDT (default: 0.05)"
+        },
+        "daily_loss_cap": {
+          "type": "string",
+          "description": "Maximum cumulative daily loss before halt (default: 0.50)"
+        },
+        "max_drawdown_pct": {
+          "type": "string",
+          "description": "Maximum equity drawdown % from peak (default: 15.0)"
+        },
+        "state_file": {
+          "type": "string",
+          "description": "Path to persistent state JSON file"
+        },
+        "trade_log": {
+          "type": "string",
+          "description": "Path to persistent JSONL trade ledger"
+        },
+        "output_format": {
+          "type": "string",
+          "description": "Output envelope format: json/jsonl (default: jsonl)"
+        },
+        "cache_ttl": {
+          "type": "number",
+          "description": "Cache TTL for market metadata (default: 10)"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "Custom cache storage directory"
+        },
+        "ollama_host": {
+          "type": "string",
+          "description": "Ollama LLM endpoint (default: http://localhost:11434)"
+        },
+        "ollama_model": {
+          "type": "string",
+          "description": "Ollama model name (default: nemotron-3-nano:30b-cloud)"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "Custom environment variable override (repeatable)"
+        },
+        "loop": {
+          "type": "boolean",
+          "description": "Run continuous market evaluation loop"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate orders and execution without financial risk"
+        },
+        "enable_ai": {
+          "type": "boolean",
+          "description": "Enable Ollama AI trade thesis analysis"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable short-term cache for ticker and kline data"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear state and cache directories and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "json_only": {
+          "type": "boolean",
+          "description": "Output raw JSON/JSONL only (suppress UI box on stderr)"
+        },
+        "quiet": {
+          "type": "boolean",
+          "description": "Suppress non-essential progress and UI output"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output and tracebacks"
+        }
+      }
+    }
+  },
+  {
+    "name": "pyrm_scalp2",
+    "description": "Enterprise Bybit V5 USDT perpetual market microstructure analyzer, multi-symbol scanner, and guarded L2 micro-profit scalper.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Execution action: ta/scan/multi_scan/quick_scalp/l2_signal/l2_live_scalp/micro_pnl/compound_micro_profit/trade_statistics/wallet_balance/positions/open_orders/orderbook/ticker/instrument/risk_status/execute_scalp/close_position/cancel_orders/set_leverage/kill_switch/history (default: quick_scalp)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Primary perpetual trading pair (default: SOLUSDT)"
+        },
+        "symbols": {
+          "type": "string",
+          "description": "Comma-separated trading pairs for multi-scan (default: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,ADAUSDT)"
+        },
+        "timeframe": {
+          "type": "string",
+          "description": "Candle timeframe interval: 1/3/5/15/30/60/120/240/D (default: 1)"
+        },
+        "side": {
+          "type": "string",
+          "description": "Trade direction: Buy/Sell (default: Buy)"
+        },
+        "target_profit": {
+          "type": "string",
+          "description": "Target net profit per trade in USDT (default: 0.10, auto/dynamic supported)"
+        },
+        "qty": {
+          "type": "integer",
+          "description": "Order quantity override (default: auto-calculated)"
+        },
+        "leverage": {
+          "type": "string",
+          "description": "Account leverage multiplier (default: 10, max: 100)"
+        },
+        "max_notional": {
+          "type": "string",
+          "description": "Maximum position notional cap in USDT (default: 100.0)"
+        },
+        "max_spread_bps": {
+          "type": "string",
+          "description": "Maximum allowable spread in basis points (default: 12.0)"
+        },
+        "max_spread_pct": {
+          "type": "string",
+          "description": "Maximum allowable REST spread percentage (default: 0.035)"
+        },
+        "max_loss_trade": {
+          "type": "string",
+          "description": "Hard stop-loss limit per trade in USDT (default: 0.05)"
+        },
+        "daily_loss_cap": {
+          "type": "string",
+          "description": "Maximum cumulative daily loss before circuit breaker (default: 5.0)"
+        },
+        "max_drawdown_pct": {
+          "type": "string",
+          "description": "Maximum equity drawdown % from peak before halt (default: 15.0)"
+        },
+        "max_positions": {
+          "type": "integer",
+          "description": "Maximum simultaneous open positions (default: 1)"
+        },
+        "max_workers": {
+          "type": "integer",
+          "description": "Concurrent worker threads for batch scanning (default: 5)"
+        },
+        "cooldown": {
+          "type": "number",
+          "description": "Per-symbol execution cooldown in seconds (default: 60)"
+        },
+        "l2_depth": {
+          "type": "integer",
+          "description": "Bybit L2 orderbook depth: 1/50/200/1000 (default: 50)"
+        },
+        "l2_entry_score": {
+          "type": "string",
+          "description": "Minimum directional OFI score required for entry (default: 0.62)"
+        },
+        "l2_exit_score": {
+          "type": "string",
+          "description": "Reversal OFI score threshold for early exit (default: 0.20)"
+        },
+        "l2_stop_bps": {
+          "type": "string",
+          "description": "Emergency L2 price stop in basis points (default: 10.0)"
+        },
+        "l2_max_hold": {
+          "type": "number",
+          "description": "Maximum lifetime of an active micro-scalp session (default: 45.0)"
+        },
+        "entry_price": {
+          "type": "string",
+          "description": "Simulated/actual entry price for micro_pnl"
+        },
+        "exit_price": {
+          "type": "string",
+          "description": "Simulated/actual exit price for micro_pnl"
+        },
+        "capital": {
+          "type": "string",
+          "description": "Starting capital for compound growth simulations (default: 100.0)"
+        },
+        "compound_rate": {
+          "type": "string",
+          "description": "Per-trade compounding rate as a decimal (default: 0.001)"
+        },
+        "trades": {
+          "type": "integer",
+          "description": "Number of compounding trades to simulate (default: 100)"
+        },
+        "live_confirmation": {
+          "type": "string",
+          "description": "Required live confirmation token (e.g. I_UNDERSTAND_LIVE_RISK)"
+        },
+        "state_file": {
+          "type": "string",
+          "description": "Custom state persistence JSON file path"
+        },
+        "trade_log": {
+          "type": "string",
+          "description": "Custom trade ledger JSONL file path"
+        },
+        "output_format": {
+          "type": "string",
+          "description": "Output format: json/jsonl (default: json)"
+        },
+        "cache_ttl": {
+          "type": "number",
+          "description": "Cache TTL in seconds (default: 5)"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "Custom cache storage directory"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "Custom environment variable override (repeatable)"
+        },
+        "post_only": {
+          "type": "boolean",
+          "description": "Enforce maker post-only limit execution where supported"
+        },
+        "reduce_only": {
+          "type": "boolean",
+          "description": "Restrict execution to reducing/closing existing position"
+        },
+        "live": {
+          "type": "boolean",
+          "description": "Authorize live trading execution (defaults to safe dry-run)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable caching for cacheable queries"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Purge cache and state files and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "self_test": {
+          "type": "boolean",
+          "description": "Execute self-diagnostics and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color terminal output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "micro_scalp2",
+    "description": "Enterprise Bybit USDT-Linear microstructure scalper with native v5 REST HMAC-SHA256 signing,",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "symbols": {
+          "type": "string",
+          "description": "Comma-separated trading pairs (default: BTCUSDT,ETHUSDT,BNBUSDT,ADAUSDT,SOLUSDT)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Single trading pair override (takes precedence if provided)"
+        },
+        "side": {
+          "type": "string",
+          "description": "Order side for single-symbol mode: Buy/Sell (optional: auto if omitted)"
+        },
+        "target": {
+          "type": "string",
+          "description": "Target profit per trade in USDT (default: 0.02)"
+        },
+        "target_profit": {
+          "type": "string",
+          "description": "Alias for --target"
+        },
+        "leverage": {
+          "type": "string",
+          "description": "Account leverage multiplier (default: 50, max: 100)"
+        },
+        "pos_value": {
+          "type": "string",
+          "description": "Fixed position notional value cap in USDT (default: 50.0)"
+        },
+        "pos_pct": {
+          "type": "string",
+          "description": "Position equity percentage sizing (0.0 to 100.0, default: 0.0)"
+        },
+        "spread_max_bps": {
+          "type": "string",
+          "description": "Maximum allowable spread in basis points (default: 15.0)"
+        },
+        "max_positions": {
+          "type": "integer",
+          "description": "Maximum simultaneous open positions (default: 1)"
+        },
+        "max_workers": {
+          "type": "integer",
+          "description": "Concurrent market analysis worker threads (default: 5)"
+        },
+        "cooldown": {
+          "type": "number",
+          "description": "Per-symbol trade cooldown in seconds (default: 120)"
+        },
+        "loop_delay": {
+          "type": "number",
+          "description": "Cycle sleep interval when loop is enabled (default: 30)"
+        },
+        "risk_reward": {
+          "type": "string",
+          "description": "Risk to reward ratio multiplier (default: 1.0)"
+        },
+        "trailing_stop": {
+          "type": "string",
+          "description": "Trailing stop distance in price or bps (e.g. 0.05 or 10bps)"
+        },
+        "max_loss_trade": {
+          "type": "string",
+          "description": "Hard stop-loss limit per trade in USDT (default: 0.05)"
+        },
+        "daily_loss_cap": {
+          "type": "string",
+          "description": "Maximum cumulative daily loss before halt (default: 0.50)"
+        },
+        "max_drawdown_pct": {
+          "type": "string",
+          "description": "Maximum equity drawdown % from peak (default: 15.0)"
+        },
+        "state_file": {
+          "type": "string",
+          "description": "Path to persistent state JSON file"
+        },
+        "trade_log": {
+          "type": "string",
+          "description": "Path to persistent JSONL trade ledger"
+        },
+        "output_format": {
+          "type": "string",
+          "description": "Output envelope format: json/jsonl (default: jsonl)"
+        },
+        "cache_ttl": {
+          "type": "number",
+          "description": "Cache TTL for market metadata (default: 10)"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "Custom cache storage directory"
+        },
+        "ollama_host": {
+          "type": "string",
+          "description": "Ollama LLM endpoint (default: http://localhost:11434)"
+        },
+        "ollama_model": {
+          "type": "string",
+          "description": "Ollama model name (default: nemotron-3-nano:30b-cloud)"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "Custom environment variable override (repeatable)"
+        },
+        "loop": {
+          "type": "boolean",
+          "description": "Run continuous market evaluation loop"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate orders and execution without financial risk"
+        },
+        "enable_ai": {
+          "type": "boolean",
+          "description": "Enable Ollama AI trade thesis analysis"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable short-term cache for ticker and kline data"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear state and cache directories and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "json_only": {
+          "type": "boolean",
+          "description": "Output raw JSON/JSONL only (suppress UI box on stderr)"
+        },
+        "quiet": {
+          "type": "boolean",
+          "description": "Suppress non-essential progress and UI output"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output and tracebacks"
+        }
+      }
     }
   },
   {
@@ -7259,7 +7815,7 @@
   },
   {
     "name": "code_snapshot",
-    "description": "Generates high-resolution code snapshot images with neon dark themes, window frames, and syntax highlighting.",
+    "description": "Generates high-resolution code snapshot images with neon dark themes,",
     "parameters": {
       "type": "object",
       "properties": {
@@ -7295,7 +7851,7 @@
         },
         "line_numbers": {
           "type": "boolean",
-          "description": "Display line numbers in snapshot"
+          "description": "Display line numbers"
         },
         "window_frame": {
           "type": "boolean",
@@ -8283,6 +8839,332 @@
       "required": [
         "target"
       ]
+    }
+  },
+  {
+    "name": "tool_builder",
+    "description": "Enterprise tool generator for sigoden/aichat featuring strict schema export, path validation, and resilient JSONL routing.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target file or directory path (required)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum items to process (default: 100)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "json_only": {
+          "type": "boolean",
+          "description": "Output raw JSON/JSONL only"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "cheat_sheet_gen",
+    "description": "Generate interactive cheat sheets for commands, tools, and references",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Cheat sheet title (required)"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category/tag for the cheat sheet (default: general)"
+        },
+        "format": {
+          "type": "string",
+          "description": "Output format: md, html, pdf, json (default: md)"
+        },
+        "output": {
+          "type": "string",
+          "description": "Output file path (default: ./cheatsheet.{format})"
+        },
+        "template": {
+          "type": "string",
+          "description": "Custom template file path"
+        },
+        "author": {
+          "type": "string",
+          "description": "Author name for the cheat sheet"
+        },
+        "version": {
+          "type": "string",
+          "description": "Version number (default: 1.0.0)"
+        },
+        "columns": {
+          "type": "integer",
+          "description": "Number of columns for layout (default: 2)"
+        },
+        "max_width": {
+          "type": "integer",
+          "description": "Maximum width in characters (default: 80)"
+        },
+        "include_toc": {
+          "type": "boolean",
+          "description": "Include table of contents"
+        },
+        "number_sections": {
+          "type": "boolean",
+          "description": "Number sections automatically"
+        },
+        "highlight_syntax": {
+          "type": "boolean",
+          "description": "Enable syntax highlighting for code blocks"
+        },
+        "compact": {
+          "type": "boolean",
+          "description": "Use compact layout (less whitespace)"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Show detailed processing information"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI colour output"
+        }
+      },
+      "required": [
+        "title"
+      ]
+    }
+  },
+  {
+    "name": "update_topic",
+    "description": "Update session topic, current strategic intent, and milestone progress for agent tracking.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Topic or milestone title (required)"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Detailed summary of progress and context (required)"
+        },
+        "strategic_intent": {
+          "type": "string",
+          "description": "Strategic direction or next step objective"
+        },
+        "session_file": {
+          "type": "string",
+          "description": "Path to session log/state file (optional)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "tag": {
+          "type": "array",
+          "description": "Category or phase tag (repeatable)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "append": {
+          "type": "boolean",
+          "description": "Append to session history instead of overwriting"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for session metadata"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "title",
+        "summary"
+      ]
+    }
+  },
+  {
+    "name": "fetch_weather",
+    "description": "Fetch current weather, multi-day forecasts, and hourly outlooks for any location or auto-detected IP.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "string",
+          "description": "City name, coordinates, or 'auto' (default: auto)"
+        },
+        "units": {
+          "type": "string",
+          "description": "Unit system: metric or imperial (default: metric)",
+          "enum": [
+            "metric",
+            "imperial"
+          ]
+        },
+        "days": {
+          "type": "integer",
+          "description": "Forecast days: 1 to 7 (default: 1)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary, detailed, hourly (default: summary)",
+          "enum": [
+            "summary",
+            "detailed",
+            "hourly"
+          ]
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching (15-minute TTL)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "rider_tracker",
+    "description": "Track cycling activities, GPS pings, power watts, incline grade, heart rate zones, lap splits, and export to Strava/Garmin GPX/TCX.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action: start, ping, pause, resume, stop, status, list, stats, export, delete (default: status)",
+          "enum": [
+            "start",
+            "ping",
+            "pause",
+            "resume",
+            "stop",
+            "status",
+            "list",
+            "stats",
+            "export",
+            "delete"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "description": "Ride session title / name (e.g. 'Morning Gravel Climb')"
+        },
+        "ride_id": {
+          "type": "string",
+          "description": "Specific ride ID (defaults to active session)"
+        },
+        "lat": {
+          "type": "number",
+          "description": "Latitude coordinate (-90.0 to 90.0)"
+        },
+        "lon": {
+          "type": "number",
+          "description": "Longitude coordinate (-180.0 to 180.0)"
+        },
+        "elevation": {
+          "type": "number",
+          "description": "Elevation in meters (or feet if imperial)"
+        },
+        "speed": {
+          "type": "number",
+          "description": "Instantaneous speed in km/h (or mph if imperial)"
+        },
+        "heart_rate": {
+          "type": "integer",
+          "description": "Rider heart rate in BPM"
+        },
+        "cadence": {
+          "type": "integer",
+          "description": "Pedaling cadence in RPM"
+        },
+        "battery": {
+          "type": "integer",
+          "description": "Device/sensor battery percentage (0-100)"
+        },
+        "bike": {
+          "type": "string",
+          "description": "Bike profile (e.g. 'Road', 'Gravel', 'MTB', 'E-Bike')"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Waypoint notes or trail conditions"
+        },
+        "format": {
+          "type": "string",
+          "description": "Export format: gpx, tcx, geojson, csv, json (default: gpx)",
+          "enum": [
+            "gpx",
+            "tcx",
+            "geojson",
+            "csv",
+            "json"
+          ]
+        },
+        "units": {
+          "type": "string",
+          "description": "Unit system: metric or imperial (default: metric)",
+          "enum": [
+            "metric",
+            "imperial"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary or detailed (default: summary)",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "auto_gps": {
+          "type": "boolean",
+          "description": "Auto-acquire coordinates from hardware (Termux/Device GPS)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
     }
   }
 ]

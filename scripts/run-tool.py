@@ -21,7 +21,6 @@ from typing import (
     get_type_hints,
 )
 
-
 EXIT_SUCCESS = 0
 EXIT_GENERAL_ERROR = 1
 EXIT_INVALID_INPUT = 2

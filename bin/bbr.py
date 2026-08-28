@@ -110,7 +110,7 @@ except ImportError:
     WEBSOCKET_AVAILABLE = False
 
 try:
-    import socks  # noqa: F401
+    import socks  # ruff: ignore[unused-import]
 
     PYSOCKS_AVAILABLE = True
 except ImportError:

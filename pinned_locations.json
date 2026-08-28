@@ -102,5 +102,31 @@
     "provider": "gps",
     "label": "rock road metrolink",
     "timestamp": "2026-08-09T18:59:22.812348"
+  },
+  {
+    "latitude": 38.723438333333334,
+    "longitude": -90.37538500000001,
+    "altitude": 79.30000000000001,
+    "accuracy": 8.199999809265137,
+    "vertical_accuracy": 17.899999618530273,
+    "bearing": 0.0,
+    "speed": 0.0,
+    "elapsedMs": 123,
+    "provider": "gps",
+    "label": "mikes house",
+    "timestamp": "2026-08-24T09:06:57.737503"
+  },
+  {
+    "latitude": 38.72327833333333,
+    "longitude": -90.37530166666666,
+    "altitude": 79.0,
+    "accuracy": 7.800000190734863,
+    "vertical_accuracy": 22.600000381469727,
+    "bearing": 0.0,
+    "speed": 0.0,
+    "elapsedMs": 112,
+    "provider": "gps",
+    "label": "forest park",
+    "timestamp": "2026-08-24T09:08:30.492002"
   }
 ]
