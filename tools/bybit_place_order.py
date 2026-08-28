@@ -4,7 +4,7 @@
 # @option --side <Buy|Sell> Side
 # @option --order-type <Market|Limit> Order type
 # @option --qty <QTY> Quantity
-#!/usr/bin/env python3
+# !/usr/bin/env python3
 import argparse
 import json
 

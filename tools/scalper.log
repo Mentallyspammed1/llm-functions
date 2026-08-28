@@ -17122,3 +17122,413 @@ We can't connect to the server for this app or website at this time. There might
 2026-08-17 05:54:51,292 [WARNING] bybit.core: Network error on POST https://api.bytick.com/v5/position/set-leverage (attempt 6/5): SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/position/set-leverage (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 1] Operation not permitted"))
 2026-08-17 05:54:51,294 [WARNING] multi_scalper: [ATOMUSDT] set leverage 50x failed: Network error: SOCKSHTTPSConnectionPool(host='api.bytick.com', port=443): Max retries exceeded with url: /v5/position/set-leverage (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bytick.com', port=443): Failed to establish a new connection: [Errno 1] Operation not permitted"))
 2026-08-17 05:54:51,296 [INFO] multi_scalper: [ATOMUSDT] skip: leverage config failed
+2026-08-21 03:34:23,223 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 03:34:23,225 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 03:34:23,226 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.5000 | lev 25x | notional $5.05 | symbols 6
+2026-08-21 03:34:23,228 [INFO] multi_scalper: [DRY-RUN BTCUSDT] analysing…
+2026-08-21 03:34:23,230 [INFO] multi_scalper: [DRY-RUN ETHUSDT] analysing…
+2026-08-21 03:34:23,237 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 03:34:23,240 [INFO] multi_scalper: [DRY-RUN ADAUSDT] analysing…
+2026-08-21 03:34:23,260 [INFO] multi_scalper: [DRY-RUN XRPUSDT] analysing…
+2026-08-21 03:34:23,267 [INFO] multi_scalper: [DRY-RUN SOLUSDT] analysing…
+2026-08-21 03:34:41,032 [INFO] multi_scalper: [DRY-RUN XRPUSDT] Buy qty=3.9 ($5.10) TP=1.3090 SL=1.2451
+2026-08-21 03:34:41,032 [INFO] multi_scalper: [DRY-RUN XRPUSDT] submitting smart order…
+2026-08-21 03:34:41,371 [INFO] multi_scalper: [ETHUSDT] skip: Buy conflict trend=SHORT mom=-1.128
+2026-08-21 03:34:41,408 [INFO] multi_scalper: [BTCUSDT] 🚀 STRONG MOMENTUM DETECTED! Scaling position size by 1.5x
+2026-08-21 03:34:41,409 [INFO] multi_scalper: [BTCUSDT] skip: margin $2.98 > 70% equity $1.40
+2026-08-21 03:34:41,602 [INFO] multi_scalper: [ADAUSDT] skip: neutral book (49.4%)
+2026-08-21 03:34:41,767 [INFO] multi_scalper: [DRY-RUN SOLUSDT] Buy qty=0.1 ($8.94) TP=89.55 SL=86.98
+2026-08-21 03:34:41,767 [INFO] multi_scalper: [DRY-RUN SOLUSDT] submitting smart order…
+2026-08-21 03:34:41,955 [INFO] multi_scalper: [LINKUSDT] skip: neutral book (53.7%)
+2026-08-21 03:34:43,903 [INFO] multi_scalper: [DRY-RUN XRPUSDT] result: {"success": true, "dry_run": true, "symbol": "XRPUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 3.9, "entry_price": 1.3074, "risk_entry_price": 1.3080536999999999, "stop_loss": 1.2451, "take_profit": 1.309, "expected_profit_usdt": 0.0062, "expected_loss_usdt": 0.243, "expected_profit_net_usdt": 0.0024, "expected_loss_net_usdt": 0.251, "risk_amount_usdt": 0.0202, "rr_ratio": 2.0, "rr_realized": 0.01, "notional_usdt": 5.0989, "balance": 2.024, "leverage": 25, "atr": 0.02633773, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "XRPUSDT", "side": "Buy", "orderType": "Market", "qty": "3.9", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "1.2451", "takeProfit": "1.3090"}, "warnings": [], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-08-21 03:34:44,057 [INFO] multi_scalper: [DRY-RUN SOLUSDT] result: {"success": true, "dry_run": true, "symbol": "SOLUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.1, "entry_price": 89.31, "risk_entry_price": 89.354655, "stop_loss": 86.98, "take_profit": 89.55, "expected_profit_usdt": 0.024, "expected_loss_usdt": 0.233, "expected_profit_net_usdt": 0.0173, "expected_loss_net_usdt": 0.2472, "risk_amount_usdt": 0.0202, "rr_ratio": 2.0, "rr_realized": 0.07, "notional_usdt": 8.931, "balance": 2.024, "leverage": 25, "atr": 0.9534363, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SOLUSDT", "side": "Buy", "orderType": "Market", "qty": "0.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "86.98", "takeProfit": "89.55"}, "warnings": [], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-08-21 15:06:45,155 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 15:06:45,160 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 15:06:45,162 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0400 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 15:06:45,165 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 15:06:45,189 [INFO] multi_scalper: [DRY-RUN XLMUSDT] analysing…
+2026-08-21 15:07:01,112 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (46.7%)
+2026-08-21 15:07:01,665 [INFO] multi_scalper: [DRY-RUN LINKUSDT] Sell qty=0.5 ($5.84) TP=11.660 SL=11.737
+2026-08-21 15:07:01,666 [INFO] multi_scalper: [DRY-RUN LINKUSDT] submitting smart order…
+2026-08-21 15:07:04,601 [INFO] multi_scalper: [DRY-RUN LINKUSDT] result: {"success": true, "dry_run": true, "symbol": "LINKUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 0.5, "entry_price": 11.677, "risk_entry_price": 11.6711615, "stop_loss": 11.737, "take_profit": 11.66, "expected_profit_usdt": 0.0085, "expected_loss_usdt": 0.03, "expected_profit_net_usdt": 0.0041, "expected_loss_net_usdt": 0.0394, "risk_amount_usdt": 0.0167, "rr_ratio": 2.0, "rr_realized": 0.105, "notional_usdt": 5.8385, "balance": 1.673, "leverage": 50, "atr": 0.19420134, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "LINKUSDT", "side": "Sell", "orderType": "Market", "qty": "0.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "11.737", "takeProfit": "11.660"}, "warnings": [], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-08-21 15:09:04,948 [INFO] multi_scalper: Wallet USDT equity: $1.67
+2026-08-21 15:09:06,456 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 15:09:06,456 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 15:09:06,457 [INFO] multi_scalper: Margin budget $1.17 (equity $1.67 − open≈$0.00) | target PnL $0.0400 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 15:09:06,477 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-08-21 15:09:06,520 [INFO] multi_scalper: [XLMUSDT] analysing…
+2026-08-21 15:09:19,057 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (48.0%)
+2026-08-21 15:09:19,668 [INFO] multi_scalper: [LINKUSDT] skip: neutral book (48.3%)
+2026-08-21 23:15:28,531 [INFO] multi_scalper: Wallet USDT equity: $1.67
+2026-08-21 23:15:30,013 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:15:30,014 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:15:30,015 [INFO] multi_scalper: Margin budget $1.17 (equity $1.67 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 2
+2026-08-21 23:15:30,018 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-08-21 23:15:30,030 [INFO] multi_scalper: [XLMUSDT] analysing…
+2026-08-21 23:15:41,003 [INFO] multi_scalper: [LINKUSDT] skip: Buy conflict trend=HOLD mom=-0.211
+2026-08-21 23:15:41,837 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (50.4%)
+2026-08-21 23:17:32,239 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 23:17:32,240 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:17:32,241 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 23:17:32,245 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 23:17:32,261 [INFO] multi_scalper: [DRY-RUN XLMUSDT] analysing…
+2026-08-21 23:17:47,089 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (45.4%)
+2026-08-21 23:17:47,163 [INFO] multi_scalper: [DRY-RUN LINKUSDT] Sell qty=0.5 ($6.19) TP=12.363 SL=12.400
+2026-08-21 23:17:47,163 [INFO] multi_scalper: [DRY-RUN LINKUSDT] submitting smart order…
+2026-08-21 23:17:48,716 [INFO] multi_scalper: [DRY-RUN LINKUSDT] result: {"success": true, "dry_run": true, "symbol": "LINKUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 0.5, "entry_price": 12.372, "risk_entry_price": 12.365814, "stop_loss": 12.4, "take_profit": 12.363, "expected_profit_usdt": 0.0045, "expected_loss_usdt": 0.014, "expected_profit_net_usdt": -0.0001, "expected_loss_net_usdt": 0.0239, "risk_amount_usdt": 0.1, "rr_ratio": 2.0, "rr_realized": 0.006, "notional_usdt": 6.186, "balance": 10.0, "leverage": 50, "atr": 0.22059456, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "LINKUSDT", "side": "Sell", "orderType": "Market", "qty": "0.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "12.400", "takeProfit": "12.363"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math."], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-08-21 23:18:26,722 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 23:18:26,724 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:18:26,724 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 23:18:26,727 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 23:18:26,731 [INFO] multi_scalper: [DRY-RUN XLMUSDT] analysing…
+2026-08-21 23:18:41,220 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (52.9%)
+2026-08-21 23:18:41,375 [INFO] multi_scalper: [DRY-RUN LINKUSDT] Sell qty=0.5 ($6.17) TP=12.329 SL=12.374
+2026-08-21 23:18:41,376 [INFO] multi_scalper: [DRY-RUN LINKUSDT] submitting smart order…
+2026-08-21 23:18:43,053 [INFO] multi_scalper: [DRY-RUN LINKUSDT] result: {"success": true, "dry_run": true, "symbol": "LINKUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 0.5, "entry_price": 12.339, "risk_entry_price": 12.332830500000002, "stop_loss": 12.374, "take_profit": 12.329, "expected_profit_usdt": 0.005, "expected_loss_usdt": 0.0175, "expected_profit_net_usdt": 0.0004, "expected_loss_net_usdt": 0.0274, "risk_amount_usdt": 0.1, "rr_ratio": 2.0, "rr_realized": 0.014, "notional_usdt": 6.1695, "balance": 10.0, "leverage": 50, "atr": 0.22059456, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "LINKUSDT", "side": "Sell", "orderType": "Market", "qty": "0.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "12.374", "takeProfit": "12.329"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math."], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-08-21 23:20:24,845 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 23:20:24,846 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:20:24,846 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 23:20:24,848 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 23:20:24,859 [INFO] multi_scalper: [DRY-RUN XLMUSDT] analysing…
+2026-08-21 23:20:27,140 [INFO] multi_scalper: Wallet USDT equity: $1.67
+2026-08-21 23:20:28,933 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:20:28,934 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:20:28,934 [INFO] multi_scalper: Margin budget $1.17 (equity $1.67 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 2
+2026-08-21 23:20:28,936 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-08-21 23:20:28,943 [INFO] multi_scalper: [XLMUSDT] analysing…
+2026-08-21 23:20:38,157 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (49.9%)
+2026-08-21 23:20:39,001 [INFO] multi_scalper: [LINKUSDT] skip: neutral book (51.2%)
+2026-08-21 23:20:41,504 [INFO] multi_scalper: [LINKUSDT] Sell qty=0.5 ($6.17) TP=12.321 SL=12.425
+2026-08-21 23:20:41,505 [INFO] multi_scalper: [LINKUSDT] submitting smart order…
+2026-08-21 23:20:42,258 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (48.0%)
+2026-08-21 23:20:45,021 [INFO] multi_scalper: [LINKUSDT] result: {"success": true, "dry_run": false, "symbol": "LINKUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 0.5, "entry_price": 12.345, "risk_entry_price": 12.3388275, "stop_loss": 12.425, "take_profit": 12.321, "expected_profit_usdt": 0.012, "expected_loss_usdt": 0.04, "expected_profit_net_usdt": 0.0074, "expected_loss_net_usdt": 0.0499, "risk_amount_usdt": 0.0167, "rr_ratio": 2.0, "rr_realized": 0.148, "notional_usdt": 6.1725, "balance": 1.673, "leverage": 20, "atr": 0.22252313, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "LINKUSDT", "side": "Sell", "orderType": "Market", "qty": "0.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "12.425", "takeProfit": "12.321"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "136cdc27-7755-43f8-b1b2-092161566382", "order_link_id": "", "data": {"orderId": "136cdc27-7755-43f8-b1b2-092161566382", "orderLinkId": ""}}
+2026-08-21 23:21:27,981 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 23:21:27,982 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:21:27,982 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 23:21:27,994 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 23:21:28,021 [INFO] multi_scalper: [DRY-RUN XLMUSDT] analysing…
+2026-08-21 23:21:46,723 [INFO] multi_scalper: [LINKUSDT] skip: Sell conflict trend=HOLD mom=+0.801
+2026-08-21 23:21:47,890 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (49.9%)
+2026-08-21 23:22:16,831 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 23:22:16,832 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:22:16,833 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 23:22:16,835 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 23:22:16,846 [INFO] multi_scalper: [DRY-RUN XLMUSDT] analysing…
+2026-08-21 23:22:30,929 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (47.1%)
+2026-08-21 23:22:31,500 [INFO] multi_scalper: [DRY-RUN LINKUSDT] Sell qty=0.5 ($6.16) TP=12.277 SL=12.350
+2026-08-21 23:22:31,501 [INFO] multi_scalper: [DRY-RUN LINKUSDT] submitting smart order…
+2026-08-21 23:22:33,806 [INFO] multi_scalper: [DRY-RUN LINKUSDT] result: {"success": true, "dry_run": true, "symbol": "LINKUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 0.5, "entry_price": 12.323, "risk_entry_price": 12.316838500000001, "stop_loss": 12.35, "take_profit": 12.277, "expected_profit_usdt": 0.023, "expected_loss_usdt": 0.0135, "expected_profit_net_usdt": 0.0184, "expected_loss_net_usdt": 0.0234, "risk_amount_usdt": 0.1, "rr_ratio": 2.0, "rr_realized": 0.787, "notional_usdt": 6.1615, "balance": 10.0, "leverage": 50, "atr": 0.22252313, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "LINKUSDT", "side": "Sell", "orderType": "Market", "qty": "0.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "12.350", "takeProfit": "12.277"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math."], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-08-21 23:23:34,715 [INFO] multi_scalper: Wallet USDT equity: $1.68
+2026-08-21 23:23:36,256 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:23:36,257 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:23:36,257 [INFO] multi_scalper: Margin budget $1.17 (equity $1.68 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 1
+2026-08-21 23:23:36,260 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-08-21 23:23:49,651 [INFO] multi_scalper: [LINKUSDT] Sell qty=0.5 ($6.19) TP=12.264 SL=12.476
+2026-08-21 23:23:49,654 [INFO] multi_scalper: [LINKUSDT] submitting smart order…
+2026-08-21 23:23:54,648 [INFO] multi_scalper: [LINKUSDT] result: {"success": true, "dry_run": false, "symbol": "LINKUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 0.5, "entry_price": 12.374, "risk_entry_price": 12.367813000000002, "stop_loss": 12.476, "take_profit": 12.264, "expected_profit_usdt": 0.055, "expected_loss_usdt": 0.051, "expected_profit_net_usdt": 0.0504, "expected_loss_net_usdt": 0.0609, "risk_amount_usdt": 0.0168, "rr_ratio": 2.0, "rr_realized": 0.827, "notional_usdt": 6.187, "balance": 1.6778, "leverage": 20, "atr": 0.22252313, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "LINKUSDT", "side": "Sell", "orderType": "Market", "qty": "0.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "12.476", "takeProfit": "12.264"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "6ff9f6b4-84e0-479b-b098-34e8f12c5f49", "order_link_id": "", "data": {"orderId": "6ff9f6b4-84e0-479b-b098-34e8f12c5f49", "orderLinkId": ""}}
+2026-08-21 23:24:48,158 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 23:24:48,166 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:24:48,167 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 23:24:48,169 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 23:24:48,172 [INFO] multi_scalper: [DRY-RUN XLMUSDT] analysing…
+2026-08-21 23:25:05,993 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (52.3%)
+2026-08-21 23:25:06,993 [ERROR] multi_scalper: [DRY-RUN LINKUSDT] exception: name 'entry_calc' is not defined
+Traceback (most recent call last):
+  File "/data/data/com.termux/files/home/.config/aichat/llm-functions/tools/pyrm_scalp_tool.py", line 1178, in process_symbol
+    round_trip_fee_per_unit = entry_calc * (_TAKER_FEE + _MAKER_FEE)
+                              ^^^^^^^^^^
+NameError: name 'entry_calc' is not defined. Did you mean: 'entry_price'?
+2026-08-21 23:25:32,411 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 23:25:32,413 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:25:32,413 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 23:25:32,416 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 23:25:32,431 [INFO] multi_scalper: [DRY-RUN XLMUSDT] analysing…
+2026-08-21 23:25:44,802 [INFO] multi_scalper: [XLMUSDT] skip: neutral book (47.8%)
+2026-08-21 23:25:45,005 [INFO] multi_scalper: [DRY-RUN LINKUSDT] Sell qty=0.5 ($6.16) TP=12.272 SL=12.363
+2026-08-21 23:25:45,007 [INFO] multi_scalper: [DRY-RUN LINKUSDT] submitting smart order…
+2026-08-21 23:25:46,664 [INFO] multi_scalper: [DRY-RUN LINKUSDT] result: {"success": true, "dry_run": true, "symbol": "LINKUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 0.5, "entry_price": 12.318, "risk_entry_price": 12.311841000000001, "stop_loss": 12.363, "take_profit": 12.272, "expected_profit_usdt": 0.023, "expected_loss_usdt": 0.0225, "expected_profit_net_usdt": 0.0184, "expected_loss_net_usdt": 0.0324, "risk_amount_usdt": 0.1, "rr_ratio": 2.0, "rr_realized": 0.568, "notional_usdt": 6.159, "balance": 10.0, "leverage": 50, "atr": 0.22252313, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "LINKUSDT", "side": "Sell", "orderType": "Market", "qty": "0.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "12.363", "takeProfit": "12.272"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math."], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-08-21 23:25:55,845 [INFO] multi_scalper: Wallet USDT equity: $1.71
+2026-08-21 23:25:56,259 [INFO] multi_scalper: [Position Manager] 1 open position(s)
+2026-08-21 23:25:56,260 [INFO] multi_scalper: [LINKUSDT] Sell size=0.5000 entry=12.374000 netPnL=$+0.0334 fees=$0.0046
+2026-08-21 23:25:56,757 [INFO] multi_scalper: [LINKUSDT] Trailing SL ($0.0334 net PnL) → Moving SL to 12.321
+2026-08-21 23:25:57,237 [INFO] multi_scalper: [LINKUSDT] SL → breakeven OK
+2026-08-21 23:25:58,443 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0334 total=$+0.0334 open=1 ['LINKUSDT']
+2026-08-21 23:25:58,443 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:25:58,447 [INFO] multi_scalper: Margin budget $0.89 (equity $1.71 − open≈$0.31) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 3
+2026-08-21 23:25:58,461 [INFO] multi_scalper: [XLMUSDT] analysing…
+2026-08-21 23:25:58,486 [INFO] multi_scalper: [XRPUSDT] analysing…
+2026-08-21 23:25:58,500 [INFO] multi_scalper: [DOGEUSDT] analysing…
+2026-08-21 23:26:11,192 [INFO] multi_scalper: [XLMUSDT] Sell qty=23.4 ($5.05) TP=0.2135 SL=0.2180
+2026-08-21 23:26:11,193 [INFO] multi_scalper: [XLMUSDT] submitting smart order…
+2026-08-21 23:26:11,644 [INFO] multi_scalper: [XRPUSDT] skip: Buy conflict trend=LONG mom=-0.975
+2026-08-21 23:26:12,594 [INFO] multi_scalper: [DOGEUSDT] Sell qty=57.9 ($5.55) TP=0.09492 SL=0.09674
+2026-08-21 23:26:12,595 [INFO] multi_scalper: [DOGEUSDT] submitting smart order…
+2026-08-21 23:26:14,490 [INFO] multi_scalper: [XLMUSDT] result: {"success": false, "error": "Qty invalid (Invalid parameter \u2014 check qty/price/tick size.)", "retCode": 10001, "order_params": {"category": "linear", "symbol": "XLMUSDT", "side": "Sell", "orderType": "Market", "qty": "23.4", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.2180", "takeProfit": "0.2135"}, "warnings": [], "symbol": "XLMUSDT", "side": "Sell", "qty": 23.4, "entry_price": 0.2155, "stop_loss": 0.218, "take_profit": 0.2135, "notional_usdt": 5.0427, "version": "2.3.0-ASCENDED"}
+2026-08-21 23:26:14,491 [INFO] multi_scalper: [XLMUSDT] skip: order submission rejected: order rejected
+2026-08-21 23:26:15,770 [INFO] multi_scalper: [DOGEUSDT] result: {"success": false, "error": "Qty invalid (Invalid parameter \u2014 check qty/price/tick size.)", "retCode": 10001, "order_params": {"category": "linear", "symbol": "DOGEUSDT", "side": "Sell", "orderType": "Market", "qty": "57.9", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.09674", "takeProfit": "0.09492"}, "warnings": [], "symbol": "DOGEUSDT", "side": "Sell", "qty": 57.9, "entry_price": 0.09601, "stop_loss": 0.09674, "take_profit": 0.09492, "notional_usdt": 5.559, "version": "2.3.0-ASCENDED"}
+2026-08-21 23:26:15,771 [INFO] multi_scalper: [DOGEUSDT] skip: order submission rejected: order rejected
+2026-08-21 23:31:24,583 [DEBUG] multi_scalper: Verbose logging enabled.
+2026-08-21 23:31:24,627 [INFO] multi_scalper: DRY-RUN mode — balance fallback $2.00
+2026-08-21 23:31:24,679 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:31:24,682 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 2
+2026-08-21 23:31:24,697 [INFO] multi_scalper: [DRY-RUN LINKUSDT] analysing…
+2026-08-21 23:31:24,710 [INFO] multi_scalper: [DRY-RUN XLMUSDT] analysing…
+2026-08-21 23:31:24,796 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (2): api.bybit.com:443
+2026-08-21 23:31:24,803 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:26,948 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT HTTP/1.1" 200 None
+2026-08-21 23:31:26,963 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=LINKUSDT → HTTP 200 (2262 ms)
+2026-08-21 23:31:27,009 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:27,046 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/orderbook?category=linear&limit=25&symbol=XLMUSDT HTTP/1.1" 200 None
+2026-08-21 23:31:27,130 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/orderbook?category=linear&limit=25&symbol=XLMUSDT → HTTP 200 (2418 ms)
+2026-08-21 23:31:27,192 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:28,435 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/kline?category=linear&symbol=LINKUSDT&interval=15&limit=300 HTTP/1.1" 200 None
+2026-08-21 23:31:28,619 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/kline?category=linear&symbol=XLMUSDT&interval=15&limit=300 HTTP/1.1" 200 None
+2026-08-21 23:31:31,134 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:31,170 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:32,701 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/orderbook?category=linear&symbol=LINKUSDT&limit=50 HTTP/1.1" 200 None
+2026-08-21 23:31:32,910 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:33,023 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/orderbook?category=linear&symbol=XLMUSDT&limit=50 HTTP/1.1" 200 None
+2026-08-21 23:31:33,046 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:35,366 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/recent-trade?category=linear&symbol=LINKUSDT&limit=200 HTTP/1.1" 200 39622
+2026-08-21 23:31:36,458 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/recent-trade?category=linear&symbol=XLMUSDT&limit=200 HTTP/1.1" 200 39510
+2026-08-21 23:31:37,765 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:37,792 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:39,506 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/tickers?category=linear&symbol=LINKUSDT HTTP/1.1" 200 852
+2026-08-21 23:31:39,523 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:39,904 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/tickers?category=linear&symbol=XLMUSDT HTTP/1.1" 200 860
+2026-08-21 23:31:39,922 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:41,738 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/open-interest?category=linear&symbol=LINKUSDT&intervalTime=5min&limit=30 HTTP/1.1" 200 3085
+2026-08-21 23:31:41,752 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:42,060 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/open-interest?category=linear&symbol=XLMUSDT&intervalTime=5min&limit=30 HTTP/1.1" 200 3124
+2026-08-21 23:31:42,084 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): api.bybit.com:443
+2026-08-21 23:31:43,745 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/account-ratio?category=linear&symbol=LINKUSDT&period=5min&limit=20 HTTP/1.1" 200 1954
+2026-08-21 23:31:43,803 [DEBUG] multi_scalper: [DRY-RUN LINKUSDT] exp_imb=0.601 trend=LONG mom=-0.370 spread=0.8bps
+2026-08-21 23:31:43,869 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/account-ratio?category=linear&symbol=XLMUSDT&period=5min&limit=20 HTTP/1.1" 200 None
+2026-08-21 23:31:43,891 [DEBUG] multi_scalper: [DRY-RUN XLMUSDT] exp_imb=0.446 trend=LONG mom=-1.000 spread=4.6bps
+2026-08-21 23:31:44,359 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/instruments-info?category=linear&limit=1000&symbol=LINKUSDT HTTP/1.1" 200 973
+2026-08-21 23:31:44,361 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000&symbol=LINKUSDT → HTTP 200 (555 ms)
+2026-08-21 23:31:44,371 [DEBUG] micro_profit: Inputs: symbol=LINKUSDT side=buy qty=0.5 lev=50 target=0.02 mk=0.0002 tk=0.00055 fr=0.0001 slippage=0.0001
+2026-08-21 23:31:44,377 [DEBUG] micro_profit: Solved exit_p=12.390971 for target=0.0200
+2026-08-21 23:31:44,391 [INFO] multi_scalper: [DRY-RUN LINKUSDT] Buy qty=0.5 ($6.17) TP=12.388 SL=12.297
+2026-08-21 23:31:44,392 [INFO] multi_scalper: [DRY-RUN LINKUSDT] submitting smart order…
+2026-08-21 23:31:44,519 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/instruments-info?category=linear&limit=1000&symbol=XLMUSDT HTTP/1.1" 200 969
+2026-08-21 23:31:44,521 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000&symbol=XLMUSDT → HTTP 200 (628 ms)
+2026-08-21 23:31:44,527 [DEBUG] micro_profit: Inputs: symbol=XLMUSDT side=sell qty=23.2 lev=50 target=0.02 mk=0.0002 tk=0.00055 fr=0.0001 slippage=0.0001
+2026-08-21 23:31:44,528 [DEBUG] micro_profit: Solved exit_p=0.215910 for target=0.0200
+2026-08-21 23:31:44,541 [INFO] multi_scalper: [DRY-RUN XLMUSDT] Sell qty=23.2 ($5.03) TP=0.2160 SL=0.2180
+2026-08-21 23:31:44,541 [INFO] multi_scalper: [DRY-RUN XLMUSDT] submitting smart order…
+2026-08-21 23:31:44,990 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/instruments-info?category=linear&limit=1000&symbol=LINKUSDT HTTP/1.1" 200 973
+2026-08-21 23:31:44,992 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000&symbol=LINKUSDT → HTTP 200 (599 ms)
+2026-08-21 23:31:45,114 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/instruments-info?category=linear&limit=1000&symbol=XLMUSDT HTTP/1.1" 200 969
+2026-08-21 23:31:45,116 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000&symbol=XLMUSDT → HTTP 200 (573 ms)
+2026-08-21 23:31:45,490 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/tickers?category=linear&symbol=LINKUSDT HTTP/1.1" 200 854
+2026-08-21 23:31:45,492 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/tickers?category=linear&symbol=LINKUSDT → HTTP 200 (498 ms)
+2026-08-21 23:31:45,613 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/tickers?category=linear&symbol=XLMUSDT HTTP/1.1" 200 860
+2026-08-21 23:31:45,615 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/tickers?category=linear&symbol=XLMUSDT → HTTP 200 (494 ms)
+2026-08-21 23:31:46,254 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/kline?category=linear&interval=60&limit=100&symbol=LINKUSDT HTTP/1.1" 200 None
+2026-08-21 23:31:46,256 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/kline?category=linear&interval=60&limit=100&symbol=LINKUSDT → HTTP 200 (763 ms)
+2026-08-21 23:31:46,263 [INFO] multi_scalper: [DRY-RUN LINKUSDT] result: {"success": true, "dry_run": true, "symbol": "LINKUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.5, "entry_price": 12.354, "risk_entry_price": 12.360176999999998, "stop_loss": 12.297, "take_profit": 12.388, "expected_profit_usdt": 0.017, "expected_loss_usdt": 0.0285, "expected_profit_net_usdt": 0.0124, "expected_loss_net_usdt": 0.0384, "risk_amount_usdt": 0.1, "rr_ratio": 2.0, "rr_realized": 0.322, "notional_usdt": 6.177, "balance": 10.0, "leverage": 50, "atr": 0.22252313, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "LINKUSDT", "side": "Buy", "orderType": "Market", "qty": "0.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "12.297", "takeProfit": "12.388"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math."], "version": "2.3.0-ASCENDED", "note": "Dry run active. Order was NOT submitted to exchange."}
+2026-08-21 23:31:46,519 [DEBUG] urllib3.connectionpool: https://api.bybit.com:443 "GET /v5/market/kline?category=linear&interval=60&limit=100&symbol=XLMUSDT HTTP/1.1" 200 None
+2026-08-21 23:31:46,521 [DEBUG] bybit.core: GET https://api.bybit.com/v5/market/kline?category=linear&interval=60&limit=100&symbol=XLMUSDT → HTTP 200 (905 ms)
+2026-08-21 23:31:46,523 [ERROR] multi_scalper: [DRY-RUN XLMUSDT] exception: [Errno 32] Broken pipe
+Traceback (most recent call last):
+  File "/data/data/com.termux/files/home/.config/aichat/llm-functions/tools/pyrm_scalp_tool.py", line 1288, in process_symbol
+    res = bybit_smart_order.run(**order_kwargs)
+  File "/data/data/com.termux/files/home/.config/aichat/llm-functions/tools/bybit_smart_order.py", line 1534, in run
+    write_llm_output(result)
+    ~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/data/data/com.termux/files/home/.config/aichat/llm-functions/tools/bybit_smart_order.py", line 1437, in write_llm_output
+    sys.stdout.flush()
+    ~~~~~~~~~~~~~~~~^^
+BrokenPipeError: [Errno 32] Broken pipe
+2026-08-21 23:32:45,757 [INFO] multi_scalper: Wallet USDT equity: $1.70
+2026-08-21 23:32:47,019 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:32:47,019 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:32:47,020 [INFO] multi_scalper: Margin budget $1.19 (equity $1.70 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 1
+2026-08-21 23:32:47,033 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-08-21 23:32:57,738 [INFO] multi_scalper: [ADAUSDT] Sell qty=20.1 ($5.05) TP=0.2484 SL=0.2536
+2026-08-21 23:32:57,738 [INFO] multi_scalper: [ADAUSDT] submitting smart order…
+2026-08-21 23:33:00,729 [INFO] multi_scalper: [ADAUSDT] result: {"success": false, "error": "Qty invalid (Invalid parameter \u2014 check qty/price/tick size.)", "retCode": 10001, "order_params": {"category": "linear", "symbol": "ADAUSDT", "side": "Sell", "orderType": "Market", "qty": "20.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.2536", "takeProfit": "0.2484"}, "warnings": [], "symbol": "ADAUSDT", "side": "Sell", "qty": 20.1, "entry_price": 0.2514, "stop_loss": 0.2536, "take_profit": 0.2484, "notional_usdt": 5.0531, "version": "2.3.0-ASCENDED"}
+2026-08-21 23:33:00,730 [INFO] multi_scalper: [ADAUSDT] skip: order submission rejected: order rejected
+2026-08-21 23:33:17,227 [INFO] multi_scalper: Loop mode active — starting scalper daemon (cycle interval: 30s).
+2026-08-21 23:33:17,232 [INFO] multi_scalper: --- Cycle #1 (spread_bps=15.0) ---
+2026-08-21 23:33:17,236 [INFO] multi_scalper: Wallet USDT equity: $2.00
+2026-08-21 23:33:17,247 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:33:17,257 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:33:17,261 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 2
+2026-08-21 23:33:17,285 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-08-21 23:33:17,287 [WARNING] multi_scalper: [LINKUSDT] set leverage 20x failed: Missing BYBIT_API_KEY / BYBIT_API_SECRET in environment
+2026-08-21 23:33:17,288 [INFO] multi_scalper: [LINKUSDT] skip: leverage config failed
+2026-08-21 23:33:17,288 [INFO] multi_scalper: [XLMUSDT] analysing…
+2026-08-21 23:33:17,289 [WARNING] multi_scalper: [XLMUSDT] set leverage 20x failed: Missing BYBIT_API_KEY / BYBIT_API_SECRET in environment
+2026-08-21 23:33:17,289 [INFO] multi_scalper: [XLMUSDT] skip: leverage config failed
+2026-08-21 23:33:17,297 [INFO] multi_scalper: Cycle #1 complete. Next cycle in 30s.
+2026-08-21 23:33:20,950 [INFO] multi_scalper: Wallet USDT equity: $1.70
+2026-08-21 23:33:22,399 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:33:22,405 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:33:22,406 [INFO] multi_scalper: Margin budget $1.19 (equity $1.70 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 1
+2026-08-21 23:33:22,409 [INFO] multi_scalper: [XLMUSDT] analysing…
+2026-08-21 23:33:33,575 [INFO] multi_scalper: [XLMUSDT] Sell qty=23.1 ($5.03) TP=0.2156 SL=0.2201
+2026-08-21 23:33:33,576 [INFO] multi_scalper: [XLMUSDT] submitting smart order…
+2026-08-21 23:33:36,686 [INFO] multi_scalper: [XLMUSDT] result: {"success": false, "error": "Qty invalid (Invalid parameter \u2014 check qty/price/tick size.)", "retCode": 10001, "order_params": {"category": "linear", "symbol": "XLMUSDT", "side": "Sell", "orderType": "Market", "qty": "23.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.2201", "takeProfit": "0.2156"}, "warnings": [], "symbol": "XLMUSDT", "side": "Sell", "qty": 23.1, "entry_price": 0.2182, "stop_loss": 0.2201, "take_profit": 0.2156, "notional_usdt": 5.0404, "version": "2.3.0-ASCENDED"}
+2026-08-21 23:33:36,686 [INFO] multi_scalper: [XLMUSDT] skip: order submission rejected: order rejected
+2026-08-21 23:33:47,305 [INFO] multi_scalper: --- Cycle #2 (spread_bps=15.0) ---
+2026-08-21 23:33:47,307 [INFO] multi_scalper: Wallet USDT equity: $2.00
+2026-08-21 23:33:47,330 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:33:47,331 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:33:47,332 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 2
+2026-08-21 23:33:47,359 [INFO] multi_scalper: [LINKUSDT] analysing…
+2026-08-21 23:33:47,360 [WARNING] multi_scalper: [LINKUSDT] set leverage 20x failed: Missing BYBIT_API_KEY / BYBIT_API_SECRET in environment
+2026-08-21 23:33:47,360 [INFO] multi_scalper: [LINKUSDT] skip: leverage config failed
+2026-08-21 23:33:47,363 [INFO] multi_scalper: [XLMUSDT] analysing…
+2026-08-21 23:33:47,363 [WARNING] multi_scalper: [XLMUSDT] set leverage 20x failed: Missing BYBIT_API_KEY / BYBIT_API_SECRET in environment
+2026-08-21 23:33:47,370 [INFO] multi_scalper: [XLMUSDT] skip: leverage config failed
+2026-08-21 23:33:47,377 [INFO] multi_scalper: Cycle #2 complete. Next cycle in 30s.
+2026-08-21 23:34:04,977 [INFO] multi_scalper: Wallet USDT equity: $1.70
+2026-08-21 23:34:06,265 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:34:06,269 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:34:06,270 [INFO] multi_scalper: Margin budget $1.19 (equity $1.70 − open≈$0.00) | target PnL $0.0300 | lev 20x | notional $5.05 | symbols 2
+2026-08-21 23:34:06,272 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-21 23:34:06,280 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-08-21 23:34:19,159 [INFO] multi_scalper: [SOLUSDT] Buy qty=0.1 ($9.94) TP=99.74 SL=99.05
+2026-08-21 23:34:19,159 [INFO] multi_scalper: [SOLUSDT] submitting smart order…
+2026-08-21 23:34:19,297 [INFO] multi_scalper: [ADAUSDT] skip: neutral book (51.5%)
+2026-08-21 23:34:24,359 [INFO] multi_scalper: [SOLUSDT] result: {"success": true, "dry_run": false, "symbol": "SOLUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.1, "entry_price": 99.48, "risk_entry_price": 99.52974, "stop_loss": 99.05, "take_profit": 99.74, "expected_profit_usdt": 0.026, "expected_loss_usdt": 0.043, "expected_profit_net_usdt": 0.0185, "expected_loss_net_usdt": 0.0589, "risk_amount_usdt": 0.017, "rr_ratio": 2.0, "rr_realized": 0.315, "notional_usdt": 9.948, "balance": 1.697, "leverage": 20, "atr": 1.58596924, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SOLUSDT", "side": "Buy", "orderType": "Market", "qty": "0.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "99.05", "takeProfit": "99.74"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "518bdab4-2179-47db-b74b-a7a61c6b66d5", "order_link_id": "", "data": {"orderId": "518bdab4-2179-47db-b74b-a7a61c6b66d5", "orderLinkId": ""}}
+2026-08-21 23:36:48,115 [INFO] multi_scalper: Wallet USDT equity: $1.71
+2026-08-21 23:36:49,755 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:36:49,756 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:36:49,757 [INFO] multi_scalper: Margin budget $1.19 (equity $1.71 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 1
+2026-08-21 23:36:49,759 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-21 23:37:00,999 [INFO] multi_scalper: [SOLUSDT] Sell qty=0.1 ($9.99) TP=99.34 SL=100.43
+2026-08-21 23:37:01,000 [INFO] multi_scalper: [SOLUSDT] submitting smart order…
+2026-08-21 23:37:04,167 [INFO] multi_scalper: [SOLUSDT] result: {"success": true, "dry_run": false, "symbol": "SOLUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 0.1, "entry_price": 99.87, "risk_entry_price": 99.82006500000001, "stop_loss": 100.43, "take_profit": 99.34, "expected_profit_usdt": 0.053, "expected_loss_usdt": 0.056, "expected_profit_net_usdt": 0.0455, "expected_loss_net_usdt": 0.072, "risk_amount_usdt": 0.0171, "rr_ratio": 2.0, "rr_realized": 0.632, "notional_usdt": 9.987, "balance": 1.705, "leverage": 20, "atr": 1.62025496, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SOLUSDT", "side": "Sell", "orderType": "Market", "qty": "0.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "100.43", "takeProfit": "99.34"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "ff34d3b0-a6fa-4164-99fb-4941d5aa8785", "order_link_id": "", "data": {"orderId": "ff34d3b0-a6fa-4164-99fb-4941d5aa8785", "orderLinkId": ""}}
+2026-08-21 23:37:38,469 [INFO] multi_scalper: Wallet USDT equity: $1.68
+2026-08-21 23:37:38,882 [INFO] multi_scalper: [Position Manager] 1 open position(s)
+2026-08-21 23:37:38,883 [INFO] multi_scalper: [SOLUSDT] Sell size=0.1000 entry=99.870000 netPnL=$-0.0235 fees=$0.0075
+2026-08-21 23:37:39,722 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$-0.0235 total=$-0.0235 open=1 ['SOLUSDT']
+2026-08-21 23:37:39,723 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:37:39,723 [INFO] multi_scalper: Margin budget $0.68 (equity $1.68 − open≈$0.50) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 1
+2026-08-21 23:37:39,724 [INFO] multi_scalper: No runnable symbols this cycle.
+2026-08-21 23:37:57,428 [INFO] multi_scalper: Wallet USDT equity: $1.66
+2026-08-21 23:37:58,811 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-21 23:37:58,811 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:37:58,813 [INFO] multi_scalper: Margin budget $1.16 (equity $1.66 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 1
+2026-08-21 23:37:58,827 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-21 23:38:09,005 [INFO] multi_scalper: [SOLUSDT] Buy qty=0.1 ($10.06) TP=101.19 SL=100.09
+2026-08-21 23:38:09,006 [INFO] multi_scalper: [SOLUSDT] submitting smart order…
+2026-08-21 23:38:12,052 [INFO] multi_scalper: [SOLUSDT] result: {"success": true, "dry_run": false, "symbol": "SOLUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.1, "entry_price": 100.53, "risk_entry_price": 100.580265, "stop_loss": 100.09, "take_profit": 101.19, "expected_profit_usdt": 0.066, "expected_loss_usdt": 0.044, "expected_profit_net_usdt": 0.0584, "expected_loss_net_usdt": 0.0601, "risk_amount_usdt": 0.0166, "rr_ratio": 2.0, "rr_realized": 0.973, "notional_usdt": 10.053, "balance": 1.663, "leverage": 20, "atr": 1.66739781, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SOLUSDT", "side": "Buy", "orderType": "Market", "qty": "0.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "100.09", "takeProfit": "101.19"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "dcda7d0f-63af-4ea2-96d9-b0010668032f", "order_link_id": "", "data": {"orderId": "dcda7d0f-63af-4ea2-96d9-b0010668032f", "orderLinkId": ""}}
+2026-08-21 23:38:23,897 [INFO] multi_scalper: Wallet USDT equity: $1.65
+2026-08-21 23:38:24,295 [INFO] multi_scalper: [Position Manager] 1 open position(s)
+2026-08-21 23:38:24,295 [INFO] multi_scalper: [SOLUSDT] Buy size=0.1000 entry=100.520000 netPnL=$-0.0128 fees=$0.0075
+2026-08-21 23:38:25,234 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$-0.0128 total=$-0.0128 open=1 ['SOLUSDT']
+2026-08-21 23:38:25,237 [INFO] multi_scalper: notional capped → $5.05
+2026-08-21 23:38:25,239 [INFO] multi_scalper: Margin budget $0.65 (equity $1.65 − open≈$0.50) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 1
+2026-08-21 23:38:25,244 [INFO] multi_scalper: No runnable symbols this cycle.
+2026-08-22 00:41:06,786 [INFO] multi_scalper: Wallet USDT equity: $1.66
+2026-08-22 00:41:07,955 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-22 00:41:07,955 [INFO] multi_scalper: notional capped → $5.05
+2026-08-22 00:41:07,956 [INFO] multi_scalper: Margin budget $1.16 (equity $1.66 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 1
+2026-08-22 00:41:07,957 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-22 00:41:16,351 [INFO] multi_scalper: [SOLUSDT] Buy qty=0.1 ($9.36) TP=94.19 SL=93.10
+2026-08-22 00:41:16,352 [INFO] multi_scalper: [SOLUSDT] submitting smart order…
+2026-08-22 00:41:18,908 [INFO] multi_scalper: [SOLUSDT] result: {"success": true, "dry_run": false, "symbol": "SOLUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.1, "entry_price": 93.64, "risk_entry_price": 93.68682, "stop_loss": 93.1, "take_profit": 94.19, "expected_profit_usdt": 0.055, "expected_loss_usdt": 0.054, "expected_profit_net_usdt": 0.048, "expected_loss_net_usdt": 0.069, "risk_amount_usdt": 0.0166, "rr_ratio": 2.0, "rr_realized": 0.696, "notional_usdt": 9.364, "balance": 1.6609, "leverage": 20, "atr": 2.56977278, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SOLUSDT", "side": "Buy", "orderType": "Market", "qty": "0.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "93.10", "takeProfit": "94.19"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "43e8badf-1bbb-4564-b544-49e1075b54ab", "order_link_id": "", "data": {"orderId": "43e8badf-1bbb-4564-b544-49e1075b54ab", "orderLinkId": ""}}
+2026-08-22 01:53:04,470 [INFO] multi_scalper: Wallet USDT equity: $2.00
+2026-08-22 01:53:05,795 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-22 01:53:05,795 [INFO] multi_scalper: notional capped → $5.05
+2026-08-22 01:53:05,796 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0500 | lev 20x | notional $5.05 | symbols 1
+2026-08-22 01:53:05,797 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-22 01:53:06,499 [WARNING] multi_scalper: [SOLUSDT] set leverage 20x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1787381587946],server_timestamp[1787381586543],recv_window[20000]
+2026-08-22 01:53:06,500 [INFO] multi_scalper: [SOLUSDT] skip: leverage config failed
+2026-08-22 01:53:16,883 [INFO] multi_scalper: Wallet USDT equity: $1.71
+2026-08-22 01:53:18,292 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-22 01:53:18,292 [INFO] multi_scalper: notional capped → $5.05
+2026-08-22 01:53:18,293 [INFO] multi_scalper: Margin budget $1.20 (equity $1.71 − open≈$0.00) | target PnL $0.0500 | lev 10x | notional $5.05 | symbols 1
+2026-08-22 01:53:18,295 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-22 01:53:30,359 [INFO] multi_scalper: [SOLUSDT] skip: neutral book (51.8%)
+2026-08-22 01:56:06,195 [INFO] multi_scalper: Wallet USDT equity: $1.71
+2026-08-22 01:56:07,517 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-22 01:56:07,517 [INFO] multi_scalper: notional capped → $5.05
+2026-08-22 01:56:07,518 [INFO] multi_scalper: Margin budget $1.20 (equity $1.71 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 5
+2026-08-22 01:56:07,520 [INFO] multi_scalper: [BTCUSDT] analysing…
+2026-08-22 01:56:07,523 [INFO] multi_scalper: [ETHUSDT] analysing…
+2026-08-22 01:56:07,528 [INFO] multi_scalper: [BNBUSDT] analysing…
+2026-08-22 01:56:07,538 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-08-22 01:56:07,547 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-22 01:56:20,322 [INFO] multi_scalper: [BTCUSDT] skip: margin $1.55 > 70% equity $1.20
+2026-08-22 01:56:22,884 [INFO] multi_scalper: [ETHUSDT] Buy qty=0.01 ($24.34) TP=2438.03 SL=2431.72
+2026-08-22 01:56:22,884 [INFO] multi_scalper: [ETHUSDT] submitting smart order…
+2026-08-22 01:56:23,586 [INFO] multi_scalper: [SOLUSDT] Buy qty=0.1 ($9.41) TP=94.41 SL=93.92
+2026-08-22 01:56:23,586 [INFO] multi_scalper: [SOLUSDT] submitting smart order…
+2026-08-22 01:56:23,826 [INFO] multi_scalper: [ADAUSDT] Sell qty=21.6 ($5.03) TP=0.2318 SL=0.2339
+2026-08-22 01:56:23,827 [INFO] multi_scalper: [ADAUSDT] submitting smart order…
+2026-08-22 01:56:23,986 [INFO] multi_scalper: [BNBUSDT] Buy qty=0.01 ($6.99) TP=701.5 SL=696.8
+2026-08-22 01:56:23,986 [INFO] multi_scalper: [BNBUSDT] submitting smart order…
+2026-08-22 01:56:26,210 [INFO] multi_scalper: [ETHUSDT] result: {"success": true, "dry_run": false, "symbol": "ETHUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.01, "entry_price": 2435.22, "risk_entry_price": 2436.4376099999995, "stop_loss": 2431.72, "take_profit": 2438.03, "expected_profit_usdt": 0.0281, "expected_loss_usdt": 0.035, "expected_profit_net_usdt": 0.0098, "expected_loss_net_usdt": 0.074, "risk_amount_usdt": 0.0171, "rr_ratio": 2.0, "rr_realized": 0.133, "notional_usdt": 24.3522, "balance": 1.7106, "leverage": 50, "atr": 39.67989871, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "ETHUSDT", "side": "Buy", "orderType": "Market", "qty": "0.01", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "2431.72", "takeProfit": "2438.03"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "971dbcf5-3070-4c38-9a60-6e403dd2737c", "order_link_id": "", "data": {"orderId": "971dbcf5-3070-4c38-9a60-6e403dd2737c", "orderLinkId": ""}}
+2026-08-22 01:56:27,121 [INFO] multi_scalper: [SOLUSDT] result: {"success": true, "dry_run": false, "symbol": "SOLUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.1, "entry_price": 94.26, "risk_entry_price": 94.30713, "stop_loss": 93.92, "take_profit": 94.41, "expected_profit_usdt": 0.015, "expected_loss_usdt": 0.034, "expected_profit_net_usdt": 0.0079, "expected_loss_net_usdt": 0.0491, "risk_amount_usdt": 0.0171, "rr_ratio": 2.0, "rr_realized": 0.162, "notional_usdt": 9.426, "balance": 1.7106, "leverage": 50, "atr": 2.5362368, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SOLUSDT", "side": "Buy", "orderType": "Market", "qty": "0.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "93.92", "takeProfit": "94.41"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "2244d5e9-9302-4366-8fe4-0bf88e8e4867", "order_link_id": "", "data": {"orderId": "2244d5e9-9302-4366-8fe4-0bf88e8e4867", "orderLinkId": ""}}
+2026-08-22 01:56:27,211 [INFO] multi_scalper: [ADAUSDT] result: {"success": false, "error": "Qty invalid (Invalid parameter \u2014 check qty/price/tick size.)", "retCode": 10001, "order_params": {"category": "linear", "symbol": "ADAUSDT", "side": "Sell", "orderType": "Market", "qty": "21.6", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.2339", "takeProfit": "0.2318"}, "warnings": [], "symbol": "ADAUSDT", "side": "Sell", "qty": 21.6, "entry_price": 0.2333, "stop_loss": 0.2339, "take_profit": 0.2318, "notional_usdt": 5.0393, "version": "2.3.0-ASCENDED"}
+2026-08-22 01:56:27,212 [INFO] multi_scalper: [ADAUSDT] skip: order submission rejected: order rejected
+2026-08-22 01:56:27,306 [INFO] multi_scalper: [BNBUSDT] result: {"success": true, "dry_run": false, "symbol": "BNBUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.01, "entry_price": 699.4, "risk_entry_price": 699.7497, "stop_loss": 696.8, "take_profit": 701.5, "expected_profit_usdt": 0.021, "expected_loss_usdt": 0.026, "expected_profit_net_usdt": 0.0158, "expected_loss_net_usdt": 0.0372, "risk_amount_usdt": 0.0171, "rr_ratio": 2.0, "rr_realized": 0.424, "notional_usdt": 6.994, "balance": 1.7106, "leverage": 50, "atr": 11.02275295, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "BNBUSDT", "side": "Buy", "orderType": "Market", "qty": "0.01", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "696.8", "takeProfit": "701.5"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "a951bed1-0127-485d-b761-a4d771d50937", "order_link_id": "", "data": {"orderId": "a951bed1-0127-485d-b761-a4d771d50937", "orderLinkId": ""}}
+2026-08-22 02:21:56,302 [INFO] multi_scalper: Wallet USDT equity: $2.00
+2026-08-22 02:21:57,961 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-22 02:21:57,964 [INFO] multi_scalper: notional capped → $5.05
+2026-08-22 02:21:57,965 [INFO] multi_scalper: Margin budget $1.40 (equity $2.00 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 5
+2026-08-22 02:21:57,966 [INFO] multi_scalper: [BTCUSDT] analysing…
+2026-08-22 02:21:57,999 [INFO] multi_scalper: [ETHUSDT] analysing…
+2026-08-22 02:21:58,019 [INFO] multi_scalper: [BNBUSDT] analysing…
+2026-08-22 02:21:58,046 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-08-22 02:21:58,051 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-22 02:21:58,793 [WARNING] multi_scalper: [BTCUSDT] set leverage 50x failed: invalid request, please check your server timestamp or recv_window param: req_timestamp[1787383320224],server_timestamp[1787383318745],recv_window[20000]
+2026-08-22 02:21:58,793 [INFO] multi_scalper: [BTCUSDT] skip: leverage config failed
+2026-08-22 02:22:17,587 [INFO] multi_scalper: [BNBUSDT] Sell qty=0.01 ($7.03) TP=700.4 SL=705.1
+2026-08-22 02:22:17,588 [INFO] multi_scalper: [BNBUSDT] submitting smart order…
+2026-08-22 02:22:17,754 [INFO] multi_scalper: [ADAUSDT] Buy qty=21.5 ($5.03) TP=0.2349 SL=0.2328
+2026-08-22 02:22:17,755 [INFO] multi_scalper: [SOLUSDT] Buy qty=0.1 ($9.47) TP=95.01 SL=94.52
+2026-08-22 02:22:17,755 [INFO] multi_scalper: [ADAUSDT] submitting smart order…
+2026-08-22 02:22:17,760 [INFO] multi_scalper: [SOLUSDT] submitting smart order…
+2026-08-22 02:22:17,994 [INFO] multi_scalper: [ETHUSDT] Sell qty=0.01 ($24.35) TP=2430.88 SL=2437.19
+2026-08-22 02:22:17,995 [INFO] multi_scalper: [ETHUSDT] submitting smart order…
+2026-08-22 02:22:22,645 [INFO] multi_scalper: [BNBUSDT] result: {"success": false, "error": "invalid request, please check your server timestamp or recv_window param: req_timestamp[1787383344127],server_timestamp[1787383342629],recv_window[20000] (Auth/timestamp issue \u2014 check API keys & clock sync.)", "retCode": 10002, "order_params": {"category": "linear", "symbol": "BNBUSDT", "side": "Sell", "orderType": "Market", "qty": "0.01", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "705.1", "takeProfit": "700.4"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math.", "set-leverage: invalid request, please check your server timestamp or recv_window param: req_timestamp[1787383341838],server_timestamp[1787383340161],recv_window[20000] (Auth/timestamp issue \u2014 check API keys & clock sync.)"], "symbol": "BNBUSDT", "side": "Sell", "qty": 0.01, "entry_price": 703.1, "stop_loss": 705.1, "take_profit": 700.4, "notional_usdt": 7.031, "version": "2.3.0-ASCENDED"}
+2026-08-22 02:22:22,646 [INFO] multi_scalper: [BNBUSDT] skip: order submission rejected: order rejected
+2026-08-22 02:22:22,808 [INFO] multi_scalper: [SOLUSDT] result: {"success": false, "error": "invalid request, please check your server timestamp or recv_window param: req_timestamp[1787383344287],server_timestamp[1787383342718],recv_window[20000] (Auth/timestamp issue \u2014 check API keys & clock sync.)", "retCode": 10002, "order_params": {"category": "linear", "symbol": "SOLUSDT", "side": "Buy", "orderType": "Market", "qty": "0.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "94.52", "takeProfit": "95.01"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math.", "set-leverage: invalid request, please check your server timestamp or recv_window param: req_timestamp[1787383342006],server_timestamp[1787383340367],recv_window[20000] (Auth/timestamp issue \u2014 check API keys & clock sync.)"], "symbol": "SOLUSDT", "side": "Buy", "qty": 0.1, "entry_price": 94.81, "stop_loss": 94.52, "take_profit": 95.01, "notional_usdt": 9.481, "version": "2.3.0-ASCENDED"}
+2026-08-22 02:22:22,809 [INFO] multi_scalper: [SOLUSDT] skip: order submission rejected: order rejected
+2026-08-22 02:22:23,022 [INFO] multi_scalper: [ADAUSDT] result: {"success": false, "error": "invalid request, please check your server timestamp or recv_window param: req_timestamp[1787383344612],server_timestamp[1787383343024],recv_window[20000] (Auth/timestamp issue \u2014 check API keys & clock sync.)", "retCode": 10002, "order_params": {"category": "linear", "symbol": "ADAUSDT", "side": "Buy", "orderType": "Market", "qty": "21.5", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "0.2328", "takeProfit": "0.2349"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math.", "set-leverage: invalid request, please check your server timestamp or recv_window param: req_timestamp[1787383342167],server_timestamp[1787383340606],recv_window[20000] (Auth/timestamp issue \u2014 check API keys & clock sync.)"], "symbol": "ADAUSDT", "side": "Buy", "qty": 21.5, "entry_price": 0.2344, "stop_loss": 0.2328, "take_profit": 0.2349, "notional_usdt": 5.0396, "version": "2.3.0-ASCENDED"}
+2026-08-22 02:22:23,024 [INFO] multi_scalper: [ADAUSDT] skip: order submission rejected: order rejected
+2026-08-22 02:22:23,184 [INFO] multi_scalper: [ETHUSDT] result: {"success": false, "error": "invalid request, please check your server timestamp or recv_window param: req_timestamp[1787383344703],server_timestamp[1787383343194],recv_window[20000] (Auth/timestamp issue \u2014 check API keys & clock sync.)", "retCode": 10002, "order_params": {"category": "linear", "symbol": "ETHUSDT", "side": "Sell", "orderType": "Market", "qty": "0.01", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "2437.19", "takeProfit": "2430.88"}, "warnings": ["Wallet balance unavailable or zero; using $10 paper balance for risk math.", "set-leverage: invalid request, please check your server timestamp or recv_window param: req_timestamp[1787383342326],server_timestamp[1787383340852],recv_window[20000] (Auth/timestamp issue \u2014 check API keys & clock sync.)"], "symbol": "ETHUSDT", "side": "Sell", "qty": 0.01, "entry_price": 2437.16, "stop_loss": 2437.19, "take_profit": 2430.88, "notional_usdt": 24.3716, "version": "2.3.0-ASCENDED"}
+2026-08-22 02:22:23,184 [INFO] multi_scalper: [ETHUSDT] skip: order submission rejected: order rejected
+2026-08-22 02:26:09,919 [INFO] multi_scalper: Wallet USDT equity: $1.73
+2026-08-22 02:26:11,453 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-22 02:26:11,454 [INFO] multi_scalper: notional capped → $5.05
+2026-08-22 02:26:11,455 [INFO] multi_scalper: Margin budget $1.21 (equity $1.73 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 5
+2026-08-22 02:26:11,458 [INFO] multi_scalper: [BTCUSDT] analysing…
+2026-08-22 02:26:11,468 [INFO] multi_scalper: [ETHUSDT] analysing…
+2026-08-22 02:26:11,475 [INFO] multi_scalper: [BNBUSDT] analysing…
+2026-08-22 02:26:11,490 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-08-22 02:26:11,495 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-22 02:26:13,042 [WARNING] bybit.core: Network error on POST https://api.bybit.com/v5/position/set-leverage (attempt 1/5): SOCKSHTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/set-leverage (Caused by NewConnectionError("SOCKSHTTPSConnection(host='api.bybit.com', port=443): Failed to establish a new connection: 0x04: Host unreachable"))
+2026-08-22 02:26:26,156 [INFO] multi_scalper: [ADAUSDT] skip: neutral book (49.2%)
+2026-08-22 02:26:26,770 [INFO] multi_scalper: [SOLUSDT] skip: neutral book (48.8%)
+2026-08-22 02:26:27,280 [INFO] multi_scalper: [BNBUSDT] skip: neutral book (50.4%)
+2026-08-22 02:26:27,437 [INFO] multi_scalper: [ETHUSDT] Sell qty=0.01 ($24.36) TP=2432.35 SL=2438.66
+2026-08-22 02:26:27,437 [INFO] multi_scalper: [ETHUSDT] submitting smart order…
+2026-08-22 02:26:31,446 [INFO] multi_scalper: [ETHUSDT] result: {"success": true, "dry_run": false, "symbol": "ETHUSDT", "side": "Sell", "order_type": "Market", "category": "linear", "qty": 0.01, "entry_price": 2437.5, "risk_entry_price": 2436.28125, "stop_loss": 2438.66, "take_profit": 2432.35, "expected_profit_usdt": 0.0515, "expected_loss_usdt": 0.0116, "expected_profit_net_usdt": 0.0332, "expected_loss_net_usdt": 0.0506, "risk_amount_usdt": 0.0173, "rr_ratio": 2.0, "rr_realized": 0.657, "notional_usdt": 24.375, "balance": 1.7332, "leverage": 50, "atr": 38.37244131, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "ETHUSDT", "side": "Sell", "orderType": "Market", "qty": "0.01", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "2438.66", "takeProfit": "2432.35"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "44c86dd6-d402-4e19-8fd0-4fe5516c0d56", "order_link_id": "", "data": {"orderId": "44c86dd6-d402-4e19-8fd0-4fe5516c0d56", "orderLinkId": ""}}
+2026-08-22 02:26:33,564 [INFO] multi_scalper: [BTCUSDT] skip: margin $1.55 > 70% equity $1.21
+2026-08-22 02:29:13,303 [INFO] multi_scalper: Wallet USDT equity: $1.69
+2026-08-22 02:29:14,625 [INFO] multi_scalper: [Session] realized=$+0.0000 unrealized=$+0.0000 total=$+0.0000 open=0 []
+2026-08-22 02:29:14,625 [INFO] multi_scalper: notional capped → $5.05
+2026-08-22 02:29:14,626 [INFO] multi_scalper: Margin budget $1.19 (equity $1.69 − open≈$0.00) | target PnL $0.0200 | lev 50x | notional $5.05 | symbols 5
+2026-08-22 02:29:14,628 [INFO] multi_scalper: [BTCUSDT] analysing…
+2026-08-22 02:29:14,634 [INFO] multi_scalper: [ETHUSDT] analysing…
+2026-08-22 02:29:14,656 [INFO] multi_scalper: [BNBUSDT] analysing…
+2026-08-22 02:29:14,666 [INFO] multi_scalper: [ADAUSDT] analysing…
+2026-08-22 02:29:14,678 [INFO] multi_scalper: [SOLUSDT] analysing…
+2026-08-22 02:29:27,689 [INFO] multi_scalper: [BTCUSDT] skip: margin $1.55 > 70% equity $1.19
+2026-08-22 02:29:29,248 [INFO] multi_scalper: [ETHUSDT] Buy qty=0.01 ($24.39) TP=2443.07 SL=2436.75
+2026-08-22 02:29:29,249 [INFO] multi_scalper: [ETHUSDT] submitting smart order…
+2026-08-22 02:29:29,692 [INFO] multi_scalper: [ADAUSDT] skip: neutral book (50.6%)
+2026-08-22 02:29:30,739 [INFO] multi_scalper: [SOLUSDT] Buy qty=0.1 ($9.49) TP=95.19 SL=94.70
+2026-08-22 02:29:30,740 [INFO] multi_scalper: [SOLUSDT] submitting smart order…
+2026-08-22 02:29:31,125 [INFO] multi_scalper: [BNBUSDT] Buy qty=0.01 ($7.05) TP=707.3 SL=702.6
+2026-08-22 02:29:31,129 [INFO] multi_scalper: [BNBUSDT] submitting smart order…
+2026-08-22 02:29:32,739 [INFO] multi_scalper: [ETHUSDT] result: {"success": true, "dry_run": false, "symbol": "ETHUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.01, "entry_price": 2438.81, "risk_entry_price": 2440.0294049999998, "stop_loss": 2436.75, "take_profit": 2443.07, "expected_profit_usdt": 0.0426, "expected_loss_usdt": 0.0206, "expected_profit_net_usdt": 0.0243, "expected_loss_net_usdt": 0.0596, "risk_amount_usdt": 0.0169, "rr_ratio": 2.0, "rr_realized": 0.408, "notional_usdt": 24.3881, "balance": 1.6934, "leverage": 50, "atr": 38.37244131, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "ETHUSDT", "side": "Buy", "orderType": "Market", "qty": "0.01", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "2436.75", "takeProfit": "2443.07"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "90cc0c80-585c-4570-80f1-21d97aa5f8d5", "order_link_id": "", "data": {"orderId": "90cc0c80-585c-4570-80f1-21d97aa5f8d5", "orderLinkId": ""}}
+2026-08-22 02:29:34,205 [INFO] multi_scalper: [SOLUSDT] result: {"success": true, "dry_run": false, "symbol": "SOLUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.1, "entry_price": 94.95, "risk_entry_price": 94.997475, "stop_loss": 94.7, "take_profit": 95.19, "expected_profit_usdt": 0.024, "expected_loss_usdt": 0.025, "expected_profit_net_usdt": 0.0169, "expected_loss_net_usdt": 0.0402, "risk_amount_usdt": 0.0169, "rr_ratio": 2.0, "rr_realized": 0.42, "notional_usdt": 9.495, "balance": 1.6934, "leverage": 50, "atr": 2.43793427, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "SOLUSDT", "side": "Buy", "orderType": "Market", "qty": "0.1", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "94.70", "takeProfit": "95.19"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "21ac8b4e-ae7f-4004-bc63-f69e8672b763", "order_link_id": "", "data": {"orderId": "21ac8b4e-ae7f-4004-bc63-f69e8672b763", "orderLinkId": ""}}
+2026-08-22 02:29:35,154 [INFO] multi_scalper: [BNBUSDT] result: {"success": true, "dry_run": false, "symbol": "BNBUSDT", "side": "Buy", "order_type": "Market", "category": "linear", "qty": 0.01, "entry_price": 704.5, "risk_entry_price": 704.8522499999999, "stop_loss": 702.6, "take_profit": 707.3, "expected_profit_usdt": 0.028, "expected_loss_usdt": 0.019, "expected_profit_net_usdt": 0.0227, "expected_loss_net_usdt": 0.0303, "risk_amount_usdt": 0.0169, "rr_ratio": 2.0, "rr_realized": 0.75, "notional_usdt": 7.045, "balance": 1.6934, "leverage": 50, "atr": 10.80539861, "fees": {"entry": 0.00055, "sl_exit": 0.00055, "tp_exit": 0.0002}, "order_params": {"category": "linear", "symbol": "BNBUSDT", "side": "Buy", "orderType": "Market", "qty": "0.01", "timeInForce": "IOC", "positionIdx": 0, "slTriggerBy": "MarkPrice", "tpTriggerBy": "MarkPrice", "stopLoss": "702.6", "takeProfit": "707.3"}, "warnings": [], "version": "2.3.0-ASCENDED", "order_id": "1dd954df-6686-4a96-9ad7-06dfe1fabb9b", "order_link_id": "", "data": {"orderId": "1dd954df-6686-4a96-9ad7-06dfe1fabb9b", "orderLinkId": ""}}

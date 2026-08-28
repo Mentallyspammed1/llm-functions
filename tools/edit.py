@@ -106,7 +106,6 @@ import fnmatch
 import functools
 import glob as _glob_module
 import hashlib
-import io
 import json
 import logging
 import os
@@ -115,7 +114,6 @@ import re
 import select
 import shutil
 import signal
-import stat
 import subprocess
 import sys
 import tempfile
@@ -123,7 +121,6 @@ import threading
 import time
 import zipfile
 from collections import OrderedDict, deque
-from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import (
@@ -131,11 +128,9 @@ from typing import (
     Callable,
     Dict,
     List,
-    Literal,
     Optional,
     Pattern,
     Tuple,
-    Union,
 )
 
 __version__ = "4.0.0-MERGED"
@@ -178,9 +173,9 @@ _OCTAL_CHARS = set("01234567")
 _BOM_TABLE: Tuple[Tuple[bytes, str], ...] = (
     (b"\xff\xfe\x00\x00", "utf-32-le"),
     (b"\x00\x00\xfe\xff", "utf-32-be"),
-    (b"\xef\xbb\xbf",     "utf-8-sig"),
-    (b"\xff\xfe",         "utf-16-le"),
-    (b"\xfe\xff",         "utf-16-be"),
+    (b"\xef\xbb\xbf", "utf-8-sig"),
+    (b"\xff\xfe", "utf-16-le"),
+    (b"\xfe\xff", "utf-16-be"),
 )
 
 PSEUDO_FS_PREFIXES: tuple[str, ...] = (
@@ -256,17 +251,17 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-NEON_BLUE    = "\033[38;5;39m"
-NEON_ORANGE  = "\033[38;5;208m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+NEON_BLUE = "\033[38;5;39m"
+NEON_ORANGE = "\033[38;5;208m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])|\033\[[0-9;]*[a-zA-Z]")
 
@@ -1084,7 +1079,7 @@ class GracefulShutdown:
         self._lock = threading.Lock()
         self._handlers: Dict[int, Any] = {}
 
-    def __enter__(self) -> "GracefulShutdown":
+    def __enter__(self) -> GracefulShutdown:
         try:
             if threading.current_thread() is threading.main_thread():
                 self._handlers[signal.SIGINT] = signal.signal(signal.SIGINT, self._handle)
@@ -1742,11 +1737,10 @@ def op_copy(
                 return {"success": False, "error": "recursive flag required to copy directory", "exit_code": EXIT_INVALID_INPUT}
             copy_fn = shutil.copy2 if preserve_metadata else shutil.copy
             shutil.copytree(src, dst, copy_function=copy_fn, dirs_exist_ok=True)
+        elif preserve_metadata:
+            shutil.copy2(src, dst)
         else:
-            if preserve_metadata:
-                shutil.copy2(src, dst)
-            else:
-                shutil.copy(src, dst)
+            shutil.copy(src, dst)
         return {"success": True, "source": str(src), "target": str(dst)}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -2711,7 +2705,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Operation:{RESET}   {NEON_YELLOW}{data.get('operation', data.get('action', 'N/A'))}{RESET}", no_color=no_color)
     _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}", no_color=no_color)
 
-    if "encoding" in data and data["encoding"]:
+    if data.get("encoding"):
         _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Encoding:{RESET}    {data['encoding']}", no_color=no_color)
     if "size" in data:
         _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Size:{RESET}        {data['size']} bytes", no_color=no_color)
@@ -2728,7 +2722,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
         _cprint(f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}       {data['error']}", no_color=no_color)
 
-    if "diff" in data and data["diff"]:
+    if data.get("diff"):
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Diff Preview:{RESET}", no_color=no_color)
         for line in data["diff"].splitlines()[:15]:

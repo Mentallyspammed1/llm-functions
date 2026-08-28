@@ -31,7 +31,7 @@ import subprocess
 import sys
 import time
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -89,15 +89,15 @@ class GracefulShutdown:
 # SECTION 2: UI Palette & Visual Helpers
 # ==============================================================================
 
-NEON_CYAN   = "\033[38;5;51m"
-NEON_GREEN  = "\033[38;5;46m"
-NEON_RED    = "\033[38;5;196m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
 NEON_YELLOW = "\033[38;5;226m"
 NEON_PURPLE = "\033[38;5;129m"
-NEON_PINK   = "\033[38;5;198m"
-RESET       = "\033[0m"
-BOLD        = "\033[1m"
-DIM         = "\033[2m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[a-zA-Z]")
 
@@ -194,7 +194,7 @@ def _unwrap_ddg_url(raw_url: str) -> str:
     if "uddg=" in raw_url:
         parsed = urllib.parse.urlparse(raw_url)
         qs = urllib.parse.parse_qs(parsed.query)
-        if "uddg" in qs and qs["uddg"]:
+        if qs.get("uddg"):
             return qs["uddg"][0]
     if raw_url.startswith("//"):
         return "https:" + raw_url

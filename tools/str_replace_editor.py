@@ -71,7 +71,7 @@ from typing import (
 )
 
 __version__ = "2.2.0-ASCENDED"
-__all__ = ["__version__", "execute_tool", "run", "generate_tool_schema"]
+__all__ = ["__version__", "execute_tool", "generate_tool_schema", "run"]
 
 # ==============================================================================
 # SECTION 1: Exit Codes, Constants & Exception Models
@@ -1127,7 +1127,7 @@ class RegexCache:
     """Thread-safe regex pattern cache with LRU eviction."""
 
     def __init__(self, max_size: int = 128):
-        self._cache: "OrderedDict[Tuple[str, int], Pattern[str]]" = OrderedDict()
+        self._cache: OrderedDict[Tuple[str, int], Pattern[str]] = OrderedDict()
         self._max_size = max_size
         self._lock = threading.Lock()
 
@@ -1579,7 +1579,7 @@ def execute_tool(
             payload_bytes, final_encoding, encoding_changed = _encode_text(
                 write_text, encoding_used, explicit_encoding=requested_encoding is not None, bom_present=bom_present
             )
-            
+
             diff_text = _generate_diff(file_content, new_content, str(target_path))
             backup_created, backup_path_str = (_create_backup(target_path) if backup and target_path.exists() and not dry_run else (False, None))
 
@@ -1659,7 +1659,7 @@ def execute_tool(
 
             lines = file_content.split("\n")
             insert_idx = min(len(lines), target_line - 1)
-            
+
             lines.insert(insert_idx, incoming_norm)
             new_content = "\n".join(lines)
             changed = True

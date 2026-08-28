@@ -51,20 +51,20 @@ from typing import Any, Literal, Optional
 
 __version__ = "2.6.0"
 __all__ = [
-    "run",
-    "execute_tool",
-    "main",
-    "validate_inputs",
-    "build_cache_key",
-    "invalidate_cache",
-    "generate_tool_schema",
+    "GracefulShutdown",
     "ToolCache",
     "ToolError",
-    "GracefulShutdown",
+    "__version__",
+    "build_cache_key",
+    "execute_tool",
+    "generate_tool_schema",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "invalidate_cache",
+    "main",
+    "run",
+    "validate_inputs",
 ]
 
 # ==============================================================================
@@ -195,15 +195,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Colors & UI Display Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -416,7 +416,7 @@ class ToolCache:
             if time.time() - cache_file.stat().st_mtime > ttl_seconds:
                 cache_file.unlink(missing_ok=True)
                 return None
-            with open(cache_file, "r", encoding="utf-8") as fp:
+            with open(cache_file, encoding="utf-8") as fp:
                 data = json.load(fp)
                 if isinstance(data, dict):
                     return data
@@ -582,7 +582,7 @@ def _search_file_content(
         return 0, matches
 
     try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as fp:
+        with open(file_path, encoding="utf-8", errors="replace") as fp:
             lines = fp.readlines()
     except OSError:
         return 0, matches
@@ -708,7 +708,7 @@ def execute_tool(
             else:
                 # Directory Traversal (Find + Grep Engine)
                 pattern = file_pattern or "*"
-                
+
                 for root, dirs, files in os.walk(target_path):
                     if timeout and (time.monotonic() - start_time) > timeout:
                         raise ToolError(f"Search operation timed out after {timeout}s", EXIT_TIMEOUT)

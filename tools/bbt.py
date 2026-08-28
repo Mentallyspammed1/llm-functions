@@ -205,6 +205,7 @@ def _get_api_credentials() -> Tuple[str, str]:
         key, secret = secret, key
     return key, secret
 
+
 @dataclass
 class TradingConfig:
     api_key: str = field(default_factory=lambda: _get_api_credentials()[0])
@@ -2635,7 +2636,7 @@ def run(
             res = bot.scan_symbols(
                 symbols=kwargs.get("symbols", [symbol] if symbol else ["BTCUSDT"]),
                 category=category,
-                include_regime=bool(kwargs.get("include_regime", False)),
+                include_regime=bool(kwargs.get("include_regime")),
             )
         elif action == "calculate_support_resistance_levels":
             res = bot.calculate_support_resistance_levels(

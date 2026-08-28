@@ -906,7 +906,7 @@ def run_one_cycle(
     # -------------------------------------------------------------------
     # 7️⃣ Dry‑Run / Execution Decision
     # -------------------------------------------------------------------
-    if args.get("dry_run", False):
+    if args.get("dry_run"):
         net_profit = (signal["exit_price"] - signal["entry_price"]) * qty
         net_profit -= (
             signal["entry_price"] * qty * args["maker_fee"]

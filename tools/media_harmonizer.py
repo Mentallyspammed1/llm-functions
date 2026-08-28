@@ -148,7 +148,7 @@ def _check_dependencies() -> tuple[bool, str]:
     # Check whisper CLI or python package
     has_whisper_cli = shutil.which("whisper") is not None
     try:
-        import whisper  # type: ignore # noqa: F401
+        import whisper  # type: ignore # ruff: ignore[unused-import]
 
         has_whisper_py = True
     except ImportError:

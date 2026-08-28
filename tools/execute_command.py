@@ -46,19 +46,24 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, Union
 
+# Colorama initialization for cross-platform colored output
+import colorama
+
+colorama.init(autoreset=True)
+
 __version__ = "2.3.0"
 __all__ = [
     "ToolCache",
     "ToolError",
     "__version__",
     "duration_to_seconds",
-    "parse_duration",
     "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
     "inject_curl_timeouts",
     "interpret_exit_code",
+    "parse_duration",
     "run",
     "run_command",
     "run_command_full",
@@ -172,7 +177,7 @@ _ANSI_RE = re.compile(
     r"(?:"
     r"\x1b\[[0-?]*[ -/]*[@-~]"          # CSI sequences
     r"|"
-    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)" # OSC sequences
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC sequences
     r"|"
     r"\x1b[@-Z]"                         # Single-char controls
     r"|"
@@ -368,7 +373,7 @@ class ToolCache:
             return None
 
         try:
-            with open(cache_file, "r", encoding="utf-8") as fp:
+            with open(cache_file, encoding="utf-8") as fp:
                 payload = json.load(fp)
             if not isinstance(payload, dict):
                 return None
@@ -887,7 +892,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     _COLOR_OVERRIDE = False if no_color else None
 
     try:
-        success = bool(data.get("success", False))
+        success = bool(data.get("success"))
         exit_code = int(data.get("exit_code", EXIT_ERROR))
         cmd = str(data.get("command") or "")
         duration_ms = data.get("duration_ms", 0.0)
@@ -1812,4 +1817,3 @@ if __name__ == "__main__":
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)
     sys.exit(int(res.get("exit_code", EXIT_ERROR)))
-
