@@ -1,6 +1,5 @@
 # web
 free_search.py
-yandex_search.py
 bs.py
 web_spider.py
 internet_speedtest.py
@@ -15,7 +14,6 @@ fetch_url_via_curl.sh
 vid_search.py
 fetch_url_via_jina.py
 ddg_search.py
-ddg_search_lite.py
 pyrm_search.py
 url_metadata.py
 download_image.py
@@ -26,8 +24,6 @@ nsfw_search.py
 text_extract_urls.py
 # bybit
 bybit_realm.py
-pyrm_scalp2.py
-micro_scalp2.py
 bybit_wbta.py
 bybit-realm.py
 bybit_pro_suite.py
@@ -46,7 +42,6 @@ bbt_quick_trade.py
 bbt_scanner.py
 bbt_risk.py
 pyrm_term.py
-bybit_live.py
 # tools
 execute_command.py
 scientific_calculator.py
@@ -106,4 +101,3 @@ sys_unified.py
 
 location_manager.py
 search_tool.py
-tool_builder.py
