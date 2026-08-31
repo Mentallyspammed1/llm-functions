@@ -57,15 +57,15 @@ from urllib.parse import urlparse
 
 __version__ = "4.1.0"
 __all__ = [
-    "GracefulShutdown",
+    "run",
+    "execute_tool",
+    "main",
+    "validate_inputs",
+    "generate_tool_schema",
     "ToolCache",
     "ToolError",
+    "GracefulShutdown",
     "__version__",
-    "execute_tool",
-    "generate_tool_schema",
-    "main",
-    "run",
-    "validate_inputs",
 ]
 
 # ==============================================================================
@@ -269,7 +269,7 @@ class ToolCache:
             if time.time() - cache_file.stat().st_mtime > ttl_seconds:
                 cache_file.unlink(missing_ok=True)
                 return None
-            with open(cache_file, encoding="utf-8") as fp:
+            with open(cache_file, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
                 if isinstance(data, dict):
                     return data
@@ -635,12 +635,12 @@ def execute_tool(
                     raise ToolError("Thumbnail generation aborted by signal.", EXIT_INTERRUPTED)
 
                 out_thumb_path = per_dir / f"{stem}_{i:04d}_{int(t)}s.{fmt}"
-
+                
                 vf_parts = [f"scale={width}:-2"]
                 if add_timestamps:
                     ts_str = _format_timestamp(t).replace(":", r"\:")
                     vf_parts.append(f"drawtext=text='{ts_str}':fontsize={font_size}:fontcolor={font_color}:box=1:boxcolor={box_color}@{box_opacity}:x=10:y=h-th-10")
-
+                
                 vf = ",".join(vf_parts)
                 extra_args = []
                 if fmt == "jpg":
@@ -650,7 +650,7 @@ def execute_tool(
                     extra_args.extend(["-quality", str(quality)])
                 elif fmt == "png":
                     extra_args.extend(["-compression_level", str(max(1, min(9, int(quality / 10))))])
-
+                
                 if strip_metadata:
                     extra_args.extend(["-map_metadata", "-1"])
 

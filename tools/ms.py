@@ -2398,17 +2398,17 @@ def main(args: Dict[str, Any]) -> None:
     target_profit = float(args.get("target_profit", 0.05))
     maker_fee = float(args.get("maker_fee", 0.0002))
     trailing_stop = parse_trailing_stop(args.get("trailing_stop"))
-    balance_check = bool(args.get("balance_check"))
-    dry_run = bool(args.get("dry_run"))
+    balance_check = bool(args.get("balance_check", False))
+    dry_run = bool(args.get("dry_run", False))
     max_spread_bps = float(args.get("max_spread_bps", 50))
     mode = str(args.get("mode", "rest")).lower()
     ws_timeout = float(args.get("ws_timeout", 8))
-    testnet = bool(args.get("testnet"))
+    testnet = bool(args.get("testnet", False))
     loop_interval = float(args.get("loop_interval", 2.0))
     cooldown = float(args.get("cooldown", 30))
     max_iterations = int(args.get("max_iterations", 0))
-    private_ws = bool(args.get("private_ws"))
-    position_guard = bool(args.get("position_guard"))
+    private_ws = bool(args.get("private_ws", False))
+    position_guard = bool(args.get("position_guard", False))
     position_guard_profit_override = float(
         args.get("position_guard_profit_override", 0.02)
     )
@@ -2418,9 +2418,9 @@ def main(args: Dict[str, Any]) -> None:
         if isinstance(position_guard_aggressive, bool)
         else str(position_guard_aggressive).lower() in ("true", "1", "yes")
     )
-    ws_fallback_rest = bool(args.get("ws_fallback_rest"))
+    ws_fallback_rest = bool(args.get("ws_fallback_rest", False))
     leverage = float(args.get("leverage", 1.0))
-    verbose = bool(args.get("verbose"))
+    verbose = bool(args.get("verbose", False))
     if verbose:
         logger.setLevel(logging.DEBUG)
     exit_order_type = str(args.get("exit_order_type", "limit")).lower()
@@ -2493,7 +2493,7 @@ def main(args: Dict[str, Any]) -> None:
         "fill_horizon_sec": fill_horizon_sec,
     }
 
-    if args.get("loop"):
+    if args.get("loop", False):
         signal.signal(signal.SIGINT, _handle_signal)
         signal.signal(signal.SIGTERM, _handle_signal)
         run_daemon(normalized)
@@ -2513,7 +2513,7 @@ def main(args: Dict[str, Any]) -> None:
 
 if __name__ == "__main__":
     main(parse_argv(sys.argv[1:]))
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 # ==============================================================================
 # bybit_micro_scalper_v2.py — Bybit Micro‑Profit Scalper (v3.0)
 #
@@ -5365,23 +5365,23 @@ def main(args: Dict[str, Any]) -> None:
 
     trailing_stop = parse_trailing_stop(args.get("trailing_stop"))
 
-    balance_check = bool(args.get("balance_check"))
-    dry_run = bool(args.get("dry_run"))
+    balance_check = bool(args.get("balance_check", False))
+    dry_run = bool(args.get("dry_run", False))
     max_spread_bps = float(args.get("max_spread_bps", 50))
     mode = str(args.get("mode", "rest")).lower()
     ws_timeout = float(args.get("ws_timeout", 8))
-    testnet = bool(args.get("testnet"))
+    testnet = bool(args.get("testnet", False))
 
     # Sync system clock offset with Bybit API time
     urls_base = base_urls(testnet)
     sync_server_time(urls_base["rest"])
 
-    loop = bool(args.get("loop"))
+    loop = bool(args.get("loop", False))
     loop_interval = float(args.get("loop_interval", 2.0))
     cooldown = float(args.get("cooldown", 30))
     max_iterations = int(args.get("max_iterations", 0))
-    private_ws = bool(args.get("private_ws"))
-    position_guard = bool(args.get("position_guard"))
+    private_ws = bool(args.get("private_ws", False))
+    position_guard = bool(args.get("position_guard", False))
     position_guard_profit_override = float(
         args.get("position_guard_profit_override", 0.02)
     )
@@ -5391,9 +5391,9 @@ def main(args: Dict[str, Any]) -> None:
         if isinstance(pos_guard_agg, bool)
         else str(pos_guard_agg).lower() in ("true", "1", "yes")
     )
-    ws_fallback_rest = bool(args.get("ws_fallback_rest"))
+    ws_fallback_rest = bool(args.get("ws_fallback_rest", False))
     leverage = float(args.get("leverage", 1.0))
-    verbose = bool(args.get("verbose"))
+    verbose = bool(args.get("verbose", False))
     if verbose:
         logger.setLevel(logging.DEBUG)
 
@@ -5490,7 +5490,7 @@ def run(args: Dict[str, Any]) -> None:
 
 
 if __name__ == "__main__":
-    main(parse_argv(sys.argv[1:]))  # !/usr/bin/env python3
+    main(parse_argv(sys.argv[1:]))  #!/usr/bin/env python3
 # ==============================================================================
 # bybit_micro_scalper_v2.py — Bybit Micro‑Profit Scalper (v3.0)
 #
@@ -8341,23 +8341,23 @@ def main(args: Dict[str, Any]) -> None:
 
     trailing_stop = parse_trailing_stop(args.get("trailing_stop"))
 
-    balance_check = bool(args.get("balance_check"))
-    dry_run = bool(args.get("dry_run"))
+    balance_check = bool(args.get("balance_check", False))
+    dry_run = bool(args.get("dry_run", False))
     max_spread_bps = float(args.get("max_spread_bps", 50))
     mode = str(args.get("mode", "rest")).lower()
     ws_timeout = float(args.get("ws_timeout", 8))
-    testnet = bool(args.get("testnet"))
+    testnet = bool(args.get("testnet", False))
 
     # Sync system clock offset with Bybit API time
     urls_base = base_urls(testnet)
     sync_server_time(urls_base["rest"])
 
-    loop = bool(args.get("loop"))
+    loop = bool(args.get("loop", False))
     loop_interval = float(args.get("loop_interval", 2.0))
     cooldown = float(args.get("cooldown", 30))
     max_iterations = int(args.get("max_iterations", 0))
-    private_ws = bool(args.get("private_ws"))
-    position_guard = bool(args.get("position_guard"))
+    private_ws = bool(args.get("private_ws", False))
+    position_guard = bool(args.get("position_guard", False))
     position_guard_profit_override = float(
         args.get("position_guard_profit_override", 0.02)
     )
@@ -8367,9 +8367,9 @@ def main(args: Dict[str, Any]) -> None:
         if isinstance(pos_guard_agg, bool)
         else str(pos_guard_agg).lower() in ("true", "1", "yes")
     )
-    ws_fallback_rest = bool(args.get("ws_fallback_rest"))
+    ws_fallback_rest = bool(args.get("ws_fallback_rest", False))
     leverage = float(args.get("leverage", 1.0))
-    verbose = bool(args.get("verbose"))
+    verbose = bool(args.get("verbose", False))
     if verbose:
         logger.setLevel(logging.DEBUG)
 
@@ -8466,7 +8466,7 @@ def run(args: Dict[str, Any]) -> None:
 
 
 if __name__ == "__main__":
-    main(parse_argv(sys.argv[1:]))  # !/usr/bin/env python3
+    main(parse_argv(sys.argv[1:]))  #!/usr/bin/env python3
 # ==============================================================================
 # micro_scalp.py — Bybit Micro-Profit Scalper
 #

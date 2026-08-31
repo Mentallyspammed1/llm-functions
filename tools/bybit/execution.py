@@ -27,7 +27,7 @@ class ExecutionMixin:
     ):
         """Places a new order (Market, Limit, Stop)."""
         tif = "GTC"
-        if kwargs.get("post_only"):
+        if kwargs.get("post_only", False):
             tif = "PostOnly"
         elif "time_in_force" in kwargs:
             tif = kwargs["time_in_force"]
@@ -39,7 +39,7 @@ class ExecutionMixin:
             "orderType": order_type,
             "qty": self._format_qty(symbol, qty, category),
             "timeInForce": tif,
-            "reduceOnly": bool(kwargs.get("reduce_only")),
+            "reduceOnly": bool(kwargs.get("reduce_only", False)),
         }
         if price:
             data["price"] = self._format_price(symbol, price, category)

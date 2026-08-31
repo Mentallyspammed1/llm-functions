@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.2.0
+# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.0.1
 # Unified Header Analysis · Multi-Backend OSINT Image Search · Video Scraper Engine
 #
 # @describe Unified OSINT, Media Intelligence, and Video Search Platform (Pyrmethus Edition)
@@ -48,9 +48,11 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import contextlib
+from contextlib import suppress
 import csv
 import datetime
-import gzip
 import hashlib
 import html
 import ipaddress
@@ -71,7 +73,6 @@ import urllib.parse
 import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import suppress
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -146,7 +147,7 @@ except ImportError:
 # CONSTANTS & CONFIGURATION
 # ==============================================================================
 
-__version__ = "4.2.0"
+__version__ = "4.0.1"
 
 EXIT_SUCCESS = 0
 EXIT_ERROR = 1
@@ -173,8 +174,6 @@ _MAX_DOWNLOAD_BYTES = max(
     int(os.environ.get("OSINT_MAX_DOWNLOAD_BYTES", str(100 * 1024 * 1024))),
 )
 _STREAM_CHUNK_SIZE = 128 * 1024
-_MAX_FETCH_BYTES = max(1_048_576, int(os.environ.get("OSINT_MAX_FETCH_BYTES", str(10 * 1024 * 1024))))
-_CUSTOM_USER_AGENT = ""
 
 _USER_AGENTS: List[str] = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -451,7 +450,7 @@ def _coerce_timeout(v: Any, default: float = _REQUEST_TIMEOUT) -> float:
 
 
 def _ua() -> str:
-    return _CUSTOM_USER_AGENT or random.choice(_USER_AGENTS)
+    return random.choice(_USER_AGENTS)
 
 
 def _has_image_ext(url: str) -> bool:
@@ -534,6 +533,9 @@ def _validate_url(url: str) -> Optional[str]:
         host = p.hostname.rstrip(".").lower()
         if len(url) > 8192:
             return "URL exceeds maximum supported length."
+
+        if _DEBUG:
+            return None
 
         if host in ("localhost", "localhost.localdomain"):
             return "Access to localhost is blocked for security."
@@ -820,23 +822,7 @@ def _fetch(
                 url, headers=base_headers, method=method.upper()
             )
             with opener.open(req, timeout=timeout) as resp:
-                raw = bytearray()
-                while len(raw) <= _MAX_FETCH_BYTES:
-                    chunk = resp.read(min(_STREAM_CHUNK_SIZE, _MAX_FETCH_BYTES + 1 - len(raw)))
-                    if not chunk:
-                        break
-                    raw.extend(chunk)
-                if len(raw) > _MAX_FETCH_BYTES:
-                    raise ToolError(f"Response exceeded {_MAX_FETCH_BYTES:,} byte limit")
-                data = bytes(raw)
-                encoding = (dict(resp.info()).get("Content-Encoding") or "").lower()
-                if "gzip" in encoding:
-                    data = gzip.decompress(data)
-                elif "deflate" in encoding:
-                    import zlib
-                    data = zlib.decompress(data)
-                if len(data) > _MAX_FETCH_BYTES:
-                    raise ToolError(f"Decoded response exceeded {_MAX_FETCH_BYTES:,} byte limit")
+                data = resp.read()
 
             _debug(f"[{backend}] {len(data):,} B ← {url[:70]}")
 
@@ -847,14 +833,10 @@ def _fetch(
 
         except urllib.error.HTTPError as e:
             _debug(f"[{backend}] HTTP {e.code} attempt {attempt}/{retries}")
-            if e.code in (429, 502, 503, 504):
-                retry_after = e.headers.get("Retry-After") if e.headers else None
-                try:
-                    wait = min(60.0, max(0.5, float(retry_after))) if retry_after else (_RETRY_BACKOFF**attempt)
-                except (TypeError, ValueError):
-                    wait = _RETRY_BACKOFF**attempt
-                time.sleep(wait + random.uniform(0.1, 0.75))
-            elif e.code in (400, 401, 403, 404, 405, 410, 451):
+            if e.code in (429, 503):
+                wait = (_RETRY_BACKOFF**attempt) + random.uniform(0.1, 1.5)
+                time.sleep(wait)
+            elif e.code in (403, 404):
                 return None
             last_exc = e
 
@@ -1063,14 +1045,16 @@ def _format_headers_pretty(result: dict) -> str:
 # ==============================================================================
 
 _YANDEX_PATS = [
-    re.compile(r'"origUrl":"(https?://[^"]+)"', re.I),
+    re.compile(r'&quot;origUrl&quot;\s*:\s*&quot;(https?://[^&"]+?)&quot;', re.I),
     re.compile(
-        r'"origUrl":"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I
+        r'"origUrl"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I
     ),
     re.compile(
-        r'"img_href":"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I
+        r'"img_href"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I
     ),
-    re.compile(r"https?://[^\\s\"'<>]+?\\.(?:jpe?g|png|gif|webp|avif)(?:\\?[^\\s\"'<>]*)?", re.I),
+    re.compile(
+        r'https?://[^\s"\'<>]+?\.(?:jpe?g|png|gif|webp|avif)(?:\?[^\s"\'<>]*)?', re.I
+    ),
 ]
 
 
@@ -1250,7 +1234,7 @@ def _backend_e621(
         params = {"tags": query, "limit": str(per), "page": str(page)}
         data = _fetch_json(
             "https://e621.net/posts.json?" + urllib.parse.urlencode(params),
-            headers={"User-Agent": f"PyrmethusOSINT/4.0 (by user_{random.randint(100, 999)})"},
+            headers={"User-Agent": f"PyrmethusOSINT/4.0 (by user_{random.randint(100,999)})"},
             backend="e621",
             use_cache=use_cache,
         )
@@ -1456,33 +1440,6 @@ ENGINE_MAP: dict[str, dict[str, Any]] = {
 }
 
 
-def _vsearch_regex_fallback(body: str, base_url: str, engine: str, limit: int) -> list[dict[str, Any]]:
-    """Dependency-free fallback for common video-card HTML."""
-    results: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    blocks = re.findall(r"<(?:article|li|div)[^>]*(?:video|tile|card|media)[^>]*>.*?</(?:article|li|div)>", body, re.I | re.S)
-    if not blocks:
-        blocks = [body]
-    for block in blocks:
-        hrefs = re.findall(r"href=[\"']([^\"']+)", block, re.I)
-        imgs = re.findall(r"(?:data-src|data-lazy|src)=[\"']([^\"']+)", block, re.I)
-        if not hrefs and not imgs:
-            continue
-        link = urllib.parse.urljoin(base_url, html.unescape(hrefs[0])) if hrefs else base_url
-        img = urllib.parse.urljoin(base_url, html.unescape(imgs[0])) if imgs else ""
-        texts = re.findall(r"<(?:h[1-6]|p|span)[^>]*>(.*?)</(?:h[1-6]|p|span)>", block, re.I | re.S)
-        title = _strip_ansi(re.sub(r"<[^>]+>", " ", texts[0])) if texts else "Untitled"
-        title = html.unescape(re.sub(r"\s+", " ", title)).strip()[:300]
-        key = _canonical_url(link)
-        if key in seen:
-            continue
-        seen.add(key)
-        results.append({"id": f"{engine}_{len(results) + 1}", "title": title or "Untitled", "url": link, "page_url": link, "img_url": img, "source": engine, "type": "video"})
-        if len(results) >= limit:
-            break
-    return results
-
-
 def _execute_vsearch(
     query: str,
     engine: str,
@@ -1491,7 +1448,9 @@ def _execute_vsearch(
     timeout: int = 15,
     use_cache: bool = True,
 ) -> list[dict[str, Any]]:
-    # Parser selection is handled after the target URL is constructed.
+    if not BS4_AVAILABLE:
+        _warn("BeautifulSoup4 not installed — vsearch falling back to pattern matching")
+        return []
 
     cfg = ENGINE_MAP.get(engine) or ENGINE_MAP["pexels"]
     base_url = cfg["url"]
@@ -1499,13 +1458,6 @@ def _execute_vsearch(
         query=urllib.parse.quote_plus(query), page=page
     )
     target_url = urllib.parse.urljoin(base_url, search_path)
-
-    if not BS4_AVAILABLE:
-        _warn("BeautifulSoup4 not installed — vsearch using stdlib HTML fallback")
-        raw = _fetch(target_url, timeout=timeout, backend="vsearch", use_cache=use_cache)
-        if not raw:
-            return []
-        return _vsearch_regex_fallback(raw.decode("utf-8", errors="replace"), base_url, engine, limit)
 
     raw = _fetch(
         target_url, timeout=timeout, backend="vsearch", use_cache=use_cache
@@ -1961,61 +1913,6 @@ def _search_mode(
     )
 
 
-# ==============================================================================
-# GIF SEARCH ENGINE
-# ==============================================================================
-
-_GIF_SEARCH_URLS = {
-    "yandex": "https://yandex.com/images/search",
-    "bing": "https://www.bing.com/images/search",
-}
-
-
-def _gif_media_url(url: str) -> bool:
-    u = (url or "").lower()
-    return any(x in u for x in (".gif", "giphy.com", "tenor.com", "gifbin", "imgur.com"))
-
-
-def _gif_candidates(text: str, limit: int) -> list[dict[str, Any]]:
-    results = []; seen = set()
-    # Prefer explicit media URLs embedded in image-search JSON/HTML.
-    patterns = (
-        r"https?://[^\"' <>]+?\.(?:gif|gifv|webp)(?:\?[^\"' <>]*)?",
-        r"\"(?:murl|mediaurl|mediaUrl|contentUrl|original|src)\"\s*:\s*\"((?:https?:)?\\/\\/[^\"]+)\"",
-    )
-    for pat in patterns:
-        for m in re.finditer(pat, text, re.I):
-            url = _clean_url(m.group(1) if m.lastindex else m.group(0))
-            url = url.replace('\\\\/', '/')
-            if not _is_http_url(url) or not _gif_media_url(url) or url in seen: continue
-            seen.add(url)
-            results.append({"rank": len(results) + 1, "title": "", "media_url": url, "thumbnail_url": url, "source_url": "", "domain": _domain(url), "media_type": "gif"})
-            if len(results) >= limit: return results
-    return results
-
-
-def _gif_search(query: str, limit: int, page: int, deep: bool, timeout: float, use_cache: bool) -> list[dict[str, Any]]:
-    engines = ("yandex", "bing") if deep else ("yandex",)
-    all_results = []
-    for engine in engines:
-        params = {"text": query + " animated GIF", "p": max(0, page - 1)} if engine == "yandex" else {"q": query + " animated GIF", "first": max(1, page) * 35, "form": "HDRSC2"}
-        target = _GIF_SEARCH_URLS[engine] + "?" + urllib.parse.urlencode(params)
-        raw = _fetch(target, timeout=timeout, backend="gif", use_cache=use_cache)
-        if not raw: continue
-        text = raw.decode("utf-8", errors="replace")
-        for item in _gif_candidates(text, max(limit * 2, 20)):
-            item["search_engine"] = engine; item["search_url"] = target
-            title = item.get("title", "").lower(); url = item["media_url"].lower()
-            item["score"] = (6 if url.endswith('.gif') else 3) + (2 if any(x in url for x in ('giphy', 'tenor')) else 0) + (1 if 'gif' in title else 0)
-            all_results.append(item)
-    unique = {}
-    for item in all_results:
-        unique.setdefault(item["media_url"].split('#')[0], item)
-    results = sorted(unique.values(), key=lambda x: (-x.get("score", 0), x.get("media_url", "")))[:limit]
-    for i, item in enumerate(results, 1): item["rank"] = i
-    return results
-
-
 def run(
     mode: str = "search",
     url: Optional[str] = None,
@@ -2049,11 +1946,10 @@ def run(
     csv: Optional[str] = None,
     **kwargs: Any,
 ) -> dict:
-    global _cache, _DEBUG, _IGNORE_SSL, _CUSTOM_USER_AGENT
+    global _cache, _DEBUG, _IGNORE_SSL
 
     _DEBUG = _coerce_bool(verbose)
     _IGNORE_SSL = _coerce_bool(ignore_ssl)
-    _CUSTOM_USER_AGENT = str(user_agent or "").strip()
 
     safe_cache_ttl = max(0, min(int(cache_ttl or _CACHE_TTL), 7 * 24 * 3600))
     safe_cache_dir = str(Path(cache_dir or _DEFAULT_CACHE_DIR).expanduser())
@@ -2062,10 +1958,6 @@ def run(
         _cache = HttpCache(safe_cache_dir, ttl=safe_cache_ttl)
 
     mode = (mode or "search").lower().strip()
-    limit = max(1, min(int(limit or 1), 1000))
-    page = max(1, int(page or 1))
-    workers = max(1, min(int(workers or 1), 32))
-    timeout = _coerce_timeout(timeout)
 
     if mode == "headers":
         if not url:
@@ -2084,23 +1976,6 @@ def run(
         if output_fmt == "pretty" and res.get("success"):
             print(_format_headers_pretty(res))
             return res
-        _persist(res, save, html, csv)
-        return res
-
-    if mode == "gif":
-        if not query:
-            return _envelope(False, "gif", error="--query is required for gif mode")
-        results = _gif_search(
-            query=query, limit=limit, page=page, deep=deep,
-            timeout=timeout, use_cache=_coerce_bool(use_cache)
-        )
-        if download_thumbs and results:
-            target = str(Path(media_dir).expanduser())
-            results, _ = _parallel_download(results, target, workers, mime_check, ignore_ssl)
-        res = _envelope(True, "gif", data={
-            "query": query, "results": results, "count": len(results),
-            "deep": bool(deep), "engine": "yandex" if not deep else "yandex+bing"
-        })
         _persist(res, save, html, csv)
         return res
 
@@ -2223,7 +2098,8 @@ def write_llm_output(data: dict[str, Any]) -> None:
         if _validate_sandbox(out_file_path):
             try:
                 out_file_path.parent.mkdir(parents=True, exist_ok=True)
-                _atomic_write_text(out_file_path, json_payload)
+                with open(out_file_path, "a", encoding="utf-8") as fp:
+                    fp.write(json_payload)
             except OSError as err:
                 sys.stderr.write(f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n")
                 sys.stdout.write(json_payload)
@@ -2254,12 +2130,12 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(
         prog="osint",
-        description="Pyrmethus Master OSINT & Media Intelligence Engine v4.2.0",
+        description="Pyrmethus Master OSINT & Media Intelligence Engine v4.0.1",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     ap.add_argument(
-        "--mode", default="search", choices=["headers", "search", "vsearch", "gif", "pipeline"]
+        "--mode", default="search", choices=["headers", "search", "vsearch", "pipeline"]
     )
     ap.add_argument("--url", default=None)
     ap.add_argument("--method", default="HEAD")
@@ -2267,13 +2143,9 @@ if __name__ == "__main__":
         "--follow-redirects", dest="follow_redirects", action="store_true", default=True
     )
     ap.add_argument(
-        "--no-follow-redirects", dest="follow_redirects", action="store_false"
-    )
-    ap.add_argument(
         "--output", dest="output_fmt", default="json", choices=["json", "pretty"]
     )
     ap.add_argument("--query", default=None)
-    ap.add_argument("--gif", dest="gif_mode", action="store_true", help="Alias for --mode gif")
     ap.add_argument("--engine", default="pexels", choices=list(ENGINE_MAP.keys()))
     ap.add_argument("--limit", type=int, default=15)
     ap.add_argument("--page", type=int, default=1)
@@ -2303,8 +2175,6 @@ if __name__ == "__main__":
 
     ns = ap.parse_args()
     args = vars(ns)
-    if args.pop("gif_mode", False):
-        args["mode"] = "gif"
 
     try:
         res = run(**args)

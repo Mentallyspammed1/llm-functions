@@ -252,25 +252,27 @@ def _run_lux_download(
                     f"'{expected_name}' is missing or zero‑size.{RESET}",
                     no_color=no_color,
                 )
-        elif candidates:
-            candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            newest = candidates[0]
-            if newest.stat().st_size > 0:
-                return {
-                    "success": True,
-                    "video_path": str(newest.resolve()),
-                    "all_candidates": [str(p.resolve()) for p in candidates],
-                    "exit_code_rc": rc,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                }
-            if verbose:
-                _cprint(
-                    f"{NEON_RED}{attempt_name} produced a file but it is zero‑size: {newest.name}{RESET}",
-                    no_color=no_color,
-                )
-        elif verbose:
-            _cprint(f"{NEON_RED}{attempt_name} produced no output files at all.{RESET}", no_color=no_color)
+        else:
+            if candidates:
+                candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                newest = candidates[0]
+                if newest.stat().st_size > 0:
+                    return {
+                        "success": True,
+                        "video_path": str(newest.resolve()),
+                        "all_candidates": [str(p.resolve()) for p in candidates],
+                        "exit_code_rc": rc,
+                        "stdout": stdout,
+                        "stderr": stderr,
+                    }
+                if verbose:
+                    _cprint(
+                        f"{NEON_RED}{attempt_name} produced a file but it is zero‑size: {newest.name}{RESET}",
+                        no_color=no_color,
+                    )
+            else:
+                if verbose:
+                    _cprint(f"{NEON_RED}{attempt_name} produced no output files at all.{RESET}", no_color=no_color)
 
         return {
             "success": False,

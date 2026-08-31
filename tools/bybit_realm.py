@@ -82,9 +82,7 @@ def _get_bybit_realm_credentials() -> tuple[str, str]:
         return raw_s, raw_k
     return raw_k, raw_s
 
-
 _BYBIT_CREDS = _get_bybit_realm_credentials()
-
 
 @dataclass
 class TradingConfig:

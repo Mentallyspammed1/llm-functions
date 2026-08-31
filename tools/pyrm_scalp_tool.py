@@ -843,7 +843,7 @@ def manage_positions(target_profit: float) -> float:
                 total_fees,
             )
 
-            trigger = max(0.003, target_profit * 0.40)
+            trigger = max(0.003, target_profit * 0.10)
             if net_pnl < trigger:
                 continue
 
@@ -1010,29 +1010,13 @@ def process_symbol(
             _skip(f"spread {spread_bps:.1f}bps > {spread_max_bps}")
             return
 
-        # ---- Multi-Tier Microstructure Orderbook Analysis -----------------
-        # 1. Top-10 Exponential Decay Imbalance (OFI)
-        bid_w = sum(float(b[1]) * (0.85 ** i) for i, b in enumerate(bids[:10]))
-        ask_w = sum(float(a[1]) * (0.85 ** i) for i, a in enumerate(asks[:10]))
+        # ---- Decay-weighted imbalance ------------------------------------
+        bid_w = sum(float(b[1]) / (i + 1) for i, b in enumerate(bids))
+        ask_w = sum(float(a[1]) / (i + 1) for i, a in enumerate(asks))
         tot_w = bid_w + ask_w
         imbalance = bid_w / tot_w if tot_w > 0 else 0.5
 
-        # 2. Microstructure Depth Ratio (MDR): Immediate (top-5) vs Deep (top-25) liquidity ratio
-        top5_bid_vol = sum(float(b[1]) for b in bids[:5])
-        top5_ask_vol = sum(float(a[1]) for a in asks[:5])
-        tot25_bid_vol = sum(float(b[1]) for b in bids[:25])
-        tot25_ask_vol = sum(float(a[1]) for a in asks[:25])
-
-        top5_ratio = top5_bid_vol / (top5_bid_vol + top5_ask_vol) if (top5_bid_vol + top5_ask_vol) > 0 else 0.5
-        deep25_ratio = tot25_bid_vol / (tot25_bid_vol + tot25_ask_vol) if (tot25_bid_vol + tot25_ask_vol) > 0 else 0.5
-
-        # Composite Microstructure Imbalance (70% immediate top-5, 30% deep top-25)
-        composite_imbalance = (0.70 * top5_ratio) + (0.30 * deep25_ratio)
-
-        # Combine exponential decay OFI with composite L2 depth imbalance
-        imbalance = 0.60 * imbalance + 0.40 * composite_imbalance
-
-        # ---- WBTA & Order Flow Confluence --------------------------------
+        # ---- WBTA --------------------------------------------------------
         trend_sig = "NEUTRAL"
         l2_bulls = l2_bears = price_velo = agg_ratio = 0.0
 
@@ -1069,7 +1053,7 @@ def process_symbol(
         )
 
         log.debug(
-            "%s exp_imb=%.3f trend=%s mom=%.3f spread=%.1fbps",
+            "%s imb=%.3f trend=%s mom=%.3f spread=%.1fbps",
             tag,
             imbalance,
             trend_sig,
@@ -1077,21 +1061,17 @@ def process_symbol(
             spread_bps,
         )
 
-        # ---- Direction & Filter Thresholds --------------------------------
-        # Relaxed imbalance thresholds: 52% / 48% allows more entries while
-        # still requiring a detectable edge.  Momentum filter is weakened
-        # (only blocks hard contradictions) to avoid the "skip everything" problem.
-        if imbalance >= 0.52:
+        # ---- Direction ---------------------------------------------------
+        if imbalance > 0.55:
             side = "Buy"
             entry_price = best_ask
-            # Only block if trend and momentum *both* strongly oppose
-            if "SELL" in trend_sig and momentum < -0.20:
+            if "SELL" in trend_sig or momentum < -0.1:
                 _skip(f"Buy conflict trend={trend_sig} mom={momentum:+.3f}")
                 return
-        elif imbalance <= 0.48:
+        elif imbalance < 0.45:
             side = "Sell"
             entry_price = best_bid
-            if "BUY" in trend_sig and momentum > 0.20:
+            if "BUY" in trend_sig or momentum > 0.1:
                 _skip(f"Sell conflict trend={trend_sig} mom={momentum:+.3f}")
                 return
         else:
@@ -1106,8 +1086,8 @@ def process_symbol(
 
         target_val = max(float(target_value_usdt), min_notional + 0.05)
 
-        # UPGRADE: Dynamic Momentum & Volatility Sizing
-        # Scale position up by 1.5x on extreme imbalance/momentum confluence
+        # UPGRADE: Dynamic Momentum Sizing
+        # Bet 50% heavier if we have high confluence between extreme orderbook imbalance and strong momentum
         is_strong_buy = imbalance >= 0.70 and momentum >= 0.8
         is_strong_sell = imbalance <= 0.30 and momentum <= -0.8
         if is_strong_buy or is_strong_sell:
@@ -1116,10 +1096,6 @@ def process_symbol(
                 "[%s] 🚀 STRONG MOMENTUM DETECTED! Scaling position size by 1.5x",
                 symbol,
             )
-
-        # Apply tight spread discount: if spread <= 3 bps, boost sizing by 10%
-        if spread_bps <= 3.0:
-            target_val *= 1.10
 
         # qty from notional, quantized to qty_step
         raw_qty = target_val / entry_price
@@ -1178,60 +1154,54 @@ def process_symbol(
             if entry_calc <= 0:
                 entry_calc = entry_price
 
-            # High-Frequency Micro-Scalp Target Solver:
-            # TP must cover round-trip fees + net profit.  Allow up to 8 ticks
-            # of distance so the bot can capture real edge instead of being
-            # clamped to 1-2 ticks that get eaten by fees.
-            round_trip_fee_per_unit = entry_calc * (_TAKER_FEE + _MAKER_FEE)
-            min_tp_dist = round_trip_fee_per_unit + (3 * tick_size)  # fee floor + 3 ticks
-            max_tp_dist = round_trip_fee_per_unit + (8 * tick_size)  # reasonable cap
-
-            if side == "Buy":
-                default_tp = entry_calc + max_tp_dist
-                # SL = mirror of TP distance × risk_reward, floor = TP dist (≥1:1 RR)
-                tp_dist = max_tp_dist
-                sl_dist = max(tp_dist, tp_dist * risk_reward)
-                default_sl = entry_calc - sl_dist
-            else:
-                default_tp = entry_calc - max_tp_dist
-                tp_dist = max_tp_dist
-                sl_dist = max(tp_dist, tp_dist * risk_reward)
-                default_sl = entry_calc + sl_dist
-
+            default_tp = entry_calc * 1.005 if side == "Buy" else entry_calc * 0.995
+            default_sl = entry_calc * 0.995 if side == "Buy" else entry_calc * 1.005
             tp_price = float(metrics.get("target_exit_price", default_tp))
             sl_price = float(metrics.get("stop_loss_price", default_sl))
 
-            # Clamp TP: must be at least min_tp_dist away (fee-safe), at most max_tp_dist
+            # Clamp to S/R
             if side == "Buy":
-                tp_price = max(tp_price, round_to_tick(entry_calc + min_tp_dist, tick_size))
-                tp_price = min(tp_price, round_to_tick(entry_calc + max_tp_dist, tick_size))
-                # Enforce minimum 1:1 RR on the SL
-                actual_tp_dist = tp_price - entry_calc
-                if entry_calc - sl_price < actual_tp_dist:
-                    sl_price = round_to_tick(entry_calc - actual_tp_dist, tick_size)
+                tp_price = round_to_tick(
+                    max(
+                        min(tp_price, resistance - tick_size),
+                        entry_calc + 2 * tick_size,
+                    ),
+                    tick_size,
+                )
+                sl_price = round_to_tick(
+                    min(
+                        sl_price,
+                        support - 2 * tick_size,
+                        entry_calc - 2 * tick_size,
+                    ),
+                    tick_size,
+                )
             else:
-                tp_price = min(tp_price, round_to_tick(entry_calc - min_tp_dist, tick_size))
-                tp_price = max(tp_price, round_to_tick(entry_calc - max_tp_dist, tick_size))
-                actual_tp_dist = entry_calc - tp_price
-                if sl_price - entry_calc < actual_tp_dist:
-                    sl_price = round_to_tick(entry_calc + actual_tp_dist, tick_size)
+                tp_price = round_to_tick(
+                    min(
+                        max(tp_price, support + tick_size),
+                        entry_calc - 2 * tick_size,
+                    ),
+                    tick_size,
+                )
+                sl_price = round_to_tick(
+                    max(
+                        sl_price,
+                        resistance + 2 * tick_size,
+                        entry_calc + 2 * tick_size,
+                    ),
+                    tick_size,
+                )
 
-            # Fee-aware BE & Net Profit Guard on TP (Guarantees positive net profit)
-            round_trip_fee_pct = _TAKER_FEE + _MAKER_FEE
-            slippage_buffer = 0.0001
-            required_margin_pct = round_trip_fee_pct + slippage_buffer + (target / (entry_calc * qty) if (entry_calc * qty) > 0 else 0.001)
-
+            # Fee-aware BE guard on TP
+            fees = qty * entry_calc * (_TAKER_FEE + _MAKER_FEE)
             if side == "Buy":
-                min_net_tp = entry_calc * (1.0 + required_margin_pct)
-                tp_price = max(tp_price, min_net_tp)
-                be_tp = entry_calc * (1.0 + round_trip_fee_pct)
+                be_tp = entry_calc + (fees / qty)
                 if tp_price < be_tp:
                     _skip(f"TP {tp_price:.6f} < BE {be_tp:.6f}")
                     return
             else:
-                min_net_tp = entry_calc * (1.0 - required_margin_pct)
-                tp_price = min(tp_price, min_net_tp)
-                be_tp = entry_calc * (1.0 - round_trip_fee_pct)
+                be_tp = entry_calc - (fees / qty)
                 if tp_price > be_tp:
                     _skip(f"TP {tp_price:.6f} > BE {be_tp:.6f}")
                     return
@@ -1302,13 +1272,9 @@ def process_symbol(
                     _orders_this_cycle += 1
                 if not dry_run:
                     log_trade("execute_order", symbol, res)
-                else:
-                    log_trade("dry_run_signal", symbol, res)
                 # Keep margin reserved on success (position is live)
                 margin_reserved = False  # don't release below
             else:
-                err_msg = res.get("retMsg") or res.get("msg") or "order rejected"
-                _skip(f"order submission rejected: {err_msg}")
                 _circuit_breaker.record_failure(symbol)
                 # release margin on failed submit
         finally:
@@ -1613,8 +1579,8 @@ def run(**kwargs: Any) -> Dict[str, Any]:
             if kwargs.get("trailing_stop") not in (None, "")
             else None
         ),
-        dry_run=bool(kwargs.get("dry_run")),
-        no_color=bool(kwargs.get("no_color")),
+        dry_run=bool(kwargs.get("dry_run", False)),
+        no_color=bool(kwargs.get("no_color", False)),
         max_workers=int(kwargs.get("max_workers", 8)),
         max_positions=int(kwargs.get("max_positions", 5)),
         cooldown=float(kwargs.get("cooldown", 120.0)),
@@ -1721,26 +1687,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Thread pool size for concurrent symbol analysis",
     )
     parser.add_argument(
-        "--spread-max-bps",
-        type=float,
-        default=15.0,
-        dest="spread_max_bps",
-        help="Max allowed spread in basis points (default: 15)",
-    )
-    parser.add_argument(
-        "--max-positions",
-        type=int,
-        default=5,
-        dest="max_positions",
-        help="Max concurrent open positions (default: 5)",
-    )
-    parser.add_argument(
-        "--cooldown",
-        type=float,
-        default=120.0,
-        help="Seconds before re-entering same symbol (default: 120)",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         dest="dry_run",
@@ -1803,19 +1749,11 @@ if __name__ == "__main__":
             args.loop_delay,
         )
         cycle_num = 0
-        idle_cycles = 0          # track how many cycles had zero fills
-        base_spread = getattr(args, "spread_max_bps", 15.0)
         while not _SHUTDOWN.is_set():
             cycle_num += 1
-
-            # Adaptive spread relaxation: if 3+ idle cycles, widen spread
-            # by 2 bps per idle cycle (cap at base + 10 bps) to find trades
-            adaptive_spread = base_spread + max(0, (idle_cycles - 2) * 2.0)
-            adaptive_spread = min(adaptive_spread, base_spread + 10.0)
-
-            log.info("--- Cycle #%d (spread_bps=%.1f) ---", cycle_num, adaptive_spread)
+            log.info("--- Cycle #%d ---", cycle_num)
             try:
-                result = run_scalper_cycle(
+                run_scalper_cycle(
                     symbols=symbol_list,
                     target_value_usdt=args.pos_value,
                     leverage=args.leverage,
@@ -1828,27 +1766,18 @@ if __name__ == "__main__":
                     max_workers=args.max_workers,
                     max_positions=getattr(args, "max_positions", 5),
                     cooldown=getattr(args, "cooldown", 120.0),
-                    spread_max_bps=adaptive_spread,
+                    spread_max_bps=getattr(args, "spread_max_bps", 15.0),
                 )
-                orders_placed = result.get("orders_placed", 0) if result else 0
-                if orders_placed > 0:
-                    idle_cycles = 0   # reset on fill
-                else:
-                    idle_cycles += 1
             except Exception as exc:
                 log.error("Loop cycle #%d exception: %s", cycle_num, exc)
-                idle_cycles += 1
 
-            # Rapid re-scan: if we placed orders this cycle, skip the sleep
-            # and immediately re-evaluate (the position manager needs to run)
-            if orders_placed > 0:
-                delay = 3  # brief cooldown before re-scan
-                log.info("Cycle #%d: %d order(s) placed — rapid re-scan in %ds.", cycle_num, orders_placed, delay)
-            else:
-                delay = args.loop_delay
-                log.info("Cycle #%d complete. Next cycle in %ds.", cycle_num, delay)
-
-            deadline = time.monotonic() + delay
+            # FIX: sleep in interruptible chunks so SIGTERM is responsive
+            log.info(
+                "Cycle #%d complete. Next cycle in %ds.",
+                cycle_num,
+                args.loop_delay,
+            )
+            deadline = time.monotonic() + args.loop_delay
             while not _SHUTDOWN.is_set() and time.monotonic() < deadline:
                 time.sleep(min(1.0, deadline - time.monotonic()))
 

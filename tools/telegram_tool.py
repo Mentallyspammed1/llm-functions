@@ -53,22 +53,22 @@ from typing import Any, Literal, Optional, Tuple
 
 __version__ = "2.6.0"
 __all__ = [
-    "GracefulShutdown",
+    "run",
+    "execute_tool",
+    "main",
+    "validate_inputs",
+    "build_cache_key",
+    "invalidate_cache",
+    "generate_tool_schema",
     "ToolCache",
     "ToolError",
-    "__version__",
-    "build_cache_key",
-    "execute_tool",
-    "generate_tool_schema",
+    "GracefulShutdown",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "invalidate_cache",
-    "main",
     "resolve_agent_path",
     "resolve_credentials",
-    "run",
-    "validate_inputs",
+    "__version__",
 ]
 
 # Telegram API Fallbacks & Limits
@@ -188,15 +188,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Colors & UI Display Helpers
 # ==============================================================================
 
-NEON_CYAN = "\033[38;5;51m"
-NEON_GREEN = "\033[38;5;46m"
-NEON_RED = "\033[38;5;196m"
-NEON_YELLOW = "\033[38;5;226m"
-NEON_PURPLE = "\033[38;5;129m"
-NEON_PINK = "\033[38;5;198m"
-RESET = "\033[0m"
-BOLD = "\033[1m"
-DIM = "\033[2m"
+NEON_CYAN    = "\033[38;5;51m"
+NEON_GREEN   = "\033[38;5;46m"
+NEON_RED     = "\033[38;5;196m"
+NEON_YELLOW  = "\033[38;5;226m"
+NEON_PURPLE  = "\033[38;5;129m"
+NEON_PINK    = "\033[38;5;198m"
+RESET        = "\033[0m"
+BOLD         = "\033[1m"
+DIM          = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -388,7 +388,7 @@ class ToolCache:
             if time.time() - cache_file.stat().st_mtime > ttl_seconds:
                 cache_file.unlink(missing_ok=True)
                 return None
-            with open(cache_file, encoding="utf-8") as fp:
+            with open(cache_file, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
                 if isinstance(data, dict):
                     return data
@@ -559,9 +559,9 @@ def _build_multipart_payload(fields: dict[str, Any], file_field_name: str, file_
     for name, value in fields.items():
         if value is None or value == "":
             continue
-        body.extend(f"--{boundary}\r\n".encode())
-        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
-        body.extend(f"{value}\r\n".encode())
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        body.extend(f"{value}\r\n".encode("utf-8"))
 
     # Binary file payload
     filename = file_path.name
@@ -569,15 +569,15 @@ def _build_multipart_payload(fields: dict[str, Any], file_field_name: str, file_
     if not mime_type:
         mime_type = "application/octet-stream"
 
-    body.extend(f"--{boundary}\r\n".encode())
-    body.extend(f'Content-Disposition: form-data; name="{file_field_name}"; filename="{filename}"\r\n'.encode())
-    body.extend(f"Content-Type: {mime_type}\r\n\r\n".encode())
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(f'Content-Disposition: form-data; name="{file_field_name}"; filename="{filename}"\r\n'.encode("utf-8"))
+    body.extend(f"Content-Type: {mime_type}\r\n\r\n".encode("utf-8"))
 
     with open(file_path, "rb") as fp:
         body.extend(fp.read())
     body.extend(b"\r\n")
 
-    body.extend(f"--{boundary}--\r\n".encode())
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
     content_type_header = f"multipart/form-data; boundary={boundary}"
     return bytes(body), content_type_header
 

@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import logging
@@ -43,14 +44,14 @@ from typing import Any, Literal, Optional
 
 __version__ = '2.3.0'
 __all__ = [
+    'run',
+    'execute_tool',
     'ToolCache',
     'ToolError',
-    '__version__',
-    'execute_tool',
     'get_agent_var',
     'get_builtin_var',
     'get_execution_context',
-    'run',
+    '__version__',
 ]
 
 # ==============================================================================
@@ -123,15 +124,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN = '\033[38;5;51m'
-NEON_GREEN = '\033[38;5;46m'
-NEON_RED = '\033[38;5;196m'
-NEON_YELLOW = '\033[38;5;226m'
-NEON_PURPLE = '\033[38;5;129m'
-NEON_PINK = '\033[38;5;198m'
-RESET = '\033[0m'
-BOLD = '\033[1m'
-DIM = '\033[2m'
+NEON_CYAN    = '\033[38;5;51m'
+NEON_GREEN   = '\033[38;5;46m'
+NEON_RED     = '\033[38;5;196m'
+NEON_YELLOW  = '\033[38;5;226m'
+NEON_PURPLE  = '\033[38;5;129m'
+NEON_PINK    = '\033[38;5;198m'
+RESET        = '\033[0m'
+BOLD         = '\033[1m'
+DIM          = '\033[2m'
 
 # Advanced ANSI escape sequence stripping regex (includes 24-bit RGB and control codes)
 _ANSI_RE = re.compile(
@@ -293,7 +294,7 @@ class ToolCache:
             if time.time() - mtime > ttl_seconds:
                 cache_file.unlink(missing_ok=True)
                 return None
-            with open(cache_file, encoding='utf-8') as fp:
+            with open(cache_file, 'r', encoding='utf-8') as fp:
                 return json.load(fp)
         except Exception:
             return None
@@ -387,7 +388,7 @@ def execute_tool(
         locations_data: list[dict[str, Any]] = []
         if storage_file.exists():
             try:
-                with open(storage_file, encoding='utf-8') as fp:
+                with open(storage_file, 'r', encoding='utf-8') as fp:
                     locations_data = json.load(fp)
             except Exception:
                 locations_data = []
@@ -400,7 +401,7 @@ def execute_tool(
                     'exit_code': EXIT_INVALID_INPUT,
                     'duration_ms': round((time.monotonic() - start_time) * 1000, 2),
                 }
-
+            
             new_id = location_id or f'loc_{int(time.time() * 1000)}'
             new_entry = {
                 'id': new_id,
@@ -449,10 +450,11 @@ def execute_tool(
 
             processed_items = locations_data[:limit_val]
 
-        elif location_id:
-            processed_items = [loc for loc in locations_data if loc.get('id') == location_id]
-        else:
-            processed_items = locations_data[:limit_val]
+        else:  # 'review' mode
+            if location_id:
+                processed_items = [loc for loc in locations_data if loc.get('id') == location_id]
+            else:
+                processed_items = locations_data[:limit_val]
 
         duration_ms = round((time.monotonic() - start_time) * 1000, 2)
 

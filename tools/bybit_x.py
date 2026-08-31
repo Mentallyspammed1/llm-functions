@@ -3,7 +3,7 @@ import sys
 sys.path.append("/data/data/com.termux/files/home/.config/aichat/llm-functions/tools")
 from target_analysis import USDTTargetCalculator
 
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 """
 BYBIT REALM - Production-Grade Trading System Tool for LLM Functions v5.0
 

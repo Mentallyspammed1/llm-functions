@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import html
 import json
 import logging
@@ -17,29 +18,29 @@ import mimetypes
 import os
 import pickle
 import platform
-import re
 import shutil
 import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 __version__ = "3.0.0"
 __all__ = [
+    "run",
+    "execute_tool",
     "ToolCache",
     "ToolError",
-    "__version__",
-    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "run",
+    "__version__",
 ]
 
 # Standard Notification Defaults
@@ -799,20 +800,20 @@ def _build_multipart_payload(fields: dict[str, Any], file_field_name: str, file_
     for name, value in fields.items():
         if value is None or value == "":
             continue
-        body.extend(f"--{boundary}\r\n".encode())
-        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
-        body.extend(f"{value}\r\n".encode())
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        body.extend(f"{value}\r\n".encode("utf-8"))
 
     mime_type, _ = mimetypes.guess_type(str(file_path))
-    body.extend(f"--{boundary}\r\n".encode())
-    body.extend(f'Content-Disposition: form-data; name="{file_field_name}"; filename="{file_path.name}"\r\n'.encode())
-    body.extend(f"Content-Type: {mime_type or 'application/octet-stream'}\r\n\r\n".encode())
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(f'Content-Disposition: form-data; name="{file_field_name}"; filename="{file_path.name}"\r\n'.encode("utf-8"))
+    body.extend(f"Content-Type: {mime_type or 'application/octet-stream'}\r\n\r\n".encode("utf-8"))
 
     with open(file_path, "rb") as fp:
         body.extend(fp.read())
     body.extend(b"\r\n")
 
-    body.extend(f"--{boundary}--\r\n".encode())
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
     return bytes(body), f"multipart/form-data; boundary={boundary}"
 
 

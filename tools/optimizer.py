@@ -767,6 +767,11 @@ def _get_cached_battery_status() -> str:
 
 import sys
 
+if sys.version_info >= (3, 9):
+    pass
+else:
+    pass
+
 
 def _get_heavy_processes(
     cpu_threshold: float,
@@ -799,7 +804,7 @@ def _get_heavy_processes(
 
 def _has_psutil() -> bool:
     try:
-        import psutil  # ruff: ignore[unused-import]
+        import psutil  # noqa: F401
 
         return True
     except ImportError:

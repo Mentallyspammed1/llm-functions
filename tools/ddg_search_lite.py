@@ -43,11 +43,13 @@ import os
 import re
 import ssl
 import sys
+import time
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
+
 
 DEFAULT_COUNT = 8
 DEFAULT_TIMEOUT = 20

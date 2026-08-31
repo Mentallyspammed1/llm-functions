@@ -35,6 +35,7 @@ import signal
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from enum import Enum

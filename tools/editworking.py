@@ -2494,6 +2494,8 @@ def run(
             "error": f"'target_path' is required for '{operation}'",
         }
     # FIX: allow diff to omit target_path (uses latest backup)
+    if operation == "diff" and not target_path:
+        pass
     if operation in _NEEDS_LINE and line_number is None:
         return {
             "success": False,

@@ -38,18 +38,18 @@ import urllib.request
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 __version__ = "2.4.0"
 __all__ = [
+    "run",
+    "execute_tool",
     "ToolCache",
     "ToolError",
-    "__version__",
-    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "run",
+    "__version__",
 ]
 
 # DoH Resolver Providers
@@ -145,15 +145,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN = "\033[38;5;51m"
-NEON_GREEN = "\033[38;5;46m"
-NEON_RED = "\033[38;5;196m"
-NEON_YELLOW = "\033[38;5;226m"
-NEON_PURPLE = "\033[38;5;129m"
-NEON_PINK = "\033[38;5;198m"
-RESET = "\033[0m"
-BOLD = "\033[1m"
-DIM = "\033[2m"
+NEON_CYAN    = "\033[38;5;51m"
+NEON_GREEN   = "\033[38;5;46m"
+NEON_RED     = "\033[38;5;196m"
+NEON_YELLOW  = "\033[38;5;226m"
+NEON_PURPLE  = "\033[38;5;129m"
+NEON_PINK    = "\033[38;5;198m"
+RESET        = "\033[0m"
+BOLD         = "\033[1m"
+DIM          = "\033[2m"
 
 _ANSI_RE = re.compile(
     r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"

@@ -350,7 +350,7 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
     """
     Calculate micro-profit exit/stop bounds, position sizing, and fee impact.
     """
-    verbose: bool = bool(kwargs.get("verbose"))
+    verbose: bool = bool(kwargs.get("verbose", False))
 
     # ------------------------------------------------------------------
     # 1. Inputs & Sanitization
@@ -577,7 +577,7 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
     log.debug("Solved exit_p=%.6f for target=%.4f", float(exit_p), float(target))
 
     # ------------------------------------------------------------------
-    # 6. Stop-Loss Price Solver (slippage & fee-aware risk calculation)
+    # 6. Stop-Loss Price Solver (slippage-adjusted)
     # ------------------------------------------------------------------
     risk_amt = target / risk_rr
     if side == "buy":
@@ -587,10 +587,9 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                 "success": False,
                 "error": "Stop-loss fees and slippage are too high (>= 100%) to calculate a valid stop price.",
             }
-        # Correctly subtract risk amount and fee drag from entry to ensure SL price is below entry
-        sl_p = (entry * (Decimal(1) - e_fee) - (risk_amt / trading_qty)) / denom_sl
+        sl_p = (entry * (Decimal(1) + e_fee) - (risk_amt / trading_qty)) / denom_sl
     else:
-        sl_p = (entry * (Decimal(1) + e_fee) + (risk_amt / trading_qty)) / (
+        sl_p = ((risk_amt / trading_qty) + entry * (Decimal(1) - e_fee)) / (
             Decimal(1) + x_fee_sl
         )
 
@@ -670,22 +669,15 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                 log.debug("Wall detection failed for %s side: %s", label, exc)
 
     # ------------------------------------------------------------------
-    # 9. Dynamic Confidence Score Model
+    # 9. Confidence Score
     # ------------------------------------------------------------------
     conf = Decimal(75)
     if side == "buy":
-        conf += (imbalance - Decimal("0.5")) * Decimal(50)
+        conf += (imbalance - Decimal("0.5")) * Decimal(40)
     else:
-        conf += (Decimal("0.5") - imbalance) * Decimal(50)
-
-    # Spread penalty (deduct score for wider spreads)
-    if spread_bps_val > Decimal(5):
-        conf -= (spread_bps_val - Decimal(5)) * Decimal("1.5")
-
-    # Penalty for elevated warnings
-    if warnings:
-        conf -= Decimal(len(warnings)) * Decimal(5)
-
+        conf += (Decimal("0.5") - imbalance) * Decimal(40)
+    if spread_bps_val > Decimal(10):
+        conf -= (spread_bps_val - Decimal(10)) * Decimal(2)
     conf = max(Decimal(10), min(Decimal(99), conf))
 
     # ------------------------------------------------------------------
@@ -717,7 +709,7 @@ def calculate_micro_profit(**kwargs: Any) -> Dict[str, Any]:
                 leverage=int(lev),
                 sl_price=float(sl_p),
                 tp_price=float(exit_p),
-                dry_run=bool(kwargs.get("dry_run")),
+                dry_run=bool(kwargs.get("dry_run", False)),
             )
             log.debug("Order result: %s", order_result)
         except Exception as err:
@@ -803,7 +795,7 @@ def write_llm_output(data: Dict[str, Any]) -> None:
 
 def run(**kwargs: Any) -> Dict[str, Any]:
     """Execute micro-profit calculation and route results."""
-    verbose = bool(kwargs.get("verbose"))
+    verbose = bool(kwargs.get("verbose", False))
     if verbose:
         logging.basicConfig(
             level=logging.DEBUG,
@@ -813,7 +805,7 @@ def run(**kwargs: Any) -> Dict[str, Any]:
         log.debug("Verbose logging enabled. kwargs=%s", list(kwargs.keys()))
 
     result = calculate_micro_profit(**kwargs)
-    print_human_readable_ui(result, no_color=bool(kwargs.get("no_color")))
+    print_human_readable_ui(result, no_color=bool(kwargs.get("no_color", False)))
     write_llm_output(result)
     return result
 

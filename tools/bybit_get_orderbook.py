@@ -3,7 +3,7 @@
 # @option --symbol <SYMBOL> Symbol
 # @option --limit <NUMBER> Limit
 # @option --use-tor <BOOL> Use Tor
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 import argparse
 import json
 

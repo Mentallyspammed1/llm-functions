@@ -535,7 +535,8 @@ def fetch_url(
 
         effective_max_time = _effective_max_time(timeout, max_time)
         connect_timeout_i = _positive_int(connect_timeout, "connect_timeout")
-        connect_timeout_i = min(connect_timeout_i, effective_max_time)
+        if connect_timeout_i > effective_max_time:
+            connect_timeout_i = effective_max_time
 
         retry_i = _nonnegative_int(retry, "retry")
         retry_delay_i = _nonnegative_int(retry_delay, "retry_delay")

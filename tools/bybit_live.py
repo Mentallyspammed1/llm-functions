@@ -69,8 +69,8 @@ import threading
 import time
 import uuid
 from collections import deque
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from dataclasses import dataclass, field
-from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation
 from enum import Enum
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
@@ -111,7 +111,7 @@ except ImportError:
     WEBSOCKET_AVAILABLE = False
 
 try:
-    import socks  # ruff: ignore[unused-import]
+    import socks  # noqa: F401
 
     PYSOCKS_AVAILABLE = True
 except ImportError:
@@ -1765,11 +1765,6 @@ class BybitToolDispatcher:
         for base_url in endpoints:
             url = f"{base_url}{endpoint}"
             try:
-                # Refresh timestamp for each endpoint attempt to avoid timestamp expiration across retries
-                ts = self._get_timestamp()
-                if signed:
-                    headers["X-BAPI-TIMESTAMP"] = ts
-                    headers["X-BAPI-SIGN"] = self._sign(payload_str, ts)
                 logger.debug("[%s] %s %s signed=%s", request_id, method, url, signed)
                 return self.circuit.call(
                     self.tor.request,
@@ -1966,7 +1961,7 @@ class BybitToolDispatcher:
         else:
             reduce_only = True
         result = self.place_order(symbol=symbol, side=OrderSide(close_side), qty=close_qty, order_type=OrderType.MARKET, category=category, reduce_only=reduce_only, position_idx=PositionIdx.ONE_WAY)
-        return {"status": "ok" if result.get("retCode", 0) == 0 else "error", "symbol": symbol.upper(), "action": action, "closed_qty": close_qty, "requested_percent": percent, "remaining_estimate": max(0.0, size - close_qty), "result": result}
+        return {"status": "ok" if result.get("retCode", 0) == 0 else "error", "symbol": symbol.upper(), "action": action, "closed_qty": close_qty, "requested_percent": percent, "remaining_estimate": max(0.0, size-close_qty), "result": result}
 
     def quick_dca_ladder(self, symbol: str, total_qty: float, steps: int = 3, range_pct: float = 1.5, side: str = "Buy", category: Category = Category.LINEAR) -> dict:
         """Create a precision-aware DCA ladder with deterministic client order IDs."""
@@ -1980,11 +1975,6 @@ class BybitToolDispatcher:
             return {"status": "error", "msg": "side must be Buy or Sell"}
         ticker = self.get_ticker(symbol, category)
         last_px = _safe_float(ticker.get("lastPrice"))
-        if not last_px:
-            try:
-                last_px = _safe_float(ticker.get("result", {}).get("list", [{}])[0].get("lastPrice"))
-            except Exception:
-                pass
         if not last_px or last_px <= 0:
             return {"status": "error", "msg": "Could not fetch ticker price"}
         raw_step_qty = total_qty / steps
@@ -9203,91 +9193,6 @@ class BybitToolDispatcher:
         result["tick_size"] = pf.tick_size
         return result
 
-    def calculate_net_scalp_profit(
-        self,
-        symbol: str,
-        side: str,
-        entry_price: float,
-        exit_price: float,
-        qty: float,
-        entry_fee_rate: float = 0.0006,
-        exit_fee_rate: float = 0.0006,
-        funding_rate: float = 0.0,
-        holding_periods: int = 0,
-        slippage_pct: float = 0.0001,
-        category: str = "linear",
-    ) -> dict:
-        """Calculate complete net scalp profit including fees, funding costs, and slippage.
-
-        PnL Formulas:
-          Gross PnL (Buy)  = (exit_price - entry_price) * qty
-          Gross PnL (Sell) = (entry_price - exit_price) * qty
-          Entry Fee        = entry_price * qty * entry_fee_rate
-          Exit Fee         = exit_price  * qty * exit_fee_rate
-          Funding Fee      = position_value * funding_rate * holding_periods
-          Slippage Buffer  = exit_price  * qty * slippage_pct
-          Net PnL          = Gross PnL - Entry Fee - Exit Fee - Funding Fee - Slippage Buffer
-        """
-        info = self._fetch_instrument(symbol, category)
-        pf = info.price_flt
-
-        # Dynamically fetch account fee tier if default values passed
-        if entry_fee_rate == 0.0006 or exit_fee_rate == 0.0006:
-            try:
-                fee_data = self.get_fee_rate(symbol=symbol, category=category)
-                fee_list = fee_data.get("list", [{}])
-                actual_taker = _safe_float(fee_list[0].get("takerFeeRate"))
-                actual_maker = _safe_float(fee_list[0].get("makerFeeRate"))
-                if actual_taker:
-                    if entry_fee_rate == 0.0006:
-                        entry_fee_rate = actual_taker
-                    if exit_fee_rate == 0.0006:
-                        exit_fee_rate = actual_taker
-            except Exception as e:
-                logger.debug("Failed to fetch live fee rates, using defaults: %s", e)
-
-        is_buy = side.capitalize() == "Buy"
-        gross_pnl = (exit_price - entry_price) * qty if is_buy else (entry_price - exit_price) * qty
-
-        entry_val = entry_price * qty
-        exit_val = exit_price * qty
-
-        entry_fee = entry_val * entry_fee_rate
-        exit_fee = exit_val * exit_fee_rate
-        funding_cost = (entry_val + exit_val) / 2.0 * funding_rate * holding_periods
-        slippage_cost = exit_val * slippage_pct
-
-        total_costs = entry_fee + exit_fee + funding_cost + slippage_cost
-        net_pnl = gross_pnl - total_costs
-        net_roi_pct = (net_pnl / entry_val) * 100.0 if entry_val > 0 else 0.0
-
-        # Calculate exact minimum exit price to achieve break-even
-        if is_buy:
-            min_exit_for_breakeven = (entry_val + entry_fee) / (qty * (1.0 - exit_fee_rate - (funding_rate * holding_periods) - slippage_pct))
-        else:
-            min_exit_for_breakeven = (entry_val - entry_fee) / (qty * (1.0 + exit_fee_rate + (funding_rate * holding_periods) + slippage_pct))
-
-        min_exit_for_breakeven = pf.adjust(min_exit_for_breakeven)
-
-        return {
-            "status": "ok",
-            "symbol": symbol,
-            "side": side,
-            "entry_price": entry_price,
-            "exit_price": exit_price,
-            "qty": qty,
-            "gross_pnl": round(gross_pnl, 6),
-            "entry_fee": round(entry_fee, 6),
-            "exit_fee": round(exit_fee, 6),
-            "funding_cost": round(funding_cost, 6),
-            "slippage_cost": round(slippage_cost, 6),
-            "total_costs": round(total_costs, 6),
-            "net_pnl": round(net_pnl, 6),
-            "net_roi_pct": round(net_roi_pct, 4),
-            "is_profitable": net_pnl > 0,
-            "breakeven_exit_price": min_exit_for_breakeven,
-        }
-
     def get_min_order_value(self, symbol: str, category: str = "linear") -> dict:
         """Get the minimum order value (qty * price) for a symbol with current price context."""
         info = self._fetch_instrument(symbol, category)
@@ -10157,15 +10062,14 @@ class BybitToolDispatcher:
                     pass
             elif PYSOCKS_AVAILABLE and self.config.pysocks_enabled:
                 try:
-                    # Reuse cached PySocks GeoRouter instance if initialized, else lazy initialize
-                    if not hasattr(self, "_health_router") or self._health_router is None:
-                        self._health_router = PySocksGeoRouter(
-                            proxy_host=self.config.pysocks_host,
-                            proxy_port=self.config.pysocks_port,
-                            rdns=True,
-                        )
-                    geo_ip = self._health_router.get_public_ip()
-                    geo_location = self._health_router.get_geo_location()
+                    router = PySocksGeoRouter(
+                        proxy_host=self.config.pysocks_host,
+                        proxy_port=self.config.pysocks_port,
+                        rdns=True,
+                    )
+                    geo_ip = router.get_public_ip()
+                    geo_location = router.get_geo_location()
+                    router.close()
                 except Exception:
                     pass
 
@@ -11663,26 +11567,6 @@ def run(
                 qty=qty,
                 tp_pct=tp_pct,
                 sl_pct=sl_pct,
-                category=cat.value,
-            )
-        elif action == "calculate_net_scalp_profit":
-            ep = entry_price if entry_price is not None else price
-            xp = exit_price if exit_price is not None else stop_loss
-            if not symbol or not side or ep is None or xp is None or qty is None:
-                return {
-                    "status": "error",
-                    "msg": "symbol, side, entry_price (or price), exit_price (or stop_loss), and qty required",
-                }
-            return bot.calculate_net_scalp_profit(
-                symbol=symbol,
-                side=side,
-                entry_price=float(ep),
-                exit_price=float(xp),
-                qty=float(qty),
-                entry_fee_rate=float(fee_rate) if fee_rate is not None else 0.0006,
-                exit_fee_rate=float(fee_rate) if fee_rate is not None else 0.0006,
-                funding_rate=float(funding_rate) if funding_rate is not None else 0.0,
-                holding_periods=int(holding_periods) if holding_periods is not None else 0,
                 category=cat.value,
             )
         elif action == "get_min_order_value":

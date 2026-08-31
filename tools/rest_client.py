@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import pickle
 import re
@@ -46,20 +47,20 @@ from typing import Any, Literal, Optional
 
 __version__ = "2.5.0"
 __all__ = [
-    "GracefulShutdown",
+    "run",
+    "execute_tool",
+    "main",
+    "validate_inputs",
+    "build_cache_key",
+    "invalidate_cache",
+    "generate_tool_schema",
     "ToolCache",
     "ToolError",
-    "__version__",
-    "build_cache_key",
-    "execute_tool",
-    "generate_tool_schema",
+    "GracefulShutdown",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "invalidate_cache",
-    "main",
-    "run",
-    "validate_inputs",
+    "__version__",
 ]
 
 # ==============================================================================
@@ -170,15 +171,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Colors & UI Display Helpers
 # ==============================================================================
 
-NEON_CYAN = "\033[38;5;51m"
-NEON_GREEN = "\033[38;5;46m"
-NEON_RED = "\033[38;5;196m"
-NEON_YELLOW = "\033[38;5;226m"
-NEON_PURPLE = "\033[38;5;129m"
-NEON_PINK = "\033[38;5;198m"
-RESET = "\033[0m"
-BOLD = "\033[1m"
-DIM = "\033[2m"
+NEON_CYAN    = "\033[38;5;51m"
+NEON_GREEN   = "\033[38;5;46m"
+NEON_RED     = "\033[38;5;196m"
+NEON_YELLOW  = "\033[38;5;226m"
+NEON_PURPLE  = "\033[38;5;129m"
+NEON_PINK    = "\033[38;5;198m"
+RESET        = "\033[0m"
+BOLD         = "\033[1m"
+DIM          = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -204,7 +205,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 
     success = data.get("success", False)
     status_code = data.get("status_code", 0)
-
+    
     if success and 200 <= status_code < 300:
         status_color = NEON_GREEN
         status_symbol = "✓"
@@ -518,7 +519,7 @@ def execute_tool(
     existing_query = urllib.parse.parse_qs(url_parts.query)
     for pk, pv in parsed_params.items():
         existing_query[pk] = [pv]
-
+    
     new_query = urllib.parse.urlencode(existing_query, doseq=True)
     final_url = urllib.parse.urlunparse((
         url_parts.scheme,
