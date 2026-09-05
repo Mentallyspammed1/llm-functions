@@ -15,11 +15,11 @@
 set -uo pipefail
 
 # SYNTHWAVE RETRO-NEON PALETTE
-CYBER_MAGENTA=$'\033[38;5;201m'
-CYBER_LIME=$'\033[38;5;82m'
-CYBER_YELLOW=$'\033[38;5;226m'
-CYBER_CYAN=$'\033[38;5;51m'
-RESET=$'\033[0m'
+CYBER_MAGENTA=$'\\033[38;5;201m'
+CYBER_LIME=$'\\033[38;5;82m'
+CYBER_YELLOW=$'\\033[38;5;226m'
+CYBER_CYAN=$'\\033[38;5;51m'
+RESET=$'\\033[0m'
 BORDER_NEON="${CYBER_MAGENTA}"
 BORDER_TL='╔' BORDER_TR='╗' BORDER_BL='╚' BORDER_BR='╝' BORDER_V='║'
 
@@ -28,23 +28,30 @@ get_width() { tput cols 2>/dev/null || echo 80; }
 
 print_header() {
     local title=" PNL REPORT | $(date '+%Y-%m-%d %H:%M:%S') "
-    printf "${BORDER_NEON}${BORDER_TL}${CYBER_YELLOW}%s${BORDER_TR}${RESET}
-" "$title"
+    printf "${BORDER_NEON}${BORDER_TL}${CYBER_YELLOW}%s${BORDER_TR}${RESET}\n" "$title"
 }
 
 print_footer() {
-    printf "${BORDER_NEON}${BORDER_BL}%*s${BORDER_BR}${RESET}
-" "$(($(get_width)-2))" ""
+    printf "${BORDER_NEON}${BORDER_BL}%*s${BORDER_BR}${RESET}\n" "$(($(get_width)-2))" ""
 }
 
 # ---- API Helper -----------------------------------------------------
 _sign_request() {
-    local timestamp=$(date +%s%3N)
-    local string_to_sign="${timestamp}${1}${2}${3}${4}"
-    echo -n "$string_to_sign" | openssl dgst -sha256 -hex | sed 's/^.* //'
+    local method="$1"
+    local endpoint="$2"
+    local query="$3"
+    local timestamp="$4"
+    local string_to_sign="${timestamp}${method}${endpoint}${query}"
+    printf "%s" "$string_to_sign" | openssl dgst -sha256 -hmac "${API_SECRET}" -hex | sed 's/^.* //'
 }
 
 main() {
+    # Load environment from .env if present
+    if [[ -f "/data/data/com.termux/files/home/.config/aichat/llm-functions/.env" ]]; then
+        # shellcheck disable=SC1091
+        source "/data/data/com.termux/files/home/.config/aichat/llm-functions/.env"
+    fi
+
     # Default values from argc
     local CATEGORY="${argc_category:-linear}"
     local SYMBOL="${argc_symbol:-}"
@@ -62,11 +69,17 @@ main() {
     [[ -n "$CURSOR" ]] && QUERY="${QUERY}&cursor=${CURSOR}"
 
     local ENDPOINT="/v5/position/closed-pnl"
-    local SIGNATURE=$(_sign_request "GET" "$ENDPOINT" "$QUERY" "")
+    local timestamp
+    timestamp=$(date +%s%3N)
+    local SIGNATURE=$(_sign_request "GET" "$ENDPOINT" "$QUERY" "$timestamp")
 
     # Request - One-line curl to avoid shell syntax errors
     local RESPONSE
-    RESPONSE=$(curl -s -S -X GET "https://api.bybit.com${ENDPOINT}?${QUERY}" -H "X-BAPI-API-KEY: ${API_KEY:-}" -H "X-BAPI-SIGN: $SIGNATURE" -H "X-BAPI-TIMESTAMP: $(date +%s%3N)" -H "X-BAPI-RECV-WINDOW: 5000")
+    RESPONSE=$(curl -s -S -X GET "https://api.bybit.com${ENDPOINT}?${QUERY}" \
+        -H "X-BAPI-API-KEY: ${API_KEY:-}" \
+        -H "X-BAPI-SIGN: $SIGNATURE" \
+        -H "X-BAPI-TIMESTAMP: $timestamp" \
+        -H "X-BAPI-RECV-WINDOW: 5000")
 
     # Output formatting
     local width=$(get_width)
@@ -82,8 +95,7 @@ main() {
     content=$(
         print_header
         echo "$formatted_output" | while IFS= read -r line; do
-            printf "${BORDER_NEON}${BORDER_V}${RESET} %s
-" "$line"
+            printf "${BORDER_NEON}${BORDER_V}${RESET} %s\n" "$line"
         done
         print_footer
     )

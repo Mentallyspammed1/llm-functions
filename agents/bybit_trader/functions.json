@@ -595,7 +595,7 @@
   },
   {
     "name": "bybit_live",
-    "description": "BYBIT REALM v4.0 \u2013 Comprehensive Bybit V5 trading tool with all endpoints, indicators, breakeven logic, L2 analysis, and profitable macros.",
+    "description": "BYBIT REALM v4.0 – Comprehensive Bybit V5 trading tool with all endpoints, indicators, breakeven logic, L2 analysis, and profitable macros.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1331,7 +1331,7 @@
   },
   {
     "name": "bybit_wbta",
-    "description": "Market Trend Observatory v3.3 \u2014 Complete L2 Orderbook Microstructure,",
+    "description": "Market Trend Observatory v3.3 — Complete L2 Orderbook Microstructure, Trade Flow Analysis, Funding/OI Telemetry, 35+ Technical Indicators, and Multi-Factor Long/Short Signal Engine. Read-only telemetry tool.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1372,7 +1372,7 @@
   },
   {
     "name": "bybit_core",
-    "description": "Core V5 API driver for Bybit with session pooling, HMAC signing,",
+    "description": "Core V5 API driver for Bybit with session pooling, HMAC signing, failover domain routing, and automatic server time synchronization.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1441,9 +1441,53 @@
           "type": "string",
           "description": "The URL to fetch."
         },
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout in seconds (used as --max-time when max-time is default)."
+        },
+        "max_time": {
+          "type": "integer",
+          "description": "Maximum transfer time in seconds."
+        },
+        "connect_timeout": {
+          "type": "integer",
+          "description": "Connection timeout in seconds."
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Custom User-Agent header."
+        },
+        "output": {
+          "type": "string",
+          "description": "Output file path (default: LLM_OUTPUT or return body in tool result)."
+        },
+        "dump_header": {
+          "type": "string",
+          "description": "Output file path for HTTP response headers."
+        },
+        "cookie_file": {
+          "type": "string",
+          "description": "Path to cookie file for session management."
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD)."
+        },
+        "data": {
+          "type": "string",
+          "description": "Request body data for POST/PUT/PATCH."
+        },
+        "headers": {
+          "type": "string",
+          "description": "Comma-separated headers (e.g., \"Key: Val,Key2: Val2\")."
+        },
         "follow_redirects": {
           "type": "boolean",
           "description": "Follow HTTP redirects."
+        },
+        "max_redirects": {
+          "type": "integer",
+          "description": "Maximum number of redirects."
         },
         "verify_ssl": {
           "type": "boolean",
@@ -1464,6 +1508,34 @@
         "include": {
           "type": "boolean",
           "description": "Include HTTP response headers in the body output."
+        },
+        "retry": {
+          "type": "integer",
+          "description": "Number of retry attempts."
+        },
+        "retry_delay": {
+          "type": "integer",
+          "description": "Delay between retries in seconds."
+        },
+        "limit_rate": {
+          "type": "string",
+          "description": "Limit download rate (e.g., 100k, 1m)."
+        },
+        "proxy": {
+          "type": "string",
+          "description": "Proxy server URL."
+        },
+        "auth": {
+          "type": "string",
+          "description": "Authentication credentials (user:password or bearer token)."
+        },
+        "auth_type": {
+          "type": "string",
+          "description": "Authentication type (basic or bearer)."
+        },
+        "max_bytes": {
+          "type": "integer",
+          "description": "Abort if body exceeds this many bytes (default 10 MiB)."
         },
         "json_on_success": {
           "type": "boolean",
