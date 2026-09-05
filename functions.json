@@ -776,6 +776,50 @@
     }
   },
   {
+    "name": "nsfw_web_search",
+    "description": "Perform an unfiltered web search (SafeSearch forced OFF). Supports optional proxy rotation for reliability.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query (required)"
+        },
+        "max_results": {
+          "type": "integer",
+          "description": "Maximum results (default: 8, max: 20)"
+        },
+        "region": {
+          "type": "string",
+          "description": "Region code (default: us-en)"
+        },
+        "proxy": {
+          "type": "string",
+          "description": "Single proxy URL (http://host:port or socks5://...)"
+        },
+        "use_proxy_rotation": {
+          "type": "boolean",
+          "description": "Enable automatic free-proxy rotation"
+        },
+        "proxy_list": {
+          "type": "string",
+          "description": "Custom proxy list file (one URL per line)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI colour output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Show proxy attempts + debug"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
     "name": "fetch_url_via_jina",
     "description": "Extract content from a URL using Jina AI Reader API.",
     "parameters": {
@@ -8278,6 +8322,214 @@
         "verbose": {
           "type": "boolean",
           "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
+  },
+  {
+    "name": "fetch_weather",
+    "description": "Fetch current weather, multi-day forecasts, and hourly outlooks for any location or auto-detected IP.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "string",
+          "description": "City name, coordinates, or 'auto' (default: auto)"
+        },
+        "units": {
+          "type": "string",
+          "description": "Unit system: metric or imperial (default: metric)",
+          "enum": [
+            "metric",
+            "imperial"
+          ]
+        },
+        "days": {
+          "type": "integer",
+          "description": "Forecast days: 1 to 7 (default: 1)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary, detailed, hourly (default: summary)",
+          "enum": [
+            "summary",
+            "detailed",
+            "hourly"
+          ]
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching (15-minute TTL)"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      }
+    }
+  },
+  {
+    "name": "skill_manager",
+    "description": "Create, load, or list agent skills.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": ""
+        },
+        "name": {
+          "type": "string",
+          "description": ""
+        },
+        "description": {
+          "type": "string",
+          "description": ""
+        },
+        "content": {
+          "type": "string",
+          "description": ""
+        },
+        "skills_dir": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "required": [
+        "action",
+        "name",
+        "description",
+        "content",
+        "skills_dir"
+      ]
+    }
+  },
+  {
+    "name": "ip_geo",
+    "description": "Return geolocation and network information for an IP address.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "ip": {
+          "type": "string",
+          "description": ""
+        },
+        "fields": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "required": [
+        "ip",
+        "fields"
+      ]
+    }
+  },
+  {
+    "name": "file_lint",
+    "description": "files (Python, JSON, TOML, INI, Markdown, and general text).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "File or directory path to lint (required)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed",
+          "enum": [
+            "summary",
+            "detailed"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum items/issues to report"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Maximum execution time in seconds"
+        },
+        "file_pattern": {
+          "type": "string",
+          "description": "Filename glob filter (e.g., '*.py', '*.json')"
+        },
+        "max_line_length": {
+          "type": "integer",
+          "description": "Maximum allowed line length (default: 100)"
+        },
+        "severity": {
+          "type": "string",
+          "description": "Minimum severity: all/warning/error",
+          "enum": [
+            "all",
+            "warning",
+            "error"
+          ]
+        },
+        "cache_ttl": {
+          "type": "number",
+          "description": "Cache TTL in seconds"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "Cache directory path"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "Safe environment override (repeatable)"
+        },
+        "recursive": {
+          "type": "boolean",
+          "description": "Scan directories recursively"
+        },
+        "include_hidden": {
+          "type": "boolean",
+          "description": "Include hidden files and directories"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Compatibility flag; tool is read-only"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable deterministic result caching"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear this tool's cache"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print the LLM-facing JSON schema"
+        },
+        "self_test": {
+          "type": "boolean",
+          "description": "Run dependency-free linter self-tests"
+        },
+        "json_only": {
+          "type": "boolean",
+          "description": "Suppress human CLI UI (machine output only)"
+        },
+        "quiet": {
+          "type": "boolean",
+          "description": "Suppress progress and UI output"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable debug logging"
         }
       },
       "required": [

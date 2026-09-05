@@ -12,6 +12,7 @@ net_ip_info.sh
 wget2x.py
 fetch_url_via_curl.sh
 vid_search.py
+nsfw_web_search.py
 fetch_url_via_jina.py
 ddg_search.py
 pyrm_search.py
@@ -102,3 +103,7 @@ sys_unified.py
 
 location_manager.py
 search_tool.py
+fetch_weather.py
+skill_manager.py
+ip_geo.py
+file_lint.py

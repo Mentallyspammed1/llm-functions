@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 # BEGIN HUMAN READABLE UI PATCH
 import json, sys
 def _print_human_readable_ui(res):
@@ -18,8 +20,6 @@ def _print_human_readable_ui(res):
 # END HUMAN READABLE UI PATCH
 
 """Manage, create, and load skills for the agent — llm-functions tool."""
-
-from __future__ import annotations
 
 import argparse
 import json
@@ -61,15 +61,15 @@ def execute(action: str, name: str, description: str, content: str, skills_dir: 
         skill_dir = target_dir / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         skill_file = skill_dir / "SKILL.md"
-        
+
         # Build YAML frontmatter and content
         full_content = f"---\nname: {name}\ndescription: {description}\n---\n\n{content}\n"
-        
+
         try:
             skill_file.write_text(full_content, encoding="utf-8")
         except OSError as e:
             raise RuntimeError(f"Failed to write skill file: {e}")
-            
+
         return {
             "success": True,
             "data": {
@@ -96,12 +96,12 @@ def execute(action: str, name: str, description: str, content: str, skills_dir: 
                     "warnings": [],
                     "error": f"Skill '{name}' not found at {skill_file} or {alt_skill_file}"
                 }
-                
+
         try:
             loaded_content = skill_file.read_text(encoding="utf-8")
         except OSError as e:
             raise RuntimeError(f"Failed to read skill file: {e}")
-            
+
         return {
             "success": True,
             "data": {
@@ -124,7 +124,7 @@ def execute(action: str, name: str, description: str, content: str, skills_dir: 
                         skills_found.append({"name": item.name, "path": str(skill_md.absolute())})
                 elif item.is_file() and item.suffix == ".md":
                     skills_found.append({"name": item.stem, "path": str(item.absolute())})
-                    
+
         return {
             "success": True,
             "data": {
@@ -135,7 +135,7 @@ def execute(action: str, name: str, description: str, content: str, skills_dir: 
             "warnings": [],
             "error": None
         }
-        
+
     return {"success": False, "error": "Unknown execution path"}
 
 
@@ -174,9 +174,9 @@ def _cli() -> int:
     p.add_argument("--description", default="", help="Description of the skill (for create)")
     p.add_argument("--content", default="", help="Markdown content of the skill (for create)")
     p.add_argument("--skills-dir", default="skills", help="Directory where skills are stored")
-    
+
     args = p.parse_args()
-    
+
     result = run(
         action=args.action,
         name=args.name,
@@ -184,7 +184,7 @@ def _cli() -> int:
         content=args.content,
         skills_dir=args.skills_dir,
     )
-    
+
     # Write machine result to LLM_OUTPUT if available, else stdout
     output_target = os.environ.get("LLM_OUTPUT", "")
     if output_target and output_target != "/dev/stdout":

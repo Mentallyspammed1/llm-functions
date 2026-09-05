@@ -1,3 +1,27 @@
+from __future__ import annotations
+import random
+
+def _mutate_query(query):
+    """Adds significant jitter and keyword mutation to bypass pattern detection."""
+    import random
+    modifiers = ["hd", "4k", "high res", "gallery", "collection", "set", "leak", "exclusive"]
+    mutations = [
+        lambda q: q + " " + random.choice(modifiers),
+        lambda q: q + " " * random.randint(1, 3),
+        lambda q: q.strip(),
+        lambda q: q + " " + random.choice(["alt", "style", "look"]),
+        lambda q: q.replace("nsfw", "unfiltered") if "nsfw" in q.lower() else q,
+        lambda q: q.replace("nsfw", "explicit") if "nsfw" in q.lower() else q,
+    ]
+    return random.choice(mutations)(query)
+
+def _get_random_referer(backend):
+    referers = {
+        "bing": ["https://www.bing.com/", "https://www.bing.com/images/search", "https://www.bing.com/videos/search"],
+        "yandex": ["https://yandex.com/", "https://yandex.com/images/", "https://yandex.com/search/"],
+        "google": ["https://www.google.com/", "https://www.google.com/search"]
+    }
+    return random.choice(referers.get(backend, ["https://www.google.com/"]))
 #!/usr/bin/env python3
 # ==============================================================================
 # osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.0.1
@@ -45,7 +69,6 @@
 # @env LLM_OUTPUT=/dev/stdout      Output path for LLM integration
 # ==============================================================================
 
-from __future__ import annotations
 
 import argparse
 import concurrent.futures
@@ -776,6 +799,10 @@ def _build_ssl_ctx(ignore_ssl: bool = _IGNORE_SSL) -> ssl.SSLContext:
     return ctx
 
 
+# ==============================================================================
+# VOA UPGRADE: SESSION-BASED FETCH & DYNAMIC UA ROTATION
+# ==============================================================================
+
 def _fetch(
     url: str,
     headers: Optional[Dict[str, str]] = None,
@@ -787,7 +814,7 @@ def _fetch(
     follow_redirects: bool = True,
     use_cache: bool = True,
 ) -> Optional[bytes]:
-    """Single authoritative fetch function with retry, rate-limit, and cache."""
+    """VOA-Enhanced fetch: Session-mimicry, aggressive UA rotation, and atomic caching."""
     if use_cache and method.upper() in ("GET", "HEAD"):
         cached = _cache.get(url, method)
         if cached is not None:
@@ -796,17 +823,23 @@ def _fetch(
     rl = _get_rate_limiter(backend)
     ctx = _build_ssl_ctx(ignore_ssl)
 
-    base_headers: Dict[str, str] = {
-        "User-Agent": _ua(),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate",
-        "Connection": "close",
-        "Cache-Control": "no-cache",
-        "DNT": "1",
-    }
-    if headers:
-        base_headers.update(headers)
+    # VOA: Dynamic Header Generation per attempt to bypass fingerprinting
+    def get_headers():
+        h = {
+            "User-Agent": _ua(),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+        }
+        if headers:
+            h.update(headers)
+        return h
 
     last_exc: Exception = RuntimeError("No fetch attempts made")
 
@@ -819,12 +852,12 @@ def _fetch(
             opener = urllib.request.build_opener(*handlers)
 
             req = urllib.request.Request(
-                url, headers=base_headers, method=method.upper()
+                url, headers=get_headers(), method=method.upper()
             )
             with opener.open(req, timeout=timeout) as resp:
                 data = resp.read()
 
-            _debug(f"[{backend}] {len(data):,} B ← {url[:70]}")
+            _debug(f"[VOA][{backend}] {len(data):,} B ← {url[:70]}")
 
             if use_cache and method.upper() in ("GET", "HEAD"):
                 _cache.put(url, data, method)
@@ -832,25 +865,28 @@ def _fetch(
             return data
 
         except urllib.error.HTTPError as e:
-            _debug(f"[{backend}] HTTP {e.code} attempt {attempt}/{retries}")
-            if e.code in (429, 503):
-                wait = (_RETRY_BACKOFF**attempt) + random.uniform(0.1, 1.5)
+            _debug(f"[VOA][{backend}] HTTP {e.code} attempt {attempt}/{retries}")
+            if e.code == 429: # Rate Limited
+                wait = (_RETRY_BACKOFF**attempt) * 2 + random.uniform(1.0, 3.0)
                 time.sleep(wait)
+            elif e.code in (500, 502, 503, 504):
+                time.sleep(_RETRY_BACKOFF * attempt)
             elif e.code in (403, 404):
                 return None
             last_exc = e
 
         except (urllib.error.URLError, socket.timeout, ConnectionResetError) as e:
-            _debug(f"[{backend}] Network err attempt {attempt}: {e}")
+            _debug(f"[VOA][{backend}] Network err attempt {attempt}: {e}")
             time.sleep(_RETRY_BACKOFF * attempt)
             last_exc = e
 
         except Exception as e:
-            _debug(f"[{backend}] Unexpected attempt {attempt}: {e}")
+            _debug(f"[VOA][{backend}] Unexpected attempt {attempt}: {e}")
             last_exc = e
 
-    _warn(f"[{backend}] All {retries} attempts failed: {last_exc} — {url[:70]}")
+    _warn(f"[VOA][{backend}] All {retries} attempts failed: {last_exc} — {url[:70]}")
     return None
+
 
 
 def _fetch_json(
@@ -1115,9 +1151,12 @@ def _backend_yandex(
 
 
 _BING_PATS = [
-    re.compile(r'&quot;murl&quot;:&quot;(https?://[^&"]+?)&quot;', re.I),
-    re.compile(r'"murl"\s*:\s*"(https?://[^"]+)"', re.I),
-    re.compile(r'data-src="(https?://[^"]+?\.(?:jpe?g|png|gif|webp))"', re.I),
+    re.compile(r'&quot;murl&quot;:&quot;(https?://[^&\" ]+?)&quot;', re.I),
+    re.compile(r'\"murl\"\s*:\s*\"(https?://[^"]+)\"', re.I),
+    re.compile(r'data-src=\" (https?://[^"]+?\.(?:jpe?g|png|gif|webp))\"', re.I),
+    re.compile(r'src=\" (https?://[^"]+?\.(?:jpe?g|png|gif|webp))\"', re.I),
+    re.compile(r'data-original-src=\" (https?://[^"]+?\.(?:jpe?g|png|gif|webp))\"', re.I),
+    re.compile(r'murl\": \"(https?://[^"]+)\"', re.I),
 ]
 
 
@@ -1135,19 +1174,36 @@ def _backend_bing(
     for _ in range(max(1, max_pages)):
         if len(results) >= limit:
             break
-        # Upgraded: adlt=off ensures unrestricted/NSFW search queries return results
-        params = {"q": query, "first": str(first), "count": "35", "adlt": "off"}
+        
+        # VOA: Mutate query and rotate referer to bypass pattern detection
+        mutated_query = _mutate_query(query)
+        params = {"q": mutated_query, "first": str(first), "count": "35", "adlt": "off"}
+        
+        headers = {
+            "Referer": _get_random_referer("bing"),
+            "Cookie": "SRCHHPGUSR=ADLT=OFF; B3=off;",
+            "User-Agent": _get_random_ua(),
+        }
+        
         raw = _fetch(
             "https://www.bing.com/images/search?" + urllib.parse.urlencode(params),
-            headers={
-                "Referer": "https://www.bing.com/",
-                "Cookie": "SRCHHPGUSR=ADLT=OFF; B3=off;",
-            },
+            headers=headers,
             backend="bing",
             use_cache=use_cache,
         )
         if raw is None:
-            break
+            # Try one more time with a different mutation if it failed
+            mutated_query = _mutate_query(query)
+            params["q"] = mutated_query
+            raw = _fetch(
+                "https://www.bing.com/images/search?" + urllib.parse.urlencode(params),
+                headers=headers,
+                backend="bing",
+                use_cache=use_cache,
+            )
+            if raw is None:
+                break
+
         html_str = raw.decode("utf-8", errors="replace")
         found = 0
         for pat in _BING_PATS:
@@ -1163,7 +1219,29 @@ def _backend_bing(
             if len(results) >= limit:
                 break
         if found == 0:
-            break
+            # If no results found, try a broader mutation
+            mutated_query = query.replace("nsfw", "").strip()
+            params["q"] = mutated_query
+            raw = _fetch(
+                "https://www.bing.com/images/search?" + urllib.parse.urlencode(params),
+                headers=headers,
+                backend="bing",
+                use_cache=use_cache,
+            )
+            if raw:
+                html_str = raw.decode("utf-8", errors="replace")
+                for pat in _BING_PATS:
+                    for m in pat.finditer(html_str):
+                        u = html.unescape(urllib.parse.unquote(m.group(1)))
+                        canonical = _canonical_url(u)
+                        if u.startswith("http") and canonical not in seen and _has_image_ext(u):
+                            seen.add(canonical)
+                            results.append(_make_image_result("bing", u, u, len(results)))
+                            found += 1
+                            if len(results) >= limit:
+                                break
+            if found == 0:
+                break
         first += 35
 
     return results[:limit], "bing"
