@@ -1,5 +1,94 @@
 [
   {
+    "name": "bybit_trader",
+    "description": "Hardened Bybit V5 USDT-perpetual market analytics, risk management, and guarded execution engine. Use it for technical analysis, micro-scalp scans, orderbook and price-action reads, tickers, fills/history, wallet balance, open positions and orders, live risk status, leverage changes, the kill switch, and gated scalp execution or reduce-only closes.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "calc_micro_profit",
+            "cancel_orders",
+            "close_position",
+            "execute_scalp",
+            "fills",
+            "history",
+            "instrument",
+            "kill_switch",
+            "open_orders",
+            "orderbook",
+            "positions",
+            "price_action",
+            "risk_status",
+            "scan",
+            "set_leverage",
+            "ta",
+            "ticker",
+            "wallet_balance"
+          ],
+          "description": "Engine action to execute"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "USDT-perpetual symbol such as SOLUSDT (default: agent default_symbol)"
+        },
+        "timeframe": {
+          "type": "string",
+          "description": "Kline timeframe: 1, 3, 5, 15, 60, or D (default: 1)"
+        },
+        "side": {
+          "type": "string",
+          "description": "Order side: Buy or Sell (default: Buy)"
+        },
+        "target_profit_usdt": {
+          "type": "number",
+          "description": "Target net scalp profit in USDT (default: agent target_micro_profit)"
+        },
+        "qty": {
+          "type": "number",
+          "description": "Order quantity in base coin; derived from notional and instrument step when omitted"
+        },
+        "leverage": {
+          "type": "integer",
+          "description": "Leverage multiplier for set_leverage and execution (default: agent default_leverage)"
+        },
+        "max_spread_pct": {
+          "type": "number",
+          "description": "Maximum allowed spread percentage for the execution gate (default: agent max_spread_pct)"
+        },
+        "max_notional_usdt": {
+          "type": "number",
+          "description": "Maximum order notional in USDT (default: agent max_notional_usdt)"
+        },
+        "post_only": {
+          "type": "boolean",
+          "description": "Prefer PostOnly maker execution (default: true)"
+        },
+        "live": {
+          "type": "boolean",
+          "description": "Request live execution; still requires every independent safety gate (default: false)"
+        },
+        "live_confirmation": {
+          "type": "string",
+          "description": "Exact live confirmation token required for live execution"
+        },
+        "reduce_only": {
+          "type": "boolean",
+          "description": "Reduce-only close; bypasses directional entry signals (default: false)"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Reuse cached market data when still fresh (default: false)"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "agent": true
+  },
+  {
     "name": "bybit_get_ticker",
     "description": "Get ticker data from Bybit.",
     "parameters": {
@@ -506,7 +595,7 @@
   },
   {
     "name": "bybit_live",
-    "description": "BYBIT REALM v4.0 – Comprehensive Bybit V5 trading tool with all endpoints, indicators, breakeven logic, L2 analysis, and profitable macros.",
+    "description": "BYBIT REALM v4.0 \u2013 Comprehensive Bybit V5 trading tool with all endpoints, indicators, breakeven logic, L2 analysis, and profitable macros.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1242,7 +1331,7 @@
   },
   {
     "name": "bybit_wbta",
-    "description": "Market Trend Observatory v3.3 — Complete L2 Orderbook Microstructure,",
+    "description": "Market Trend Observatory v3.3 \u2014 Complete L2 Orderbook Microstructure,",
     "parameters": {
       "type": "object",
       "properties": {
