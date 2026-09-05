@@ -149,7 +149,7 @@
   },
   {
     "name": "web_spider",
-    "description": "Unified tool for high-performance web fetching, recursive crawling,",
+    "description": "Unified tool for high-performance web fetching, recursive crawling, media extraction, and network diagnostics.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -408,7 +408,7 @@
         },
         "clear_cache": {
           "type": "boolean",
-          "description": "Delete all cached results and exit\n=============================================================================="
+          "description": "Delete all cached results and exit"
         }
       },
       "required": [
@@ -582,7 +582,7 @@
         },
         "timeout": {
           "type": "integer",
-          "description": "Request timeout in seconds."
+          "description": "Request timeout in seconds (used as --max-time when max-time is default)."
         },
         "max_time": {
           "type": "integer",
@@ -598,7 +598,7 @@
         },
         "output": {
           "type": "string",
-          "description": "Output file path (default: LLM_OUTPUT or stdout)."
+          "description": "Output file path (default: LLM_OUTPUT or return body in tool result)."
         },
         "dump_header": {
           "type": "string",
@@ -610,11 +610,11 @@
         },
         "method": {
           "type": "string",
-          "description": "HTTP method (GET, POST, PUT, DELETE, PATCH)."
+          "description": "HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD)."
         },
         "data": {
           "type": "string",
-          "description": "Request body data for POST/PUT."
+          "description": "Request body data for POST/PUT/PATCH."
         },
         "headers": {
           "type": "string",
@@ -638,15 +638,15 @@
         },
         "silent": {
           "type": "boolean",
-          "description": "Silent mode."
+          "description": "Silent mode (less curl stderr)."
         },
         "verbose": {
           "type": "boolean",
-          "description": "Verbose output."
+          "description": "Verbose curl output to stderr."
         },
         "include": {
           "type": "boolean",
-          "description": "Include HTTP headers in output."
+          "description": "Include HTTP response headers in the body output."
         },
         "retry": {
           "type": "integer",
@@ -671,6 +671,14 @@
         "auth_type": {
           "type": "string",
           "description": "Authentication type (basic or bearer)."
+        },
+        "max_bytes": {
+          "type": "integer",
+          "description": "Abort if body exceeds this many bytes (default 10 MiB)."
+        },
+        "json_on_success": {
+          "type": "boolean",
+          "description": "If set, return JSON with body, http_code, and final_url on success."
         }
       },
       "required": [
@@ -938,7 +946,7 @@
   },
   {
     "name": "pyrm_search",
-    "description": "Perform advanced web search using Google Custom Search API with",
+    "description": "Perform advanced web search using Google Custom Search API with multiple filtering options including date range, site restriction, file type, language, and full image search with downloading, parsing, and base64 encoding for vision models. Use this when you need current information, images, or feel a search could provide a better answer. Returns structured results with titles, links, snippets, metadata, and optional downloaded images. Safe search is disabled.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1588,13 +1596,17 @@
   },
   {
     "name": "text_extract_urls",
-    "description": "Extract all URLs from text.",
+    "description": "Extract all unique URLs from arbitrary text.",
     "parameters": {
       "type": "object",
       "properties": {
         "text": {
           "type": "string",
-          "description": "The text to search."
+          "description": "The text to search for URLs."
+        },
+        "pretty": {
+          "type": "string",
+          "description": "Emit rich neon boxed human UI on stderr."
         }
       },
       "required": [
@@ -1664,7 +1676,7 @@
   },
   {
     "name": "bybit_wbta",
-    "description": "Market Trend Observatory v3.3 — Complete L2 Orderbook Microstructure,",
+    "description": "Market Trend Observatory v3.3 — Complete L2 Orderbook Microstructure, Trade Flow Analysis, Funding/OI Telemetry, 35+ Technical Indicators, and Multi-Factor Long/Short Signal Engine. Read-only telemetry tool.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -2609,7 +2621,7 @@
   },
   {
     "name": "proxy_utils",
-    "description": "Utility tool for detecting proxy availability, probing Tor/SOCKS5 ports,",
+    "description": "Utility tool for detecting proxy availability, probing Tor/SOCKS5 ports, and setting HTTP/HTTPS/SOCKS proxy environment configurations.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -2638,7 +2650,7 @@
   },
   {
     "name": "bybit_core",
-    "description": "Core V5 API driver for Bybit with session pooling, HMAC signing,",
+    "description": "Core V5 API driver for Bybit with session pooling, HMAC signing, failover domain routing, and automatic server time synchronization.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -2675,7 +2687,7 @@
   },
   {
     "name": "micro_profit",
-    "description": "Estimate micro-profit opportunities from order-book data with",
+    "description": "Estimate micro-profit opportunities from order-book data with precision analytical exit solving and position sizing.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -2690,6 +2702,58 @@
         "qty": {
           "type": "integer",
           "description": "Required quantity (base asset)."
+        },
+        "target": {
+          "type": "string",
+          "description": "Optional target profit in USDT (default 5.0)."
+        },
+        "leverage": {
+          "type": "string",
+          "description": "Optional leverage multiplier (default 1)."
+        },
+        "maker_fee": {
+          "type": "string",
+          "description": "Maker fee rate (default 0.0002)."
+        },
+        "taker_fee": {
+          "type": "string",
+          "description": "Taker fee rate (default 0.00055)."
+        },
+        "funding_rate": {
+          "type": "string",
+          "description": "Funding rate per interval (default 0.0001)."
+        },
+        "slippage": {
+          "type": "string",
+          "description": "Estimated slippage rate (default 0.0001)."
+        },
+        "risk_reward": {
+          "type": "string",
+          "description": "Risk/reward ratio (default 2.0)."
+        },
+        "kelly_win": {
+          "type": "string",
+          "description": "Estimated win rate for Kelly (default 0.55)."
+        },
+        "depth": {
+          "type": "string",
+          "description": "Order book depth to analyze (default 40)."
+        },
+        "account_balance": {
+          "type": "string",
+          "description": "Account balance for sizing (default 0.0)."
+        },
+        "risk_percent": {
+          "type": "string",
+          "description": "Risk percent per trade (default 0.0)."
+        },
+        "bids_json": {
+          "type": "string",
+          "description": "JSON encoded bids array."
+        },
+        "asks_json": {
+          "type": "string",
+          "description": "JSON encoded asks array."
         },
         "use_vwap_entry": {
           "type": "boolean",
@@ -3033,7 +3097,7 @@
   },
   {
     "name": "bybit_smart_order",
-    "description": "Place a smart order with automatic position sizing, risk management,",
+    "description": "Place a smart order with automatic position sizing, risk management, and SL/TP bounds. Supports market/limit/conditional orders, fee-aware risk sizing, ATR fallback stops, formula eval, and dry-run.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -3211,7 +3275,7 @@
   },
   {
     "name": "pyrm_scalp_tool",
-    "description": "Multi-symbol high-leverage orderbook scalper bot for Bybit with",
+    "description": "Multi-symbol high-leverage orderbook scalper bot for Bybit with L2 depth analysis, Breakeven SL management, circuit breakers, session performance tracking, filter caching, margin budgeting, symbol cooldowns, and multi-factor signal filtering.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -5225,7 +5289,7 @@
   },
   {
     "name": "photo_tool",
-    "description": "Take a photo using the device camera and save it to a central",
+    "description": "Take a photo using the device camera and save it to a central directory. Supports front/rear camera selection, auto-timestamped filenames, base64 encoding for vision models, thumbnail generation, EXIF metadata injection, GPS tagging, burst mode, photo stitching, QR/barcode scanning, face detection hints, cloud upload hooks, HEIC/WebP conversion, annotation overlays, histogram analysis, auto-brightness detection, and a persistent searchable photo log. Handles termux-camera-photo option quirks automatically by trying multiple invocation strategies.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -5421,7 +5485,7 @@
   },
   {
     "name": "edit",
-    "description": "Unified file editing and directory manipulation tool supporting view,",
+    "description": "Unified file editing and directory manipulation tool supporting view, read, write, append, prepend, replace, count, insert, delete, diff, batch operations, regex search, archive, template rendering, line operations, hash, word count, find, head, tail, compare, permissions, line-ending normalization, backup/revert, grep, and truncate.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -6298,31 +6362,15 @@
       "type": "object",
       "properties": {
         "get": {
-          "type": "string",
-          "description": "Get clipboard"
+          "type": "boolean",
+          "description": "Get clipboard contents"
         },
         "set": {
           "type": "string",
-          "description": "Set clipboard"
+          "description": "Set clipboard to this text"
         }
       },
       "required": []
-    }
-  },
-  {
-    "name": "url_metadata",
-    "description": "Extract URL title.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "url": {
-          "type": "string",
-          "description": ""
-        }
-      },
-      "required": [
-        "url"
-      ]
     }
   },
   {
@@ -6332,7 +6380,8 @@
       "type": "object",
       "properties": {
         "port": {
-          "type": "string"
+          "type": "integer",
+          "description": "The port number to look up"
         }
       },
       "required": [
@@ -6549,138 +6598,6 @@
         "host",
         "port"
       ]
-    }
-  },
-  {
-    "name": "nsfw_search",
-    "description": "Unified OSINT, Media Intelligence, and Video Search Platform (Pyrmethus Edition)",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "mode": {
-          "type": "string",
-          "description": "headers | search | vsearch | pipeline (default: search)"
-        },
-        "url": {
-          "type": "string",
-          "description": "Target URL"
-        },
-        "method": {
-          "type": "string",
-          "description": "HEAD | GET | OPTIONS (default: HEAD)"
-        },
-        "follow_redirects": {
-          "type": "boolean",
-          "description": "Follow HTTP redirects (default: true)"
-        },
-        "output": {
-          "type": "string",
-          "description": "json | pretty (default: json)"
-        },
-        "query": {
-          "type": "string",
-          "description": "Search query"
-        },
-        "engine": {
-          "type": "string",
-          "description": "Video search engine (default: pexels)"
-        },
-        "backend": {
-          "type": "string",
-          "description": "yandex|bing|bing_dl|e621|rule34|danbooru (default: yandex)"
-        },
-        "limit": {
-          "type": "integer",
-          "description": "Maximum results (default: 15)"
-        },
-        "page": {
-          "type": "integer",
-          "description": "Starting page number (default: 1)"
-        },
-        "platform": {
-          "type": "string",
-          "description": "Restrict to domain"
-        },
-        "tags": {
-          "type": "array",
-          "description": "Extra tag (repeatable)",
-          "items": {
-            "type": "string"
-          }
-        },
-        "save": {
-          "type": "string",
-          "description": "Save JSON results"
-        },
-        "html": {
-          "type": "string",
-          "description": "Save HTML gallery"
-        },
-        "csv": {
-          "type": "string",
-          "description": "Save CSV report"
-        },
-        "download": {
-          "type": "boolean",
-          "description": "Download found media/images"
-        },
-        "download_thumbs": {
-          "type": "boolean",
-          "description": "Download thumbnail images locally"
-        },
-        "media_dir": {
-          "type": "string",
-          "description": "Download directory (default: ~/osint_media/)"
-        },
-        "verify_headers": {
-          "type": "boolean",
-          "description": "Verify each URL's headers before downloading"
-        },
-        "mime_check": {
-          "type": "boolean",
-          "description": "Reject downloads whose Content-Type isn't image/media"
-        },
-        "deep": {
-          "type": "boolean",
-          "description": "Multi-page deep search"
-        },
-        "user_agent": {
-          "type": "string",
-          "description": "Custom User-Agent header"
-        },
-        "timeout": {
-          "type": "number",
-          "description": "Request timeout in seconds (default: 10)"
-        },
-        "ignore_ssl": {
-          "type": "boolean",
-          "description": "Bypass SSL verification"
-        },
-        "cache_dir": {
-          "type": "string",
-          "description": "On-disk HTTP cache dir (default: ~/.osint_cache/)"
-        },
-        "cache_ttl": {
-          "type": "integer",
-          "description": "Cache TTL in seconds (default: 3600)"
-        },
-        "workers": {
-          "type": "integer",
-          "description": "Parallel workers (default: 4)"
-        },
-        "use_cache": {
-          "type": "boolean",
-          "description": "Enable result caching"
-        },
-        "no_color": {
-          "type": "boolean",
-          "description": "Disable ANSI color output"
-        },
-        "verbose": {
-          "type": "boolean",
-          "description": "Enable detailed debug logging"
-        }
-      }
     }
   },
   {

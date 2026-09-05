@@ -10,7 +10,7 @@ web_search.sh
 web_fetcher.py
 net_ip_info.sh
 wget2x.py
-fetch_url_via_curl.sh
+fetch_url_via_curl.py
 vid_search.py
 nsfw_web_search.py
 fetch_url_via_jina.py
@@ -69,7 +69,6 @@ memory_tool.py
 mapper_extractor.py
 file_summarizer.py
 clipboard.sh
-url_metadata.py
 find_port.sh
 git_summary.py
 get_my_location.py
@@ -78,7 +77,6 @@ dns_query.py
 local_ip.py
 connectivity_check.py
 tcp_ping.py
-nsfw_search.py
 grep_text.py
 file_patch.py
 image_intel.py
