@@ -127,6 +127,9 @@ def extract_from_comments(contents: str, scriptfile: str) -> List[Dict[str, Any]
     description = ""
     properties: Dict[str, Dict[str, Any]] = {}
     required: List[str] = []
+    # True while plain comment lines still extend the @describe text
+    # (mirrors argc behaviour where continuation lines join the description).
+    in_describe = False
 
     for line in lines:
         if not line.startswith("#"):
@@ -137,38 +140,52 @@ def extract_from_comments(contents: str, scriptfile: str) -> List[Dict[str, Any]
         line = line[1:].strip()
         if line.startswith("@describe"):
             description = line[len("@describe") :].strip()
+            in_describe = True
 
-        elif line.startswith("@option"):
-            match = re.match(
-                r"^@option\s+(?:-[a-zA-Z],\s*)?--([\w-]+)(!)?\s+(?:<([^>]+)>)?\s*(.*)$",
-                line,
-            )
-            if match:
-                opt_name = match.group(1).replace("-", "_")
-                is_req = bool(match.group(2))
-                opt_type = match.group(3) or "string"
-                opt_desc = match.group(4).strip()
+        elif line.startswith("@"):
+            # Any other annotation (@option/@flag/@meta/@env/...) ends the
+            # description continuation.
+            in_describe = False
 
-                json_type = TYPE_MAP.get(opt_type.upper(), "string")
-                prop_def: Dict[str, Any] = {"type": json_type, "description": opt_desc}
+            if line.startswith("@option"):
+                match = re.match(
+                    r"^@option\s+(?:-[a-zA-Z],\s*)?--([\w-]+)(!)?(?:=\S*)?\s+(?:<([^>]+)>)?\s*(.*)$",
+                    line,
+                )
+                if match:
+                    opt_name = match.group(1).replace("-", "_")
+                    is_req = bool(match.group(2))
+                    opt_type = match.group(3) or "string"
+                    opt_desc = match.group(4).strip()
 
-                enum_match = re.search(r"\b(?:choices|allowed|enum):\s*([a-zA-Z0-9_\-\/,\s]+)", opt_desc, re.I)
-                if enum_match:
-                    raw_choices = re.split(r"[\/,\s]+", enum_match.group(1).strip())
-                    choices = [c.strip() for c in raw_choices if c.strip()]
-                    if len(choices) > 1:
-                        prop_def["enum"] = choices
+                    json_type = TYPE_MAP.get(opt_type.upper(), "string")
+                    prop_def: Dict[str, Any] = {"type": json_type, "description": opt_desc}
 
-                properties[opt_name] = prop_def
-                if is_req:
-                    required.append(opt_name)
+                    enum_match = re.search(r"\b(?:choices|allowed|enum):\s*([a-zA-Z0-9_\-\/,\s]+)", opt_desc, re.I)
+                    if enum_match:
+                        raw_choices = re.split(r"[\/,\s]+", enum_match.group(1).strip())
+                        choices = [c.strip() for c in raw_choices if c.strip()]
+                        if len(choices) > 1:
+                            prop_def["enum"] = choices
 
-        elif line.startswith("@flag"):
-            match = re.match(r"^@flag\s+(?:-[a-zA-Z],\s*)?--([\w-]+)\s*(.*)$", line)
-            if match:
-                opt_name = match.group(1).replace("-", "_")
-                opt_desc = match.group(2).strip()
-                properties[opt_name] = {"type": "boolean", "description": opt_desc}
+                    properties[opt_name] = prop_def
+                    if is_req:
+                        required.append(opt_name)
+
+            elif line.startswith("@flag"):
+                match = re.match(r"^@flag\s+(?:-[a-zA-Z],\s*)?--([\w-]+)\s*(.*)$", line)
+                if match:
+                    opt_name = match.group(1).replace("-", "_")
+                    opt_desc = match.group(2).strip()
+                    properties[opt_name] = {"type": "boolean", "description": opt_desc}
+
+        elif in_describe:
+            # Plain comment line directly after @describe: continuation text
+            # (banner/separator or empty '#' lines end the description).
+            if not line or re.fullmatch(r"[=\-─—━═~*_#\s]+", line):
+                in_describe = False
+            else:
+                description = f"{description} {line}".strip()
 
     if not description:
         return []

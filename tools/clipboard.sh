@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/env bash
 # @describe Get or set system clipboard.
-# @option --get <BOOL> Get clipboard
-# @option --set <TEXT> Set clipboard
+# @flag --get Get clipboard contents
+# @option --set <TEXT> Set clipboard to this text
 
 main() {
     if [[ -n "$argc_get" ]]; then
