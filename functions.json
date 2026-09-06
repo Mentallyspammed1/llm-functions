@@ -8453,5 +8453,160 @@
         "target"
       ]
     }
+  },
+  {
+    "name": "github_tool",
+    "description": "restores, and GitHub PR / Issue workflows.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Repository path (defaults to current dir)"
+        },
+        "action": {
+          "type": "string",
+          "description": "Operation: status/info/log/show/diff/blame/commit/push/pull/fetch/checkout/branch/merge/rebase/cherry_pick/revert/reset/restore/stash/tag/remote/clean/conflicts/pr/issue",
+          "enum": [
+            "status",
+            "info",
+            "log",
+            "show",
+            "diff",
+            "blame",
+            "commit",
+            "push",
+            "pull",
+            "fetch",
+            "checkout",
+            "branch",
+            "merge",
+            "rebase",
+            "cherry_pick",
+            "revert",
+            "reset",
+            "restore",
+            "stash",
+            "tag",
+            "remote",
+            "clean",
+            "conflicts",
+            "pr",
+            "issue"
+          ]
+        },
+        "subcommand": {
+          "type": "string",
+          "description": "Action subcommand (e.g., pr: list/view/create/checkout/merge; stash: pop/list; rebase: abort)"
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch, ref, or tag target"
+        },
+        "commit_hash": {
+          "type": "string",
+          "description": "Commit hash for show, cherry-pick, revert, reset, or blame"
+        },
+        "message": {
+          "type": "string",
+          "description": "Commit message, tag description, or PR/Issue title"
+        },
+        "body": {
+          "type": "string",
+          "description": "Long-form description or PR/Issue body"
+        },
+        "file": {
+          "type": "string",
+          "description": "Target file path (repeatable)"
+        },
+        "remote": {
+          "type": "string",
+          "description": "Remote repository name (default: origin)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max items for logs, PRs, or issues (default: 20)"
+        },
+        "line_start": {
+          "type": "integer",
+          "description": "Starting line for blame inspection"
+        },
+        "line_end": {
+          "type": "integer",
+          "description": "Ending line for blame inspection"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Command timeout in seconds"
+        },
+        "cache_ttl": {
+          "type": "number",
+          "description": "Cache TTL for read-only actions"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "Cache directory"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "Safe environment override (repeatable)"
+        },
+        "all_files": {
+          "type": "boolean",
+          "description": "Stage all modified/untracked files (git add -A)"
+        },
+        "create_branch": {
+          "type": "boolean",
+          "description": "Create branch on checkout (-b / switch -c)"
+        },
+        "delete_branch": {
+          "type": "boolean",
+          "description": "Delete specified branch or tag (-d)"
+        },
+        "set_upstream": {
+          "type": "boolean",
+          "description": "Set upstream on push (-u)"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate mutating operations without changes"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for read queries"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear tool cache"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print the LLM-facing JSON schema"
+        },
+        "self_test": {
+          "type": "boolean",
+          "description": "Run dependency-free automated tests"
+        },
+        "json_only": {
+          "type": "boolean",
+          "description": "Suppress human CLI UI"
+        },
+        "quiet": {
+          "type": "boolean",
+          "description": "Suppress progress/UI"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable debug logging"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    }
   }
 ]
