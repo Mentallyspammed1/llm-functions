@@ -186,10 +186,11 @@ class BybitBaseClient:
         self._symbol_cache: Dict[str, dict] = {}
         self.time_offset = 0
         self.last_rate_limits = {}
-        try:
-            self.sync_server_time()
-        except:
-            pass
+        if os.getenv("BYBIT_SYNC_TIME", "true").lower() == "true":
+            try:
+                self.sync_server_time()
+            except Exception:
+                pass
 
     def sync_server_time(self):
         resp = self._request("GET", "/v5/market/time", signed=False)
@@ -200,13 +201,10 @@ class BybitBaseClient:
 
     def _sign(self, payload: str, ts: str) -> str:
         msg = f"{ts}{self.config.api_key}{self.config.recv_window}{payload}"
-        print(
-            f"DEBUG: Signing: '{msg}' (ts={ts}, key={self.config.api_key}, rw={self.config.recv_window})",
-            file=sys.stderr,
-        )
         return hmac.new(
             self.config.api_secret.encode(), msg.encode(), hashlib.sha256
         ).hexdigest()
+
 
     def _request(
         self,
@@ -217,6 +215,12 @@ class BybitBaseClient:
         signed=True,
         category="default",
     ) -> dict:
+        if signed and (not self.config.api_key or not self.config.api_secret):
+            return {
+                "status": "error",
+                "code": "NO_CREDENTIALS",
+                "msg": "BYBIT_API_KEY / BYBIT_API_SECRET not set — set them in .env for signed endpoints.",
+            }
         self._limiter.acquire(category)
 
         ts = str(int(time.time() * 1000) + self.time_offset)

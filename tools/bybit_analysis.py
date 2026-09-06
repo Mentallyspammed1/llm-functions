@@ -1,295 +1,210 @@
 #!/usr/bin/env python3
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
+# @describe Bybit Advanced Analysis - Technical indicators, orderbook, multi-TF analysis
+# @option --symbol!        Trading pair (e.g., BTCUSDT)
+# @option --action         Action: indicators|analyze|orderbook|smart_order|price_action
+# @option --interval       Kline interval: 1|3|5|15|30|60|120|240|D (default: 60)
+# @option --limit          Number of candles (default: 100)
+# @option --side           Order side for smart_order: Buy|Sell
+# @option --qty            Quantity for smart_order
+# @option --risk_pct       Risk percentage for smart_order (default: 1.0)
+# @option --use_tor       Route through Tor proxy (default: true)
 """
 Bybit Advanced Analysis Tools
-Native Python implementation (No pandas/pandas_ta dependencies)
+Technical indicators, orderbook analysis, price-action signals and smart orders.
+
+Runs on the unified `tools.bybit` client (no pybit dependency).
 """
+
+import argparse
 import json
-import os
-import statistics
-from datetime import datetime, timezone
-from typing import List
+import sys
+from pathlib import Path
 
-from argc import argc as Argc
-from pybit.unified_trading import HTTP
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-# Configuration
-TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
-USE_TOR = os.getenv("USE_TOR", "false").lower() == "true"
-TOR_PROXY = os.getenv("TOR_PROXY", "socks5h://127.0.0.1:9050")
-
-http_kwargs = {"testnet": TESTNET}
-if USE_TOR:
-    http_kwargs["proxies"] = {"http": TOR_PROXY, "https": TOR_PROXY}
-
-session = HTTP(**http_kwargs)
+from tools.bybit.terminal import BybitRealm  # noqa: E402
 
 
-def _ema(data: List[float], period: int) -> List[float]:
-    if not data:
-        return []
-    k = 2 / (period + 1)
-    ema = [data[0]]
-    for val in data[1:]:
-        ema.append(val * k + ema[-1] * (1 - k))
-    return ema
+def _realm():
+    return BybitRealm()
 
 
-def _rsi(prices: List[float], period: int = 14) -> List[float]:
-    if len(prices) <= period:
-        return []
-    deltas = [prices[i] - prices[i - 1] for i in range(1, len(prices))]
-    gains = [max(d, 0) for d in deltas]
-    losses = [max(-d, 0) for d in deltas]
-
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-
-    rsi = [100 - (100 / (1 + (avg_gain / avg_loss))) if avg_loss != 0 else 100]
-
-    for i in range(period, len(deltas)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        rsi.append(100 - (100 / (1 + (avg_gain / avg_loss))) if avg_loss != 0 else 100)
-
-    return [None] * period + rsi
-
-
-# @cmd Get market regime
-# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
-# @option --interval <TEXT> Interval (default: 60)
-# @option --lookback <INT> Number of klines (default: 100)
-def bybit_get_market_regime(symbol, interval="60", lookback=100):
-    """Classifies market as TRENDING_UP, TRENDING_DOWN, RANGING, or VOLATILE."""
-    res = session.get_kline(
-        category="linear", symbol=symbol, interval=interval, limit=lookback
-    )["result"]["list"]
-    if len(res) < 30:
-        print(json.dumps({"status": "error", "msg": "Insufficient data"}))
-        return
-
-    closes = [float(k[4]) for k in reversed(res)]
-    ema_short = _ema(closes, 10)[-1]
-    ema_long = _ema(closes, 30)[-1]
-
-    returns = [
-        (closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))
-    ]
-    volatility = statistics.stdev(returns) * 100
-
-    if volatility > 2.0:
-        regime = "VOLATILE"
-    elif ema_short > ema_long * 1.002:
-        regime = "TRENDING_UP"
-    elif ema_short < ema_long * 0.998:
-        regime = "TRENDING_DOWN"
-    else:
-        regime = "RANGING"
-
-    result = {"symbol": symbol, "regime": regime, "volatility": round(volatility, 4)}
-    print(json.dumps(result))
-
-
-# @cmd Get signal confluence
-# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
-# @option --intervals <TEXT> Comma-separated intervals (default: 5,15,60,240)
-def bybit_get_confluence(symbol, intervals="5,15,60,240"):
-    """Analyzes EMA trend and RSI momentum across multiple timeframes."""
-    tf_list = [i.strip() for i in intervals.split(",")]
-    scores = []
-    details = {}
-
-    for tf in tf_list:
-        try:
-            res = session.get_kline(
-                category="linear", symbol=symbol, interval=tf, limit=50
-            )
-            if res.get("retCode") != 0:
-                details[tf] = {"error": res.get("retMsg")}
-                continue
-
-            klines = res["result"]["list"]
-            closes = [float(k[4]) for k in reversed(klines)]
-
-            ema = _ema(closes, 20)[-1]
-            price = closes[-1]
-            rsi_list = _rsi(closes, 14)
-            rsi = rsi_list[-1] if rsi_list else 50
-
-            trend = 1 if price > ema else -1
-            momentum = 1 if rsi > 55 else (-1 if rsi < 45 else 0)
-
-            details[tf] = {
-                "rsi": round(rsi, 2),
-                "trend": "BULLISH" if trend > 0 else "BEARISH",
-                "momentum": momentum,
-            }
-            scores.append(trend + momentum)
-        except Exception as e:
-            details[tf] = {"error": str(e)}
-            continue
-
-    total_score = sum(scores)
-    max_possible = len(tf_list) * 2
-
-    if total_score >= max_possible * 0.7:
-        rec = "STRONG_BUY"
-    elif total_score > 0:
-        rec = "BUY"
-    elif total_score <= -max_possible * 0.7:
-        rec = "STRONG_SELL"
-    elif total_score < 0:
-        rec = "SELL"
-    else:
-        rec = "NEUTRAL"
-
-    result = {
-        "symbol": symbol,
-        "recommendation": rec,
-        "confluence_score": total_score,
-        "details": details,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    print(json.dumps(result))
-
-
-# @cmd Get technical indicators
-# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
-# @option --interval! <TEXT> Interval (1, 5, 15, 60, 120, 240, D, W, M)
-# @option --limit <INT> Number of klines (default: 100)
-def bybit_get_indicators(symbol, interval, limit=100):
-    """Calculate RSI, EMA, ATR indicators"""
-    res = session.get_kline(
-        category="linear", symbol=symbol, interval=interval, limit=limit
-    )["result"]["list"]
-    closes = [float(k[4]) for k in reversed(res)]
-    highs = [float(k[2]) for k in reversed(res)]
-    lows = [float(k[3]) for k in reversed(res)]
-
-    rsi = _rsi(closes, 14)[-1]
-    ema20 = _ema(closes, 20)[-1]
-    ema50 = _ema(closes, 50)[-1]
-
-    # ATR
-    tr = [
-        max(
-            highs[i] - lows[i],
-            abs(highs[i] - closes[i - 1]),
-            abs(lows[i] - closes[i - 1]),
-        )
-        for i in range(1, len(closes))
-    ]
-    atr = sum(tr[-14:]) / 14 if len(tr) >= 14 else 0
-
-    result = {
-        "symbol": symbol,
-        "interval": interval,
-        "close": closes[-1],
-        "rsi": round(rsi, 2) if rsi else None,
-        "ema_20": round(ema20, 2),
-        "ema_50": round(ema50, 2),
-        "atr": round(atr, 4),
-    }
-    print(json.dumps(result))
-
-
-# @cmd Multi-timeframe analysis
-# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
-# @option --timeframes <TEXT> Comma-separated timeframes (default: 15,60,240,D)
-def bybit_analyze_symbol(symbol, timeframes="15,60,240,D"):
-    """Analyze symbol across multiple timeframes"""
-    analysis = {}
-    for tf in timeframes.split(","):
-        data = session.get_kline(
-            category="linear", symbol=symbol, interval=tf.strip(), limit=50
-        )["result"]["list"]
-        closes = [float(c[4]) for k in data]  # Wrong indexing in legacy, fixed to [4]
-        current, previous = float(data[0][4]), float(data[1][4])
-        change_pct = ((current - previous) / previous) * 100
-        analysis[tf.strip()] = {
-            "trend": "Bullish" if current > previous else "Bearish",
-            "change_pct": round(change_pct, 2),
-            "close": current,
+def bybit_get_indicators(symbol, interval=60, limit=100):
+    """Get technical indicators (RSI, EMA, ATR, MACD, ADX, Bollinger)"""
+    bot = _realm()
+    try:
+        result = {
+            "symbol": symbol,
+            "interval": interval,
+            "rsi": bot.calculate_rsi(symbol, interval),
+            "ema_20": bot.calculate_ema(symbol, interval, 20),
+            "ema_50": bot.calculate_ema(symbol, interval, 50),
+            "atr": bot.calculate_atr(symbol, interval),
+            "macd": bot.calculate_macd(symbol, interval),
+            "adx": bot.calculate_adx(symbol, interval),
+            "bollinger": bot.calculate_bollinger_bands(symbol, interval),
+            "stochastic": bot.calculate_stochastic(symbol, interval),
         }
-    print(json.dumps(analysis))
+        print(json.dumps(result, indent=2))
+    finally:
+        bot.close()
 
 
-# @cmd Analyze orderbook depth
-# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
-# @option --limit <INT> Depth level (default: 25)
+def bybit_analyze_symbol(symbol):
+    """Multi-timeframe analysis (15m, 1h, 4h, 1D)"""
+    bot = _realm()
+    try:
+        results = {}
+        for tf, name in [("15", "15m"), ("60", "1h"), ("240", "4h"), ("D", "1D")]:
+            reg = bot.get_market_regime(symbol, tf)
+            ema = bot.calculate_ema(symbol, tf, 20)
+            ticker = bot.get_ticker(symbol).get("list", [{}])[0]
+            price = float(ticker.get("lastPrice", 0) or 0)
+            trend = (
+                "Bullish"
+                if price > ema.get("ema", price)
+                else "Bearish"
+            )
+            momentum = (
+                "Strong"
+                if ema.get("ema") and abs(price - ema["ema"]) / ema["ema"] > 0.01
+                else "Weak"
+            )
+            results[name] = {
+                "trend": trend,
+                "momentum": momentum,
+                "price": price,
+                "ema20": ema.get("ema"),
+                "regime": reg.get("regime"),
+            }
+        print(json.dumps(results, indent=2))
+    finally:
+        bot.close()
+
+
 def bybit_analyze_orderbook(symbol, limit=25):
-    res = session.get_orderbook(category="linear", symbol=symbol, limit=limit)
-    bids, asks = res["result"]["b"], res["result"]["a"]
-    bid_vol = sum(float(x[1]) for x in bids)
-    ask_vol = sum(float(x[1]) for x in asks)
-    best_bid, best_ask = float(bids[0][0]), float(asks[0][0])
-    result = {
-        "symbol": symbol,
-        "best_bid": best_bid,
-        "best_ask": best_ask,
-        "spread_pct": round(((best_ask - best_bid) / best_bid) * 100, 4),
-        "bid_vol": round(bid_vol, 2),
-        "ask_vol": round(ask_vol, 2),
-        "imbalance": round(bid_vol / ask_vol, 2) if ask_vol > 0 else 0,
-        "sentiment": "Bullish" if bid_vol > ask_vol else "Bearish",
-    }
-    print(json.dumps(result))
+    """Analyze orderbook depth and imbalance"""
+    bot = _realm()
+    try:
+        result = bot.get_orderbook_analysis(symbol, limit)
+        print(json.dumps(result, indent=2))
+    finally:
+        bot.close()
 
 
-# @cmd Get volume profile
-# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
-# @option --interval <TEXT> Interval (1, 5, 15, 60, 120, 240, D)
-# @option --limit <INT> Number of klines (default: 100)
-def bybit_get_volume_profile(symbol, interval="60", limit=100):
-    data = session.get_kline(
-        category="linear", symbol=symbol, interval=interval, limit=limit
-    )["result"]["list"]
-    vols = [float(k[5]) for k in data]
-    closes = [float(k[4]) for k in data]
-    typical = [(float(k[2]) + float(k[3]) + float(k[4])) / 3 for k in data]
-    vwap = sum(t * v for t, v in zip(typical, vols)) / sum(vols) if sum(vols) > 0 else 0
-    print(
-        json.dumps(
-            {
+def bybit_price_action(symbol, interval=60, limit=300):
+    """Price-action trend analysis: structure, EMA stack, S/R zones, signal"""
+    bot = _realm()
+    try:
+        result = bot.price_action_analysis(symbol, interval, limit)
+        print(json.dumps(result, indent=2))
+    finally:
+        bot.close()
+
+
+def bybit_smart_order(symbol, side, qty=None, risk_pct=1.0):
+    """Smart order with automatic risk-based position sizing and ATR stop.
+
+    `qty` is optional: when omitted the position is sized from `risk_pct`
+    of the wallet balance and a 2x-ATR stop (risk-first sizing)."""
+    bot = _realm()
+    try:
+        if qty is not None:
+            # Fixed-qty path: ATR-bracketed market order with TP/SL attached
+            atr = bot.calculate_atr(symbol, "15").get("atr", 0) or 0
+            ticker = bot.get_ticker(symbol).get("list", [{}])[0]
+            price = float(ticker.get("lastPrice", 0) or 0)
+            if price and atr:
+                if side.lower() in ("buy", "long"):
+                    tp, sl = price + 2 * atr, price - 1.5 * atr
+                else:
+                    tp, sl = price - 2 * atr, price + 1.5 * atr
+                result = bot.place_order(
+                    symbol, side, qty, "Market", stop_loss=sl, take_profit=tp
+                )
+            else:
+                result = bot.place_order(symbol, side, qty, "Market")
+        else:
+            result = bot.place_smart_order(
+                symbol=symbol, side=side, risk_pct=risk_pct
+            )
+        print(json.dumps(result, indent=2))
+    finally:
+        bot.close()
+
+
+def run(**kwargs) -> dict:
+    """Unified entry point (used by run-tool.py)."""
+    action = kwargs.get("action", "indicators")
+    symbol = kwargs.get("symbol")
+    if not symbol:
+        return {"error": "--symbol is required"}
+    interval = kwargs.get("interval", "60")
+    limit = int(kwargs.get("limit", 100))
+
+    bot = _realm()
+    try:
+        if action == "indicators":
+            return {
                 "symbol": symbol,
-                "vwap": round(vwap, 2),
-                "avg_vol": round(statistics.mean(vols), 2),
+                "interval": interval,
+                "rsi": bot.calculate_rsi(symbol, interval),
+                "ema_20": bot.calculate_ema(symbol, interval, 20),
+                "ema_50": bot.calculate_ema(symbol, interval, 50),
+                "atr": bot.calculate_atr(symbol, interval),
+                "macd": bot.calculate_macd(symbol, interval),
+                "adx": bot.calculate_adx(symbol, interval),
             }
-        )
-    )
+        if action == "analyze":
+            res = {}
+            for tf in ["15", "60", "240", "D"]:
+                reg = bot.get_market_regime(symbol, tf)
+                ema = bot.calculate_ema(symbol, tf, 20)
+                ticker = bot.get_ticker(symbol).get("list", [{}])[0]
+                price = float(ticker.get("lastPrice", 0) or 0)
+                res[tf] = {
+                    "trend": "Bullish" if price > ema.get("ema", price) else "Bearish",
+                    "price": price,
+                    "ema20": ema.get("ema"),
+                    "regime": reg.get("regime"),
+                }
+            return res
+        if action == "orderbook":
+            return bot.get_orderbook_analysis(symbol, limit)
+        if action == "price_action":
+            return bot.price_action_analysis(symbol, interval, limit)
+        if action == "smart_order":
+            qty = kwargs.get("qty")
+            risk_pct = float(kwargs.get("risk_pct", 1.0))
+            if qty is not None:
+                return bot.place_smart_order(
+                    symbol=symbol,
+                    side=kwargs.get("side", "Buy"),
+                    risk_pct=risk_pct,
+                )
+            return bot.place_smart_order(
+                symbol=symbol, side=kwargs.get("side", "Buy"), risk_pct=risk_pct
+            )
+        return {"error": f"Unknown action: {action}"}
+    finally:
+        bot.close()
 
 
-# @cmd Get support and resistance levels
-# @option --symbol! <TEXT> Trading pair (e.g., BTCUSDT)
-# @option --interval <TEXT> Interval (default: 60)
-# @option --limit <INT> Number of klines (default: 100)
-def bybit_get_support_resistance(symbol, interval="60", limit=100):
-    data = session.get_kline(
-        category="linear", symbol=symbol, interval=interval, limit=limit
-    )["result"]["list"]
-    highs = [float(k[2]) for k in data]
-    lows = [float(k[3]) for k in data]
-    res, sup = [], []
-    for i in range(1, len(highs) - 1):
-        if highs[i] > highs[i - 1] and highs[i] > highs[i + 1]:
-            res.append(highs[i])
-        if lows[i] < lows[i - 1] and lows[i] < lows[i + 1]:
-            sup.append(lows[i])
-    current = float(data[0][4])
-    print(
-        json.dumps(
-            {
-                "symbol": symbol,
-                "current": current,
-                "support": sorted(set([round(s, 2) for s in sup[-5:]])),
-                "resistance": sorted(set([round(r, 2) for r in res[-5:]])),
-            }
-        )
-    )
+def main():
+    parser = argparse.ArgumentParser(description="Bybit Analysis Tools")
+    parser.add_argument("--action", default="indicators", help="Action to perform")
+    parser.add_argument("--symbol", required=True, help="Trading pair")
+    parser.add_argument("--interval", default="60", help="Kline interval")
+    parser.add_argument("--limit", type=int, default=100, help="Limit")
+    parser.add_argument("--side", default="Buy", help="Buy or Sell")
+    parser.add_argument("--qty", type=float, default=None, help="Quantity")
+    parser.add_argument("--risk_pct", type=float, default=1.0, help="Risk %")
+    args = parser.parse_args()
+
+    print(json.dumps(run(**vars(args)), indent=2))
 
 
 if __name__ == "__main__":
-    Argc().run()
+    main()

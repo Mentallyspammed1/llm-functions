@@ -24,6 +24,7 @@ cloudish_tools.py
 nsfw_search.py
 text_extract_urls.py
 # bybit
+bybit_suite.py
 bybit_realm.py
 bybit_wbta.py
 bybit-realm.py

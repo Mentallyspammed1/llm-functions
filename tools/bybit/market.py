@@ -126,6 +126,30 @@ class MarketDataMixin:
             return res["list"]
         return res.get("result", {}).get("list", []) if isinstance(res, dict) else []
 
+    @staticmethod
+    def _orderbook_levels(ob: dict) -> tuple:
+        """Normalize an orderbook payload into (bids, asks) of [(price, qty)].
+
+        Accepts both the already-unwrapped shape returned by
+        BybitBaseClient._request ({"b": [...], "a": [...]}) and a nested
+        {"result": {"b": ..., "a": ...}} shape.
+        """
+        if not isinstance(ob, dict):
+            return [], []
+        res = ob.get("result", ob) if "result" in ob and not ("b" in ob or "a" in ob) else ob
+        bids, asks = [], []
+        for raw in res.get("b", []) or []:
+            try:
+                bids.append((float(raw[0]), float(raw[1])))
+            except (TypeError, ValueError, IndexError):
+                continue
+        for raw in res.get("a", []) or []:
+            try:
+                asks.append((float(raw[0]), float(raw[1])))
+            except (TypeError, ValueError, IndexError):
+                continue
+        return bids, asks
+
     # ══════════════════════════════════════════════════════════════════════════
     # TECHNICAL INDICATORS
     # ══════════════════════════════════════════════════════════════════════════
@@ -133,16 +157,19 @@ class MarketDataMixin:
     def calculate_rsi(
         self, symbol: str, interval: str = "60", period: int = 14
     ) -> dict:
-        """Calculates the Relative Strength Index (RSI)."""
-        klines = self._get_klines_safely(symbol, interval, period + 50)
+        """Calculates the Relative Strength Index (RSI, Wilder smoothing)."""
+        klines = self._get_klines_safely(symbol, interval, period + 100)
         if len(klines) < period + 1:
             return {"status": "error", "msg": "No data"}
         closes = [float(k[4]) for k in reversed(klines)]
         diffs = [closes[i + 1] - closes[i] for i in range(len(closes) - 1)]
         gains = [d if d > 0 else 0 for d in diffs]
         losses = [-d if d < 0 else 0 for d in diffs]
-        avg_g = sum(gains[-period:]) / period
-        avg_l = sum(losses[-period:]) / period
+        avg_g = sum(gains[:period]) / period
+        avg_l = sum(losses[:period]) / period
+        for i in range(period, len(gains)):
+            avg_g = (avg_g * (period - 1) + gains[i]) / period
+            avg_l = (avg_l * (period - 1) + losses[i]) / period
         if avg_l == 0:
             return {"status": "ok", "rsi": 100}
         return {"status": "ok", "rsi": round(100 - (100 / (1 + avg_g / avg_l)), 2)}
@@ -181,20 +208,26 @@ class MarketDataMixin:
     ) -> dict:
         """Calculates the Average True Range (ATR)."""
         klines = self._get_klines_safely(symbol, interval, period + 1)
-        if len(klines) < period:
+        if len(klines) < period + 1:
             return {"status": "error", "msg": "No data"}
+        # API returns newest-first; walk chronologically (oldest -> newest)
+        chron = list(reversed(klines))
         tr = []
-        for i in range(1, len(klines)):
-            h, l, pc = float(klines[i][2]), float(klines[i][3]), float(klines[i - 1][4])
+        for i in range(1, len(chron)):
+            h, l, pc = (
+                float(chron[i][2]),
+                float(chron[i][3]),
+                float(chron[i - 1][4]),
+            )
             tr.append(max(h - l, abs(h - pc), abs(l - pc)))
         return {"status": "ok", "atr": round(sum(tr[-period:]) / period, 4)}
 
     def calculate_adx(
         self, symbol: str, interval: str = "60", period: int = 14
     ) -> dict:
-        """Calculates Average Directional Index (ADX)."""
-        klines = self._get_klines_safely(symbol, interval, period * 2 + 10)
-        if len(klines) < period:
+        """Calculates Average Directional Index (ADX, Wilder)."""
+        klines = self._get_klines_safely(symbol, interval, period * 3 + 10)
+        if len(klines) < period * 2:
             return {"status": "error", "msg": "No data"}
         h, l, c = (
             [float(k[2]) for k in reversed(klines)],
@@ -207,10 +240,21 @@ class MarketDataMixin:
             up, down = h[i] - h[i - 1], l[i - 1] - l[i]
             pdm.append(max(up, 0) if up > down else 0)
             ndm.append(max(down, 0) if down > up else 0)
-        s_tr, s_pdm, s_ndm = sum(tr[-period:]), sum(pdm[-period:]), sum(ndm[-period:])
-        di_p = 100 * s_pdm / s_tr if s_tr > 0 else 0
-        di_n = 100 * s_ndm / s_tr if s_tr > 0 else 0
-        adx = 100 * abs(di_p - di_n) / (di_p + di_n) if (di_p + di_n) > 0 else 0
+        # ADX = average of the last `period` DX values (Wilder)
+        dx_series = []
+        for i in range(period - 1, len(tr)):
+            s_tr = sum(tr[i - period + 1 : i + 1])
+            s_pdm = sum(pdm[i - period + 1 : i + 1])
+            s_ndm = sum(ndm[i - period + 1 : i + 1])
+            di_p = 100 * s_pdm / s_tr if s_tr > 0 else 0
+            di_n = 100 * s_ndm / s_tr if s_tr > 0 else 0
+            dx_series.append(
+                100 * abs(di_p - di_n) / (di_p + di_n) if (di_p + di_n) > 0 else 0
+            )
+        adx = sum(dx_series[-period:]) / period if dx_series else 0
+        s_tr = sum(tr[-period:])
+        di_p = 100 * sum(pdm[-period:]) / s_tr if s_tr > 0 else 0
+        di_n = 100 * sum(ndm[-period:]) / s_tr if s_tr > 0 else 0
         return {
             "status": "ok",
             "adx": round(adx, 2),
@@ -233,7 +277,7 @@ class MarketDataMixin:
     ) -> dict:
         """Calculates Exponential Moving Average (EMA)."""
         klines = self._get_klines_safely(symbol, interval, period + 50)
-        closes = [float(k[4]) for k in reversed(klines)]
+        closes = [float(k[4]) for k in reversed(klines)]  # chronological
         if len(closes) < period:
             return {"status": "error", "msg": "No data"}
         k = 2 / (period + 1)
@@ -316,31 +360,6 @@ class MarketDataMixin:
         v = sum(float(k[5]) for k in klines)
         return {"status": "ok", "vwap": round(pv / v if v != 0 else 0, 4)}
 
-    def calculate_hma(
-        self, symbol: str, interval: str = "60", period: int = 20
-    ) -> dict:
-        """Calculates Hull Moving Average (HMA)."""
-        klines = self._get_klines_safely(symbol, interval, period * 2)
-        closes = [float(k[4]) for k in reversed(klines)]
-
-        def wma(data, p):
-            weights = list(range(1, p + 1))
-            return sum(d * w for d, w in zip(data[-p:], weights)) / sum(weights)
-
-        half_period = period // 2
-        sqrt_period = int(period**0.5)
-
-        wma1 = [
-            wma(closes[: i + half_period], half_period)
-            for i in range(len(closes) - half_period + 1)
-        ]
-        wma2 = [
-            wma(closes[: i + period], period) for i in range(len(closes) - period + 1)
-        ]
-
-        hma = [2 * w1 - w2 for w1, w2 in zip(wma1[period - half_period :], wma2)]
-        return {"status": "ok", "hma": round(hma[-1], 4)}
-
     def calculate_momentum(
         self, symbol: str, interval: str = "60", period: int = 14
     ) -> dict:
@@ -350,26 +369,30 @@ class MarketDataMixin:
         momentum = closes[-1] - closes[-period]
         return {"status": "ok", "momentum": round(momentum, 4)}
 
-    def calculate_all_indicators(self, symbol: str, interval: str = "60") -> dict:
-        """Aggregates all available indicators."""
-        return {
-            "status": "ok",
-            "msg": "Use bybit_realm calculate_all_indicators for full suite",
-        }
-
     def calculate_ehlers_rsi(
         self, symbol: str, interval: str = "60", period: int = 14
     ) -> dict:
-        """Calculates Ehlers RSI smoothing."""
-        klines = self._get_klines_safely(symbol, interval, period + 50)
+        """Calculates Ehlers-smoothed RSI (RSI series passed through an
+        exponential smoother)."""
+        klines = self._get_klines_safely(symbol, interval, period + 100)
         closes = [float(k[4]) for k in reversed(klines)]
-        if not closes:
+        if len(closes) < period + 1:
             return {"status": "error", "msg": "No data"}
+        diffs = [closes[i + 1] - closes[i] for i in range(len(closes) - 1)]
+        gains = [d if d > 0 else 0 for d in diffs]
+        losses = [-d if d < 0 else 0 for d in diffs]
+        avg_g = sum(gains[:period]) / period
+        avg_l = sum(losses[:period]) / period
+        rsi_series = []
+        for i in range(period, len(gains)):
+            avg_g = (avg_g * (period - 1) + gains[i]) / period
+            avg_l = (avg_l * (period - 1) + losses[i]) / period
+            rsi_series.append(100 if avg_l == 0 else 100 - (100 / (1 + avg_g / avg_l)))
         alpha = 2 / (period + 1)
-        rsi = closes[0]
-        for price in closes[1:]:
-            rsi = (price * alpha) + (rsi * (1 - alpha))
-        return {"status": "ok", "ehler_rsi": round(rsi, 4)}
+        smooth = rsi_series[0]
+        for val in rsi_series[1:]:
+            smooth = val * alpha + smooth * (1 - alpha)
+        return {"status": "ok", "ehler_rsi": round(smooth, 2)}
 
     def calculate_ehler_stochastic(
         self, symbol: str, interval: str = "60", period: int = 14
@@ -395,7 +418,7 @@ class MarketDataMixin:
         smooth_k: int = 3,
         smooth_d: int = 3,
     ) -> dict:
-        """Calculates Stochastic Oscillator %K."""
+        """Calculates Stochastic Oscillator %K (smoothed) and %D."""
         klines = self._get_klines_safely(symbol, interval, period + smooth_k + smooth_d)
         h, l, c = (
             [float(k[2]) for k in reversed(klines)],
@@ -404,9 +427,13 @@ class MarketDataMixin:
         )
         if len(c) < period:
             return {"status": "error", "msg": "No data"}
-        lo, hi = min(l[-period:]), max(h[-period:])
-        k = (c[-1] - lo) / (hi - lo) * 100 if hi != lo else 0
-        return {"status": "ok", "k": round(k, 2)}
+        raw_k = []
+        for i in range(period - 1, len(c)):
+            lo, hi = min(l[i - period + 1 : i + 1]), max(h[i - period + 1 : i + 1])
+            raw_k.append((c[i] - lo) / (hi - lo) * 100 if hi != lo else 0.0)
+        k = sum(raw_k[-smooth_k:]) / smooth_k if smooth_k else raw_k[-1]
+        d = sum(raw_k[-smooth_d:]) / smooth_d if smooth_d else raw_k[-1]
+        return {"status": "ok", "k": round(k, 2), "d": round(d, 2)}
 
     def calculate_hma(
         self, symbol: str, interval: str = "60", period: int = 20
@@ -442,15 +469,21 @@ class MarketDataMixin:
         return {"status": "ok", "bullish": bull, "bearish": bear}
 
     def calculate_pivot_points(self, symbol: str, interval: str = "D") -> dict:
-        """Calculates standard Pivot Points."""
+        """Calculates standard Pivot Points from the previous completed candle."""
         klines = self._get_klines_safely(symbol, interval, 2)
-        h, l, c = float(klines[0][2]), float(klines[0][3]), float(klines[0][4])
+        if not klines:
+            return {"status": "error", "msg": "No data"}
+        # klines[0] may be the still-forming candle; klines[1] is the last completed one
+        src = klines[1] if len(klines) > 1 else klines[0]
+        h, l, c = float(src[2]), float(src[3]), float(src[4])
         p = (h + l + c) / 3
         return {
             "status": "ok",
             "pivot": round(p, 4),
             "r1": round(2 * p - l, 4),
             "s1": round(2 * p - h, 4),
+            "r2": round(p + (h - l), 4),
+            "s2": round(p - (h - l), 4),
         }
 
     def calculate_klinger(
@@ -549,20 +582,21 @@ class MarketDataMixin:
         self, symbol: str, interval: str = "60", period: int = 20
     ) -> dict:
         """Calculates Triple Exponential Moving Average (TEMA)."""
-        klines = self._get_klines_safely(symbol, interval, period + 50)
+        klines = self._get_klines_safely(symbol, interval, period + 100)
         c = [float(k[4]) for k in reversed(klines)]
 
-        def ema(data, p):
+        def ema_series(data, p):
             k = 2 / (p + 1)
-            e = data[0]
+            out = [data[0]]
             for v in data[1:]:
-                e = v * k + e * (1 - k)
-            return e
+                out.append(v * k + out[-1] * (1 - k))
+            return out
 
-        e1 = ema(c, period)
-        e2 = ema([e1], period)
-        e3 = ema([e2], period)
-        return {"status": "ok", "tema": round(3 * e1 - 3 * e2 + e3, 4)}
+        e1 = ema_series(c, period)
+        e2 = ema_series(e1, period)
+        e3 = ema_series(e2, period)
+        tema = 3 * e1[-1] - 3 * e2[-1] + e3[-1]
+        return {"status": "ok", "tema": round(tema, 4)}
 
     def calculate_fisher_transform(
         self, symbol: str, interval: str = "60", period: int = 10
@@ -600,32 +634,79 @@ class MarketDataMixin:
         period: int = 10,
         multiplier: float = 3.0,
     ) -> dict:
-        """Calculates SuperTrend indicator."""
-        atr = self.calculate_atr(symbol, interval, period).get("atr", 0)
-        ticker = self.get_ticker(symbol).get("list", [{}])[0]
-        price = float(ticker.get("lastPrice", 0))
+        """Calculates the SuperTrend indicator (standard trailing-band logic).
+
+        Bands only widen when price closes beyond the previous band, which
+        makes SuperTrend behave as a trailing stop rather than a fixed channel.
+        """
+        klines = self._get_klines_safely(symbol, interval, period + 50)
+        if len(klines) < period + 1:
+            return {"status": "error", "msg": "No data"}
+        chron = list(reversed(klines))  # oldest -> newest
+        h = [float(k[2]) for k in chron]
+        l = [float(k[3]) for k in chron]
+        c = [float(k[4]) for k in chron]
+
+        trs = []
+        for i in range(1, len(chron)):
+            trs.append(max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1])))
+        atr = sum(trs[:period]) / period
+
+        f_upper, f_lower, trend = [], [], []
+        for i in range(len(c)):
+            mid = (h[i] + l[i]) / 2
+            b_upper = mid + multiplier * atr
+            b_lower = mid - multiplier * atr
+            if i >= period:
+                atr = (atr * (period - 1) + trs[i - 1]) / period
+            if i == 0:
+                f_upper.append(b_upper)
+                f_lower.append(b_lower)
+                trend.append(1)
+                continue
+            f_upper.append(
+                b_upper
+                if (b_upper < f_upper[-1] or c[i - 1] > f_upper[-1])
+                else f_upper[-1]
+            )
+            f_lower.append(
+                b_lower
+                if (b_lower > f_lower[-1] or c[i - 1] < f_lower[-1])
+                else f_lower[-1]
+            )
+            if trend[-1] == 1:
+                trend.append(1 if c[i] >= f_lower[-1] else -1)
+            else:
+                trend.append(-1 if c[i] <= f_upper[-1] else 1)
+
+        stop = f_lower[-1] if trend[-1] == 1 else f_upper[-1]
         return {
             "status": "ok",
-            "upper": round(price + multiplier * atr, 4),
-            "lower": round(price - multiplier * atr, 4),
-            "trend": "Up" if price > price - multiplier * atr else "Down",
+            "upper": round(f_upper[-1], 4),
+            "lower": round(f_lower[-1], 4),
+            "trend": "Up" if trend[-1] == 1 else "Down",
+            "stop": round(stop, 4),
+            "price": round(c[-1], 4),
         }
 
     def calculate_choppiness_index(
         self, symbol: str, interval: str = "60", period: int = 14
     ) -> dict:
         """Calculates Choppiness Index."""
-        klines = self._get_klines_safely(symbol, interval, period)
-        atr_s = sum(
-            max(
-                float(k[2]) - float(k[3]),
-                abs(float(k[2]) - float(klines[i - 1][4])),
-                abs(float(k[3]) - float(klines[i - 1][4])),
+        klines = self._get_klines_safely(symbol, interval, period + 1)
+        if len(klines) < 2:
+            return {"status": "error", "msg": "No data"}
+        chron = list(reversed(klines))  # chronological
+        atr_s = 0.0
+        for i in range(1, len(chron)):
+            h, l, pc = (
+                float(chron[i][2]),
+                float(chron[i][3]),
+                float(chron[i - 1][4]),
             )
-            for i, k in enumerate(klines)
-            if i > 0
-        )
-        hi, lo = max(float(k[2]) for k in klines), min(float(k[3]) for k in klines)
+            atr_s += max(h - l, abs(h - pc), abs(l - pc))
+        hi = max(float(k[2]) for k in chron[-period:])
+        lo = min(float(k[3]) for k in chron[-period:])
         chop = (
             100 * math.log10(atr_s / (hi - lo)) / math.log10(period) if hi != lo else 50
         )
@@ -668,11 +749,12 @@ class MarketDataMixin:
     ) -> dict:
         """Calculates Williams %R."""
         klines = self._get_klines_safely(symbol, interval, period)
-        h, l, c = (
-            [float(k[2]) for k in reversed(klines)],
-            [float(k[3]) for k in reversed(klines)],
-            float(klines[0][4]),
-        )
+        if not klines:
+            return {"status": "error", "msg": "No data"}
+        chron = list(reversed(klines))  # chronological
+        h = [float(k[2]) for k in chron]
+        l = [float(k[3]) for k in chron]
+        c = float(chron[-1][4])  # most recent close
         hi, lo = max(h), min(l)
         wr = (hi - c) / (hi - lo) * -100 if hi != lo else 0
         return {"status": "ok", "williams_r": round(wr, 2)}
@@ -784,14 +866,16 @@ class MarketDataMixin:
 
     def get_orderbook_analysis(self, symbol: str, depth: int = 50) -> dict:
         """Analyzes orderbook imbalance (OBI)."""
-        ob = self.get_orderbook(symbol, limit=depth).get("result", {})
-        bv = sum(float(q) for _, q in ob.get("b", []))
-        av = sum(float(q) for _, q in ob.get("a", []))
+        bids, asks = self._orderbook_levels(self.get_orderbook(symbol, limit=depth))
+        bv = sum(q for _, q in bids)
+        av = sum(q for _, q in asks)
         return {
             "status": "ok",
             "obi": (bv - av) / (bv + av) if bv + av > 0 else 0,
             "bid_vol": round(bv, 2),
             "ask_vol": round(av, 2),
+            "best_bid": bids[0][0] if bids else None,
+            "best_ask": asks[0][0] if asks else None,
         }
 
     def analyze_symbol(self, symbol: str) -> dict:
@@ -865,20 +949,21 @@ class MarketDataMixin:
             [float(k[3]) for k in reversed(klines)],
             [float(k[4]) for k in reversed(klines)],
         )
-        mh, ml = sum(h[-amplitude:]) / amplitude, sum(l[-amplitude:]) / amplitude
+        if not c:
+            return {"status": "error", "msg": "No data"}
+        # Most recent candles (chronological list => the tail)
+        mh = sum(h[-amplitude:]) / amplitude
+        ml = sum(l[-amplitude:]) / amplitude
         return {
             "status": "ok",
             "direction": "BULLISH" if c[-1] > (mh + ml) / 2 else "BEARISH",
-            "midpoint": (mh + ml) / 2,
+            "midpoint": round((mh + ml) / 2, 4),
         }
 
     def calculate_cvd_divergence(self, symbol: str, limit: int = 200) -> dict:
         """Detects Cumulative Volume Delta (CVD) divergence."""
-        t = (
-            self.get_recent_trades(symbol, limit=limit)
-            .get("result", {})
-            .get("list", [])
-        )
+        trades = self.get_recent_trades(symbol, limit=limit)
+        t = trades.get("list", trades.get("result", {}).get("list", [])) or []
         delta = sum(float(x["v"]) if x["s"] == "Buy" else -float(x["v"]) for x in t)
         pc = float(self.get_ticker(symbol).get("list", [{}])[0].get("price24hPcnt", 0))
         div = "NONE"
@@ -886,7 +971,7 @@ class MarketDataMixin:
             div = "BEARISH_DIVERGENCE"
         elif pc < 0 and delta > 0:
             div = "BULLISH_DIVERGENCE"
-        return {"status": "ok", "delta": delta, "divergence": div}
+        return {"status": "ok", "delta": round(delta, 2), "divergence": div}
 
     def get_value_area_bounds(
         self, symbol: str, interval: str = "60", bins: int = 20
@@ -1085,12 +1170,9 @@ class MarketDataMixin:
             }
 
     def check_funding_rate_impact(self, symbol: str, threshold: float = 0.01) -> bool:
-        """Checks if funding rate is above threshold."""
-        r = abs(
-            float(self.get_ticker(symbol).get("list", [{}])[0].get("fundingRate", 0))
-            * 100
-        )
-        return r >= threshold
+        """Checks if |funding rate| is above `threshold` (percent, e.g. 0.01 = 0.01%)."""
+        fr = float(self.get_ticker(symbol).get("list", [{}])[0].get("fundingRate", 0))
+        return abs(fr) * 100 >= float(threshold)
 
     def get_spot_futures_basis(self, symbol_spot: str, symbol_linear: str) -> dict:
         """Calculates Spot-Futures Basis."""
@@ -1122,13 +1204,21 @@ class MarketDataMixin:
 
     def calculate_short_squeeze_risk(self, symbol: str) -> dict:
         """Assess risk of a short squeeze."""
-        oi = self.get_open_interest(symbol, limit=2).get("list", [])
+        oi_res = self.get_open_interest(symbol, limit=10)
+        oi = oi_res.get("list", oi_res.get("result", {}).get("list", [])) or []
         if len(oi) < 2:
-            return {"risk": "LOW"}
-        oi_c, oi_p = float(oi[-1]["openInterest"]), float(oi[-2]["openInterest"])
+            return {"status": "ok", "squeeze_risk": "LOW", "oi_change": 0}
+        # Sort by timestamp so oi[-1] is the latest reading regardless of API order
+        oi_sorted = sorted(oi, key=lambda x: int(x.get("timestamp", 0)))
+        oi_c = float(oi_sorted[-1].get("openInterest", 0))
+        oi_p = float(oi_sorted[-2].get("openInterest", 0))
         pc = float(self.get_ticker(symbol).get("list", [{}])[0].get("price24hPcnt", 0))
         risk = "HIGH" if pc > 0.02 and oi_c < oi_p else "NORMAL"
-        return {"squeeze_risk": risk, "oi_change": (oi_c - oi_p) / oi_p * 100}
+        return {
+            "status": "ok",
+            "squeeze_risk": risk,
+            "oi_change_pct": round((oi_c - oi_p) / oi_p * 100, 2) if oi_p else 0,
+        }
 
     def get_scalper_signal(self, symbol: str, depth: int = 15) -> str:
         """OBI-based scalping signal."""
@@ -1283,18 +1373,16 @@ class MarketDataMixin:
         self, symbol: str, distance_pcts: List[float] = [0.1, 0.5, 1.0]
     ) -> dict:
         """Aggregates OB volume at % distances."""
-        ob = self.get_orderbook(symbol, limit=200).get("result", {})
-        b, a = (
-            [{"p": float(p), "v": float(q)} for p, q in ob.get("b", [])],
-            [{"p": float(p), "v": float(q)} for p, q in ob.get("a", [])],
-        )
+        bids, asks = self._orderbook_levels(self.get_orderbook(symbol, limit=200))
+        b = [{"p": p, "v": q} for p, q in bids]
+        a = [{"p": p, "v": q} for p, q in asks]
         m = (b[0]["p"] + a[0]["p"]) / 2 if b and a else 0
         res = {}
         for pct in distance_pcts:
             bv = sum(x["v"] for x in b if x["p"] >= m * (1 - pct / 100))
             av = sum(x["v"] for x in a if x["p"] <= m * (1 + pct / 100))
             res[f"{pct}%"] = {"bid": round(bv, 2), "ask": round(av, 2)}
-        return {"profile": res}
+        return {"status": "ok", "profile": res}
 
     def check_liquidity_sweep_and_wait(self, symbol: str) -> bool:
         """Monitors for liquidity sweeps (wicks)."""
@@ -1309,10 +1397,10 @@ class MarketDataMixin:
 
     def is_maker_scalp_viable(self, symbol: str, fee: float = 0.0002) -> bool:
         """Checks if spread covers fees."""
-        ob = self.get_orderbook(symbol, limit=1).get("result", {})
-        if not ob.get("b") or not ob.get("a"):
+        bids, asks = self._orderbook_levels(self.get_orderbook(symbol, limit=1))
+        if not bids or not asks:
             return False
-        s = (float(ob["a"][0][0]) - float(ob["b"][0][0])) / float(ob["b"][0][0])
+        s = (asks[0][0] - bids[0][0]) / bids[0][0]
         return s > (fee * 2.5)
 
     def route_strategy_by_regime(self, symbol: str) -> str:

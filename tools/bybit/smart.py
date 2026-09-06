@@ -31,7 +31,12 @@ class SmartOrderMixin:
         # Find settlement coin for linear (usually USDT)
         settle_coin = "USDT"
         coin_entry = next((c for c in bal_list if c.get("coin") == settle_coin), {})
-        balance = float(coin_entry.get("availableToWithdraw", 0))
+        balance = float(
+            coin_entry.get("availableToWithdraw")
+            or coin_entry.get("availableToTrade")
+            or coin_entry.get("walletBalance")
+            or 0
+        )
         if balance <= 0:
             return {"status": "error", "msg": "Insufficient balance"}
 

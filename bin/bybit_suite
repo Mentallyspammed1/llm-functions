@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -e
+
+# Portable wrapper for the unified Bybit suite tool.
+# Resolves the repo root relative to this script's location.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+if [[ -f "$REPO_ROOT/.venv/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/.venv/bin/activate"
+fi
+
+exec python "$REPO_ROOT/scripts/run-tool.py" "bybit_suite" "$@"

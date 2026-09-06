@@ -11,7 +11,9 @@ from .account import AccountMixin, RiskManagerMixin
 from .base import BybitBaseClient, TradeJournal, TradingConfig, logger
 from .execution import ExecutionMixin
 from .market import MarketDataMixin
+from .price_action import PriceActionEngine, analyze_price_action
 from .smart import SmartOrderMixin
+from .unified import PriceActionMixin
 
 
 class SignalManager:
@@ -48,6 +50,7 @@ class BybitRealm(
     AccountMixin,
     RiskManagerMixin,
     SmartOrderMixin,
+    PriceActionMixin,
 ):
     def __init__(self, config: Optional[TradingConfig] = None):
         super().__init__(config)

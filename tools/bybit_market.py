@@ -1,84 +1,115 @@
 #!/usr/bin/env python3
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
+# @describe Bybit Market Data Tools - Get orderbook, ticker, klines, funding rate
+# @option --symbol!        Trading pair (e.g., BTCUSDT)
+# @option --action         Action: orderbook|ticker|klines|funding|instruments
+# @option --limit          Orderbook/klines limit (default: 50)
+# @option --interval       Kline interval: 1|3|5|15|30|60|120|240|D (default: 15)
+# @option --use_tor       Route through Tor proxy (default: true)
 """
 Bybit Market Data Tools
-Public market data endpoints - no authentication required
+Public market data endpoints — no authentication required.
+
+Runs on the unified `tools.bybit` client (no pybit dependency).
 """
+
+import argparse
 import json
 import os
+import sys
+from pathlib import Path
 
-from argc import argc as Argc
-from pybit.unified_trading import HTTP
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-# Configuration
-TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
-USE_TOR = os.getenv("USE_TOR", "false").lower() == "true"
-TOR_PROXY = os.getenv("TOR_PROXY", "socks5h://127.0.0.1:9050")
-
-# Bybit V5 Market Endpoints
-http_kwargs = {
-    "testnet": TESTNET,
-}
-if USE_TOR:
-    http_kwargs["proxies"] = {"http": TOR_PROXY, "https": TOR_PROXY}
-session = HTTP(**http_kwargs)
+from tools.bybit.terminal import BybitRealm  # noqa: E402
 
 
-# @cmd Get orderbook depth
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --limit Depth limit (default: 50)
+def _realm():
+    return BybitRealm()
+
+
 def bybit_get_orderbook(symbol, limit=50):
-    """Fetch L2 orderbook with specified depth"""
-    result = session.get_orderbook(category="linear", symbol=symbol, limit=limit)
-    print(json.dumps(result))
+    """Get orderbook depth (L2)"""
+    bot = _realm()
+    try:
+        print(json.dumps(bot.get_orderbook(symbol, limit=limit), indent=2))
+    finally:
+        bot.close()
 
 
-# @cmd Get ticker info
-# @option --symbol! Trading pair (e.g., BTCUSDT)
 def bybit_get_ticker(symbol):
-    """Get 24h ticker information for a symbol"""
-    result = session.get_tickers(category="linear", symbol=symbol)
-    print(json.dumps(result))
+    """Get 24h ticker information"""
+    bot = _realm()
+    try:
+        print(json.dumps(bot.get_ticker(symbol), indent=2))
+    finally:
+        bot.close()
 
 
-# @cmd Get candlestick data
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --interval! Interval (1, 5, 15, 60, 120, 240, D, W, M)
-# @option --limit Number of klines (default: 100)
-def bybit_get_klines(symbol, interval, limit=100):
-    """Get historical kline/candlestick data"""
-    result = session.get_kline(
-        category="linear", symbol=symbol, interval=interval, limit=limit
-    )
-    print(json.dumps(result))
+def bybit_get_klines(symbol, interval="15", limit=100):
+    """Get candlestick/kline data"""
+    bot = _realm()
+    try:
+        print(json.dumps(bot.get_klines(symbol, interval=interval, limit=limit), indent=2))
+    finally:
+        bot.close()
 
 
-# @cmd Get instrument info
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-def bybit_get_instrument(symbol):
-    """Get instrument specifications (tick size, lot size, etc.)"""
-    result = session.get_instruments_info(category="linear", symbol=symbol)
-    print(json.dumps(result))
-
-
-# @cmd Get funding rate
-# @option --symbol! Trading pair (e.g., BTCUSDT)
 def bybit_get_funding_rate(symbol):
-    """Get current funding rate for a symbol"""
-    result = session.get_funding_rate(category="linear", symbol=symbol)
-    print(json.dumps(result))
+    """Get current funding rate"""
+    bot = _realm()
+    try:
+        print(json.dumps(bot.get_funding_rate(symbol, limit=1), indent=2))
+    finally:
+        bot.close()
 
 
-# @cmd Get risk limit
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-def bybit_get_risk_limit(symbol):
-    """Get risk limit for a symbol"""
-    result = session.get_risk_limit(category="linear", symbol=symbol)
-    print(json.dumps(result))
+def bybit_get_instruments(symbol):
+    """Get instrument info (tick size, lot size, etc.)"""
+    bot = _realm()
+    try:
+        print(json.dumps(bot.get_instruments_info("linear", symbol), indent=2))
+    finally:
+        bot.close()
+
+
+def run(**kwargs) -> dict:
+    """Unified entry point (used by run-tool.py)."""
+    action = kwargs.get("action", "ticker")
+    symbol = kwargs.get("symbol")
+    if not symbol:
+        return {"error": "--symbol is required"}
+    limit = int(kwargs.get("limit", 50))
+    interval = kwargs.get("interval", "15")
+
+    bot = _realm()
+    try:
+        if action == "orderbook":
+            return bot.get_orderbook(symbol, limit=limit)
+        if action == "ticker":
+            return bot.get_ticker(symbol)
+        if action == "klines":
+            return bot.get_klines(symbol, interval=interval, limit=limit)
+        if action == "funding":
+            return bot.get_funding_rate(symbol, limit=1)
+        if action == "instruments":
+            return bot.get_instruments_info("linear", symbol)
+        return {"error": f"Unknown action: {action}"}
+    finally:
+        bot.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Bybit Market Tools")
+    parser.add_argument("--action", default="ticker", help="Action to perform")
+    parser.add_argument("--symbol", required=True, help="Trading pair")
+    parser.add_argument("--limit", type=int, default=50, help="Limit")
+    parser.add_argument("--interval", default="15", help="Kline interval")
+    args = parser.parse_args()
+
+    print(json.dumps(run(**vars(args)), indent=2))
 
 
 if __name__ == "__main__":
-    Argc().run()
+    main()

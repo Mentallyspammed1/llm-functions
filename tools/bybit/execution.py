@@ -15,6 +15,15 @@ class ExecutionMixin:
             params["settleCoin"] = settle_coin
         return self._request("GET", "/v5/order/realtime", params, category="trade")
 
+    def get_executions(self, symbol=None, order_id=None, limit=50, category="linear"):
+        """Get trade executions (fills) for the account."""
+        params = {"category": category, "limit": limit}
+        if symbol:
+            params["symbol"] = symbol.upper()
+        if order_id:
+            params["orderId"] = order_id
+        return self._request("GET", "/v5/execution/list", params, category="trade")
+
     def place_order(
         self,
         symbol,

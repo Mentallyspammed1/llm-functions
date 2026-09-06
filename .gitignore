@@ -27,3 +27,7 @@ __pycache__/
 # Node (root node_modules is intentionally tracked for on-device MCP servers;
 # ignore nested install artifacts under agent/bridge dirs that are not tracked)
 aicha5/bridge/node_modules/.cache/
+
+# Bybit suite runtime artifacts
+/bybit_trades.db
+/trading_signals.json

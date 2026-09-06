@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# @describe Bybit Account & Position Tools - Get balance, positions, orders, and PnL
+# @describe Bybit Account Tools - balance, positions, orders, PnL
 # @option --coin           Filter by coin (default: USDT)
 # @option --symbol         Filter by symbol (e.g., BTCUSDT)
 # @option --action         Action: balance|positions|open_orders|closed_pnl|executions
@@ -8,110 +8,113 @@
 # @option --use_tor       Route through Tor proxy (default: true)
 """
 Bybit Account & Position Tools
-Requires BYBIT_API_KEY and BYBIT_API_SECRET
+
+Runs on the unified `tools.bybit` client (no pybit dependency).
 """
 
 import argparse
 import json
-import os
-
-# Load .env if exists
+import sys
 from pathlib import Path
 
-env_path = Path(__file__).parent.parent / ".env"
-if env_path.exists():
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, val = line.split("=", 1)
-                os.environ.setdefault(key, val)
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from pybit.unified_trading import HTTP
+from tools.bybit.terminal import BybitRealm  # noqa: E402
 
-# Tor proxy support
-USE_TOR = os.getenv("BYBIT_USE_TOR", "true").lower() == "true"
-PROXY = "socks5h://127.0.0.1:9050" if USE_TOR else None
 
-# Use testnet from .env
-TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
-
-session = HTTP(
-    testnet=TESTNET,
-    api_key=os.getenv("BYBIT_API_KEY"),
-    api_secret=os.getenv("BYBIT_API_SECRET"),
-    proxy=PROXY,
-)
+def _realm():
+    return BybitRealm()
 
 
 def bybit_get_balance(coin=None):
     """Get wallet balance"""
+    bot = _realm()
     try:
-        result = session.get_wallet_balance(accountType="UNIFIED", coin=coin)
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        res = bot.get_wallet_balance()
+        coins = res.get("list", [{}])[0].get("coin", [])
+        if coin:
+            coins = [c for c in coins if c.get("coin", "").upper() == coin.upper()]
+        print(json.dumps(coins, indent=2))
+    finally:
+        bot.close()
 
 
 def bybit_get_positions(symbol=None):
-    """View open positions"""
+    """Get open positions"""
+    bot = _realm()
     try:
-        result = session.get_positions(category="linear", symbol=symbol)
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        print(json.dumps(bot.get_positions(symbol=symbol), indent=2))
+    finally:
+        bot.close()
 
 
 def bybit_get_open_orders(symbol=None):
     """Get open orders"""
+    bot = _realm()
     try:
-        result = session.get_open_orders(category="linear", symbol=symbol)
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        print(json.dumps(bot.get_open_orders(symbol=symbol), indent=2))
+    finally:
+        bot.close()
 
 
 def bybit_get_closed_pnl(symbol=None, limit=20):
     """Get closed PnL history"""
+    bot = _realm()
     try:
-        result = session.get_closed_pnl(category="linear", symbol=symbol, limit=limit)
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        print(json.dumps(bot.get_pnl_history(symbol=symbol, limit=limit), indent=2))
+    finally:
+        bot.close()
 
 
 def bybit_get_executions(symbol=None, order_id=None):
-    """Get execution history"""
+    """Get trade executions"""
+    bot = _realm()
     try:
-        result = session.get_executions(
-            category="linear", symbol=symbol, orderId=order_id
-        )
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        print(json.dumps(bot.get_executions(symbol=symbol, order_id=order_id), indent=2))
+    finally:
+        bot.close()
+
+
+def run(**kwargs) -> dict:
+    """Unified entry point (used by run-tool.py)."""
+    action = kwargs.get("action", "balance")
+    symbol = kwargs.get("symbol")
+    coin = kwargs.get("coin")
+    limit = int(kwargs.get("limit", 20))
+    order_id = kwargs.get("order_id")
+
+    bot = _realm()
+    try:
+        if action == "balance":
+            res = bot.get_wallet_balance()
+            coins = res.get("list", [{}])[0].get("coin", [])
+            if coin:
+                coins = [c for c in coins if c.get("coin", "").upper() == coin.upper()]
+            return {"status": "ok", "coins": coins}
+        if action == "positions":
+            return bot.get_positions(symbol=symbol)
+        if action == "open_orders":
+            return bot.get_open_orders(symbol=symbol)
+        if action == "closed_pnl":
+            return bot.get_pnl_history(symbol=symbol, limit=limit)
+        if action == "executions":
+            return bot.get_executions(symbol=symbol, order_id=order_id)
+        return {"status": "error", "msg": f"Unknown action: {action}"}
+    finally:
+        bot.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description="Bybit Account Tools")
-    parser.add_argument("--action", default="balance", help="Action to perform")
-    parser.add_argument("--coin", default=None, help="Coin to filter")
-    parser.add_argument("--symbol", default=None, help="Symbol to filter")
-    parser.add_argument("--order_id", default=None, help="Order ID")
-    parser.add_argument("--limit", type=int, default=20, help="Result limit")
+    parser.add_argument("--coin", default=None)
+    parser.add_argument("--symbol", default=None)
+    parser.add_argument("--action", default="balance")
+    parser.add_argument("--order_id", default=None)
+    parser.add_argument("--limit", type=int, default=20)
     args = parser.parse_args()
-
-    if args.action == "balance":
-        bybit_get_balance(args.coin)
-    elif args.action == "positions":
-        bybit_get_positions(args.symbol)
-    elif args.action == "open_orders":
-        bybit_get_open_orders(args.symbol)
-    elif args.action == "closed_pnl":
-        bybit_get_closed_pnl(args.symbol, args.limit)
-    elif args.action == "executions":
-        bybit_get_executions(args.symbol, args.order_id)
-    else:
-        print(json.dumps({"error": f"Unknown action: {args.action}"}))
+    print(json.dumps(run(**vars(args)), indent=2))
 
 
 if __name__ == "__main__":
