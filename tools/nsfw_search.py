@@ -1,30 +1,6 @@
-from __future__ import annotations
-import random
-
-def _mutate_query(query):
-    """Adds significant jitter and keyword mutation to bypass pattern detection."""
-    import random
-    modifiers = ["hd", "4k", "high res", "gallery", "collection", "set", "leak", "exclusive"]
-    mutations = [
-        lambda q: q + " " + random.choice(modifiers),
-        lambda q: q + " " * random.randint(1, 3),
-        lambda q: q.strip(),
-        lambda q: q + " " + random.choice(["alt", "style", "look"]),
-        lambda q: q.replace("nsfw", "unfiltered") if "nsfw" in q.lower() else q,
-        lambda q: q.replace("nsfw", "explicit") if "nsfw" in q.lower() else q,
-    ]
-    return random.choice(mutations)(query)
-
-def _get_random_referer(backend):
-    referers = {
-        "bing": ["https://www.bing.com/", "https://www.bing.com/images/search", "https://www.bing.com/videos/search"],
-        "yandex": ["https://yandex.com/", "https://yandex.com/images/", "https://yandex.com/search/"],
-        "google": ["https://www.google.com/", "https://www.google.com/search"]
-    }
-    return random.choice(referers.get(backend, ["https://www.google.com/"]))
 #!/usr/bin/env python3
 # ==============================================================================
-# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.0.1
+# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.0.2
 # Unified Header Analysis · Multi-Backend OSINT Image Search · Video Scraper Engine
 #
 # @describe Unified OSINT, Media Intelligence, and Video Search Platform (Pyrmethus Edition)
@@ -69,6 +45,7 @@ def _get_random_referer(backend):
 # @env LLM_OUTPUT=/dev/stdout      Output path for LLM integration
 # ==============================================================================
 
+from __future__ import annotations
 
 import argparse
 import concurrent.futures
@@ -99,6 +76,41 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# ── VOA helpers (kept at top so they are always available) ────────────────────
+def _mutate_query(query: str) -> str:
+    """Adds significant jitter and keyword mutation to bypass pattern detection."""
+    modifiers = ["hd", "4k", "high res", "gallery", "collection", "set", "leak", "exclusive"]
+    mutations = [
+        lambda q: q + " " + random.choice(modifiers),
+        lambda q: q + " " * random.randint(1, 3),
+        lambda q: q.strip(),
+        lambda q: q + " " + random.choice(["alt", "style", "look"]),
+        lambda q: q.replace("nsfw", "unfiltered") if "nsfw" in q.lower() else q,
+        lambda q: q.replace("nsfw", "explicit") if "nsfw" in q.lower() else q,
+    ]
+    return random.choice(mutations)(query)
+
+
+def _get_random_referer(backend: str) -> str:
+    referers = {
+        "bing": [
+            "https://www.bing.com/",
+            "https://www.bing.com/images/search",
+            "https://www.bing.com/videos/search",
+        ],
+        "yandex": [
+            "https://yandex.com/",
+            "https://yandex.com/images/",
+            "https://yandex.com/search/",
+        ],
+        "google": [
+            "https://www.google.com/",
+            "https://www.google.com/search",
+        ],
+    }
+    return random.choice(referers.get(backend, ["https://www.google.com/"]))
+
 
 # Guard third-party optional imports
 try:
@@ -170,7 +182,7 @@ except ImportError:
 # CONSTANTS & CONFIGURATION
 # ==============================================================================
 
-__version__ = "4.0.1"
+__version__ = "4.0.2"
 
 EXIT_SUCCESS = 0
 EXIT_ERROR = 1
@@ -237,7 +249,7 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
 
-_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-\~])|\033\[[0-9;?]*[a-zA-Z]")
 
 # ==============================================================================
 # UI & ANSI HELPERS
@@ -474,6 +486,10 @@ def _coerce_timeout(v: Any, default: float = _REQUEST_TIMEOUT) -> float:
 
 def _ua() -> str:
     return random.choice(_USER_AGENTS)
+
+
+# Compatibility alias – old Bing path was calling the non-existent name
+_get_random_ua = _ua
 
 
 def _has_image_ext(url: str) -> bool:
@@ -823,7 +839,6 @@ def _fetch(
     rl = _get_rate_limiter(backend)
     ctx = _build_ssl_ctx(ignore_ssl)
 
-    # VOA: Dynamic Header Generation per attempt to bypass fingerprinting
     def get_headers():
         h = {
             "User-Agent": _ua(),
@@ -866,7 +881,7 @@ def _fetch(
 
         except urllib.error.HTTPError as e:
             _debug(f"[VOA][{backend}] HTTP {e.code} attempt {attempt}/{retries}")
-            if e.code == 429: # Rate Limited
+            if e.code == 429:
                 wait = (_RETRY_BACKOFF**attempt) * 2 + random.uniform(1.0, 3.0)
                 time.sleep(wait)
             elif e.code in (500, 502, 503, 504):
@@ -886,7 +901,6 @@ def _fetch(
 
     _warn(f"[VOA][{backend}] All {retries} attempts failed: {last_exc} — {url[:70]}")
     return None
-
 
 
 def _fetch_json(
@@ -1174,17 +1188,16 @@ def _backend_bing(
     for _ in range(max(1, max_pages)):
         if len(results) >= limit:
             break
-        
-        # VOA: Mutate query and rotate referer to bypass pattern detection
+
         mutated_query = _mutate_query(query)
         params = {"q": mutated_query, "first": str(first), "count": "35", "adlt": "off"}
-        
+
         headers = {
             "Referer": _get_random_referer("bing"),
             "Cookie": "SRCHHPGUSR=ADLT=OFF; B3=off;",
             "User-Agent": _get_random_ua(),
         }
-        
+
         raw = _fetch(
             "https://www.bing.com/images/search?" + urllib.parse.urlencode(params),
             headers=headers,
@@ -1192,7 +1205,6 @@ def _backend_bing(
             use_cache=use_cache,
         )
         if raw is None:
-            # Try one more time with a different mutation if it failed
             mutated_query = _mutate_query(query)
             params["q"] = mutated_query
             raw = _fetch(
@@ -1219,7 +1231,6 @@ def _backend_bing(
             if len(results) >= limit:
                 break
         if found == 0:
-            # If no results found, try a broader mutation
             mutated_query = query.replace("nsfw", "").strip()
             params["q"] = mutated_query
             raw = _fetch(
@@ -1308,7 +1319,6 @@ def _backend_e621(
     fetched_pages = 0
 
     while len(results) < limit and fetched_pages < max_pages:
-        # Upgraded: Removed forced "type:gif" so general queries return records
         params = {"tags": query, "limit": str(per), "page": str(page)}
         data = _fetch_json(
             "https://e621.net/posts.json?" + urllib.parse.urlencode(params),
@@ -1416,7 +1426,6 @@ def _backend_danbooru(
     per = min(limit, 200)
     fetched_pages = 0
 
-    # Upgraded: Sanitize query to max 2 tags for anonymous API compliance
     clean_query = " ".join(query.split()[:2])
 
     while len(results) < limit and fetched_pages < max_pages:
@@ -2208,7 +2217,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(
         prog="osint",
-        description="Pyrmethus Master OSINT & Media Intelligence Engine v4.0.1",
+        description="Pyrmethus Master OSINT & Media Intelligence Engine v4.0.2",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
