@@ -11,11 +11,12 @@ adds a label and timestamp, and appends them to `pinned_locations.json`
 in the project root directory.
 """
 
-import subprocess
+import argparse
+import datetime
 import json
 import os
-import datetime
-import argparse
+import subprocess
+
 
 def run(label: str = "current_location") -> str:
     """
@@ -29,7 +30,9 @@ def run(label: str = "current_location") -> str:
     """
     try:
         # Run termux-location
-        result = subprocess.run(["termux-location"], capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            ["termux-location"], capture_output=True, text=True, check=True
+        )
         location_data = json.loads(result.stdout)
 
         # Add a label and timestamp
@@ -43,7 +46,7 @@ def run(label: str = "current_location") -> str:
 
         data = []
         if os.path.exists(storage_file):
-            with open(storage_file, "r") as f:
+            with open(storage_file) as f:
                 try:
                     data = json.load(f)
                 except json.JSONDecodeError:
@@ -56,10 +59,16 @@ def run(label: str = "current_location") -> str:
 
         return f"Successfully pinned location '{label}' at {location_data['latitude']}, {location_data['longitude']}"
     except Exception as e:
-        return f"Error pinning location: {str(e)}"
+        return f"Error pinning location: {e!s}"
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pin the current location.")
-    parser.add_argument("--label", type=str, default="current_location", help="Label for the location pin")
+    parser.add_argument(
+        "--label",
+        type=str,
+        default="current_location",
+        help="Label for the location pin",
+    )
     args = parser.parse_args()
     print(run(args.label))

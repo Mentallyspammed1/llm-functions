@@ -1,4 +1,11 @@
 # 📘 Bybit Realm: Technical Specification & User Manual
+
+> **Note:** the whole Bybit toolchain is now tied together through the unified
+> suite — see **[BYBIT_SUITE.md](BYBIT_SUITE.md)** for the canonical entry
+> point (`bybit_suite.py`), the price-action trend engine, the backtester and
+> the safety model. This document remains the deep reference for the
+> standalone Realm tool.
+
 **Version:** 4.1.0  
 **Status:** Production-Ready  
 **Classification:** Trading Infrastructure / API Wrapper

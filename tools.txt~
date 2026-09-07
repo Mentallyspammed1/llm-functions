@@ -1,4 +1,5 @@
 # web
+free_search.py
 bs.py
 web_spider.py
 internet_speedtest.py
@@ -19,6 +20,8 @@ download_image.py
 web_crawler.py
 network_tools.py
 cloudish_tools.py
+nsfw_search.py
+text_extract_urls.py
 # bybit
 bybit_realm.py
 bybit_wbta.py
@@ -45,7 +48,6 @@ scientific_calculator.py
 file_todo.py
 task_manager.py
 json_tool.py
-str_replace_editor.py
 file_review.py
 media_harmonizer.py
 optimizer.py
@@ -61,15 +63,13 @@ navigate_between.py
 review_pins.py
 execute_py_code.py
 crypto_price.py
-memory_manager.py
-memory_analytics.py
+memory_tool.py
 mapper_extractor.py
 file_summarizer.py
 clipboard.sh
-system_info.py
 url_metadata.py
 find_port.sh
-git_summary.sh
+git_summary.py
 get_my_location.py
 http_headers.py
 dns_query.py
@@ -82,3 +82,22 @@ file_patch.py
 image_intel.py
 pdf_intel.py
 cron_job_schedualer.py
+git_tool.py
+apk_tool.py
+repo_search.py
+gif_tool.py
+code_snapshot.py
+vid2gif.py
+telegram_tool.py
+gif_toolx.py
+dns_tool.py
+sqlite_intel.py
+rest_client.py
+archive_tool.py
+docker_intel.py
+audio_transcriber.py
+trurl_query.py
+sys_unified.py
+
+location_manager.py
+search_tool.py

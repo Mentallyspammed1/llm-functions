@@ -40,30 +40,32 @@ import time
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Literal, Optional
 
 try:
     import fcntl
+
     HAS_FCNTL = True
 except ImportError:
     HAS_FCNTL = False
 
 __version__ = "2.1.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
-    "parse_unified_diff",
+    "__version__",
     "apply_file_patch",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "parse_unified_diff",
+    "run",
 ]
 
 # Track temporary files globally for signal-safe cleanup
 _ACTIVE_TEMP_FILES: set[Path] = set()
+
 
 def _cleanup_temp_files() -> None:
     """Remove any orphan temporary swap files created during atomic operations."""
@@ -74,6 +76,7 @@ def _cleanup_temp_files() -> None:
         except Exception:
             pass
     _ACTIVE_TEMP_FILES.clear()
+
 
 atexit.register(_cleanup_temp_files)
 
@@ -141,15 +144,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 # Comprehensive ANSI escape sequence stripping regex
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[a-zA-Z]|\033\[?[0-9;]*[0-9;]*[0-9;]*[a-zA-Z]")
@@ -162,10 +165,15 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stdout is attached to an interactive, non-dumb terminal."""
-    return sys.stdout.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stdout.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text, stripping colors if stdout is not a TTY or --no-color is set."""
     target = file or sys.stdout
     if no_color or not _is_tty():
@@ -173,7 +181,9 @@ def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n"
     print(text, file=target, flush=True, end=end)
 
 
-def print_progress(current: int, total: int, message: str = "", no_color: bool = False) -> None:
+def print_progress(
+    current: int, total: int, message: str = "", no_color: bool = False
+) -> None:
     """Render a visual progress bar for long-running batch operations."""
     if not _is_tty() or no_color:
         return
@@ -208,40 +218,80 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [FILE PATCH & STR EDITOR v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [FILE PATCH & STR EDITOR v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target Path:{RESET} {data.get('file_path', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}      {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target Path:{RESET} {data.get('file_path', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}      {NEON_YELLOW}{data.get('action', 'N/A')}{RESET}"
+    )
 
     action = data.get("action")
     if action == "view":
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Lines View:{RESET}  Line {data.get('view_start_line')} to {data.get('view_end_line')} (Total: {data.get('total_lines')})")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Lines View:{RESET}  Line {data.get('view_start_line')} to {data.get('view_end_line')} (Total: {data.get('total_lines')})"
+        )
     elif action in {"replace", "count"}:
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Search:{RESET}      '{data.get('search', '')}'")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Search:{RESET}      '{data.get('search', '')}'"
+        )
         if action == "replace":
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Replacement:{RESET} '{data.get('replacement', '')}'")
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Replaced:{RESET}    {NEON_GREEN}{data.get('replacements_made', 0)}{RESET} match(es)")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Replacement:{RESET} '{data.get('replacement', '')}'"
+            )
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Replaced:{RESET}    {NEON_GREEN}{data.get('replacements_made', 0)}{RESET} match(es)"
+            )
         elif action == "count":
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Matches:{RESET}     {NEON_GREEN}{data.get('match_count', 0)}{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Matches:{RESET}     {NEON_GREEN}{data.get('match_count', 0)}{RESET}"
+            )
     elif action == "patch":
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target Type:{RESET} {data.get('target_type', 'file')}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Dry Run:{RESET}     {NEON_YELLOW}{data.get('dry_run', False)}{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Patched Files:{RESET}{NEON_GREEN}{len(data.get('patched_files', []))}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target Type:{RESET} {data.get('target_type', 'file')}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Dry Run:{RESET}     {NEON_YELLOW}{data.get('dry_run', False)}{RESET}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Patched Files:{RESET}{NEON_GREEN}{len(data.get('patched_files', []))}{RESET}"
+        )
         if "lines_added" in data or "lines_removed" in data:
-            _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Changes:{RESET}     {NEON_GREEN}+{data.get('lines_added', 0)}{RESET} / {NEON_RED}-{data.get('lines_removed', 0)}{RESET} lines")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Changes:{RESET}     {NEON_GREEN}+{data.get('lines_added', 0)}{RESET} / {NEON_RED}-{data.get('lines_removed', 0)}{RESET} lines"
+            )
     elif action in {"write", "create"}:
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Written:{RESET}     {NEON_GREEN}{data.get('written_bytes', 0)}{RESET} bytes")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Dry Run:{RESET}     {NEON_YELLOW}{data.get('dry_run', False)}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Written:{RESET}     {NEON_GREEN}{data.get('written_bytes', 0)}{RESET} bytes"
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Dry Run:{RESET}     {NEON_YELLOW}{data.get('dry_run', False)}{RESET}"
+        )
 
     if data.get("backup_created"):
-        bak_str = f"Created (.bak) [{data.get('backup_sha256', '')[:8]}]" if data.get("backup_sha256") else "Created (.bak)"
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Backup:{RESET}      {NEON_GREEN}{bak_str}{RESET}")
+        bak_str = (
+            f"Created (.bak) [{data.get('backup_sha256', '')[:8]}]"
+            if data.get("backup_sha256")
+            else "Created (.bak)"
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Backup:{RESET}      {NEON_GREEN}{bak_str}{RESET}"
+        )
 
     if data.get("encoding_used"):
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Encoding:{RESET}    {DIM}{data.get('encoding_used')}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Encoding:{RESET}    {DIM}{data.get('encoding_used')}{RESET}"
+        )
 
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}      {NEON_YELLOW}{data.get('cached', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}      {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -255,7 +305,9 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         for idx, line in enumerate(lines[:25]):
             _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}{start_ln + idx:4d} │{RESET} {line}")
         if len(lines) > 25:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(lines) - 25} more lines{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(lines) - 25} more lines{RESET}"
+            )
 
     if action == "patch" and "diff_preview" in data and data["diff_preview"]:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -269,7 +321,9 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
             else:
                 _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}{line}{RESET}")
         if len(diff_lines) > 25:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(diff_lines) - 25} more diff lines{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(diff_lines) - 25} more diff lines{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -277,6 +331,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
+
 
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
@@ -298,7 +353,8 @@ def get_execution_context() -> dict[str, Any]:
         "root_dir": os.environ.get("LLM_ROOT_DIR"),
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
-        "is_termux": "TERMUX_VERSION" in os.environ or "/com.termux/" in os.environ.get("PATH", ""),
+        "is_termux": "TERMUX_VERSION" in os.environ
+        or "/com.termux/" in os.environ.get("PATH", ""),
         "pid": os.getpid(),
     }
 
@@ -348,6 +404,7 @@ def _release_file_lock(file_obj: Any) -> None:
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
 
+
 class ToolCache:
     """Caching utility with TTL support and file modification hash validation."""
 
@@ -367,7 +424,9 @@ class ToolCache:
     def _make_key(self, key_data: str) -> str:
         return hashlib.sha256(key_data.encode("utf-8")).hexdigest()
 
-    def get(self, key_data: str, target_file: Optional[Path] = None, ttl_seconds: int = 3600) -> Optional[Any]:
+    def get(
+        self, key_data: str, target_file: Optional[Path] = None, ttl_seconds: int = 3600
+    ) -> Optional[Any]:
         cache_file = self.cache_dir / f"{self._make_key(key_data)}.cache"
         if not cache_file.exists():
             return None
@@ -385,7 +444,10 @@ class ToolCache:
                 target_stat = target_file.stat()
                 recorded_mtime = cached_obj.get("_target_mtime")
                 recorded_size = cached_obj.get("_target_size")
-                if recorded_mtime != target_stat.st_mtime or recorded_size != target_stat.st_size:
+                if (
+                    recorded_mtime != target_stat.st_mtime
+                    or recorded_size != target_stat.st_size
+                ):
                     cache_file.unlink(missing_ok=True)
                     return None
 
@@ -393,7 +455,9 @@ class ToolCache:
         except Exception:
             return None
 
-    def set(self, key_data: str, value: Any, target_file: Optional[Path] = None) -> None:
+    def set(
+        self, key_data: str, value: Any, target_file: Optional[Path] = None
+    ) -> None:
         cache_file = self.cache_dir / f"{self._make_key(key_data)}.cache"
         try:
             if target_file and target_file.exists() and isinstance(value, dict):
@@ -427,8 +491,11 @@ class GracefulShutdown:
 # SECTION 5: Dependency-Free Unified Diff Engine
 # ==============================================================================
 
+
 class PatchHunk:
-    def __init__(self, old_start: int, old_len: int, new_start: int, new_len: int) -> None:
+    def __init__(
+        self, old_start: int, old_len: int, new_start: int, new_len: int
+    ) -> None:
         self.old_start = old_start
         self.old_len = old_len
         self.new_start = new_start
@@ -487,7 +554,9 @@ def parse_unified_diff(patch_text: str) -> list[FilePatch]:
                 curr_patch.hunks.append(curr_hunk)
             i += 1
             continue
-        elif curr_hunk is not None and (line.startswith(" ") or line.startswith("-") or line.startswith("+")):
+        elif curr_hunk is not None and (
+            line.startswith(" ") or line.startswith("-") or line.startswith("+")
+        ):
             op = line[0]
             text = line[1:]
             curr_hunk.lines.append((op, text))
@@ -503,7 +572,9 @@ def parse_unified_diff(patch_text: str) -> list[FilePatch]:
     return patches
 
 
-def apply_file_patch(file_lines: list[str], file_patch: FilePatch) -> tuple[bool, list[str], str]:
+def apply_file_patch(
+    file_lines: list[str], file_patch: FilePatch
+) -> tuple[bool, list[str], str]:
     """
     Apply patch hunks to file_lines using a multi-pass fuzzy alignment algorithm.
     Returns (success, patched_lines, error_message).
@@ -534,7 +605,9 @@ def apply_file_patch(file_lines: list[str], file_patch: FilePatch) -> tuple[bool
         if match_idx == -1:
             stripped_old = [l.strip() for l in old_lines]
             for candidate in range(len(lines) - len(old_lines) + 1):
-                window = [l.strip() for l in lines[candidate : candidate + len(old_lines)]]
+                window = [
+                    l.strip() for l in lines[candidate : candidate + len(old_lines)]
+                ]
                 if window == stripped_old:
                     match_idx = candidate
                     break
@@ -544,14 +617,17 @@ def apply_file_patch(file_lines: list[str], file_patch: FilePatch) -> tuple[bool
             best_ratio = 0.0
             best_candidate = -1
             old_text = "\n".join(old_lines)
-            
+
             # Try searching around expected index first
             search_start = max(0, expected_idx - 50)
             search_end = min(len(lines) - len(old_lines) + 1, expected_idx + 50)
-            
+
             # Fallback to full file if not found nearby
-            search_ranges = [(search_start, search_end), (0, len(lines) - len(old_lines) + 1)]
-            
+            search_ranges = [
+                (search_start, search_end),
+                (0, len(lines) - len(old_lines) + 1),
+            ]
+
             for start, end in search_ranges:
                 if match_idx != -1:
                     break
@@ -561,7 +637,7 @@ def apply_file_patch(file_lines: list[str], file_patch: FilePatch) -> tuple[bool
                     if ratio > best_ratio:
                         best_ratio = ratio
                         best_candidate = candidate
-                        
+
                 if best_ratio > 0.85:
                     match_idx = best_candidate
 
@@ -570,9 +646,13 @@ def apply_file_patch(file_lines: list[str], file_patch: FilePatch) -> tuple[bool
             sample_str = "\n".join(f"  | {l}" for l in sample)
             if len(old_lines) > 3:
                 sample_str += f"\n  | ... ({len(old_lines) - 3} more lines)"
-            return False, file_lines, (
-                f"Patch hunk #{idx + 1}/{len(file_patch.hunks)} failed to match any content in file "
-                f"({len(lines)} lines). Searched for {len(old_lines)}-line block starting with:\n{sample_str}"
+            return (
+                False,
+                file_lines,
+                (
+                    f"Patch hunk #{idx + 1}/{len(file_patch.hunks)} failed to match any content in file "
+                    f"({len(lines)} lines). Searched for {len(old_lines)}-line block starting with:\n{sample_str}"
+                ),
             )
 
         # Replace matching lines
@@ -586,6 +666,7 @@ def apply_file_patch(file_lines: list[str], file_patch: FilePatch) -> tuple[bool
 # ==============================================================================
 # SECTION 6: Core Tool Execution Logic
 # ==============================================================================
+
 
 def execute_tool(
     action: str,
@@ -614,7 +695,9 @@ def execute_tool(
 
     if verbose:
         logging.basicConfig(level=logging.DEBUG, format="[DEBUG] %(message)s")
-        logging.debug(f"Initializing editor tool action '{action}' on path: {file_path}")
+        logging.debug(
+            f"Initializing editor tool action '{action}' on path: {file_path}"
+        )
 
     # Path traversal & sandbox validation
     target_path = Path(file_path).expanduser().resolve()
@@ -639,8 +722,12 @@ def execute_tool(
 
     # Optional Caching for read-only operations
     cache = ToolCache()
-    cache_key = f"{action_lower}:{target_path}:{search}:{start_line}:{end_line}:{dry_run}"
-    if use_cache and (action_lower in {"view", "count"} or (action_lower == "patch" and dry_run)):
+    cache_key = (
+        f"{action_lower}:{target_path}:{search}:{start_line}:{end_line}:{dry_run}"
+    )
+    if use_cache and (
+        action_lower in {"view", "count"} or (action_lower == "patch" and dry_run)
+    ):
         cached_res = cache.get(cache_key, target_file=target_path)
         if cached_res is not None:
             if verbose:
@@ -654,7 +741,11 @@ def execute_tool(
         # --- ACTION: VIEW ---
         if action_lower == "view":
             if not target_path.is_file():
-                return {"success": False, "error": f"Path is not a regular file: {file_path}", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": f"Path is not a regular file: {file_path}",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             content, enc_used, _ = _read_file_with_fallback(target_path)
             lines = content.splitlines()
@@ -690,10 +781,18 @@ def execute_tool(
         # --- ACTION: COUNT ---
         elif action_lower == "count":
             if not target_path.is_file():
-                return {"success": False, "error": f"Path is not a regular file: {file_path}", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": f"Path is not a regular file: {file_path}",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             if not search:
-                return {"success": False, "error": "Option '--search' is required for count action.", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "Option '--search' is required for count action.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             content, enc_used, _ = _read_file_with_fallback(target_path)
             match_count = content.count(search)
@@ -719,14 +818,28 @@ def execute_tool(
         # --- ACTION: REPLACE ---
         elif action_lower == "replace":
             if not target_path.is_file():
-                return {"success": False, "error": f"Path is not a regular file: {file_path}", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": f"Path is not a regular file: {file_path}",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             if not search:
-                return {"success": False, "error": "Option '--search' is required for replace action.", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "Option '--search' is required for replace action.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
             if replacement is None:
-                return {"success": False, "error": "Option '--replacement' is required for replace action.", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "Option '--replacement' is required for replace action.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
-            content, encoding_used, newline_style = _read_file_with_fallback(target_path)
+            content, encoding_used, newline_style = _read_file_with_fallback(
+                target_path
+            )
 
             match_count = content.count(search)
             if match_count == 0:
@@ -757,7 +870,9 @@ def execute_tool(
                     backup_sha256 = hashlib.sha256(backup_bytes).hexdigest()
 
                 # Atomic swap write with sync and temp tracker
-                temp_path = target_path.with_name(f".{target_path.name}.tmp_{os.getpid()}_{int(time.time())}")
+                temp_path = target_path.with_name(
+                    f".{target_path.name}.tmp_{os.getpid()}_{int(time.time())}"
+                )
                 _ACTIVE_TEMP_FILES.add(temp_path)
 
                 try:
@@ -765,7 +880,9 @@ def execute_tool(
                         _acquire_file_lock(fh)
                         fh.write(new_content.encode(encoding_used))
                         fh.flush()
-                        os.fdatasync(fh.fileno()) if hasattr(os, "fdatasync") else os.fsync(fh.fileno())
+                        os.fdatasync(fh.fileno()) if hasattr(
+                            os, "fdatasync"
+                        ) else os.fsync(fh.fileno())
                         _release_file_lock(fh)
 
                     temp_path.replace(target_path)
@@ -794,7 +911,12 @@ def execute_tool(
         # --- ACTION: WRITE ---
         elif action_lower == "write":
             if contents is None:
-                return {"success": False, "error": "Option '--contents' is required for write action.", "exit_code": EXIT_INVALID_INPUT, "duration_ms": 0.0}
+                return {
+                    "success": False,
+                    "error": "Option '--contents' is required for write action.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                    "duration_ms": 0.0,
+                }
 
             target_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -806,14 +928,18 @@ def execute_tool(
                     bak.write_bytes(bak_bytes)
                     backup_sha256 = hashlib.sha256(bak_bytes).hexdigest()
 
-                tmp = target_path.with_name(f".{target_path.name}.tmp_{os.getpid()}_{int(time.time())}")
+                tmp = target_path.with_name(
+                    f".{target_path.name}.tmp_{os.getpid()}_{int(time.time())}"
+                )
                 _ACTIVE_TEMP_FILES.add(tmp)
                 try:
                     with open(tmp, "wb") as fh:
                         _acquire_file_lock(fh)
                         fh.write(contents.encode("utf-8"))
                         fh.flush()
-                        os.fdatasync(fh.fileno()) if hasattr(os, "fdatasync") else os.fsync(fh.fileno())
+                        os.fdatasync(fh.fileno()) if hasattr(
+                            os, "fdatasync"
+                        ) else os.fsync(fh.fileno())
                         _release_file_lock(fh)
                     tmp.replace(target_path)
                 finally:
@@ -836,21 +962,35 @@ def execute_tool(
         # --- ACTION: CREATE ---
         elif action_lower == "create":
             if target_path.exists():
-                return {"success": False, "error": f"File already exists: {file_path}. Use 'write' to overwrite.", "exit_code": EXIT_INVALID_INPUT, "duration_ms": 0.0}
+                return {
+                    "success": False,
+                    "error": f"File already exists: {file_path}. Use 'write' to overwrite.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                    "duration_ms": 0.0,
+                }
             if contents is None:
-                return {"success": False, "error": "Option '--contents' is required for create action.", "exit_code": EXIT_INVALID_INPUT, "duration_ms": 0.0}
+                return {
+                    "success": False,
+                    "error": "Option '--contents' is required for create action.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                    "duration_ms": 0.0,
+                }
 
             target_path.parent.mkdir(parents=True, exist_ok=True)
 
             if not dry_run:
-                tmp = target_path.with_name(f".{target_path.name}.tmp_{os.getpid()}_{int(time.time())}")
+                tmp = target_path.with_name(
+                    f".{target_path.name}.tmp_{os.getpid()}_{int(time.time())}"
+                )
                 _ACTIVE_TEMP_FILES.add(tmp)
                 try:
                     with open(tmp, "wb") as fh:
                         _acquire_file_lock(fh)
                         fh.write(contents.encode("utf-8"))
                         fh.flush()
-                        os.fdatasync(fh.fileno()) if hasattr(os, "fdatasync") else os.fsync(fh.fileno())
+                        os.fdatasync(fh.fileno()) if hasattr(
+                            os, "fdatasync"
+                        ) else os.fsync(fh.fileno())
                         _release_file_lock(fh)
                     tmp.replace(target_path)
                 finally:
@@ -871,11 +1011,19 @@ def execute_tool(
         # --- ACTION: PATCH ---
         elif action_lower == "patch":
             if not contents:
-                return {"success": False, "error": "Option '--contents' (unified diff string) is required for patch action.", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "Option '--contents' (unified diff string) is required for patch action.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             file_patches = parse_unified_diff(contents)
             if not file_patches:
-                return {"success": False, "error": "No valid unified diff hunks found in '--contents'.", "exit_code": EXIT_INVALID_INPUT}
+                return {
+                    "success": False,
+                    "error": "No valid unified diff hunks found in '--contents'.",
+                    "exit_code": EXIT_INVALID_INPUT,
+                }
 
             target_is_dir = target_path.is_dir()
             patched_files: list[str] = []
@@ -901,7 +1049,9 @@ def execute_tool(
                     actual_file_path = target_path
 
                 if actual_file_path.exists():
-                    orig_text, enc, newline_style = _read_file_with_fallback(actual_file_path)
+                    orig_text, enc, newline_style = _read_file_with_fallback(
+                        actual_file_path
+                    )
                     orig_lines = orig_text.splitlines()
                 else:
                     orig_lines = []
@@ -917,10 +1067,15 @@ def execute_tool(
                         "duration_ms": round((time.monotonic() - start_time) * 1000, 2),
                     }
 
-                diff_seq = list(difflib.unified_diff(
-                    orig_lines, patched_lines,
-                    fromfile=f"a/{rel_file}", tofile=f"b/{rel_file}", lineterm=""
-                ))
+                diff_seq = list(
+                    difflib.unified_diff(
+                        orig_lines,
+                        patched_lines,
+                        fromfile=f"a/{rel_file}",
+                        tofile=f"b/{rel_file}",
+                        lineterm="",
+                    )
+                )
                 diff_str = "\n".join(diff_seq)
                 if diff_str:
                     diff_previews.append(diff_str)
@@ -932,22 +1087,33 @@ def execute_tool(
 
                 if not dry_run:
                     if backup and actual_file_path.exists():
-                        bak = actual_file_path.with_suffix(actual_file_path.suffix + ".bak")
-                        bak_bytes = (newline_style.join(orig_lines) + newline_style).encode(enc)
+                        bak = actual_file_path.with_suffix(
+                            actual_file_path.suffix + ".bak"
+                        )
+                        bak_bytes = (
+                            newline_style.join(orig_lines) + newline_style
+                        ).encode(enc)
                         bak.write_bytes(bak_bytes)
                         backup_sha256 = hashlib.sha256(bak_bytes).hexdigest()
 
                     actual_file_path.parent.mkdir(parents=True, exist_ok=True)
-                    tmp = actual_file_path.with_name(f".{actual_file_path.name}.tmp_{os.getpid()}_{int(time.time())}")
+                    tmp = actual_file_path.with_name(
+                        f".{actual_file_path.name}.tmp_{os.getpid()}_{int(time.time())}"
+                    )
                     _ACTIVE_TEMP_FILES.add(tmp)
 
                     try:
-                        out_bytes = (newline_style.join(patched_lines) + (newline_style if patched_lines else "")).encode(enc)
+                        out_bytes = (
+                            newline_style.join(patched_lines)
+                            + (newline_style if patched_lines else "")
+                        ).encode(enc)
                         with open(tmp, "wb") as fh:
                             _acquire_file_lock(fh)
                             fh.write(out_bytes)
                             fh.flush()
-                            os.fdatasync(fh.fileno()) if hasattr(os, "fdatasync") else os.fsync(fh.fileno())
+                            os.fdatasync(fh.fileno()) if hasattr(
+                                os, "fdatasync"
+                            ) else os.fsync(fh.fileno())
                             _release_file_lock(fh)
 
                         tmp.replace(actual_file_path)
@@ -957,7 +1123,12 @@ def execute_tool(
                 patched_files.append(str(actual_file_path))
 
                 if verbose and len(file_patches) > 1:
-                    print_progress(idx + 1, len(file_patches), f"Patched {rel_file}", no_color=no_color)
+                    print_progress(
+                        idx + 1,
+                        len(file_patches),
+                        f"Patched {rel_file}",
+                        no_color=no_color,
+                    )
 
             duration_ms = round((time.monotonic() - start_time) * 1000, 2)
 
@@ -1004,10 +1175,13 @@ def execute_tool(
 # SECTION 7: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination safely."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -1027,6 +1201,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 8: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     action: Literal["view", "replace", "count", "patch", "write", "create"],
@@ -1081,36 +1256,42 @@ def run(
 # SECTION 9: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="file_patch_editor.py",
         description=f"AIChat File Patch & String Editor Tool v{__version__}",
     )
     parser.add_argument(
-        "--action", "-a",
+        "--action",
+        "-a",
         required=True,
         choices=["view", "replace", "count", "patch", "write", "create"],
         help="Operation to perform: view, replace, count, patch, write, create (required)",
     )
     parser.add_argument(
-        "--file-path", "-f",
+        "--file-path",
+        "-f",
         required=True,
         dest="file_path",
         metavar="PATH",
         help="Path to the target file or directory (required)",
     )
     parser.add_argument(
-        "--search", "-s",
+        "--search",
+        "-s",
         metavar="TEXT",
         help="Search string (literal string matching; required for replace/count)",
     )
     parser.add_argument(
-        "--replacement", "-r",
+        "--replacement",
+        "-r",
         metavar="TEXT",
         help="Replacement string (literal replacement; required for replace)",
     )
     parser.add_argument(
-        "--contents", "-c",
+        "--contents",
+        "-c",
         metavar="TEXT",
         help="Unified diff patch contents to apply (required for patch)",
     )
@@ -1156,7 +1337,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",

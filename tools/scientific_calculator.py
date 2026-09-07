@@ -78,20 +78,18 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 # Comprehensive ANSI escape sequence stripping regex
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
 
 def _strip_ansi(text: str) -> str:
@@ -101,10 +99,15 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text to stderr by default."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -126,28 +129,44 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [SCIENTIFIC CALCULATOR v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [SCIENTIFIC CALCULATOR v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode:{RESET}     {NEON_YELLOW}{data.get('mode', 'eval')}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode:{RESET}     {NEON_YELLOW}{data.get('mode', 'eval')}{RESET}"
+    )
 
     mode = data.get("mode")
     if mode == "eval":
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Expr:{RESET}     {data.get('expr', 'N/A')}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Expr:{RESET}     {data.get('expr', 'N/A')}"
+        )
     elif mode == "stats":
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}    {data.get('count', 0)}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}    {data.get('count', 0)}"
+        )
     elif mode == "matrix":
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Op:{RESET}       {data.get('matrix_op', 'N/A')}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Op:{RESET}       {data.get('matrix_op', 'N/A')}"
+        )
     elif mode == "convert":
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Convert:{RESET}  {data.get('value')} {data.get('from_unit')} → {data.get('to_unit')}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Convert:{RESET}  {data.get('value')} {data.get('from_unit')} → {data.get('to_unit')}"
+        )
 
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if success and "result" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         res_str = str(data["result"])
         if len(res_str) > 55:
             res_str = res_str[:52] + "..."
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_GREEN}Result:{RESET}   {BOLD}{res_str}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_GREEN}Result:{RESET}   {BOLD}{res_str}{RESET}"
+        )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -159,6 +178,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: Calculator Engines (Safe Eval, Stats, Gauss Matrices, Conversions)
 # ==============================================================================
+
 
 class GracefulShutdown:
     """Signal handler for graceful cancellation."""
@@ -186,17 +206,21 @@ class GracefulShutdown:
 def _safe_eval(expr: str) -> Any:
     """Safely evaluate mathematical expressions using math, cmath, and sandbox builtins."""
     safe_dict = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
-    safe_dict.update({k: getattr(cmath, k) for k in dir(cmath) if not k.startswith("_")})
-    safe_dict.update({
-        "abs": abs,
-        "round": round,
-        "min": min,
-        "max": max,
-        "sum": sum,
-        "pow": pow,
-        "divmod": divmod,
-        "complex": complex,
-    })
+    safe_dict.update(
+        {k: getattr(cmath, k) for k in dir(cmath) if not k.startswith("_")}
+    )
+    safe_dict.update(
+        {
+            "abs": abs,
+            "round": round,
+            "min": min,
+            "max": max,
+            "sum": sum,
+            "pow": pow,
+            "divmod": divmod,
+            "complex": complex,
+        }
+    )
 
     cleaned = expr.strip()
     return eval(cleaned, {"__builtins__": {}}, safe_dict)
@@ -219,7 +243,11 @@ def _parse_data_input(data_input: Any) -> list[float]:
                     parsed = json.loads(content)
                     return [float(x) for x in parsed]
                 else:
-                    return [float(line.strip()) for line in content.splitlines() if line.strip() and not line.startswith("#")]
+                    return [
+                        float(line.strip())
+                        for line in content.splitlines()
+                        if line.strip() and not line.startswith("#")
+                    ]
         except (OSError, ValueError):
             pass
         parts = [p.strip() for p in cleaned.replace(",", " ").split() if p.strip()]
@@ -261,8 +289,13 @@ def _matrix_mul(a: list[list[float]], b: list[list[float]]) -> list[list[float]]
     r_a, c_a = len(a), len(a[0])
     r_b, c_b = len(b), len(b[0])
     if c_a != r_b:
-        raise ValueError(f"Cannot multiply matrices of shape ({r_a}x{c_a}) and ({r_b}x{c_b}).")
-    return [[sum(a[i][k] * b[k][j] for k in range(c_a)) for j in range(c_b)] for i in range(r_a)]
+        raise ValueError(
+            f"Cannot multiply matrices of shape ({r_a}x{c_a}) and ({r_b}x{c_b})."
+        )
+    return [
+        [sum(a[i][k] * b[k][j] for k in range(c_a)) for j in range(c_b)]
+        for i in range(r_a)
+    ]
 
 
 def _matrix_transpose(a: list[list[float]]) -> list[list[float]]:
@@ -299,7 +332,10 @@ def _matrix_inv(matrix: list[list[float]]) -> list[list[float]]:
     n = len(matrix)
     if n != len(matrix[0]):
         raise ValueError("Inverse requires a square matrix.")
-    mat = [row[:] + [1.0 if i == j else 0.0 for j in range(n)] for i, row in enumerate(matrix)]
+    mat = [
+        row[:] + [1.0 if i == j else 0.0 for j in range(n)]
+        for i, row in enumerate(matrix)
+    ]
 
     for i in range(n):
         max_row = i
@@ -331,17 +367,17 @@ def _convert_units(value: float, from_u: str, to_u: str) -> float:
 
     # Temperature
     if f in {"c", "celsius"} and t in {"f", "fahrenheit"}:
-        return (value * 9/5) + 32
+        return (value * 9 / 5) + 32
     if f in {"f", "fahrenheit"} and t in {"c", "celsius"}:
-        return (value - 32) * 5/9
+        return (value - 32) * 5 / 9
     if f in {"c", "celsius"} and t in {"k", "kelvin"}:
         return value + 273.15
     if f in {"k", "kelvin"} and t in {"c", "celsius"}:
         return value - 273.15
     if f in {"f", "fahrenheit"} and t in {"k", "kelvin"}:
-        return (value - 32) * 5/9 + 273.15
+        return (value - 32) * 5 / 9 + 273.15
     if f in {"k", "kelvin"} and t in {"f", "fahrenheit"}:
-        return (value - 273.15) * 9/5 + 32
+        return (value - 273.15) * 9 / 5 + 32
 
     # Angles
     if f in {"deg", "degrees"} and t in {"rad", "radians"}:
@@ -351,13 +387,23 @@ def _convert_units(value: float, from_u: str, to_u: str) -> float:
 
     # Length (base meters)
     lengths = {
-        "m": 1.0, "meter": 1.0, "meters": 1.0,
-        "cm": 0.01, "centimeter": 0.01,
-        "mm": 0.001, "millimeter": 0.001,
-        "km": 1000.0, "kilometer": 1000.0,
-        "mi": 1609.344, "mile": 1609.344,
-        "ft": 0.3048, "foot": 0.3048, "feet": 0.3048,
-        "in": 0.0254, "inch": 0.0254, "inches": 0.0254,
+        "m": 1.0,
+        "meter": 1.0,
+        "meters": 1.0,
+        "cm": 0.01,
+        "centimeter": 0.01,
+        "mm": 0.001,
+        "millimeter": 0.001,
+        "km": 1000.0,
+        "kilometer": 1000.0,
+        "mi": 1609.344,
+        "mile": 1609.344,
+        "ft": 0.3048,
+        "foot": 0.3048,
+        "feet": 0.3048,
+        "in": 0.0254,
+        "inch": 0.0254,
+        "inches": 0.0254,
     }
     if f in lengths and t in lengths:
         val_in_meters = value * lengths[f]
@@ -365,11 +411,19 @@ def _convert_units(value: float, from_u: str, to_u: str) -> float:
 
     # Mass (base grams)
     masses = {
-        "g": 1.0, "gram": 1.0, "grams": 1.0,
-        "kg": 1000.0, "kilogram": 1000.0,
-        "mg": 0.001, "milligram": 0.001,
-        "lb": 453.59237, "pound": 453.59237, "pounds": 453.59237,
-        "oz": 28.349523125, "ounce": 28.349523125, "ounces": 28.349523125,
+        "g": 1.0,
+        "gram": 1.0,
+        "grams": 1.0,
+        "kg": 1000.0,
+        "kilogram": 1000.0,
+        "mg": 0.001,
+        "milligram": 0.001,
+        "lb": 453.59237,
+        "pound": 453.59237,
+        "pounds": 453.59237,
+        "oz": 28.349523125,
+        "ounce": 28.349523125,
+        "ounces": 28.349523125,
     }
     if f in masses and t in masses:
         val_in_grams = value * masses[f]
@@ -377,11 +431,17 @@ def _convert_units(value: float, from_u: str, to_u: str) -> float:
 
     # Data Storage (base bytes)
     data_units = {
-        "b": 1.0, "byte": 1.0, "bytes": 1.0,
-        "kb": 1024.0, "kilobyte": 1024.0,
-        "mb": 1024.0 ** 2, "megabyte": 1024.0 ** 2,
-        "gb": 1024.0 ** 3, "gigabyte": 1024.0 ** 3,
-        "tb": 1024.0 ** 4, "terabyte": 1024.0 ** 4,
+        "b": 1.0,
+        "byte": 1.0,
+        "bytes": 1.0,
+        "kb": 1024.0,
+        "kilobyte": 1024.0,
+        "mb": 1024.0**2,
+        "megabyte": 1024.0**2,
+        "gb": 1024.0**3,
+        "gigabyte": 1024.0**3,
+        "tb": 1024.0**4,
+        "terabyte": 1024.0**4,
     }
     if f in data_units and t in data_units:
         val_in_bytes = value * data_units[f]
@@ -393,6 +453,7 @@ def _convert_units(value: float, from_u: str, to_u: str) -> float:
 # ==============================================================================
 # SECTION 4: Core Tool Execution
 # ==============================================================================
+
 
 def execute_tool(
     expr: str | None = None,
@@ -437,7 +498,12 @@ def execute_tool(
                     "duration_ms": round((time.monotonic() - start_time) * 1000, 2),
                 }
             if shutdown.interrupted:
-                return {"success": False, "error": "Interrupted by user signal.", "exit_code": EXIT_ERROR, "duration_ms": 0.0}
+                return {
+                    "success": False,
+                    "error": "Interrupted by user signal.",
+                    "exit_code": EXIT_ERROR,
+                    "duration_ms": 0.0,
+                }
             result_data = _safe_eval(expr)
 
         elif mode_lower == "stats":
@@ -544,7 +610,9 @@ def execute_tool(
             "success": True,
             "mode": mode_lower,
             "expr": expr,
-            "count": result_data.get("count") if isinstance(result_data, dict) and "count" in result_data else None,
+            "count": result_data.get("count")
+            if isinstance(result_data, dict) and "count" in result_data
+            else None,
             "matrix_op": matrix_op if mode_lower == "matrix" else None,
             "from_unit": from_unit,
             "to_unit": to_unit,
@@ -554,7 +622,13 @@ def execute_tool(
             "duration_ms": duration_ms,
         }
 
-    except (ZeroDivisionError, OverflowError, ValueError, SyntaxError, NameError) as exc:
+    except (
+        ZeroDivisionError,
+        OverflowError,
+        ValueError,
+        SyntaxError,
+        NameError,
+    ) as exc:
         duration_ms = round((time.monotonic() - start_time) * 1000, 2)
         return {
             "success": False,
@@ -580,10 +654,13 @@ def execute_tool(
 # SECTION 5: Output Routing & Entrypoints
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write JSON payload to LLM_OUTPUT."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     direct_targets = {"/dev/stdout", "/dev/fd/1", "-"}
     if out_path in direct_targets:
@@ -638,16 +715,36 @@ def _build_parser() -> argparse.ArgumentParser:
         description=f"Pyrmethus Advanced Scientific Calculator v{__version__}",
     )
     parser.add_argument("--expr", "-e", help="Mathematical expression to evaluate")
-    parser.add_argument("--mode", "-m", choices=["eval", "stats", "matrix", "convert"], default="eval", help="Calculation mode")
+    parser.add_argument(
+        "--mode",
+        "-m",
+        choices=["eval", "stats", "matrix", "convert"],
+        default="eval",
+        help="Calculation mode",
+    )
     parser.add_argument("--data", "-d", help="Data list or file path for statistics")
     parser.add_argument("--matrix-a", dest="matrix_a", help="Matrix A (JSON or path)")
     parser.add_argument("--matrix-b", dest="matrix_b", help="Matrix B (JSON or path)")
-    parser.add_argument("--matrix-op", dest="matrix_op", default="mul", help="Matrix operation")
+    parser.add_argument(
+        "--matrix-op", dest="matrix_op", default="mul", help="Matrix operation"
+    )
     parser.add_argument("--from-unit", dest="from_unit", help="Source unit")
     parser.add_argument("--to-unit", dest="to_unit", help="Target unit")
     parser.add_argument("--value", type=float, help="Numeric value for conversion")
-    parser.add_argument("--no-color", action="store_true", default=False, dest="no_color", help="Disable colors")
-    parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Enable verbose logging")
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        default=False,
+        dest="no_color",
+        help="Disable colors",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        default=False,
+        help="Enable verbose logging",
+    )
     return parser
 
 

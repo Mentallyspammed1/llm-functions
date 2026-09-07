@@ -228,7 +228,7 @@ function parseParam(rawParam, funcName) {
   // - {type}: mandatory, captured in group 1.
   // - name: can be optional (e.g., '[name]'), captured in group 2.
   // - - description: optional description, captured in group 3.
-  const regex = /^{([^}]+)}\s*(\S+?)(?:\s*(?:-?\s*)(\S.*))?$/;
+  const regex = /^{([^}]+)}\s*(\S+)(?:\s*(?:-?\s*)(\S.*))?$/;
   const match = regex.exec(rawParam.trim());
 
   // If the regex does not match, the format is invalid.

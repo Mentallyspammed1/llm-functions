@@ -24,15 +24,18 @@
 # NOTE: To avoid 403 CDN blocks, ensure your public IP is whitelisted in Bybit's API IP settings.
 #       You can retrieve your current public IP with the `net_ip_info` tool if needed.
 
-import sys, json, os, re
-from pathlib import Path
+import json
+import os
+import re
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # Add current directory to path
 sys.path.append(str(Path(__file__).parent))
 
 from bybit_tool import run as bybit_run
-import bybit_turso_logger
+
 
 def run(**kwargs) -> dict:
     # --------------------------------------------------------------
@@ -50,10 +53,12 @@ def run(**kwargs) -> dict:
         if isinstance(side, str):
             side = side.lower()
             if side not in ("buy", "sell"):
-                raise ValueError("`side` must be either 'buy' or 'sell' (case‑insensitive).")
+                raise ValueError(
+                    "`side` must be either 'buy' or 'sell' (case‑insensitive)."
+                )
             kwargs["side"] = side
         else:
-            del kwargs["side"] # Remove if not a string (e.g. None from argparse)
+            del kwargs["side"]  # Remove if not a string (e.g. None from argparse)
 
     # `price` must be a numeric value
     price = kwargs.get("price")
@@ -86,73 +91,108 @@ def run(**kwargs) -> dict:
     result = bybit_run(**kwargs)
     return result
 
+
 # ====================== VISUAL SYSTEM (Aligned with execute_command.sh) ======================
 
 THEME = os.getenv("CYBER_THEME", "synthwave")
 
 PALETTES = {
     "synthwave": {
-        "pink": "\033[38;5;201m", "cyan": "\033[38;5;45m", "green": "\033[38;5;121m",
-        "orange": "\033[38;5;208m", "purple": "\033[38;5;93m", "yellow": "\033[38;5;214m",
-        "red": "\033[38;5;197m", "magenta": "\033[38;5;205m", "lime": "\033[38;5;119m",
-        "amber": "\033[38;5;215m"
+        "pink": "\033[38;5;201m",
+        "cyan": "\033[38;5;45m",
+        "green": "\033[38;5;121m",
+        "orange": "\033[38;5;208m",
+        "purple": "\033[38;5;93m",
+        "yellow": "\033[38;5;214m",
+        "red": "\033[38;5;197m",
+        "magenta": "\033[38;5;205m",
+        "lime": "\033[38;5;119m",
+        "amber": "\033[38;5;215m",
     },
     "toxic": {
-        "pink": "\033[38;5;118m", "cyan": "\033[38;5;82m", "green": "\033[38;5;46m",
-        "orange": "\033[38;5;172m", "purple": "\033[38;5;22m", "yellow": "\033[38;5;190m",
-        "red": "\033[38;5;160m", "magenta": "\033[38;5;112m", "lime": "\033[38;5;154m",
-        "amber": "\033[38;5;220m"
+        "pink": "\033[38;5;118m",
+        "cyan": "\033[38;5;82m",
+        "green": "\033[38;5;46m",
+        "orange": "\033[38;5;172m",
+        "purple": "\033[38;5;22m",
+        "yellow": "\033[38;5;190m",
+        "red": "\033[38;5;160m",
+        "magenta": "\033[38;5;112m",
+        "lime": "\033[38;5;154m",
+        "amber": "\033[38;5;220m",
     },
     "nord": {
-        "pink": "\033[38;5;110m", "cyan": "\033[38;5;111m", "green": "\033[38;5;143m",
-        "orange": "\033[38;5;173m", "purple": "\033[38;5;146m", "yellow": "\033[38;5;222m",
-        "red": "\033[38;5;167m", "magenta": "\033[38;5;139m", "lime": "\033[38;5;108m",
-        "amber": "\033[38;5;179m"
+        "pink": "\033[38;5;110m",
+        "cyan": "\033[38;5;111m",
+        "green": "\033[38;5;143m",
+        "orange": "\033[38;5;173m",
+        "purple": "\033[38;5;146m",
+        "yellow": "\033[38;5;222m",
+        "red": "\033[38;5;167m",
+        "magenta": "\033[38;5;139m",
+        "lime": "\033[38;5;108m",
+        "amber": "\033[38;5;179m",
     },
     "classic": {
-        "pink": "\033[38;5;198m", "cyan": "\033[38;5;51m", "green": "\033[38;5;46m",
-        "orange": "\033[38;5;202m", "purple": "\033[38;5;129m", "yellow": "\033[38;5;226m",
-        "red": "\033[38;5;196m", "magenta": "\033[38;5;201m", "lime": "\033[38;5;82m",
-        "amber": "\033[38;5;214m"
-    }
+        "pink": "\033[38;5;198m",
+        "cyan": "\033[38;5;51m",
+        "green": "\033[38;5;46m",
+        "orange": "\033[38;5;202m",
+        "purple": "\033[38;5;129m",
+        "yellow": "\033[38;5;226m",
+        "red": "\033[38;5;196m",
+        "magenta": "\033[38;5;201m",
+        "lime": "\033[38;5;82m",
+        "amber": "\033[38;5;214m",
+    },
 }
 
 COLORS = PALETTES.get(THEME, PALETTES["classic"])
 RESET = "\033[0m"
 BOLD = "\033[1m"
 
-BLOCK_TL, BLOCK_TR = '╭', '╮'
-BLOCK_BL, BLOCK_BR = '╰', '╯'
-BLOCK_V, BLOCK_H = '┃', '─'
-BLOCK_LT, BLOCK_RT = '├', '┤'
-BLOCK_FULL = '█'
+BLOCK_TL, BLOCK_TR = "╭", "╮"
+BLOCK_BL, BLOCK_BR = "╰", "╯"
+BLOCK_V, BLOCK_H = "┃", "─"
+BLOCK_LT, BLOCK_RT = "├", "┤"
+BLOCK_FULL = "█"
+
 
 def get_terminal_width():
-    try: return os.get_terminal_size().columns
-    except: return 80
+    try:
+        return os.get_terminal_size().columns
+    except:
+        return 80
+
 
 def strip_ansi(text):
-    return re.sub(r'\033\[[0-9;]*[a-zA-Z]', '', text)
+    return re.sub(r"\033\[[0-9;]*[a-zA-Z]", "", text)
+
 
 def print_boxed_line(content, width, color=COLORS["pink"]):
     clean_content = strip_ansi(content)
     content_len = len(clean_content)
     pad_len = width - content_len - 6
     if pad_len < 0:
-        content = content[:width-9] + "..."
+        content = content[: width - 9] + "..."
         pad_len = 0
     padding = " " * pad_len
     print(f"{color}{BLOCK_V}{RESET}  {content}{padding}  {color}{BLOCK_V}{RESET}")
+
 
 def print_spacer(width, color=COLORS["pink"]):
     padding = " " * (width - 6)
     print(f"{color}{BLOCK_V}{RESET}  {padding}  {color}{BLOCK_V}{RESET}")
 
+
 def print_header(title, width, color=COLORS["pink"]):
     top_border_len = width - len(title) - 10
-    if top_border_len < 4: top_border_len = 4
+    top_border_len = max(top_border_len, 4)
     top_border = BLOCK_H * top_border_len
-    print(f"{color}{BLOCK_TL}{BLOCK_H}{BLOCK_FULL}{COLORS['cyan']} ⚡ {COLORS['yellow']}{title.upper()} {color}{BLOCK_FULL}{top_border}{BLOCK_TR}{RESET}")
+    print(
+        f"{color}{BLOCK_TL}{BLOCK_H}{BLOCK_FULL}{COLORS['cyan']} ⚡ {COLORS['yellow']}{title.upper()} {color}{BLOCK_FULL}{top_border}{BLOCK_TR}{RESET}"
+    )
+
 
 def print_footer(status_text, dur_ms, exit_code, width, color=COLORS["pink"]):
     status_color = COLORS["green"] if exit_code == 0 else COLORS["red"]
@@ -166,27 +206,33 @@ def print_footer(status_text, dur_ms, exit_code, width, color=COLORS["pink"]):
     bottom_border = BLOCK_H * (width - 2)
     print(f"{color}{BLOCK_BL}{bottom_border}{BLOCK_BR}{RESET}")
 
+
 def colorize_content(line):
     # Do not colour lines that already contain ANSI escape sequences
     if "\033[" in line:
         return line
     # Colour only valid integers/decimals and format them to 2 dp
     line = re.sub(
-        r'([0-9]+\\\\.?[0-9]*)',
+        r"([0-9]+\\\\.?[0-9]*)",
         lambda m: f"{COLORS['yellow']}{float(m.group(1)):.2f}{RESET}",
         line,
     )
     # Keep the original colour‑coding for other patterns
-    line = re.sub(r'(/[a-zA-Z0-9._/-]+)', f"{COLORS['cyan']}\\1{RESET}", line)
-    line = re.sub(r'(Error|Fail|Failure|ERROR|FAIL|denied)', f"{COLORS['red']}\\1{RESET}", line)
-    line = re.sub(r'(Success|OK|Ready|DONE|ACTIVE)', f"{COLORS['green']}\\1{RESET}", line)
-    line = re.sub(r'(\\\"[^\\\"]*\\\")', f"{COLORS['magenta']}\\1{RESET}", line)
+    line = re.sub(r"(/[a-zA-Z0-9._/-]+)", f"{COLORS['cyan']}\\1{RESET}", line)
+    line = re.sub(
+        r"(Error|Fail|Failure|ERROR|FAIL|denied)", f"{COLORS['red']}\\1{RESET}", line
+    )
+    line = re.sub(
+        r"(Success|OK|Ready|DONE|ACTIVE)", f"{COLORS['green']}\\1{RESET}", line
+    )
+    line = re.sub(r"(\\\"[^\\\"]*\\\")", f"{COLORS['magenta']}\\1{RESET}", line)
     line = re.sub(r"'([^']*)'", f"{COLORS['magenta']}\\1{RESET}", line)
     return line
 
+
 def pretty_print_result(action, result):
     width = get_terminal_width()
-    if width > 100: width = 100
+    width = min(width, 100)
 
     start_time = datetime.now()
 
@@ -200,41 +246,63 @@ def pretty_print_result(action, result):
     elif action == "list_actions":
         actions = result.get("actions", {})
         for name, info in sorted(actions.items()):
-            print_boxed_line(f"{COLORS['green']}{name:<25}{RESET} | {info['doc']}", width)
+            print_boxed_line(
+                f"{COLORS['green']}{name:<25}{RESET} | {info['doc']}", width
+            )
             params = ", ".join(info["params"])
             if params:
                 print_boxed_line(f"  {COLORS['purple']}↳ Args: {params}{RESET}", width)
     elif action == "get_performance_summary":
-        print_boxed_line(f"Total Trades: {COLORS['yellow']}{result.get('total_trades')}{RESET}", width)
+        print_boxed_line(
+            f"Total Trades: {COLORS['yellow']}{result.get('total_trades')}{RESET}",
+            width,
+        )
         win_rate = result.get("win_rate_pct", 0)
         wr_color = COLORS["green"] if win_rate > 50 else COLORS["yellow"]
         print_boxed_line(f"Win Rate:     {wr_color}{win_rate}%{RESET}", width)
-        print_boxed_line(f"Net PnL:      {COLORS['cyan']}{result.get('net_pnl')}{RESET}", width)
-        print_boxed_line(f"Profit Factor: {COLORS['magenta']}{result.get('profit_factor')}{RESET}", width)
+        print_boxed_line(
+            f"Net PnL:      {COLORS['cyan']}{result.get('net_pnl')}{RESET}", width
+        )
+        print_boxed_line(
+            f"Profit Factor: {COLORS['magenta']}{result.get('profit_factor')}{RESET}",
+            width,
+        )
     elif action == "scan_markets":
         res = result.get("scan_results", {})
         header = f"{'Symbol':<10} | {'Price':<10} | {'Regime':<15} | {'RSI':<5}"
         print_boxed_line(f"{COLORS['purple']}{header}{RESET}", width)
         print_boxed_line("-" * (width - 10), width)
         for s, data in res.items():
-            if data.get("status") == "error": continue
+            if data.get("status") == "error":
+                continue
             line = f"{s:<10} | {data.get('price'):<10} | {data.get('regime'):<15} | {data.get('rsi'):<5}"
             print_boxed_line(colorize_content(line), width)
     elif action == "get_dashboard":
         # 1. Account Summary
         print_boxed_line(f"{BOLD}{COLORS['cyan']}ACCOUNT OVERVIEW{RESET}", width)
         acc = result.get("account", {})
-        print_boxed_line(f"Equity: {COLORS['green']}{acc.get('total_equity')}{RESET}  ┃  Balance: {acc.get('total_wallet_balance')}  ┃  Unrealised: {acc.get('unrealised_pnl')}", width)
-        print_boxed_line(f"Margin: {acc.get('total_margin_balance')}  ┃  Available: {COLORS['lime']}{acc.get('total_available_balance')}{RESET}", width)
+        print_boxed_line(
+            f"Equity: {COLORS['green']}{acc.get('total_equity')}{RESET}  ┃  Balance: {acc.get('total_wallet_balance')}  ┃  Unrealised: {acc.get('unrealised_pnl')}",
+            width,
+        )
+        print_boxed_line(
+            f"Margin: {acc.get('total_margin_balance')}  ┃  Available: {COLORS['lime']}{acc.get('total_available_balance')}{RESET}",
+            width,
+        )
         print_spacer(width)
 
         # 2. Positions
-        print_boxed_line(f"{BOLD}{COLORS['yellow']}ACTIVE POSITIONS ({result.get('positions_count')}){RESET}", width)
+        print_boxed_line(
+            f"{BOLD}{COLORS['yellow']}ACTIVE POSITIONS ({result.get('positions_count')}){RESET}",
+            width,
+        )
         positions = result.get("active_positions", [])
         if not positions:
             print_boxed_line(f"{COLORS['amber']}No active positions.{RESET}", width)
         else:
-            p_header = f"{'Symbol':<12} | {'Side':<6} | {'Size':<10} | {'PnL':<10} | {'%':<8}"
+            p_header = (
+                f"{'Symbol':<12} | {'Side':<6} | {'Size':<10} | {'PnL':<10} | {'%':<8}"
+            )
             print_boxed_line(f"{COLORS['purple']}{p_header}{RESET}", width)
             for p in positions:
                 p_color = COLORS["green"] if float(p["pnl"]) >= 0 else COLORS["red"]
@@ -245,13 +313,19 @@ def pretty_print_result(action, result):
         # 3. Performance
         perf = result.get("performance", {})
         if isinstance(perf, dict):
-            print_boxed_line(f"{BOLD}{COLORS['magenta']}TRADING PERFORMANCE (Last 50){RESET}", width)
-            print_boxed_line(f"Win Rate: {COLORS['cyan']}{perf.get('win_rate_pct')}%{RESET}  ┃  Profit Factor: {perf.get('profit_factor')}{RESET}  ┃  Net PnL: {perf.get('net_pnl')}", width)
+            print_boxed_line(
+                f"{BOLD}{COLORS['magenta']}TRADING PERFORMANCE (Last 50){RESET}", width
+            )
+            print_boxed_line(
+                f"Win Rate: {COLORS['cyan']}{perf.get('win_rate_pct')}%{RESET}  ┃  Profit Factor: {perf.get('profit_factor')}{RESET}  ┃  Net PnL: {perf.get('net_pnl')}",
+                width,
+            )
     else:
         # Generic JSON dump
         json_lines = json.dumps(result, indent=2).split("\n")
         for line in json_lines:
             print_boxed_line(colorize_content(line), width)
+
 
 if __name__ == "__main__":
     import argparse
@@ -264,16 +338,24 @@ if __name__ == "__main__":
             if k.startswith("argc_"):
                 key = k[5:]  # strip "argc_"
                 # Cast common types
-                if v.lower() == "true": val = True
-                elif v.lower() == "false": val = False
+                if v.lower() == "true":
+                    val = True
+                elif v.lower() == "false":
+                    val = False
                 else:
-                    try: val = float(v) if "." in v else int(v)
-                    except: val = v
+                    try:
+                        val = float(v) if "." in v else int(v)
+                    except:
+                        val = v
                 k_args[key] = val
 
         action = k_args.get("action")
         res = run(**k_args)
-        if not sys.stdout.isatty() and not k_args.get("pretty") and os.getenv("FORCE_PRETTY") != "1":
+        if (
+            not sys.stdout.isatty()
+            and not k_args.get("pretty")
+            and os.getenv("FORCE_PRETTY") != "1"
+        ):
             print(json.dumps(res))
         else:
             pretty_print_result(action, res)
@@ -288,13 +370,17 @@ if __name__ == "__main__":
     for i in range(0, len(unknown), 2):
         if i + 1 < len(unknown):
             key = unknown[i].lstrip("-")
-            val = unknown[i+1]
+            val = unknown[i + 1]
             # Simple casting
-            if val.lower() == "true": val = True
-            elif val.lower() == "false": val = False
+            if val.lower() == "true":
+                val = True
+            elif val.lower() == "false":
+                val = False
             else:
-                try: val = float(val) if "." in val else int(val)
-                except: pass
+                try:
+                    val = float(val) if "." in val else int(val)
+                except:
+                    pass
             k_args[key] = val
 
     res = run(**k_args)

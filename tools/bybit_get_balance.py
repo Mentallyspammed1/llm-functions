@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-import sys
-import os
 import json
+import os
+import sys
 from typing import Literal
 
 # Add tools/utils to path to import refactored base
-sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
+sys.path.append(os.path.join(os.path.dirname(__file__), "utils"))
 from bybit_base import api_request
+
 
 def run(account_type: Literal["UNIFIED", "CONTRACT", "SPOT"] = "UNIFIED") -> dict:
     """Retrieve Bybit wallet balance.
@@ -15,6 +16,7 @@ def run(account_type: Literal["UNIFIED", "CONTRACT", "SPOT"] = "UNIFIED") -> dic
     """
     params = {"accountType": account_type}
     return api_request("GET", "/v5/account/wallet-balance", params=params, signed=True)
+
 
 if __name__ == "__main__":
     # For aichat integration, print JSON to stdout

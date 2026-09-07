@@ -36,18 +36,18 @@ import traceback
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
 
 __version__ = "2.2.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 # ==============================================================================
@@ -109,19 +109,17 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
 
 def _strip_ansi(text: str) -> str:
@@ -131,10 +129,15 @@ def _strip_ansi(text: str) -> str:
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive, non-dumb terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     """Print pre-formatted ANSI text, stripping colors if non-TTY or --no-color is set."""
     target = file or sys.stderr
     if no_color or not _is_tty():
@@ -156,10 +159,16 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [PYTHON CODE EXECUTOR v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [PYTHON CODE EXECUTOR v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     stdout_val = data.get("stdout", "").strip()
     stderr_val = data.get("stderr", "").strip()
@@ -191,6 +200,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
 
+
 def get_agent_var(name: str, default: str = "") -> str:
     """Access agent user-defined variables (LLM_AGENT_VAR_<NAME>)."""
     return os.environ.get(f"LLM_AGENT_VAR_{name.upper()}", default)
@@ -210,7 +220,8 @@ def get_execution_context() -> dict[str, Any]:
         "root_dir": os.environ.get("LLM_ROOT_DIR"),
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
     }
 
 
@@ -229,6 +240,7 @@ def _parse_env_vars(env_vars: Optional[list[str]]) -> dict[str, str]:
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     """Caching utility with TTL support."""
@@ -276,6 +288,7 @@ class ToolCache:
 
 class TimeoutException(Exception):
     """Exception raised when execution exceeds timeout limit."""
+
     pass
 
 
@@ -286,6 +299,7 @@ def _alarm_handler(signum: int, frame: Any) -> None:
 # ==============================================================================
 # SECTION 5: Core Logic Implementation
 # ==============================================================================
+
 
 def execute_tool(
     code: str,
@@ -365,7 +379,9 @@ def execute_tool(
 
     try:
         os.chdir(target_cwd)
-        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(
+            stderr_buf
+        ):
             exec(code, exec_globals)
         success = True
     except TimeoutException as exc:
@@ -404,10 +420,13 @@ def execute_tool(
 # SECTION 6: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write JSON output to LLM_OUTPUT destination."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     if out_path in ("/dev/stdout", "/dev/fd/1", "-"):
         sys.stdout.write(json_payload)
@@ -426,6 +445,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 7: Function Entry Point for AIChat
 # ==============================================================================
+
 
 def run(
     code: str,
@@ -455,13 +475,15 @@ def run(
 # SECTION 8: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python_eval.py",
         description=f"AIChat Python Executor v{__version__}",
     )
     parser.add_argument(
-        "--code", "-c",
+        "--code",
+        "-c",
         required=True,
         metavar="TEXT",
         help="Python code snippet to execute (required)",
@@ -500,7 +522,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",
@@ -511,7 +534,7 @@ def _build_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     # Check if code is passed via argc environment variable when called by argc
     argc_code = os.environ.get("argc_code")
-    
+
     if argc_code and "--code" not in sys.argv and "-c" not in sys.argv:
         res = execute_tool(
             code=argc_code,

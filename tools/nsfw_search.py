@@ -1,6 +1,30 @@
+from __future__ import annotations
+import random
+
+def _mutate_query(query):
+    """Adds significant jitter and keyword mutation to bypass pattern detection."""
+    import random
+    modifiers = ["hd", "4k", "high res", "gallery", "collection", "set", "leak", "exclusive"]
+    mutations = [
+        lambda q: q + " " + random.choice(modifiers),
+        lambda q: q + " " * random.randint(1, 3),
+        lambda q: q.strip(),
+        lambda q: q + " " + random.choice(["alt", "style", "look"]),
+        lambda q: q.replace("nsfw", "unfiltered") if "nsfw" in q.lower() else q,
+        lambda q: q.replace("nsfw", "explicit") if "nsfw" in q.lower() else q,
+    ]
+    return random.choice(mutations)(query)
+
+def _get_random_referer(backend):
+    referers = {
+        "bing": ["https://www.bing.com/", "https://www.bing.com/images/search", "https://www.bing.com/videos/search"],
+        "yandex": ["https://yandex.com/", "https://yandex.com/images/", "https://yandex.com/search/"],
+        "google": ["https://www.google.com/", "https://www.google.com/search"]
+    }
+    return random.choice(referers.get(backend, ["https://www.google.com/"]))
 #!/usr/bin/env python3
 # ==============================================================================
-# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.0.0
+# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.0.1
 # Unified Header Analysis · Multi-Backend OSINT Image Search · Video Scraper Engine
 #
 # @describe Unified OSINT, Media Intelligence, and Video Search Platform (Pyrmethus Edition)
@@ -45,51 +69,50 @@
 # @env LLM_OUTPUT=/dev/stdout      Output path for LLM integration
 # ==============================================================================
 
-from __future__ import annotations
 
 import argparse
-import asyncio
-import base64
 import concurrent.futures
+import contextlib
+from contextlib import suppress
 import csv
 import datetime
 import hashlib
 import html
-import inspect
+import ipaddress
 import json
 import logging
 import os
-import pickle
 import random
 import re
-import shutil
 import signal
 import socket
 import ssl
-import subprocess
 import sys
 import tempfile
+import threading
 import time
-import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Guard third-party optional imports
 try:
     import requests
     from requests.adapters import HTTPAdapter
     from requests.packages.urllib3.util.retry import Retry  # type: ignore
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
 
 try:
     from bs4 import BeautifulSoup
+
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
@@ -130,7 +153,7 @@ try:
         _BING_DL_FN, _BING_DL_SIG = _candidates[0][1], _candidates[0][0]
         _BING_DL_AVAILABLE = True
     else:
-        _BING_DL_ERR = f"No callable found in better_bing_image_downloader"
+        _BING_DL_ERR = "No callable found in better_bing_image_downloader"
 except ImportError as _ie:
     _BING_DL_ERR = str(_ie)
 except Exception as _oe:
@@ -138,6 +161,7 @@ except Exception as _oe:
 
 try:
     from colorama import init as _cinit
+
     _cinit(autoreset=True)
 except ImportError:
     pass
@@ -146,7 +170,7 @@ except ImportError:
 # CONSTANTS & CONFIGURATION
 # ==============================================================================
 
-__version__ = "4.0.0"
+__version__ = "4.0.1"
 
 EXIT_SUCCESS = 0
 EXIT_ERROR = 1
@@ -156,17 +180,23 @@ EXIT_PERMISSION_DENIED = 126
 EXIT_INVALID_INPUT = 127
 EXIT_INTERRUPTED = 130
 
-_DOWNLOAD_TIMEOUT  = float(os.environ.get("OSINT_DOWNLOAD_TIMEOUT", "20"))
-_REQUEST_TIMEOUT   = float(os.environ.get("OSINT_REQUEST_TIMEOUT",  "10"))
-_MAX_RETRIES       = int(os.environ.get("OSINT_MAX_RETRIES",  "3"))
-_RETRY_BACKOFF     = float(os.environ.get("OSINT_RETRY_BACKOFF", "2.0"))
-_RATE_INTERVAL     = float(os.environ.get("OSINT_RATE_INTERVAL", "1.2"))
-_DEBUG             = os.environ.get("OSINT_DEBUG", "0").lower() in ("1", "true")
-_IGNORE_SSL        = os.environ.get("OSINT_IGNORE_SSL", "0").lower() in ("1", "true")
-_DEFAULT_WORKERS   = int(os.environ.get("OSINT_WORKERS", "4"))
+_DOWNLOAD_TIMEOUT = float(os.environ.get("OSINT_DOWNLOAD_TIMEOUT", "20"))
+_REQUEST_TIMEOUT = float(os.environ.get("OSINT_REQUEST_TIMEOUT", "10"))
+_MAX_RETRIES = int(os.environ.get("OSINT_MAX_RETRIES", "3"))
+_RETRY_BACKOFF = float(os.environ.get("OSINT_RETRY_BACKOFF", "2.0"))
+_RATE_INTERVAL = float(os.environ.get("OSINT_RATE_INTERVAL", "1.2"))
+_DEBUG = os.environ.get("OSINT_DEBUG", "0").lower() in ("1", "true")
+_IGNORE_SSL = os.environ.get("OSINT_IGNORE_SSL", "0").lower() in ("1", "true")
+_DEFAULT_WORKERS = int(os.environ.get("OSINT_WORKERS", "4"))
 _DEFAULT_MEDIA_DIR = os.environ.get("OSINT_MEDIA_DIR", "~/osint_media/")
 _DEFAULT_CACHE_DIR = os.environ.get("OSINT_CACHE_DIR", "~/.osint_cache/")
-_CACHE_TTL         = int(os.environ.get("OSINT_CACHE_TTL", "3600"))
+_CACHE_TTL = int(os.environ.get("OSINT_CACHE_TTL", "3600"))
+
+_MAX_DOWNLOAD_BYTES = max(
+    1_048_576,
+    int(os.environ.get("OSINT_MAX_DOWNLOAD_BYTES", str(100 * 1024 * 1024))),
+)
+_STREAM_CHUNK_SIZE = 128 * 1024
 
 _USER_AGENTS: List[str] = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -177,30 +207,35 @@ _USER_AGENTS: List[str] = [
 ]
 
 _IMAGE_EXTS = re.compile(
-    r'\.(jpe?g|png|gif|webp|avif|bmp|tiff?)(\?.*)?$', re.IGNORECASE
+    r"\.(jpe?g|png|gif|webp|avif|bmp|tiff?)(\?.*)?$", re.IGNORECASE
 )
 
-_WINDOWS_RESERVED = re.compile(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$', re.I)
+_WINDOWS_RESERVED = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$", re.I)
 
 _SECURITY_HEADERS = [
-    "strict-transport-security", "content-security-policy",
-    "x-frame-options", "x-content-type-options", "referrer-policy",
-    "permissions-policy", "x-xss-protection",
-    "cross-origin-opener-policy", "cross-origin-embedder-policy",
+    "strict-transport-security",
+    "content-security-policy",
+    "x-frame-options",
+    "x-content-type-options",
+    "referrer-policy",
+    "permissions-policy",
+    "x-xss-protection",
+    "cross-origin-opener-policy",
+    "cross-origin-embedder-policy",
     "cross-origin-resource-policy",
 ]
 
 _ALLOWED_METHODS = ("HEAD", "GET", "OPTIONS", "POST")
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -208,22 +243,39 @@ _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-z
 # UI & ANSI HELPERS
 # ==============================================================================
 
+
 class Ansi:
-    RED = '\033[31m'; GREEN = '\033[32m'; YELLOW = '\033[33m'
-    CYAN = '\033[36m'; MAGENTA = '\033[35m'; BOLD = '\033[1m'; RESET = '\033[0m'
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    CYAN = "\033[36m"
+    MAGENTA = "\033[35m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
 
     @classmethod
-    def _c(cls, code: str, m: str) -> str: return f"{code}{m}{cls.RESET}"
+    def _c(cls, code: str, m: str) -> str:
+        return f"{code}{m}{cls.RESET}"
+
     @classmethod
-    def red(cls, m: str) -> str:     return cls._c(cls.RED,     m)
+    def red(cls, m: str) -> str:
+        return cls._c(cls.RED, m)
+
     @classmethod
-    def green(cls, m: str) -> str:   return cls._c(cls.GREEN,   m)
+    def green(cls, m: str) -> str:
+        return cls._c(cls.GREEN, m)
+
     @classmethod
-    def yellow(cls, m: str) -> str:  return cls._c(cls.YELLOW,  m)
+    def yellow(cls, m: str) -> str:
+        return cls._c(cls.YELLOW, m)
+
     @classmethod
-    def cyan(cls, m: str) -> str:    return cls._c(cls.CYAN,    m)
+    def cyan(cls, m: str) -> str:
+        return cls._c(cls.CYAN, m)
+
     @classmethod
-    def magenta(cls, m: str) -> str: return cls._c(cls.MAGENTA, m)
+    def magenta(cls, m: str) -> str:
+        return cls._c(cls.MAGENTA, m)
 
 
 def _strip_ansi(text: str) -> str:
@@ -231,10 +283,15 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -246,9 +303,17 @@ def _debug(m: str) -> None:
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         _cprint(Ansi.cyan(f"[DBG {ts}] {m}"))
 
-def _warn(m: str)  -> None: _cprint(Ansi.yellow(f"[WARN] {m}"))
-def _err(m: str)   -> None: _cprint(Ansi.red(   f"[ERR ] {m}"))
-def _info(m: str)  -> None: _cprint(Ansi.green( f"[INFO] {m}"))
+
+def _warn(m: str) -> None:
+    _cprint(Ansi.yellow(f"[WARN] {m}"))
+
+
+def _err(m: str) -> None:
+    _cprint(Ansi.red(f"[ERR ] {m}"))
+
+
+def _info(m: str) -> None:
+    _cprint(Ansi.green(f"[INFO] {m}"))
 
 
 def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> None:
@@ -264,30 +329,58 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}", no_color=no_color)
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [OSINT & MEDIA INTELLIGENCE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}", no_color=no_color)
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [OSINT & MEDIA INTELLIGENCE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}",
+        no_color=no_color,
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode:{RESET}     {data.get('mode', 'N/A')}", no_color=no_color)
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode:{RESET}     {data.get('mode', 'N/A')}",
+        no_color=no_color,
+    )
     if "query" in data or "parameters" in data:
         q = data.get("query") or data.get("parameters", {}).get("query", "N/A")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}    {q}", no_color=no_color)
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}    {NEON_YELLOW}{data.get('count', len(data.get('results', [])))}{RESET}", no_color=no_color)
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Timestamp:{RESET}{DIM} {data.get('timestamp', 'N/A')}{RESET}", no_color=no_color)
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}    {q}", no_color=no_color
+        )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}    {NEON_YELLOW}{data.get('count', len(data.get('results', [])))}{RESET}",
+        no_color=no_color,
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Timestamp:{RESET}{DIM} {data.get('timestamp', 'N/A')}{RESET}",
+        no_color=no_color,
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}    {data['error']}", no_color=no_color)
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}    {data['error']}",
+            no_color=no_color,
+        )
 
     results = data.get("results", [])
     if results:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Results Preview (Top {min(len(results), 5)}):{RESET}", no_color=no_color)
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Results Preview (Top {min(len(results), 5)}):{RESET}",
+            no_color=no_color,
+        )
         for i, item in enumerate(results[:5], 1):
             title = item.get("title", "Untitled")[:50]
             link = item.get("url") or item.get("link", "#")
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}{i}.{RESET} {title}", no_color=no_color)
-            _cprint(f"{NEON_PURPLE}│{RESET}      {DIM}↳ {link}{RESET}", no_color=no_color)
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}{i}.{RESET} {title}",
+                no_color=no_color,
+            )
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}      {DIM}↳ {link}{RESET}", no_color=no_color
+            )
         if len(results) > 5:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(results) - 5} more results{RESET}", no_color=no_color)
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(results) - 5} more results{RESET}",
+                no_color=no_color,
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}", no_color=no_color)
 
@@ -296,8 +389,11 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # EXCEPTION & SERIALIZATION MODELS
 # ==============================================================================
 
+
 class ToolError(Exception):
-    def __init__(self, message: str, exit_code: int = EXIT_ERROR, details: Optional[dict] = None) -> None:
+    def __init__(
+        self, message: str, exit_code: int = EXIT_ERROR, details: Optional[dict] = None
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.exit_code = exit_code
@@ -328,8 +424,9 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SANDBOX & PATH UTILITIES
 # ==============================================================================
 
+
 def _validate_sandbox(path: Path) -> bool:
-    """Validate path lies within allowed user/system sandbox locations."""
+    """Return True only when path resolves safely beneath an allowed root."""
     allowed_roots: list[Path] = [
         Path.home().resolve(),
         Path("/tmp").resolve(),
@@ -338,32 +435,41 @@ def _validate_sandbox(path: Path) -> bool:
 
     prefix = os.environ.get("PREFIX")
     if prefix:
-        allowed_roots.append(Path(prefix).resolve())
-        allowed_roots.append((Path(prefix) / "tmp").resolve())
+        prefix_path = Path(prefix).expanduser().resolve()
+        allowed_roots.extend((prefix_path, prefix_path / "tmp"))
 
     llm_root = os.environ.get("LLM_ROOT_DIR")
     if llm_root:
-        allowed_roots.append(Path(llm_root).resolve())
+        allowed_roots.append(Path(llm_root).expanduser().resolve())
 
-    if Path("/data/data/com.termux").exists():
-        allowed_roots.append(Path("/data/data/com.termux").resolve())
+    termux_root = Path("/data/data/com.termux")
+    if termux_root.exists():
+        allowed_roots.append(termux_root.resolve())
 
     try:
-        resolved = path.resolve()
-        s = str(resolved)
-        return any(s.startswith(str(root)) for root in allowed_roots)
+        resolved = path.expanduser().resolve()
+        for root in allowed_roots:
+            try:
+                resolved.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
     except OSError:
         return False
 
 
 def _coerce_bool(v: Any) -> bool:
-    if isinstance(v, bool): return v
+    if isinstance(v, bool):
+        return v
     return str(v).strip().lower() in ("true", "1", "yes", "on")
 
 
 def _coerce_timeout(v: Any, default: float = _REQUEST_TIMEOUT) -> float:
-    try:    return max(0.5, min(float(v), 120.0))
-    except: return default
+    try:
+        return max(0.5, min(float(v), 120.0))
+    except Exception:
+        return default
 
 
 def _ua() -> str:
@@ -371,39 +477,114 @@ def _ua() -> str:
 
 
 def _has_image_ext(url: str) -> bool:
-    return bool(_IMAGE_EXTS.search(url.split('?')[0]))
+    return bool(_IMAGE_EXTS.search(url.split("?", maxsplit=1)[0]))
+
+
+def _canonical_url(url: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+        scheme = parsed.scheme.lower()
+        host = (parsed.hostname or "").lower()
+        port = parsed.port
+
+        if port and not (
+            (scheme == "http" and port == 80)
+            or (scheme == "https" and port == 443)
+        ):
+            host = f"{host}:{port}"
+
+        path = urllib.parse.quote(
+            urllib.parse.unquote(parsed.path or "/"),
+            safe="/:@!$&'()*+,;=-._~",
+        )
+        return urllib.parse.urlunsplit((scheme, host, path, parsed.query, ""))
+    except Exception:
+        return url.strip()
 
 
 def _safe_filename(url: str, fallback_ext: str = "jpg") -> str:
-    name = url.split('/')[-1].split('?')[0]
-    name = urllib.parse.unquote(name)
-    name = re.sub(r'[\\/*?:"<>|\x00-\x1f]', '_', name)[:160].strip(" .")
+    parsed = urllib.parse.urlparse(url)
+    name = urllib.parse.unquote(Path(parsed.path).name)
+    name = re.sub(r'[\\/*?:"<>|\x00-\x1f]', "_", name).strip(" .")
+    name = name[:140]
+
+    ext_match = _IMAGE_EXTS.search(parsed.path)
+    ext = ext_match.group(1).lower() if ext_match else fallback_ext.lower()
+
     if not name or _WINDOWS_RESERVED.match(name):
-        ext = fallback_ext
-        m = _IMAGE_EXTS.search(url)
-        if m:
-            ext = m.group(1)
-        name = f"img_{hashlib.md5(url.encode()).hexdigest()[:12]}.{ext}"
-    if '.' not in name:
-        name = f"{name}.{fallback_ext}"
-    return name
+        name = "media"
+
+    stem = Path(name).stem or "media"
+    suffix = Path(name).suffix.lower().lstrip(".")
+    if suffix not in ("jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "tif", "tiff"):
+        suffix = ext
+
+    digest = hashlib.sha256(url.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return f"{stem[:120]}_{digest}.{suffix}"
+
+
+def _is_private_or_special_ip(value: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(value)
+        return any(
+            (
+                addr.is_private,
+                addr.is_loopback,
+                addr.is_link_local,
+                addr.is_multicast,
+                addr.is_reserved,
+                addr.is_unspecified,
+            )
+        )
+    except ValueError:
+        return False
 
 
 def _validate_url(url: str) -> Optional[str]:
     try:
-        p = urllib.parse.urlparse(url)
-        if p.scheme not in ("http", "https"):
+        p = urllib.parse.urlparse((url or "").strip())
+
+        if p.scheme.lower() not in ("http", "https"):
             return f"Unsupported scheme '{p.scheme}'. Only http/https allowed."
-        if not p.netloc:
+
+        if not p.hostname:
             return "URL missing host/netloc."
 
-        host = p.hostname or ""
-        # SSRF Guard for internal addresses in default mode
-        if not _DEBUG:
-            if host.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"):
-                return "Access to local/loopback IP address blocked for security."
-            if host.startswith("10.") or host.startswith("192.168.") or (host.startswith("172.") and 16 <= int(host.split(".")[1] or 0) <= 31):
-                return "Access to private network IP address blocked for security."
+        if p.username or p.password:
+            return "URLs containing embedded credentials are not allowed."
+
+        host = p.hostname.rstrip(".").lower()
+        if len(url) > 8192:
+            return "URL exceeds maximum supported length."
+
+        if _DEBUG:
+            return None
+
+        if host in ("localhost", "localhost.localdomain"):
+            return "Access to localhost is blocked for security."
+
+        if _is_private_or_special_ip(host):
+            return "Access to private, loopback, link-local, or reserved IPs is blocked."
+
+        try:
+            resolved_ips = {
+                info[4][0]
+                for info in socket.getaddrinfo(
+                    host,
+                    p.port or (443 if p.scheme == "https" else 80),
+                    type=socket.SOCK_STREAM,
+                )
+            }
+        except socket.gaierror:
+            return f"Unable to resolve host '{host}'."
+
+        if not resolved_ips:
+            return f"Unable to resolve host '{host}'."
+
+        for address in resolved_ips:
+            if _is_private_or_special_ip(address):
+                return "Host resolves to a private, loopback, link-local, or reserved IP."
+
         return None
     except Exception as e:
         return f"URL parse error: {e}"
@@ -414,10 +595,14 @@ def _ts() -> str:
 
 
 def _classify_status(code: int) -> str:
-    if code < 200: return "informational"
-    if code < 300: return "success"
-    if code < 400: return "redirection"
-    if code < 500: return "client_error"
+    if code < 200:
+        return "informational"
+    if code < 300:
+        return "success"
+    if code < 400:
+        return "redirection"
+    if code < 500:
+        return "client_error"
     return "server_error"
 
 
@@ -436,9 +621,20 @@ def _analyse_headers(h: dict) -> dict:
 
 
 def _extract_server_info(h: dict) -> dict:
-    keys = ("server", "x-powered-by", "via", "x-cache", "cf-ray",
-            "content-type", "content-length", "cache-control",
-            "etag", "last-modified", "expires", "age")
+    keys = (
+        "server",
+        "x-powered-by",
+        "via",
+        "x-cache",
+        "cf-ray",
+        "content-type",
+        "content-length",
+        "cache-control",
+        "etag",
+        "last-modified",
+        "expires",
+        "age",
+    )
     return {k: h[k] for k in keys if k in h}
 
 
@@ -450,11 +646,11 @@ def _is_image_content_type(ct: str) -> bool:
 # THREAD-SAFE RATE LIMITER
 # ==============================================================================
 
+
 class RateLimitState:
     """Thread-safe per-backend rate limiter with randomized jitter."""
 
     def __init__(self, min_interval: float = _RATE_INTERVAL):
-        import threading
         self._lock = threading.Lock()
         self.last: float = 0.0
         self.min_interval = min_interval
@@ -469,18 +665,19 @@ class RateLimitState:
             self.last = time.monotonic()
 
 
-_rl_lock = concurrent.futures.thread.threading.Lock()
+_rl_lock = threading.Lock()
 _rl: Dict[str, RateLimitState] = {
-    "yandex":   RateLimitState(1.5),
-    "bing":     RateLimitState(1.2),
-    "bing_dl":  RateLimitState(0.3),
-    "e621":     RateLimitState(1.0),
-    "rule34":   RateLimitState(0.8),
+    "yandex": RateLimitState(1.5),
+    "bing": RateLimitState(1.2),
+    "bing_dl": RateLimitState(0.3),
+    "e621": RateLimitState(1.0),
+    "rule34": RateLimitState(0.8),
     "danbooru": RateLimitState(0.8),
-    "vsearch":  RateLimitState(0.5),
-    "generic":  RateLimitState(0.5),
-    "headers":  RateLimitState(0.2),
+    "vsearch": RateLimitState(0.5),
+    "generic": RateLimitState(0.5),
+    "headers": RateLimitState(0.2),
 }
+
 
 def _get_rate_limiter(backend: str) -> RateLimitState:
     with _rl_lock:
@@ -493,6 +690,7 @@ def _get_rate_limiter(backend: str) -> RateLimitState:
 # ON-DISK ATOMIC HTTP CACHE
 # ==============================================================================
 
+
 class HttpCache:
     """Content-addressed atomic file cache with TTL support."""
 
@@ -504,7 +702,10 @@ class HttpCache:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _key_path(self, url: str, method: str = "GET") -> Path:
-        digest = hashlib.sha256(f"{method}::{url}".encode()).hexdigest()
+        normalized_url = _canonical_url(url)
+        digest = hashlib.sha256(
+            f"{method.upper()}::{normalized_url}".encode("utf-8", errors="replace")
+        ).hexdigest()
         return self.root / digest[:2] / digest
 
     def get(self, url: str, method: str = "GET") -> Optional[bytes]:
@@ -521,16 +722,20 @@ class HttpCache:
         return None
 
     def put(self, url: str, data: bytes, method: str = "GET") -> None:
+        if not data or len(data) > _MAX_DOWNLOAD_BYTES:
+            return
+
         p = self._key_path(url, method)
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(f".tmp_{random.randint(1000, 9999)}")
+        tmp = p.with_name(f"{p.name}.{uuid.uuid4().hex}.tmp")
+
         try:
             tmp.write_bytes(data)
             tmp.replace(p)
             _debug(f"[cache] PUT {len(data):,} B {url[:60]}")
-        except Exception as e:
-            if tmp.exists():
-                tmp.unlink(missing_ok=True)
+        except OSError as e:
+            with suppress(OSError):
+                tmp.unlink()
             _debug(f"[cache] PUT failed: {e}")
 
 
@@ -539,7 +744,9 @@ _cache = HttpCache()
 
 class ToolCache:
     def __init__(self, cache_dir: Optional[str] = None) -> None:
-        self.cache_dir = Path(cache_dir).expanduser() if cache_dir else Path.home() / ".osint_cache"
+        self.cache_dir = (
+            Path(cache_dir).expanduser() if cache_dir else Path.home() / ".osint_cache"
+        )
         if not _validate_sandbox(self.cache_dir):
             self.cache_dir = Path.home() / ".osint_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -554,7 +761,7 @@ class ToolCache:
             try:
                 mtime = cache_file.stat().st_mtime
                 if time.time() - mtime < ttl_seconds:
-                    with open(cache_file, "r", encoding="utf-8") as f:
+                    with open(cache_file, encoding="utf-8") as f:
                         return json.load(f)
             except Exception:
                 pass
@@ -563,7 +770,7 @@ class ToolCache:
     def set(self, key_data: str, value: Any) -> None:
         key = self._make_key(key_data)
         cache_file = self.cache_dir / f"{key}.json"
-        tmp_file = cache_file.with_suffix(f".tmp_{random.randint(1000, 9999)}")
+        tmp_file = cache_file.with_name(f"{cache_file.name}.{uuid.uuid4().hex}.tmp")
         if _validate_sandbox(cache_file):
             try:
                 with open(tmp_file, "w", encoding="utf-8") as f:
@@ -578,6 +785,7 @@ class ToolCache:
 # AUTHORITATIVE HTTP FETCH ENGINE
 # ==============================================================================
 
+
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -591,18 +799,22 @@ def _build_ssl_ctx(ignore_ssl: bool = _IGNORE_SSL) -> ssl.SSLContext:
     return ctx
 
 
+# ==============================================================================
+# VOA UPGRADE: SESSION-BASED FETCH & DYNAMIC UA ROTATION
+# ==============================================================================
+
 def _fetch(
-    url:              str,
-    headers:          Optional[Dict[str, str]] = None,
-    method:           str   = "GET",
-    timeout:          float = _REQUEST_TIMEOUT,
-    retries:          int   = _MAX_RETRIES,
-    backend:          str   = "generic",
-    ignore_ssl:       bool  = _IGNORE_SSL,
-    follow_redirects: bool  = True,
-    use_cache:        bool  = True,
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    method: str = "GET",
+    timeout: float = _REQUEST_TIMEOUT,
+    retries: int = _MAX_RETRIES,
+    backend: str = "generic",
+    ignore_ssl: bool = _IGNORE_SSL,
+    follow_redirects: bool = True,
+    use_cache: bool = True,
 ) -> Optional[bytes]:
-    """Single authoritative fetch function with retry, rate-limit, and cache."""
+    """VOA-Enhanced fetch: Session-mimicry, aggressive UA rotation, and atomic caching."""
     if use_cache and method.upper() in ("GET", "HEAD"):
         cached = _cache.get(url, method)
         if cached is not None:
@@ -611,17 +823,23 @@ def _fetch(
     rl = _get_rate_limiter(backend)
     ctx = _build_ssl_ctx(ignore_ssl)
 
-    base_headers: Dict[str, str] = {
-        "User-Agent":                _ua(),
-        "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language":           "en-US,en;q=0.9",
-        "Accept-Encoding":           "gzip, deflate",
-        "Connection":                "close",
-        "Cache-Control":             "no-cache",
-        "DNT":                       "1",
-    }
-    if headers:
-        base_headers.update(headers)
+    # VOA: Dynamic Header Generation per attempt to bypass fingerprinting
+    def get_headers():
+        h = {
+            "User-Agent": _ua(),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+        }
+        if headers:
+            h.update(headers)
+        return h
 
     last_exc: Exception = RuntimeError("No fetch attempts made")
 
@@ -633,11 +851,13 @@ def _fetch(
                 handlers.append(_NoRedirectHandler())
             opener = urllib.request.build_opener(*handlers)
 
-            req = urllib.request.Request(url, headers=base_headers, method=method.upper())
+            req = urllib.request.Request(
+                url, headers=get_headers(), method=method.upper()
+            )
             with opener.open(req, timeout=timeout) as resp:
                 data = resp.read()
 
-            _debug(f"[{backend}] {len(data):,} B ← {url[:70]}")
+            _debug(f"[VOA][{backend}] {len(data):,} B ← {url[:70]}")
 
             if use_cache and method.upper() in ("GET", "HEAD"):
                 _cache.put(url, data, method)
@@ -645,29 +865,38 @@ def _fetch(
             return data
 
         except urllib.error.HTTPError as e:
-            _debug(f"[{backend}] HTTP {e.code} attempt {attempt}/{retries}")
-            if e.code in (429, 503):
-                wait = (_RETRY_BACKOFF ** attempt) + random.uniform(0.1, 1.5)
+            _debug(f"[VOA][{backend}] HTTP {e.code} attempt {attempt}/{retries}")
+            if e.code == 429: # Rate Limited
+                wait = (_RETRY_BACKOFF**attempt) * 2 + random.uniform(1.0, 3.0)
                 time.sleep(wait)
+            elif e.code in (500, 502, 503, 504):
+                time.sleep(_RETRY_BACKOFF * attempt)
             elif e.code in (403, 404):
                 return None
             last_exc = e
 
         except (urllib.error.URLError, socket.timeout, ConnectionResetError) as e:
-            _debug(f"[{backend}] Network err attempt {attempt}: {e}")
+            _debug(f"[VOA][{backend}] Network err attempt {attempt}: {e}")
             time.sleep(_RETRY_BACKOFF * attempt)
             last_exc = e
 
         except Exception as e:
-            _debug(f"[{backend}] Unexpected attempt {attempt}: {e}")
+            _debug(f"[VOA][{backend}] Unexpected attempt {attempt}: {e}")
             last_exc = e
 
-    _warn(f"[{backend}] All {retries} attempts failed: {last_exc} — {url[:70]}")
+    _warn(f"[VOA][{backend}] All {retries} attempts failed: {last_exc} — {url[:70]}")
     return None
 
 
-def _fetch_json(url: str, headers: Optional[Dict[str, str]] = None, backend: str = "generic", **kw: Any) -> Optional[Any]:
-    raw = _fetch(url, headers=headers, backend=backend, **kw)
+
+def _fetch_json(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    backend: str = "generic",
+    use_cache: bool = True,
+    **kw: Any,
+) -> Optional[Any]:
+    raw = _fetch(url, headers=headers, backend=backend, use_cache=use_cache, **kw)
     if raw is None:
         return None
     try:
@@ -677,7 +906,13 @@ def _fetch_json(url: str, headers: Optional[Dict[str, str]] = None, backend: str
         return None
 
 
-def _envelope(success: bool, mode: str, data: Optional[dict] = None, error: Optional[str] = None, **extra: Any) -> dict:
+def _envelope(
+    success: bool,
+    mode: str,
+    data: Optional[dict] = None,
+    error: Optional[str] = None,
+    **extra: Any,
+) -> dict:
     out: dict = {
         "success": success,
         "mode": mode,
@@ -691,16 +926,24 @@ def _envelope(success: bool, mode: str, data: Optional[dict] = None, error: Opti
     return out
 
 
-def _make_image_result(source: str, url: str, page_url: str, idx: int, title: str = "", snippet: str = "", score: float = 1.0) -> dict:
+def _make_image_result(
+    source: str,
+    url: str,
+    page_url: str,
+    idx: int,
+    title: str = "",
+    snippet: str = "",
+    score: float = 1.0,
+) -> dict:
     return {
-        "id":       f"{source}_{idx + 1}",
-        "title":    title or f"{source.capitalize()} Media {idx + 1}",
-        "url":      url,
+        "id": f"{source}_{idx + 1}",
+        "title": title or f"{source.capitalize()} Media {idx + 1}",
+        "url": url,
         "page_url": page_url,
-        "snippet":  snippet or f"{source.capitalize()} result",
-        "score":    round(max(0.0, score - idx * 0.02), 2),
-        "type":     "image",
-        "source":   source,
+        "snippet": snippet or f"{source.capitalize()} result",
+        "score": round(max(0.0, score - idx * 0.02), 2),
+        "type": "image",
+        "source": source,
     }
 
 
@@ -708,18 +951,19 @@ def _make_image_result(source: str, url: str, page_url: str, idx: int, title: st
 # MODE 1 — HEADERS ANALYSIS
 # ==============================================================================
 
+
 def _headers_mode(
-    url:              str,
-    method:           str   = "HEAD",
-    user_agent:       Optional[str] = None,
-    timeout:          float = _REQUEST_TIMEOUT,
-    ignore_ssl:       bool  = False,
-    follow_redirects: bool  = True,
-    output_fmt:       str   = "json",
+    url: str,
+    method: str = "HEAD",
+    user_agent: Optional[str] = None,
+    timeout: float = _REQUEST_TIMEOUT,
+    ignore_ssl: bool = False,
+    follow_redirects: bool = True,
+    output_fmt: str = "json",
 ) -> dict:
-    method     = (method or "HEAD").upper().strip()
+    method = (method or "HEAD").upper().strip()
     ignore_ssl = _coerce_bool(ignore_ssl)
-    timeout    = _coerce_timeout(timeout)
+    timeout = _coerce_timeout(timeout)
     if method not in _ALLOWED_METHODS:
         method = "HEAD"
 
@@ -733,8 +977,8 @@ def _headers_mode(
 
     start = time.perf_counter()
     try:
-        ctx      = _build_ssl_ctx(ignore_ssl)
-        base_h   = {
+        ctx = _build_ssl_ctx(ignore_ssl)
+        base_h = {
             "User-Agent": user_agent or _ua(),
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.9",
@@ -744,30 +988,30 @@ def _headers_mode(
         if not _coerce_bool(follow_redirects):
             handlers.append(_NoRedirectHandler())
         opener = urllib.request.build_opener(*handlers)
-        req    = urllib.request.Request(url, headers=base_h, method=method)
+        req = urllib.request.Request(url, headers=base_h, method=method)
 
-        elapsed      = 0.0
-        raw_headers  = {}
-        status_code  = 0
-        final_url    = url
+        elapsed = 0.0
+        raw_headers = {}
+        status_code = 0
+        final_url = url
         body_snippet = ""
 
         try:
             _get_rate_limiter("headers").wait()
             t0 = time.perf_counter()
             with opener.open(req, timeout=timeout) as r:
-                elapsed     = time.perf_counter() - t0
+                elapsed = time.perf_counter() - t0
                 raw_headers = _normalise_headers(dict(r.info()))
                 status_code = r.getcode()
-                final_url   = r.geturl()
+                final_url = r.geturl()
                 if method == "GET":
                     body_snippet = r.read(512).decode("utf-8", errors="replace")
 
         except urllib.error.HTTPError as he:
-            elapsed     = time.perf_counter() - start
+            elapsed = time.perf_counter() - start
             raw_headers = _normalise_headers(dict(he.headers))
             status_code = he.code
-            final_url   = url
+            final_url = url
             if method == "GET":
                 try:
                     body_snippet = he.read(512).decode("utf-8", errors="replace")
@@ -775,17 +1019,17 @@ def _headers_mode(
                     pass
 
         result_data = {
-            "url":             final_url,
-            "original_url":    url,
-            "status_code":     status_code,
+            "url": final_url,
+            "original_url": url,
+            "status_code": status_code,
             "status_category": _classify_status(status_code),
-            "elapsed_ms":      round(elapsed * 1000, 2),
-            "method":          method,
-            "ssl_verified":    not ignore_ssl,
-            "redirected":      final_url != url,
-            "headers":         raw_headers,
-            "server_info":     _extract_server_info(raw_headers),
-            "security_audit":  _analyse_headers(raw_headers),
+            "elapsed_ms": round(elapsed * 1000, 2),
+            "method": method,
+            "ssl_verified": not ignore_ssl,
+            "redirected": final_url != url,
+            "headers": raw_headers,
+            "server_info": _extract_server_info(raw_headers),
+            "security_audit": _analyse_headers(raw_headers),
         }
         if body_snippet:
             result_data["body_snippet"] = body_snippet
@@ -795,7 +1039,9 @@ def _headers_mode(
     except ssl.SSLError as e:
         return _envelope(False, "headers", error=str(e), error_type="ssl_error")
     except socket.timeout:
-        return _envelope(False, "headers", error=f"Timed out after {timeout}s", error_type="timeout")
+        return _envelope(
+            False, "headers", error=f"Timed out after {timeout}s", error_type="timeout"
+        )
     except Exception as e:
         return _envelope(False, "headers", error=str(e), error_type="unexpected")
 
@@ -810,17 +1056,20 @@ def _format_headers_pretty(result: dict) -> str:
         f"  Method       : {result.get('method')}",
         f"  SSL verified : {result.get('ssl_verified')}",
         f"  Redirected   : {result.get('redirected')}",
-        "", "  Server info:",
+        "",
+        "  Server info:",
     ]
     for k, v in (result.get("server_info") or {}).items():
         lines.append(f"    {k:<30}: {v}")
     audit = result.get("security_audit", {})
     lines += [
-        "", "  Security audit:",
+        "",
+        "  Security audit:",
         f"    Score   : {audit.get('security_score_pct')}%",
         f"    Present : {', '.join(audit.get('security_headers_present') or ['-'])}",
         f"    Missing : {', '.join(audit.get('security_headers_missing') or ['-'])}",
-        "", "  All headers:",
+        "",
+        "  All headers:",
     ]
     for k, v in sorted((result.get("headers") or {}).items()):
         lines.append(f"    {k:<36}: {v}")
@@ -828,102 +1077,197 @@ def _format_headers_pretty(result: dict) -> str:
 
 
 # ==============================================================================
-# OSINT SEARCH BACKENDS
+# OSINT SEARCH BACKENDS (UPGRADED FOR RELIABLE RESULTS)
 # ==============================================================================
 
 _YANDEX_PATS = [
-    re.compile(r'"origUrl"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I),
-    re.compile(r'"img_href"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I),
-    re.compile(r'https?://[^\s"\'<>]+?\.(?:jpe?g|png|gif|webp|avif)(?:\?[^\s"\'<>]*)?', re.I),
+    re.compile(r'&quot;origUrl&quot;\s*:\s*&quot;(https?://[^&"]+?)&quot;', re.I),
+    re.compile(
+        r'"origUrl"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I
+    ),
+    re.compile(
+        r'"img_href"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I
+    ),
+    re.compile(
+        r'https?://[^\s"\'<>]+?\.(?:jpe?g|png|gif|webp|avif)(?:\?[^\s"\'<>]*)?', re.I
+    ),
 ]
 
-def _backend_yandex(query: str, limit: int) -> Tuple[List[dict], str]:
+
+def _backend_yandex(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    eq = f"{query} -hentai -anime -3d -drawn"
+    eq = query
 
-    for page in range(10):
+    for page in range(max(1, start_page) - 1, max(1, start_page) - 1 + max(1, max_pages)):
         if len(results) >= limit:
             break
-        params = {"text": eq, "itype": "jpg,png,gif,webp", "p": str(page), "fyandex": "0", "family": "no"}
+        params = {
+            "text": eq,
+            "itype": "jpg,png,gif,webp",
+            "p": str(page),
+            "fyandex": "0",
+            "family": "no",
+        }
         raw = _fetch(
             "https://yandex.ru/images/search?" + urllib.parse.urlencode(params),
-            headers={"Referer": "https://yandex.ru/", "Cookie": "fyandex=0;yp=1800000000.szm.1_00_0;"},
+            headers={
+                "Referer": "https://yandex.ru/",
+                "Cookie": "fyandex=0;yp=1800000000.szm.1_00_0;",
+            },
             backend="yandex",
+            use_cache=use_cache,
         )
-        if raw is None: break
-        body  = raw.decode("utf-8", errors="replace")
+        if raw is None:
+            break
+        body = raw.decode("utf-8", errors="replace")
+        if "showcaptcha" in body.lower():
+            _warn("[yandex] CAPTCHA challenge encountered. Consider rotating IP/backend.")
+            break
+
         found = 0
         for pat in _YANDEX_PATS:
             for m in pat.finditer(body):
-                u = urllib.parse.unquote(m.group(1) if pat.groups else m.group(0))
-                if u.startswith("http") and u not in seen:
-                    seen.add(u)
+                u = html.unescape(urllib.parse.unquote(m.group(1) if pat.groups else m.group(0)))
+                canonical = _canonical_url(u)
+                if u.startswith("http") and canonical not in seen:
+                    seen.add(canonical)
                     results.append(_make_image_result("yandex", u, u, len(results)))
                     found += 1
-                    if len(results) >= limit: break
-            if len(results) >= limit: break
-        if found == 0: break
+                    if len(results) >= limit:
+                        break
+            if len(results) >= limit:
+                break
+        if found == 0:
+            break
 
     return results[:limit], "yandex"
 
 
 _BING_PATS = [
-    re.compile(r'&quot;murl&quot;:&quot;(https?://[^&"]+?)&quot;'),
-    re.compile(r'"murl"\s*:\s*"(https?://[^"]+)"'),
-    re.compile(r'data-src="(https?://[^"]+?\.(?:jpe?g|png|gif|webp))"'),
+    re.compile(r'&quot;murl&quot;:&quot;(https?://[^&\" ]+?)&quot;', re.I),
+    re.compile(r'\"murl\"\s*:\s*\"(https?://[^"]+)\"', re.I),
+    re.compile(r'data-src=\" (https?://[^"]+?\.(?:jpe?g|png|gif|webp))\"', re.I),
+    re.compile(r'src=\" (https?://[^"]+?\.(?:jpe?g|png|gif|webp))\"', re.I),
+    re.compile(r'data-original-src=\" (https?://[^"]+?\.(?:jpe?g|png|gif|webp))\"', re.I),
+    re.compile(r'murl\": \"(https?://[^"]+)\"', re.I),
 ]
 
-def _backend_bing(query: str, limit: int) -> Tuple[List[dict], str]:
+
+def _backend_bing(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    first = 1
+    first = max(1, start_page) * 35 - 34
 
-    for _ in range(10):
-        if len(results) >= limit: break
-        params = {"q": query, "first": str(first), "count": "35", "adlt": "off"}
+    for _ in range(max(1, max_pages)):
+        if len(results) >= limit:
+            break
+        
+        # VOA: Mutate query and rotate referer to bypass pattern detection
+        mutated_query = _mutate_query(query)
+        params = {"q": mutated_query, "first": str(first), "count": "35", "adlt": "off"}
+        
+        headers = {
+            "Referer": _get_random_referer("bing"),
+            "Cookie": "SRCHHPGUSR=ADLT=OFF; B3=off;",
+            "User-Agent": _get_random_ua(),
+        }
+        
         raw = _fetch(
             "https://www.bing.com/images/search?" + urllib.parse.urlencode(params),
-            headers={"Referer": "https://www.bing.com/", "Cookie": "SRCHHPGUSR=ADLT=OFF;"},
+            headers=headers,
             backend="bing",
+            use_cache=use_cache,
         )
-        if raw is None: break
+        if raw is None:
+            # Try one more time with a different mutation if it failed
+            mutated_query = _mutate_query(query)
+            params["q"] = mutated_query
+            raw = _fetch(
+                "https://www.bing.com/images/search?" + urllib.parse.urlencode(params),
+                headers=headers,
+                backend="bing",
+                use_cache=use_cache,
+            )
+            if raw is None:
+                break
+
         html_str = raw.decode("utf-8", errors="replace")
         found = 0
         for pat in _BING_PATS:
             for m in pat.finditer(html_str):
-                u = urllib.parse.unquote(m.group(1))
-                if u.startswith("http") and u not in seen and _has_image_ext(u):
-                    seen.add(u)
+                u = html.unescape(urllib.parse.unquote(m.group(1)))
+                canonical = _canonical_url(u)
+                if u.startswith("http") and canonical not in seen and _has_image_ext(u):
+                    seen.add(canonical)
                     results.append(_make_image_result("bing", u, u, len(results)))
                     found += 1
-                    if len(results) >= limit: break
-            if len(results) >= limit: break
-        if found == 0: break
+                    if len(results) >= limit:
+                        break
+            if len(results) >= limit:
+                break
+        if found == 0:
+            # If no results found, try a broader mutation
+            mutated_query = query.replace("nsfw", "").strip()
+            params["q"] = mutated_query
+            raw = _fetch(
+                "https://www.bing.com/images/search?" + urllib.parse.urlencode(params),
+                headers=headers,
+                backend="bing",
+                use_cache=use_cache,
+            )
+            if raw:
+                html_str = raw.decode("utf-8", errors="replace")
+                for pat in _BING_PATS:
+                    for m in pat.finditer(html_str):
+                        u = html.unescape(urllib.parse.unquote(m.group(1)))
+                        canonical = _canonical_url(u)
+                        if u.startswith("http") and canonical not in seen and _has_image_ext(u):
+                            seen.add(canonical)
+                            results.append(_make_image_result("bing", u, u, len(results)))
+                            found += 1
+                            if len(results) >= limit:
+                                break
+            if found == 0:
+                break
         first += 35
 
     return results[:limit], "bing"
 
 
-def _backend_bing_dl(query: str, limit: int, media_dir: str = _DEFAULT_MEDIA_DIR) -> Tuple[List[dict], str]:
+def _backend_bing_dl(
+    query: str, limit: int, media_dir: str = _DEFAULT_MEDIA_DIR, **kwargs: Any
+) -> Tuple[List[dict], str]:
     if not _BING_DL_AVAILABLE or _BING_DL_FN is None:
         _warn(f"bing_dl unavailable ({_BING_DL_ERR}), falling back to bing")
-        return _backend_bing(query, limit)
+        return _backend_bing(query, limit, **kwargs)
 
     target = Path(media_dir).expanduser()
     if not _validate_sandbox(target):
         target = Path(_DEFAULT_MEDIA_DIR).expanduser()
     target.mkdir(parents=True, exist_ok=True)
 
-    kwargs: Dict[str, Any] = {"limit": limit, "output_dir": str(target)}
+    dl_kwargs: Dict[str, Any] = {"limit": limit, "output_dir": str(target)}
     try:
-        _BING_DL_FN(query, **kwargs)
+        _BING_DL_FN(query, **dl_kwargs)
     except Exception as e:
         _warn(f"[bing_dl] Execution error: {e}")
 
     query_folder = target / query
     if not query_folder.is_dir():
-        safe = re.sub(r'[\\/*?:"<>|]', '_', query)
+        safe = re.sub(r'[\\/*?:"<>|]', "_", query)
         query_folder = target / safe
 
     results: List[dict] = []
@@ -931,117 +1275,190 @@ def _backend_bing_dl(query: str, limit: int, media_dir: str = _DEFAULT_MEDIA_DIR
         for fname in sorted(query_folder.iterdir()):
             if fname.is_file() and _has_image_ext(fname.name):
                 fp = str(fname)
-                results.append({
-                    "id":         f"bing_dl_{len(results)+1}",
-                    "title":      fname.name,
-                    "url":        f"file://{fp}",
-                    "page_url":   f"file://{fp}",
-                    "local_path": fp,
-                    "snippet":    "Bing DL download",
-                    "score":      round(max(0.0, 1.0 - len(results)*0.02), 2),
-                    "type":       "image",
-                    "source":     "bing_dl",
-                })
-                if len(results) >= limit: break
+                results.append(
+                    {
+                        "id": f"bing_dl_{len(results) + 1}",
+                        "title": fname.name,
+                        "url": f"file://{fp}",
+                        "page_url": f"file://{fp}",
+                        "local_path": fp,
+                        "snippet": "Bing DL download",
+                        "score": round(max(0.0, 1.0 - len(results) * 0.02), 2),
+                        "type": "image",
+                        "source": "bing_dl",
+                    }
+                )
+                if len(results) >= limit:
+                    break
 
     return results[:limit], "bing_dl"
 
 
-def _backend_e621(query: str, limit: int) -> Tuple[List[dict], str]:
+def _backend_e621(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    page, per = 1, min(limit, 100)
+    page = max(1, start_page)
+    per = min(limit, 100)
+    fetched_pages = 0
 
-    while len(results) < limit:
-        params = {"tags": f"{query} type:gif", "limit": str(per), "page": str(page)}
+    while len(results) < limit and fetched_pages < max_pages:
+        # Upgraded: Removed forced "type:gif" so general queries return records
+        params = {"tags": query, "limit": str(per), "page": str(page)}
         data = _fetch_json(
             "https://e621.net/posts.json?" + urllib.parse.urlencode(params),
-            headers={"User-Agent": "PyrmethusOSINT/4.0"},
+            headers={"User-Agent": f"PyrmethusOSINT/4.0 (by user_{random.randint(100,999)})"},
             backend="e621",
+            use_cache=use_cache,
         )
-        if not data: break
+        if not data or not isinstance(data, dict):
+            break
         posts = data.get("posts", [])
-        if not posts: break
+        if not posts:
+            break
         for item in posts:
             f = item.get("file", {})
             furl = f.get("url")
-            if furl and furl not in seen:
-                seen.add(furl)
-                results.append(_make_image_result(
-                    "e621", furl, f"https://e621.net/posts/{item.get('id')}",
-                    len(results), title=f"e621 #{item.get('id')}",
-                    score=round(item.get("score", {}).get("total", 0) / 10.0, 2),
-                ))
-                if len(results) >= limit: break
-        if len(posts) < per: break
+            canonical = _canonical_url(furl or "")
+            if furl and canonical not in seen:
+                seen.add(canonical)
+                results.append(
+                    _make_image_result(
+                        "e621",
+                        furl,
+                        f"https://e621.net/posts/{item.get('id')}",
+                        len(results),
+                        title=f"e621 #{item.get('id')}",
+                        score=round(item.get("score", {}).get("total", 0) / 10.0, 2),
+                    )
+                )
+                if len(results) >= limit:
+                    break
+        if len(posts) < per:
+            break
         page += 1
+        fetched_pages += 1
 
     return results[:limit], "e621"
 
 
-def _backend_rule34(query: str, limit: int) -> Tuple[List[dict], str]:
+def _backend_rule34(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    pid, per = 0, min(limit, 100)
+    pid = max(0, start_page - 1)
+    per = min(limit, 100)
+    fetched_pages = 0
 
-    while len(results) < limit:
-        params = {"page": "dapi", "s": "post", "q": "index", "json": "1", "tags": query, "limit": str(per), "pid": str(pid)}
+    while len(results) < limit and fetched_pages < max_pages:
+        params = {
+            "page": "dapi",
+            "s": "post",
+            "q": "index",
+            "json": "1",
+            "tags": query,
+            "limit": str(per),
+            "pid": str(pid),
+        }
         data = _fetch_json(
             "https://api.rule34.xxx/index.php?" + urllib.parse.urlencode(params),
             headers={"Referer": "https://rule34.xxx/"},
             backend="rule34",
+            use_cache=use_cache,
         )
-        if not data or not isinstance(data, list): break
+        if not data or not isinstance(data, list):
+            break
         for item in data:
             furl = item.get("file_url") or item.get("sample_url")
-            if furl and furl not in seen:
-                seen.add(furl)
-                results.append(_make_image_result(
-                    "rule34", furl, f"https://rule34.xxx/index.php?page=post&s=view&id={item.get('id')}",
-                    len(results), title=f"Rule34 #{item.get('id')}",
-                    score=float(item.get("score", 0)),
-                ))
-                if len(results) >= limit: break
-        if len(data) < per: break
+            canonical = _canonical_url(furl or "")
+            if furl and canonical not in seen:
+                seen.add(canonical)
+                results.append(
+                    _make_image_result(
+                        "rule34",
+                        furl,
+                        f"https://rule34.xxx/index.php?page=post&s=view&id={item.get('id')}",
+                        len(results),
+                        title=f"Rule34 #{item.get('id')}",
+                        score=float(item.get("score", 0)),
+                    )
+                )
+                if len(results) >= limit:
+                    break
+        if len(data) < per:
+            break
         pid += 1
+        fetched_pages += 1
 
     return results[:limit], "rule34"
 
 
-def _backend_danbooru(query: str, limit: int) -> Tuple[List[dict], str]:
+def _backend_danbooru(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
     results: List[dict] = []
     seen: set = set()
-    page, per = 1, min(limit, 200)
+    page = max(1, start_page)
+    per = min(limit, 200)
+    fetched_pages = 0
 
-    while len(results) < limit:
-        params = {"tags": query, "limit": str(per), "page": str(page)}
+    # Upgraded: Sanitize query to max 2 tags for anonymous API compliance
+    clean_query = " ".join(query.split()[:2])
+
+    while len(results) < limit and fetched_pages < max_pages:
+        params = {"tags": clean_query, "limit": str(per), "page": str(page)}
         data = _fetch_json(
             "https://danbooru.donmai.us/posts.json?" + urllib.parse.urlencode(params),
             headers={"Referer": "https://danbooru.donmai.us/"},
             backend="danbooru",
+            use_cache=use_cache,
         )
-        if not data or not isinstance(data, list): break
+        if not data or not isinstance(data, list):
+            break
         for item in data:
             furl = item.get("file_url") or item.get("large_file_url")
-            if furl and furl not in seen:
-                seen.add(furl)
-                results.append(_make_image_result(
-                    "danbooru", furl, f"https://danbooru.donmai.us/posts/{item.get('id')}",
-                    len(results), title=f"Danbooru #{item.get('id')}",
-                    score=float(item.get("score", 0)),
-                ))
-                if len(results) >= limit: break
-        if len(data) < per: break
+            canonical = _canonical_url(furl or "")
+            if furl and canonical not in seen:
+                seen.add(canonical)
+                results.append(
+                    _make_image_result(
+                        "danbooru",
+                        furl,
+                        f"https://danbooru.donmai.us/posts/{item.get('id')}",
+                        len(results),
+                        title=f"Danbooru #{item.get('id')}",
+                        score=float(item.get("score", 0)),
+                    )
+                )
+                if len(results) >= limit:
+                    break
+        if len(data) < per:
+            break
         page += 1
+        fetched_pages += 1
 
     return results[:limit], "danbooru"
 
 
 _BACKENDS: Dict[str, Callable] = {
-    "yandex":   _backend_yandex,
-    "bing":     _backend_bing,
-    "e621":     _backend_e621,
-    "rule34":   _backend_rule34,
+    "yandex": _backend_yandex,
+    "bing": _backend_bing,
+    "e621": _backend_e621,
+    "rule34": _backend_rule34,
     "danbooru": _backend_danbooru,
 }
 
@@ -1101,17 +1518,28 @@ ENGINE_MAP: dict[str, dict[str, Any]] = {
 }
 
 
-def _execute_vsearch(query: str, engine: str, limit: int = 20, page: int = 1, timeout: int = 15) -> list[dict[str, Any]]:
+def _execute_vsearch(
+    query: str,
+    engine: str,
+    limit: int = 20,
+    page: int = 1,
+    timeout: int = 15,
+    use_cache: bool = True,
+) -> list[dict[str, Any]]:
     if not BS4_AVAILABLE:
         _warn("BeautifulSoup4 not installed — vsearch falling back to pattern matching")
         return []
 
     cfg = ENGINE_MAP.get(engine) or ENGINE_MAP["pexels"]
     base_url = cfg["url"]
-    search_path = cfg["search_path"].format(query=urllib.parse.quote_plus(query), page=page)
+    search_path = cfg["search_path"].format(
+        query=urllib.parse.quote_plus(query), page=page
+    )
     target_url = urllib.parse.urljoin(base_url, search_path)
 
-    raw = _fetch(target_url, timeout=timeout, backend="vsearch")
+    raw = _fetch(
+        target_url, timeout=timeout, backend="vsearch", use_cache=use_cache
+    )
     if not raw:
         return []
 
@@ -1121,32 +1549,46 @@ def _execute_vsearch(query: str, engine: str, limit: int = 20, page: int = 1, ti
 
     for idx, item in enumerate(items[:limit]):
         title = "Untitled"
-        title_el = item.select_one(cfg["title_selector"]) if cfg.get("title_selector") else None
+        title_el = (
+            item.select_one(cfg["title_selector"])
+            if cfg.get("title_selector")
+            else None
+        )
         if title_el:
             attr = cfg.get("title_attribute")
-            title = (title_el.get(attr) if attr and title_el.get(attr) else title_el.get_text(strip=True)) or "Untitled"
+            title = (
+                title_el.get(attr)
+                if attr and title_el.get(attr)
+                else title_el.get_text(strip=True)
+            ) or "Untitled"
 
         link = target_url
-        link_el = item.select_one(cfg["link_selector"]) if cfg.get("link_selector") else None
+        link_el = (
+            item.select_one(cfg["link_selector"]) if cfg.get("link_selector") else None
+        )
         if link_el and link_el.get("href"):
             link = urllib.parse.urljoin(base_url, link_el["href"])
 
         img_url = ""
-        img_el = item.select_one(cfg["img_selector"]) if cfg.get("img_selector") else None
+        img_el = (
+            item.select_one(cfg["img_selector"]) if cfg.get("img_selector") else None
+        )
         if img_el:
             img_url = img_el.get("data-src") or img_el.get("src") or ""
             if img_url and not img_url.startswith("http"):
                 img_url = urllib.parse.urljoin(base_url, img_url)
 
-        results.append({
-            "id": f"{engine}_{idx+1}",
-            "title": html.unescape(title),
-            "url": link,
-            "page_url": link,
-            "img_url": img_url,
-            "source": engine,
-            "type": "video",
-        })
+        results.append(
+            {
+                "id": f"{engine}_{idx + 1}",
+                "title": html.unescape(title),
+                "url": link,
+                "page_url": link,
+                "img_url": img_url,
+                "source": engine,
+                "type": "video",
+            }
+        )
 
     return results
 
@@ -1155,104 +1597,231 @@ def _execute_vsearch(query: str, engine: str, limit: int = 20, page: int = 1, ti
 # HEADER VERIFICATION & PARALLEL MEDIA DOWNLOADS
 # ==============================================================================
 
-def _verify_url_headers(url: str, mime_check: bool = False, ignore_ssl: bool = False, timeout: float = _REQUEST_TIMEOUT) -> dict:
-    if not url.startswith("http"):
-        return {"verified": False, "verify_error": "Non-HTTP URL"}
-    try:
-        ctx = _build_ssl_ctx(ignore_ssl)
-        req = urllib.request.Request(url, headers={"User-Agent": _ua()}, method="HEAD")
-        _get_rate_limiter("headers").wait()
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-            hdrs = _normalise_headers(dict(r.info()))
-            ct = hdrs.get("content-type", "")
-            cl = hdrs.get("content-length", "unknown")
-            code = r.getcode()
-            ok = not mime_check or _is_image_content_type(ct)
+
+def _verify_url_headers(
+    url: str,
+    mime_check: bool = False,
+    ignore_ssl: bool = False,
+    timeout: float = _REQUEST_TIMEOUT,
+) -> dict:
+    validation_error = _validate_url(url)
+    if validation_error:
+        return {"verified": False, "verify_error": validation_error}
+
+    ctx = _build_ssl_ctx(ignore_ssl)
+    headers = {"User-Agent": _ua(), "Accept": "*/*"}
+
+    for method, extra_headers in (
+        ("HEAD", {}),
+        ("GET", {"Range": "bytes=0-0"}),
+    ):
+        try:
+            req_headers = dict(headers)
+            req_headers.update(extra_headers)
+            req = urllib.request.Request(url, headers=req_headers, method=method)
+
+            _get_rate_limiter("headers").wait()
+            with urllib.request.urlopen(
+                req, timeout=_coerce_timeout(timeout), context=ctx
+            ) as response:
+                hdrs = _normalise_headers(dict(response.info()))
+                content_type = hdrs.get("content-type", "")
+                content_length = hdrs.get("content-length", "unknown")
+                mime_ok = _is_image_content_type(content_type)
+
+                return {
+                    "verified": not mime_check or mime_ok,
+                    "verify_status": response.getcode(),
+                    "content_type": content_type,
+                    "content_length": content_length,
+                    "mime_ok": mime_ok,
+                    "verify_method": method,
+                }
+        except urllib.error.HTTPError as e:
+            if method == "HEAD" and e.code in (403, 405, 501):
+                continue
             return {
-                "verified": ok,
-                "verify_status": code,
-                "content_type": ct,
-                "content_length": cl,
-                "mime_ok": _is_image_content_type(ct),
+                "verified": False,
+                "verify_status": e.code,
+                "verify_error": str(e),
             }
-    except Exception as e:
-        return {"verified": False, "verify_error": str(e)}
+        except Exception as e:
+            if method == "HEAD":
+                continue
+            return {"verified": False, "verify_error": str(e)}
+
+    return {
+        "verified": False,
+        "verify_error": "HEAD and ranged GET verification failed",
+    }
 
 
-def _download_single(res: dict, folder: str, mime_check: bool = False, ignore_ssl: bool = False) -> dict:
+def _download_single(
+    res: dict,
+    folder: str,
+    mime_check: bool = False,
+    ignore_ssl: bool = False,
+) -> dict:
     url = res.get("url") or res.get("img_url") or ""
-    if not url.startswith("http"):
-        res["dl_error"] = "Non-HTTP URL"
+    validation_error = _validate_url(url)
+
+    if validation_error:
+        res["dl_error"] = validation_error
         return res
 
-    fname = _safe_filename(url)
-    path = os.path.join(folder, fname)
+    target_dir = Path(folder).expanduser()
+    if not _validate_sandbox(target_dir):
+        res["dl_error"] = "Download path is outside approved sandbox locations."
+        return res
 
-    if os.path.exists(path) and os.path.getsize(path) > 0:
-        res["local_path"] = path
+    target_dir.mkdir(parents=True, exist_ok=True)
+    path = target_dir / _safe_filename(url)
+
+    if path.exists() and path.stat().st_size > 0:
+        res["local_path"] = str(path)
         res["dl_skipped"] = True
         return res
 
-    raw = _fetch(url, timeout=_DOWNLOAD_TIMEOUT, backend="generic", ignore_ssl=ignore_ssl, use_cache=False)
-    if raw is None:
-        res["dl_error"] = "Fetch failed"
-        return res
-
-    if mime_check and len(raw) >= 12:
-        magic = raw[:12]
-        is_media = any([
-            magic[:3] == b'\xff\xd8\xff',            # JPEG
-            magic[:8] == b'\x89PNG\r\n\x1a\n',       # PNG
-            magic[:6] in (b'GIF87a', b'GIF89a'),     # GIF
-            magic[:4] == b'RIFF' and raw[8:12] == b'WEBP',  # WEBP
-            b'ftyp' in magic,                         # MP4/AVIF
-            magic[:2] == b'BM',                      # BMP
-        ])
-        if not is_media:
-            res["dl_error"] = "Magic byte check failed"
-            return res
+    ctx = _build_ssl_ctx(ignore_ssl)
+    temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.part")
 
     try:
-        os.makedirs(folder, exist_ok=True)
-        with open(path, "wb") as fh:
-            fh.write(raw)
-        res["local_path"] = path
-        res["dl_bytes"] = len(raw)
-    except OSError as e:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": _ua(),
+                "Accept": "image/avif,image/webp,image/apng,image/*,video/*,*/*;q=0.8",
+                "Connection": "close",
+            },
+            method="GET",
+        )
+
+        _get_rate_limiter("generic").wait()
+        with urllib.request.urlopen(
+            req, timeout=_DOWNLOAD_TIMEOUT, context=ctx
+        ) as response:
+            headers = _normalise_headers(dict(response.info()))
+            content_type = headers.get("content-type", "")
+            content_length = headers.get("content-length", "")
+
+            if mime_check and not _is_image_content_type(content_type):
+                res["dl_error"] = f"Content-Type rejected: {content_type or 'missing'}"
+                return res
+
+            if content_length.isdigit() and int(content_length) > _MAX_DOWNLOAD_BYTES:
+                res["dl_error"] = (
+                    f"Content-Length exceeds {_MAX_DOWNLOAD_BYTES} byte limit"
+                )
+                return res
+
+            total = 0
+            magic = b""
+
+            with open(temp_path, "wb") as out:
+                while True:
+                    chunk = response.read(_STREAM_CHUNK_SIZE)
+                    if not chunk:
+                        break
+
+                    if len(magic) < 32:
+                        magic += chunk[: 32 - len(magic)]
+
+                    total += len(chunk)
+                    if total > _MAX_DOWNLOAD_BYTES:
+                        raise ToolError(
+                            f"Download exceeded {_MAX_DOWNLOAD_BYTES} byte limit"
+                        )
+
+                    out.write(chunk)
+
+        if mime_check:
+            is_media = any(
+                (
+                    magic[:3] == b"\xff\xd8\xff",
+                    magic[:8] == b"\x89PNG\r\n\x1a\n",
+                    magic[:6] in (b"GIF87a", b"GIF89a"),
+                    magic[:4] == b"RIFF" and magic[8:12] == b"WEBP",
+                    b"ftyp" in magic,
+                    magic[:2] == b"BM",
+                    magic[:4] in (b"II*\x00", b"MM\x00*"),
+                )
+            )
+            if not is_media:
+                res["dl_error"] = "Magic-byte check failed"
+                return res
+
+        temp_path.replace(path)
+        res["local_path"] = str(path)
+        res["dl_bytes"] = total
+        res["content_type"] = content_type
+        return res
+
+    except Exception as e:
         res["dl_error"] = str(e)
+        return res
+    finally:
+        with suppress(OSError):
+            if temp_path.exists():
+                temp_path.unlink()
 
-    return res
 
+def _parallel_download(
+    results: List[dict],
+    folder: str,
+    workers: int = _DEFAULT_WORKERS,
+    mime_check: bool = False,
+    ignore_ssl: bool = False,
+) -> Tuple[List[dict], dict]:
+    target = Path(folder).expanduser()
+    target.mkdir(parents=True, exist_ok=True)
 
-def _parallel_download(results: List[dict], folder: str, workers: int = _DEFAULT_WORKERS, mime_check: bool = False, ignore_ssl: bool = False) -> Tuple[List[dict], dict]:
-    os.makedirs(folder, exist_ok=True)
+    max_workers = min(32, max(1, int(workers or 1)))
+    updated: List[Optional[dict]] = [None] * len(results)
+
     ok = fail = skipped = 0
-    updated: List[dict] = []
-    max_w = min(32, max(1, workers))
 
-    with ThreadPoolExecutor(max_workers=max_w) as pool:
-        futures = {pool.submit(_download_single, res, folder, mime_check, ignore_ssl): res for res in results}
-        for fut in as_completed(futures):
-            r = fut.result()
-            updated.append(r)
-            if r.get("dl_skipped"): skipped += 1
-            elif r.get("local_path"): ok += 1
-            else: fail += 1
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_map = {
+            pool.submit(
+                _download_single, result, str(target), mime_check, ignore_ssl
+            ): idx
+            for idx, result in enumerate(results)
+        }
 
-    stats = {"dl_ok": ok, "dl_fail": fail, "dl_skipped": skipped}
-    return updated, stats
+        for future in as_completed(future_map):
+            idx = future_map[future]
+            try:
+                item = future.result()
+            except Exception as e:
+                item = dict(results[idx])
+                item["dl_error"] = str(e)
+
+            updated[idx] = item
+
+            if item.get("dl_skipped"):
+                skipped += 1
+            elif item.get("local_path"):
+                ok += 1
+            else:
+                fail += 1
+
+    return (
+        [item for item in updated if item is not None],
+        {"dl_ok": ok, "dl_fail": fail, "dl_skipped": skipped},
+    )
 
 
 # ==============================================================================
 # REPORT GENERATION (HTML & CSV)
 # ==============================================================================
 
+
 def _html_report(data: dict) -> str:
-    params  = data.get("parameters", {})
-    query   = html.escape(str(params.get("query", data.get("query", ""))))
+    params = data.get("parameters", {})
+    query = html.escape(str(params.get("query", data.get("query", ""))))
     results = data.get("results", [])
-    count   = data.get("count", len(results))
-    ts      = html.escape(str(data.get("timestamp", "")))
+    count = data.get("count", len(results))
+    ts = html.escape(str(data.get("timestamp", "")))
 
     cards = ""
     for res in results:
@@ -1297,12 +1866,34 @@ h1{{color:#bb86fc;font-size:22px}}
 
 
 def _csv_report(results: list[dict], out_path: Path) -> str:
+    if not _validate_sandbox(out_path):
+        _err(f"CSV path {out_path} outside sandbox.")
+        return str(out_path)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["ID", "Title", "URL", "Page URL", "Source", "Local Path"])
-        for r in results:
-            writer.writerow([r.get("id"), r.get("title"), r.get("url"), r.get("page_url"), r.get("source"), r.get("local_path", "")])
+    temp_path = out_path.with_name(f"{out_path.name}.{uuid.uuid4().hex}.tmp")
+
+    try:
+        with open(temp_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["ID", "Title", "URL", "Page URL", "Source", "Local Path"])
+            for r in results:
+                writer.writerow(
+                    [
+                        r.get("id"),
+                        r.get("title"),
+                        r.get("url"),
+                        r.get("page_url"),
+                        r.get("source"),
+                        r.get("local_path", ""),
+                    ]
+                )
+        temp_path.replace(out_path)
+    finally:
+        with suppress(OSError):
+            if temp_path.exists():
+                temp_path.unlink()
+
     return str(out_path)
 
 
@@ -1310,44 +1901,63 @@ def _csv_report(results: list[dict], out_path: Path) -> str:
 # MAIN EXECUTION MODES
 # ==============================================================================
 
+
 def _search_mode(
-    query:          str,
-    limit:          int                 = 15,
-    platform:       Optional[str]       = None,
-    deep:           bool                = False,
-    tags:           Optional[List[str]] = None,
-    backend:        str                 = "yandex",
-    download:       bool                = False,
-    media_dir:      str                 = _DEFAULT_MEDIA_DIR,
-    verify_headers: bool                = False,
-    mime_check:     bool                = False,
-    ignore_ssl:     bool                = False,
-    workers:        int                 = _DEFAULT_WORKERS,
-    timeout:        float               = _REQUEST_TIMEOUT,
+    query: str,
+    limit: int = 15,
+    page: int = 1,
+    platform: Optional[str] = None,
+    deep: bool = False,
+    tags: Optional[List[str]] = None,
+    backend: str = "yandex",
+    download: bool = False,
+    media_dir: str = _DEFAULT_MEDIA_DIR,
+    verify_headers: bool = False,
+    mime_check: bool = False,
+    ignore_ssl: bool = False,
+    workers: int = _DEFAULT_WORKERS,
+    timeout: float = _REQUEST_TIMEOUT,
+    use_cache: bool = True,
 ) -> dict:
     q = (query or "").strip()
-    if tags: q = q + " " + " ".join(t for t in tags if t)
-    if platform: q = f"site:{platform} {q}"
-    limit = max(1, min(limit, 1000))
+    if tags:
+        q = q + " " + " ".join(t for t in tags if t)
+    if platform:
+        q = f"site:{platform} {q}"
+
+    requested_limit = max(1, min(int(limit), 1000))
+    page_limit = 10 if _coerce_bool(deep) else 1
+    start_page = max(1, int(page))
 
     key = backend.lower().strip()
     results: List[dict] = []
     used = key
 
+    backend_kwargs = {
+        "start_page": start_page,
+        "max_pages": page_limit,
+        "use_cache": use_cache,
+    }
+
     if key == "bing_dl":
-        results, used = _backend_bing_dl(q, limit, media_dir)
+        results, used = _backend_bing_dl(q, requested_limit, media_dir, **backend_kwargs)
     elif key in _BACKENDS:
-        results, used = _BACKENDS[key](q, limit)
+        results, used = _BACKENDS[key](q, requested_limit, **backend_kwargs)
     else:
-        results, used = _backend_yandex(q, limit)
+        results, used = _backend_yandex(q, requested_limit, **backend_kwargs)
 
     if not results and key == "yandex":
-        results, used = _backend_bing(q, limit)
+        results, used = _backend_bing(q, requested_limit, **backend_kwargs)
 
     if verify_headers and results:
         verified: List[dict] = []
         with ThreadPoolExecutor(max_workers=min(16, workers)) as pool:
-            futs = {pool.submit(_verify_url_headers, r["url"], mime_check, ignore_ssl, timeout): r for r in results}
+            futs = {
+                pool.submit(
+                    _verify_url_headers, r["url"], mime_check, ignore_ssl, timeout
+                ): r
+                for r in results
+            }
             for fut in as_completed(futs):
                 r = futs[fut]
                 vrf = fut.result()
@@ -1359,60 +1969,88 @@ def _search_mode(
     dl_stats: dict = {}
     if download and results:
         target = str(Path(media_dir).expanduser())
-        results, dl_stats = _parallel_download(results, target, workers, mime_check, ignore_ssl)
+        results, dl_stats = _parallel_download(
+            results, target, workers, mime_check, ignore_ssl
+        )
 
-    return _envelope(True, "search", data={
-        "parameters": {"query": query, "limit": limit, "backend": used, "download": download},
-        "search_meta": {"backend": used, "total_found": len(results)},
-        "download_stats": dl_stats,
-        "results": results,
-        "count": len(results),
-    })
+    return _envelope(
+        True,
+        "search",
+        data={
+            "parameters": {
+                "query": query,
+                "limit": requested_limit,
+                "backend": used,
+                "download": download,
+            },
+            "search_meta": {"backend": used, "total_found": len(results)},
+            "download_stats": dl_stats,
+            "results": results,
+            "count": len(results),
+        },
+    )
 
 
 def run(
-    mode:             str                 = "search",
-    url:              Optional[str]       = None,
-    method:           str                 = "HEAD",
-    follow_redirects: bool                = True,
-    output_fmt:       str                 = "json",
-    query:            Optional[str]       = None,
-    engine:           str                 = "pexels",
-    limit:            int                 = 15,
-    page:             int                 = 1,
-    platform:         Optional[str]       = None,
-    deep:             bool                = False,
-    tags:             Optional[List[str]] = None,
-    backend:          str                 = "yandex",
-    download:         bool                = False,
-    download_thumbs:  bool                = False,
-    media_dir:        str                 = _DEFAULT_MEDIA_DIR,
-    verify_headers:   bool                = False,
-    mime_check:       bool                = False,
-    workers:          int                 = _DEFAULT_WORKERS,
-    user_agent:       Optional[str]       = None,
-    timeout:          float               = _REQUEST_TIMEOUT,
-    ignore_ssl:       bool                = False,
-    cache_dir:        str                 = _DEFAULT_CACHE_DIR,
-    cache_ttl:        int                 = _CACHE_TTL,
-    use_cache:        bool                = False,
-    no_color:         bool                = False,
-    verbose:          bool                = False,
-    save:             Optional[str]       = None,
-    html:             Optional[str]       = None,
-    csv:              Optional[str]       = None,
+    mode: str = "search",
+    url: Optional[str] = None,
+    method: str = "HEAD",
+    follow_redirects: bool = True,
+    output_fmt: str = "json",
+    query: Optional[str] = None,
+    engine: str = "pexels",
+    limit: int = 15,
+    page: int = 1,
+    platform: Optional[str] = None,
+    deep: bool = False,
+    tags: Optional[List[str]] = None,
+    backend: str = "yandex",
+    download: bool = False,
+    download_thumbs: bool = False,
+    media_dir: str = _DEFAULT_MEDIA_DIR,
+    verify_headers: bool = False,
+    mime_check: bool = False,
+    workers: int = _DEFAULT_WORKERS,
+    user_agent: Optional[str] = None,
+    timeout: float = _REQUEST_TIMEOUT,
+    ignore_ssl: bool = False,
+    cache_dir: str = _DEFAULT_CACHE_DIR,
+    cache_ttl: int = _CACHE_TTL,
+    use_cache: bool = False,
+    no_color: bool = False,
+    verbose: bool = False,
+    save: Optional[str] = None,
+    html: Optional[str] = None,
+    csv: Optional[str] = None,
     **kwargs: Any,
 ) -> dict:
-    global _cache
-    if cache_dir != _DEFAULT_CACHE_DIR:
-        _cache = HttpCache(cache_dir, ttl=cache_ttl)
+    global _cache, _DEBUG, _IGNORE_SSL
+
+    _DEBUG = _coerce_bool(verbose)
+    _IGNORE_SSL = _coerce_bool(ignore_ssl)
+
+    safe_cache_ttl = max(0, min(int(cache_ttl or _CACHE_TTL), 7 * 24 * 3600))
+    safe_cache_dir = str(Path(cache_dir or _DEFAULT_CACHE_DIR).expanduser())
+
+    if safe_cache_dir != str(_cache.root) or safe_cache_ttl != _cache.ttl:
+        _cache = HttpCache(safe_cache_dir, ttl=safe_cache_ttl)
 
     mode = (mode or "search").lower().strip()
 
     if mode == "headers":
         if not url:
-            return _envelope(False, "headers", error="--url is required for headers mode")
-        res = _headers_mode(url=url, method=method, user_agent=user_agent, timeout=timeout, ignore_ssl=ignore_ssl, follow_redirects=follow_redirects, output_fmt=output_fmt)
+            return _envelope(
+                False, "headers", error="--url is required for headers mode"
+            )
+        res = _headers_mode(
+            url=url,
+            method=method,
+            user_agent=user_agent,
+            timeout=timeout,
+            ignore_ssl=ignore_ssl,
+            follow_redirects=follow_redirects,
+            output_fmt=output_fmt,
+        )
         if output_fmt == "pretty" and res.get("success"):
             print(_format_headers_pretty(res))
             return res
@@ -1421,12 +2059,32 @@ def run(
 
     if mode == "vsearch":
         if not query:
-            return _envelope(False, "vsearch", error="--query is required for vsearch mode")
-        vresults = _execute_vsearch(query=query, engine=engine, limit=limit, page=page, timeout=int(timeout))
+            return _envelope(
+                False, "vsearch", error="--query is required for vsearch mode"
+            )
+        vresults = _execute_vsearch(
+            query=query,
+            engine=engine,
+            limit=limit,
+            page=page,
+            timeout=int(timeout),
+            use_cache=_coerce_bool(use_cache),
+        )
         if download_thumbs:
             target = str(Path(media_dir).expanduser())
-            vresults, _ = _parallel_download(vresults, target, workers, mime_check, ignore_ssl)
-        res = _envelope(True, "vsearch", data={"query": query, "engine": engine, "results": vresults, "count": len(vresults)})
+            vresults, _ = _parallel_download(
+                vresults, target, workers, mime_check, ignore_ssl
+            )
+        res = _envelope(
+            True,
+            "vsearch",
+            data={
+                "query": query,
+                "engine": engine,
+                "results": vresults,
+                "count": len(vresults),
+            },
+        )
         _persist(res, save, html, csv)
         return res
 
@@ -1436,10 +2094,21 @@ def run(
         should_dl = download or (mode == "pipeline")
         should_verify = verify_headers or (mode == "pipeline")
         res = _search_mode(
-            query=query, limit=limit, platform=platform, deep=deep, tags=tags,
-            backend=backend, download=should_dl, media_dir=media_dir,
-            verify_headers=should_verify, mime_check=mime_check,
-            ignore_ssl=ignore_ssl, workers=workers, timeout=timeout,
+            query=query,
+            limit=limit,
+            page=page,
+            platform=platform,
+            deep=deep,
+            tags=tags,
+            backend=backend,
+            download=should_dl,
+            media_dir=media_dir,
+            verify_headers=should_verify,
+            mime_check=mime_check,
+            ignore_ssl=ignore_ssl,
+            workers=workers,
+            timeout=timeout,
+            use_cache=_coerce_bool(use_cache),
         )
         _persist(res, save, html, csv)
         return res
@@ -1447,13 +2116,32 @@ def run(
     return _envelope(False, "unknown", error=f"Unknown mode '{mode}'")
 
 
-def _persist(result: dict, save: Optional[str], html_path: Optional[str], csv_path: Optional[str]) -> None:
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+
+    try:
+        temp_path.write_text(content, encoding="utf-8")
+        temp_path.replace(path)
+    finally:
+        with suppress(OSError):
+            if temp_path.exists():
+                temp_path.unlink()
+
+
+def _persist(
+    result: dict, save: Optional[str], html_path: Optional[str], csv_path: Optional[str]
+) -> None:
     if save:
         try:
             sp = Path(save).expanduser()
             if _validate_sandbox(sp):
-                sp.parent.mkdir(parents=True, exist_ok=True)
-                sp.write_text(json.dumps(result, indent=2, ensure_ascii=False, cls=ToolJSONEncoder), encoding="utf-8")
+                _atomic_write_text(
+                    sp,
+                    json.dumps(
+                        result, indent=2, ensure_ascii=False, cls=ToolJSONEncoder
+                    ),
+                )
         except Exception as e:
             _err(f"JSON save error: {e}")
 
@@ -1461,8 +2149,7 @@ def _persist(result: dict, save: Optional[str], html_path: Optional[str], csv_pa
         try:
             hp = Path(html_path).expanduser()
             if _validate_sandbox(hp):
-                hp.parent.mkdir(parents=True, exist_ok=True)
-                hp.write_text(_html_report(result), encoding="utf-8")
+                _atomic_write_text(hp, _html_report(result))
         except Exception as e:
             _err(f"HTML save error: {e}")
 
@@ -1477,7 +2164,9 @@ def _persist(result: dict, save: Optional[str], html_path: Optional[str], csv_pa
 
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
@@ -1499,6 +2188,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # CLI ARGUMENT PARSER & INTERRUPT HANDLER
 # ==============================================================================
 
+
 class GracefulShutdown:
     def __init__(self) -> None:
         self.old_sigint = signal.signal(signal.SIGINT, self._handle_signal)
@@ -1515,18 +2205,24 @@ class GracefulShutdown:
 
 if __name__ == "__main__":
     shutdown_handler = GracefulShutdown()
-    
+
     ap = argparse.ArgumentParser(
         prog="osint",
-        description="Pyrmethus Master OSINT & Media Intelligence Engine v4.0.0",
+        description="Pyrmethus Master OSINT & Media Intelligence Engine v4.0.1",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    ap.add_argument("--mode", default="search", choices=["headers", "search", "vsearch", "pipeline"])
+    ap.add_argument(
+        "--mode", default="search", choices=["headers", "search", "vsearch", "pipeline"]
+    )
     ap.add_argument("--url", default=None)
     ap.add_argument("--method", default="HEAD")
-    ap.add_argument("--follow-redirects", dest="follow_redirects", action="store_true", default=True)
-    ap.add_argument("--output", dest="output_fmt", default="json", choices=["json", "pretty"])
+    ap.add_argument(
+        "--follow-redirects", dest="follow_redirects", action="store_true", default=True
+    )
+    ap.add_argument(
+        "--output", dest="output_fmt", default="json", choices=["json", "pretty"]
+    )
     ap.add_argument("--query", default=None)
     ap.add_argument("--engine", default="pexels", choices=list(ENGINE_MAP.keys()))
     ap.add_argument("--limit", type=int, default=15)
@@ -1534,7 +2230,9 @@ if __name__ == "__main__":
     ap.add_argument("--platform", default=None)
     ap.add_argument("--deep", action="store_true")
     ap.add_argument("--tags", action="append", metavar="TAG")
-    ap.add_argument("--backend", default="yandex", choices=list(_BACKENDS.keys()) + ["bing_dl"])
+    ap.add_argument(
+        "--backend", default="yandex", choices=list(_BACKENDS.keys()) + ["bing_dl"]
+    )
     ap.add_argument("--download", action="store_true")
     ap.add_argument("--download-thumbs", dest="download_thumbs", action="store_true")
     ap.add_argument("--media-dir", dest="media_dir", default=_DEFAULT_MEDIA_DIR)

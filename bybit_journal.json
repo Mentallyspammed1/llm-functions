@@ -1718,5 +1718,27 @@
       "msg": "ab not enough for new order"
     },
     "status": "failed"
+  },
+  {
+    "id": "1bde7ec6-9d3d-4603-a155-5a22323a0325",
+    "timestamp": "2026-08-17T15:09:42.576541+00:00",
+    "action": "place_order",
+    "symbol": "BTCUSDT",
+    "payload": {
+      "category": "linear",
+      "symbol": "BTCUSDT",
+      "side": "Buy",
+      "orderType": "Limit",
+      "qty": "1",
+      "timeInForce": "GTC",
+      "reduceOnly": false,
+      "price": "63000.0"
+    },
+    "result": {
+      "status": "error",
+      "code": 10003,
+      "msg": "API key is invalid."
+    },
+    "status": "failed"
   }
 ]

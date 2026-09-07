@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
+
 def human_readable_size(num_bytes: int) -> str:
     """Convert bytes to human readable format."""
     if num_bytes < 1024:
@@ -14,6 +15,7 @@ def human_readable_size(num_bytes: int) -> str:
         if num_bytes < 1024.0:
             return f"{num_bytes:.2f} {unit}"
     return f"{num_bytes:.2f} PB"
+
 
 def gather_files(root_path: str) -> List[Tuple[Path, int, str]]:
     """Walk root_path and return list of (file_path, size_bytes, mtime)"""
@@ -28,13 +30,24 @@ def gather_files(root_path: str) -> List[Tuple[Path, int, str]]:
                 continue
     return entries
 
+
 def main():
-    parser = argparse.ArgumentParser(description='Workspace analysis tool')
-    parser.add_argument('--path', type=str, default='.', help='Path to analyze')
-    parser.add_argument('--sort', type=str, choices=['name', 'size', 'date', 'type'], default='name')
-    parser.add_argument('--max-results', type=int, default=50, help='Maximum results to show')
-    parser.add_argument('--human-readable', action='store_true', help='Show sizes in human readable format (K/M/G)')
-    parser.add_argument('--show-summary', action='store_true', help='Show workspace summary')
+    parser = argparse.ArgumentParser(description="Workspace analysis tool")
+    parser.add_argument("--path", type=str, default=".", help="Path to analyze")
+    parser.add_argument(
+        "--sort", type=str, choices=["name", "size", "date", "type"], default="name"
+    )
+    parser.add_argument(
+        "--max-results", type=int, default=50, help="Maximum results to show"
+    )
+    parser.add_argument(
+        "--human-readable",
+        action="store_true",
+        help="Show sizes in human readable format (K/M/G)",
+    )
+    parser.add_argument(
+        "--show-summary", action="store_true", help="Show workspace summary"
+    )
     args = parser.parse_args()
 
     root = Path(args.path).expanduser().resolve()
@@ -45,17 +58,17 @@ def main():
     files = gather_files(str(root))
 
     # Determine sorting key
-    if args.sort == 'name':
+    if args.sort == "name":
         files.sort(key=lambda x: x[0].name.lower())
-    elif args.sort == 'size':
+    elif args.sort == "size":
         files.sort(key=lambda x: x[1])
-    elif args.sort == 'date':
+    elif args.sort == "date":
         files.sort(key=lambda x: x[2])
-    elif args.sort == 'type':
+    elif args.sort == "type":
         files.sort(key=lambda x: x[0].suffix.lower())
 
     # Apply max-results limit
-    files = files[:args.max_results]
+    files = files[: args.max_results]
 
     # Output each file
     for file_path, size, mtime in files:
@@ -66,7 +79,10 @@ def main():
     # Summary
     if args.show_summary:
         total_bytes = sum(f[1] for f in files)
-        print(f"\nSummary: {len(files)} items, total size {human_readable_size(total_bytes)}")
+        print(
+            f"\nSummary: {len(files)} items, total size {human_readable_size(total_bytes)}"
+        )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

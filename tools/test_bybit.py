@@ -1,7 +1,8 @@
 import sys
-import json
-sys.path.append('/data/data/com.termux/files/home/.config/aichat/llm-functions/tools')
+
+sys.path.append("/data/data/com.termux/files/home/.config/aichat/llm-functions/tools")
 import bybit_core
+
 params = {
     "category": "linear",
     "symbol": "BTCUSDT",

@@ -1,6 +1,9 @@
 #!/data/data/com.termux/files/usr/bin/env bash
 # ==============================================================================
 # Web Search Utility (Pyrmethus Enhanced Edition)
+# ==============================================================================
+# NOTE: keep annotation lines last in this header block — argc merges any
+# trailing comment lines into the final @flag/@option description.
 #
 # @describe Perform a web search using the You.com API backend
 # @option --query! <TEXT>              Search query
@@ -12,7 +15,6 @@
 # @option --timeout <SECONDS>         Python call timeout in seconds (default: 30)
 # @flag   --no-cache                  Bypass cache and force a live query
 # @flag   --clear-cache               Delete all cached results and exit
-# ==============================================================================
 
 set -euo pipefail
 

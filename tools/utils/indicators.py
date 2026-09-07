@@ -5,7 +5,7 @@ A comprehensive set of 25+ technical indicators for market analysis.
 """
 
 import math
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # --- Moving Averages ---
 
@@ -591,10 +591,8 @@ def fisher_transform(
         else:
             val = 0.33 * 2 * ((med[i] - mn) / (mx - mn) - 0.5) + 0.67 * value[i - 1]
 
-        if val > 0.999:
-            val = 0.999
-        if val < -0.999:
-            val = -0.999
+        val = min(val, 0.999)
+        val = max(val, -0.999)
         value[i] = val
         fish[i] = 0.5 * math.log((1 + val) / (1 - val)) + 0.5 * fish[i - 1]
 

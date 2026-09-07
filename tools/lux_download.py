@@ -40,15 +40,15 @@ __version__ = "1.2.0"
 # SECTION 1: Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 # Regex to strip ANSI escape codes
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[mGKHF]")
@@ -89,25 +89,43 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [LUX DOWNLOADER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [LUX DOWNLOADER v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}URL:{RESET}          {data.get('url', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Output Path:{RESET}  {data.get('output_path') or 'Default (Current Directory)'}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Stream/Format:{RESET}{data.get('stream') or 'Best / Auto'}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode Flags:{RESET}   "
-            f"Info Mode: {NEON_YELLOW}{data.get('info_mode', False)}{RESET} | "
-            f"Audio Only: {NEON_YELLOW}{data.get('audio_only', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Features:{RESET}     "
-            f"Playlist: {NEON_YELLOW}{data.get('playlist', False)}{RESET} | "
-            f"Captions: {NEON_YELLOW}{data.get('caption', False)}{RESET} | "
-            f"aria2c: {NEON_YELLOW}{data.get('use_aria2', False)}{RESET}")
-    
-    if data.get("threads"):
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Threads:{RESET}      {NEON_YELLOW}{data.get('threads')}{RESET}")
-    if data.get("cookie_used"):
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cookie Status:{RESET}{NEON_GREEN}Active{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}URL:{RESET}          {data.get('url', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Output Path:{RESET}  {data.get('output_path') or 'Default (Current Directory)'}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Stream/Format:{RESET}{data.get('stream') or 'Best / Auto'}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode Flags:{RESET}   "
+        f"Info Mode: {NEON_YELLOW}{data.get('info_mode', False)}{RESET} | "
+        f"Audio Only: {NEON_YELLOW}{data.get('audio_only', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Features:{RESET}     "
+        f"Playlist: {NEON_YELLOW}{data.get('playlist', False)}{RESET} | "
+        f"Captions: {NEON_YELLOW}{data.get('caption', False)}{RESET} | "
+        f"aria2c: {NEON_YELLOW}{data.get('use_aria2', False)}{RESET}"
+    )
 
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    if data.get("threads"):
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Threads:{RESET}      {NEON_YELLOW}{data.get('threads')}{RESET}"
+        )
+    if data.get("cookie_used"):
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cookie Status:{RESET}{NEON_GREEN}Active{RESET}"
+        )
+
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -121,7 +139,9 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         for line in lines[:15]:  # Cap output display
             _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}›{RESET} {line}")
         if len(lines) > 15:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(lines) - 15} more lines{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(lines) - 15} more lines{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -129,6 +149,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 2: Core Logic Implementation
 # ==============================================================================
+
 
 def execute_tool(
     url: str,
@@ -212,7 +233,9 @@ def execute_tool(
             cmd.append("-a")
             aria2_active = True
         elif verbose:
-            sys.stderr.write("[WARNING] aria2c requested but not found in PATH. Defaulting to lux downloader.\n")
+            sys.stderr.write(
+                "[WARNING] aria2c requested but not found in PATH. Defaulting to lux downloader.\n"
+            )
 
     cmd.append(url)
 
@@ -244,7 +267,9 @@ def execute_tool(
         }
 
         if not success:
-            res["error"] = proc.stderr.strip() or f"lux process exited with code {proc.returncode}"
+            res["error"] = (
+                proc.stderr.strip() or f"lux process exited with code {proc.returncode}"
+            )
 
         return res
 
@@ -263,10 +288,11 @@ def execute_tool(
 # SECTION 3: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    
+
     # Ensure JSON for LLM is clean (no ANSI color sequences)
     json_payload = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
@@ -289,6 +315,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # SECTION 4: Function Entry Point for AIChat
 # ==============================================================================
 
+
 def run(
     url: str,
     output_path: Optional[str] = None,
@@ -305,7 +332,7 @@ def run(
 ) -> None:
     """
     AIChat Programmatic Entrypoint.
-    
+
     Parameter names match option/flag slugs (converting hyphens to underscores).
     """
     result = execute_tool(
@@ -322,10 +349,10 @@ def run(
         no_color=no_color,
         verbose=verbose,
     )
-    
+
     # 1. Render interactive colorized UI for terminal users
     print_human_readable_ui(result, no_color=no_color)
-    
+
     # 2. Write structured JSON to LLM_OUTPUT
     write_llm_output(result)
 
@@ -334,42 +361,49 @@ def run(
 # SECTION 5: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lux_download.py",
         description=f"AIChat Lux Downloader Tool v{__version__}",
     )
     parser.add_argument(
-        "--url", "-u",
+        "--url",
+        "-u",
         required=True,
         metavar="URL",
         help="The video or playlist URL to download (required)",
     )
     parser.add_argument(
-        "--output-path", "-o",
+        "--output-path",
+        "-o",
         dest="output_path",
         metavar="PATH",
         help="Destination directory path for downloaded files",
     )
     parser.add_argument(
-        "--stream", "-s",
+        "--stream",
+        "-s",
         metavar="STREAM_ID",
         help="Select specific video stream/quality format (e.g., 1080p, 720p)",
     )
     parser.add_argument(
-        "--cookie", "-c",
+        "--cookie",
+        "-c",
         metavar="PATH_OR_TEXT",
         help="Path to cookie file or raw cookie string for authenticated downloads",
     )
     parser.add_argument(
-        "--threads", "-n",
+        "--threads",
+        "-n",
         type=int,
         default=None,
         metavar="NUM",
         help="Number of download threads / concurrency limit",
     )
     parser.add_argument(
-        "--info", "-i",
+        "--info",
+        "-i",
         action="store_true",
         default=False,
         help="Output video metadata and formats without downloading",
@@ -382,7 +416,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Download only the best quality audio track",
     )
     parser.add_argument(
-        "--playlist", "-p",
+        "--playlist",
+        "-p",
         action="store_true",
         default=False,
         help="Download full playlist if URL points to a playlist",
@@ -394,7 +429,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Download video captions / subtitles if available",
     )
     parser.add_argument(
-        "--use-aria2", "-A",
+        "--use-aria2",
+        "-A",
         action="store_true",
         default=False,
         dest="use_aria2",
@@ -408,7 +444,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",
@@ -432,7 +469,7 @@ if __name__ == "__main__":
         no_color=args.no_color,
         verbose=args.verbose,
     )
-    
+
     # Output rendering
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)

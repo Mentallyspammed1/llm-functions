@@ -9,7 +9,7 @@ import re
 
 def extract_description(tool_path):
     try:
-        with open(tool_path, "r", encoding="utf-8") as f:
+        with open(tool_path, encoding="utf-8") as f:
             content = f.read()
             match = re.search(r"@describe\s+(.*)", content)
             if match:
@@ -26,7 +26,7 @@ def extract_description(tool_path):
 def extract_parameters(tool_path):
     params = []
     try:
-        with open(tool_path, "r", encoding="utf-8") as f:
+        with open(tool_path, encoding="utf-8") as f:
             for line in f:
                 match = re.search(r"@option\s+--(\w+)(!?)\s+(.*)", line)
                 if match:

@@ -27,22 +27,21 @@ import os
 import re
 import socket
 import sys
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 __version__ = "2.2.1-ASCENDED"
 __all__ = [
-    "run",
-    "execute_proxy_tool",
-    "get_proxy_settings",
-    "get_proxies",
-    "is_proxy_available",
-    "set_proxy_environment",
-    "get_socks_port",
     "__version__",
+    "execute_proxy_tool",
+    "get_proxies",
+    "get_proxy_settings",
+    "get_socks_port",
+    "is_proxy_available",
+    "run",
+    "set_proxy_environment",
 ]
 
 # ==============================================================================
@@ -73,15 +72,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & UI Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -91,10 +90,15 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -115,11 +119,19 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [PROXY UTILITY ENGINE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [PROXY UTILITY ENGINE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}         {NEON_YELLOW}{data.get('action', 'check')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Available:{RESET}      {NEON_GREEN if data.get('available') else NEON_RED}{data.get('available', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}SOCKS Port:{RESET}     {NEON_YELLOW}{data.get('socks_port', 1080)}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Action:{RESET}         {NEON_YELLOW}{data.get('action', 'check')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Available:{RESET}      {NEON_GREEN if data.get('available') else NEON_RED}{data.get('available', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}SOCKS Port:{RESET}     {NEON_YELLOW}{data.get('socks_port', 1080)}{RESET}"
+    )
 
     proxies = data.get("proxies", {})
     if proxies:
@@ -135,6 +147,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 3: CORE PROXY LOGIC & PUBLIC API
 # ==============================================================================
+
 
 def get_proxy_settings() -> Dict[str, Optional[str]]:
     """Return a dictionary of raw proxy URLs from standard environment variables."""
@@ -193,7 +206,12 @@ def get_proxies() -> Dict[str, str]:
             proxies["https"] = https_p if "://" in https_p else f"http://{https_p}"
 
     # Fallback to local Tor SOCKS proxy automatically to bypass Geo-blocks
-    if not proxies and os.getenv("PROXY_ENABLED", "true").lower() in ("true", "1", "yes", "auto"):
+    if not proxies and os.getenv("PROXY_ENABLED", "true").lower() in (
+        "true",
+        "1",
+        "yes",
+        "auto",
+    ):
         tor_port = get_socks_port()
         tor_url = f"socks5h://127.0.0.1:{tor_port}"
         proxies["http"] = tor_url
@@ -244,9 +262,13 @@ def _parse_authority(proxy_url: str) -> Optional[Tuple[str, int]]:
         return None
 
 
-def is_proxy_available(timeout: float = 3.0, custom_proxy_url: Optional[str] = None) -> bool:
+def is_proxy_available(
+    timeout: float = 3.0, custom_proxy_url: Optional[str] = None
+) -> bool:
     """Check if at least one configured or passed proxy is reachable via TCP connection."""
-    target_urls = [custom_proxy_url] if custom_proxy_url else list(get_proxy_settings().values())
+    target_urls = (
+        [custom_proxy_url] if custom_proxy_url else list(get_proxy_settings().values())
+    )
 
     if not any(target_urls):
         target_urls = list(get_proxies().values())
@@ -274,6 +296,7 @@ def is_proxy_available(timeout: float = 3.0, custom_proxy_url: Optional[str] = N
 # SECTION 4: OUTPUT ROUTING & EXECUTOR
 # ==============================================================================
 
+
 def execute_proxy_tool(
     action: str = "check",
     proxy_url: Optional[str] = None,
@@ -283,7 +306,9 @@ def execute_proxy_tool(
     """Execute proxy utilities and return structured status metadata."""
     if verbose:
         logging.basicConfig(level=logging.DEBUG, format="[DEBUG] %(message)s")
-        logging.debug(f"Running proxy tool | Action: {action} | Custom Proxy: {proxy_url}")
+        logging.debug(
+            f"Running proxy tool | Action: {action} | Custom Proxy: {proxy_url}"
+        )
 
     set_proxy_environment()
     available = is_proxy_available(timeout=timeout, custom_proxy_url=proxy_url)
@@ -302,7 +327,9 @@ def execute_proxy_tool(
 
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     if out_path in ("/dev/stdout", "/dev/fd/1", "-"):
         sys.stdout.write(json_payload)
@@ -321,6 +348,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # ==============================================================================
 # SECTION 5: PROGRAMMATIC ENTRY POINT
 # ==============================================================================
+
 
 def run(
     action: str = "check",
@@ -346,25 +374,46 @@ def run(
 # SECTION 6: CLI ARGUMENT PARSER
 # ==============================================================================
 
+
 def _coerce(val: str) -> Any:
-    if val == "": return None
+    if val == "":
+        return None
     low = val.lower()
-    if low in ("true", "yes", "1"): return True
-    if low in ("false", "no", "0"): return False
-    try: return int(val)
-    except ValueError: pass
-    try: return float(val)
-    except ValueError: pass
+    if low in ("true", "yes", "1"):
+        return True
+    if low in ("false", "no", "0"):
+        return False
+    try:
+        return int(val)
+    except ValueError:
+        pass
+    try:
+        return float(val)
+    except ValueError:
+        pass
     return val
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="proxy_utils.py", description=f"Proxy Utility Tool v{__version__}")
-    parser.add_argument("--action", default="check", choices=["check", "get", "sync"], help="Action to perform")
+    parser = argparse.ArgumentParser(
+        prog="proxy_utils.py", description=f"Proxy Utility Tool v{__version__}"
+    )
+    parser.add_argument(
+        "--action",
+        default="check",
+        choices=["check", "get", "sync"],
+        help="Action to perform",
+    )
     parser.add_argument("--proxy-url", help="Custom proxy URL to test")
-    parser.add_argument("--timeout", type=float, default=3.0, help="Connection test timeout in seconds")
-    parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument(
+        "--timeout", type=float, default=3.0, help="Connection test timeout in seconds"
+    )
+    parser.add_argument(
+        "--no-color", action="store_true", help="Disable ANSI color output"
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable verbose debug logging"
+    )
     return parser
 
 

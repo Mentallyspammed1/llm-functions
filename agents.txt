@@ -1,3 +1,1 @@
-coder
-todo
-termux
+bybit_trader

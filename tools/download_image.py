@@ -7,12 +7,14 @@
 download_image.py - Download and save images.
 """
 
-import os
-import json
-import sys
 import argparse
+import json
+import os
+import sys
 import urllib.parse
+
 import requests
+
 
 def run(url: str, output_path: str = None, verbose: bool = False) -> dict:
     # 1. Resolve output path
@@ -22,7 +24,7 @@ def run(url: str, output_path: str = None, verbose: bool = False) -> dict:
         if not cache_dir:
             cache_dir = os.path.join(os.getcwd(), "cache", "download_image")
         os.makedirs(cache_dir, exist_ok=True)
-        
+
         # Extrapolate filename from url
         parsed_url = urllib.parse.urlparse(url)
         filename = os.path.basename(parsed_url.path)
@@ -41,37 +43,39 @@ def run(url: str, output_path: str = None, verbose: bool = False) -> dict:
     try:
         if verbose:
             print(f"Downloading {url} to {output_path}...", file=sys.stderr)
-            
+
         response = requests.get(url, headers=headers, timeout=30, stream=True)
         response.raise_for_status()
-        
+
         # Verify content type is an image
         content_type = response.headers.get("Content-Type", "")
         if "image" not in content_type and verbose:
-            print(f"Warning: Content-Type is '{content_type}', not standard image type.", file=sys.stderr)
-            
+            print(
+                f"Warning: Content-Type is '{content_type}', not standard image type.",
+                file=sys.stderr,
+            )
+
         with open(output_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
-                    
+
         return {
             "success": True,
             "url": url,
             "saved_path": os.path.abspath(output_path),
             "file_size": os.path.getsize(output_path),
-            "content_type": content_type
+            "content_type": content_type,
         }
     except Exception as e:
-        return {
-            "success": False,
-            "url": url,
-            "error": str(e)
-        }
+        return {"success": False, "url": url, "error": str(e)}
+
 
 if __name__ == "__main__":
     # 1. Parse JSON input if passed by aichat's tool dispatcher
-    if len(sys.argv) > 1 and (sys.argv[1].startswith("{") or sys.argv[1].startswith("[")):
+    if len(sys.argv) > 1 and (
+        sys.argv[1].startswith("{") or sys.argv[1].startswith("[")
+    ):
         try:
             kwargs = json.loads(sys.argv[1])
             url_val = kwargs.get("url")
@@ -83,7 +87,11 @@ if __name__ == "__main__":
             print(json.dumps(run(url_val, path_val, verb_val), indent=2))
             sys.exit(0)
         except Exception as err:
-            print(json.dumps({"success": False, "error": f"JSON argument parse error: {err}"}))
+            print(
+                json.dumps(
+                    {"success": False, "error": f"JSON argument parse error: {err}"}
+                )
+            )
             sys.exit(1)
 
     # 2. Fallback to standard CLI arguments

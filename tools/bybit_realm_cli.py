@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+
 from bybit_realm import run
+
 
 def main():
     parser = argparse.ArgumentParser(description="Bybit Realm CLI")
@@ -24,15 +26,25 @@ def main():
     order.add_argument("--price", type=float)
 
     args = parser.parse_args()
-    
+
     if args.action == "get_balance":
         print(run(action="get_wallet_balance", account_type=args.account_type))
     elif args.action == "get_positions":
         print(run(action="get_positions", symbol=args.symbol, category=args.category))
     elif args.action == "place_order":
-        print(run(action="place_order", symbol=args.symbol, side=args.side, qty=args.qty, order_type=args.order_type, price=args.price))
+        print(
+            run(
+                action="place_order",
+                symbol=args.symbol,
+                side=args.side,
+                qty=args.qty,
+                order_type=args.order_type,
+                price=args.price,
+            )
+        )
     else:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()

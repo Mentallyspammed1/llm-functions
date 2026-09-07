@@ -165,3 +165,4 @@
   "tags": [],
   "timestamp": "2026-05-20T17:50:01+00:00"
 }
+{"key": "user_shell", "value": "zsh", "type": "preference", "session": "default", "tags": ["shell", "environment"], "timestamp": "2026-07-31T04:16:56Z"}

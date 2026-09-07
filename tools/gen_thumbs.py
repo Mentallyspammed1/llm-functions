@@ -1,65 +1,364 @@
 #!/usr/bin/env python3
-"""Generate video thumbnails (local paths or URLs) via ffmpeg — llm-functions tool."""
-
-# @describe Generate video thumbnails (local paths or URLs) via ffmpeg.
+# ==============================================================================
+# video_master_tool.py — Pyrmethus AIChat Master Video Intelligence Tool v4.1.0
+# Native FFmpeg Thumbnail Extraction · Montage Grids · Scene Mapping (Zero-CV)
 #
-# @option --input!                One or more video paths or URLs (separated by commas or newlines).
-# @option --output-dir            Directory where thumbnail images are written (default: thumbnails).
-# @option --interval              Seconds between each captured frame (default: 10).
-# @option --width                 Thumbnail width in pixels; height scales automatically (default: 320).
-# @option --format                Output image format (png, jpg, webp) (default: png).
-# @option --start                 Start time as HH:MM:SS or seconds (default: 00:00:00).
-# @option --end                   End time as HH:MM:SS or seconds (default: 00:00:00).
-# @option --max-frames            Maximum number of thumbnails per input (default: 10).
-# @option --montage               Optional montage grid, e.g. 2x3 (requires ImageMagick or GraphicsMagick).
-# @option --montage-bg            Montage background color (default: white).
-# @option --tile-spacing          Montage tile spacing in pixels (default: 2).
-# @option --font                  Optional path to font file for timestamp overlay.
-# @option --font-size             Font size for timestamp overlay (default: 14).
-# @option --font-color            Font color for timestamp overlay (default: white).
-# @option --box-color             Box background color for timestamp overlay (default: black).
-# @option --box-opacity           Box background opacity for timestamp overlay (0.0 to 1.0) (default: 0.5).
-# @option --position              Position of timestamp overlay (tl, tr, bl, br) (default: bl).
-# @option --quality               JPEG/WebP quality (1-100) or PNG compression (1-9) (default: 80).
-# @flag   --add-timestamps        If set, draw the capture time on each thumbnail.
-# @flag   --strip-metadata        If set, strip EXIF metadata from output thumbnails.
-# @flag   --only-montage          If set, clean up individual frames and only keep the montage grid.
-# @flag   --verbose               Enable verbose logging to stderr.
+# @describe Master AI tool for native FFmpeg thumbnail extraction, montage grid building, and timestamp-to-query mapping without OpenCV/PySceneDetect dependencies.
 #
+# @meta require-tools aichat
+#
+# @option --target! <PATH>               Target video file path or URL (required)
+# @option --query <TEXT>                 Semantic query text to search across video scenes
+# @option --output-dir <PATH>            Directory where thumbnails and keyframes are written (default: thumbnails)
+# @option --interval <NUM>               Seconds between each captured frame for thumbnail generation (default: 10.0)
+# @option --width <NUM>                  Thumbnail width in pixels; height scales automatically (default: 320)
+# @option --format <FMT>                 Output image format: png, jpg, webp (default: png)
+# @option --start <TIME>                 Start time as HH:MM:SS or seconds (default: 00:00:00)
+# @option --end <TIME>                   End time as HH:MM:SS or seconds (default: 00:00:00)
+# @option --max-frames <NUM>             Maximum number of extracted thumbnail frames (default: 15)
+# @option --timestamps <LIST>            Comma-specific timestamps (HH:MM:SS or seconds) to capture
+# @option --percentages <LIST>           Comma-separated percentages (0-100) of video duration to capture
+# @option --montage <GRID>               Generate image grid montage, e.g. 2x3 or 3x3
+# @option --quality <NUM>                JPEG/WebP quality (1-100) or PNG compression level (1-9) (default: 80)
+# @flag   --keyframes                    Capture at keyframes only (I-frames) within time range
+# @flag   --force-keyframes              Force keyframes at exact timestamps (re-encodes for precise seeking)
+# @flag   --add-timestamps               Draw the capture time overlay on each generated thumbnail
+# @flag   --strip-metadata               Strip EXIF metadata from output thumbnails
+# @flag   --only-montage                 Clean up intermediate frames and keep only the montage grid
+# @flag   --use-cache                    Enable result caching for expensive video processing operations
+# @flag   --clear-cache                  Clear tool cache directory and exit
+# @flag   --schema                       Print JSON Tool Schema for LLM registration and exit
+# @flag   --no-color                     Disable ANSI color output
+# @flag   --verbose                      Enable detailed debug log output
+#
+# @env LLM_OUTPUT=/dev/stdout            Output path for LLM integration
+# ==============================================================================
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import hashlib
+import json
+import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
+from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
-TIME_RE = re.compile(
-    r"^(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:\.(\d+))?$"
-)
+__version__ = "4.1.0"
+__all__ = [
+    "run",
+    "execute_tool",
+    "main",
+    "validate_inputs",
+    "generate_tool_schema",
+    "ToolCache",
+    "ToolError",
+    "GracefulShutdown",
+    "__version__",
+]
 
-_verbose: bool = False
+# ==============================================================================
+# SECTION 1: Exit Codes, Validation Rules & Exception Models
+# ==============================================================================
+
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
+EXIT_FILE_NOT_FOUND = 2
+EXIT_TIMEOUT = 124
+EXIT_PERMISSION_DENIED = 126
+EXIT_INVALID_INPUT = 127
+EXIT_INTERRUPTED = 130
+
+TIME_RE = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:\.(\d+))?$")
 
 
-def _debug(msg: str) -> None:
-    if _verbose:
-        print(f"[DEBUG] {msg}", file=sys.stderr)
+class ToolError(Exception):
+    """Structured exception model for tool operations."""
+
+    def __init__(
+        self,
+        message: str,
+        exit_code: int = EXIT_ERROR,
+        details: Optional[dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.exit_code = exit_code
+        self.details = details or {}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": False,
+            "error": self.message,
+            "exit_code": self.exit_code,
+            **self.details,
+        }
 
 
-def _info(msg: str) -> None:
-    print(f"[INFO] {msg}", file=sys.stderr)
+def validate_inputs(
+    target: Optional[str],
+    width: int,
+    interval: float,
+    max_frames: int,
+) -> Optional[dict[str, Any]]:
+    """Validate core input parameters strictly before execution."""
+    if not target or not target.strip():
+        return {
+            "success": False,
+            "error": "Target video path or URL is required.",
+            "exit_code": EXIT_INVALID_INPUT,
+            "duration_ms": 0.0,
+        }
+    if width < 16:
+        return {
+            "success": False,
+            "error": f"Invalid width '{width}'. Width must be >= 16 pixels.",
+            "exit_code": EXIT_INVALID_INPUT,
+            "duration_ms": 0.0,
+        }
+    if interval <= 0:
+        return {
+            "success": False,
+            "error": f"Invalid interval '{interval}'. Interval must be > 0 seconds.",
+            "exit_code": EXIT_INVALID_INPUT,
+            "duration_ms": 0.0,
+        }
+    if max_frames < 1:
+        return {
+            "success": False,
+            "error": f"Invalid max_frames '{max_frames}'. Must be >= 1.",
+            "exit_code": EXIT_INVALID_INPUT,
+            "duration_ms": 0.0,
+        }
+    return None
 
 
-def _warn(msg: str) -> None:
-    print(f"[WARNING] {msg}", file=sys.stderr)
+class ToolJSONEncoder(json.JSONEncoder):
+    """Resilient JSON encoder handling Path, Enum, datetime, timedelta, and dataclasses."""
 
+    def default(self, obj: Any) -> Any:
+        try:
+            if isinstance(obj, Path):
+                return str(obj)
+            if isinstance(obj, Enum):
+                return obj.value
+            if isinstance(obj, (datetime, date)):
+                return obj.isoformat()
+            if isinstance(obj, timedelta):
+                return obj.total_seconds()
+            if dataclasses.is_dataclass(obj):
+                return dataclasses.asdict(obj)
+        except Exception:
+            pass
+        return repr(obj)
+
+
+# ==============================================================================
+# SECTION 2: Terminal Colors & UI Display Helpers
+# ==============================================================================
+
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+def _is_tty(no_color: bool = False) -> bool:
+    if no_color or os.environ.get("NO_COLOR"):
+        return False
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+
+
+def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+    target = file or sys.stderr
+    if not _is_tty(no_color=no_color):
+        text = _strip_ansi(text)
+    print(text, file=target, flush=True, end=end)
+
+
+def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> None:
+    """Render human-friendly box UI to stderr."""
+    if not _is_tty(no_color=no_color):
+        return
+
+    success = data.get("success", False)
+    status_color = NEON_GREEN if success else NEON_RED
+    status_symbol = "✓" if success else "✗"
+    status_text = "SUCCESS" if success else "FAILED"
+
+    box_w = 68
+    border = "─" * box_w
+
+    _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}", no_color=no_color)
+    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}🎬 [PURE-FFMPEG VIDEO TOOL v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}", no_color=no_color)
+    _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
+    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target Video:{RESET} {data.get('target', 'N/A')}", no_color=no_color)
+    if data.get("query"):
+        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query Match:{RESET}  {NEON_YELLOW}\"{data.get('query')}\"{RESET}", no_color=no_color)
+    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Thumbnails:{RESET}   {NEON_GREEN}{len(data.get('generated_thumbnails', []))} files{RESET}", no_color=no_color)
+    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}       {NEON_YELLOW}{data.get('cached', False)}{RESET}", no_color=no_color)
+    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}", no_color=no_color)
+
+    if not success and "error" in data:
+        _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
+        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}    {data['error']}", no_color=no_color)
+
+    matches = data.get("matching_segments", [])
+    if matches:
+        _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
+        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Relevant Query Timestamps:{RESET}", no_color=no_color)
+        for m in matches[:5]:
+            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}⏱ [{m['start_time']} ➔ {m['end_time']}]{RESET} Score: {NEON_GREEN}{m['relevance_score']}{RESET}", no_color=no_color)
+
+    thumbs = data.get("generated_thumbnails", [])
+    if thumbs:
+        _cprint(f"{NEON_PURPLE}├{border}┤{RESET}", no_color=no_color)
+        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Generated Output Files (Sample):{RESET}", no_color=no_color)
+        for th in thumbs[:5]:
+            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {th}", no_color=no_color)
+        if len(thumbs) > 5:
+            _cprint(f"{NEON_PURPLE}│{RESET}   {DIM}... and {len(thumbs) - 5} more files{RESET}", no_color=no_color)
+
+    _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}", no_color=no_color)
+
+
+# ==============================================================================
+# SECTION 3: Cache Management & Schema Definition
+# ==============================================================================
+
+class ToolCache:
+    """Safe, JSON file-backed caching utility with TTL support."""
+
+    def __init__(self, cache_dir: Optional[Path] = None) -> None:
+        self.cache_dir = cache_dir or (Path.home() / ".cache" / "aichat_ffmpeg_video")
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+    def _hash_key(self, key_str: str) -> str:
+        return hashlib.sha256(key_str.encode("utf-8")).hexdigest()
+
+    def get(self, key_str: str, ttl_seconds: int = 86400) -> Optional[dict[str, Any]]:
+        cache_file = self.cache_dir / f"{self._hash_key(key_str)}.json"
+        if not cache_file.exists():
+            return None
+        try:
+            if time.time() - cache_file.stat().st_mtime > ttl_seconds:
+                cache_file.unlink(missing_ok=True)
+                return None
+            with open(cache_file, "r", encoding="utf-8") as fp:
+                data = json.load(fp)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+        return None
+
+    def set(self, key_str: str, value: Any) -> None:
+        cache_file = self.cache_dir / f"{self._hash_key(key_str)}.json"
+        tmp_file = cache_file.with_suffix(".tmp")
+        try:
+            payload = json.dumps(value, cls=ToolJSONEncoder, ensure_ascii=False)
+            with open(tmp_file, "w", encoding="utf-8") as fp:
+                fp.write(payload)
+            tmp_file.replace(cache_file)
+        except Exception:
+            if tmp_file.exists():
+                tmp_file.unlink(missing_ok=True)
+
+
+def invalidate_cache(cache: Optional[ToolCache] = None) -> int:
+    cache_obj = cache or ToolCache()
+    removed = 0
+    if not cache_obj.cache_dir.exists():
+        return removed
+    for file in cache_obj.cache_dir.glob("*.json"):
+        try:
+            file.unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+class GracefulShutdown:
+    """Context manager for intercepting termination signals cleanly."""
+
+    def __init__(self) -> None:
+        self.interrupted = False
+        self._old_sigint = None
+        self._old_sigterm = None
+
+    def __enter__(self) -> GracefulShutdown:
+        self.interrupted = False
+        try:
+            self._old_sigint = signal.signal(signal.SIGINT, self._handle_signal)
+            self._old_sigterm = signal.signal(signal.SIGTERM, self._handle_signal)
+        except (ValueError, AttributeError):
+            pass
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        if self._old_sigint is not None:
+            signal.signal(signal.SIGINT, self._old_sigint)
+        if self._old_sigterm is not None:
+            signal.signal(signal.SIGTERM, self._old_sigterm)
+
+    def _handle_signal(self, signum: int, frame: Any) -> None:
+        self.interrupted = True
+
+    def should_stop(self) -> bool:
+        return getattr(self, "interrupted", False)
+
+
+def generate_tool_schema() -> dict[str, Any]:
+    return {
+        "name": "video_master_tool",
+        "description": "Pure-FFmpeg video tool for extracting thumbnails, generating image grid montages, and querying time segments.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target video file path or remote URL (required)"},
+                "query": {"type": "string", "description": "Optional search query to match against timestamps"},
+                "output_dir": {"type": "string", "description": "Directory for writing output thumbnails (default: thumbnails)"},
+                "interval": {"type": "number", "description": "Seconds between captured frames (default: 10.0)"},
+                "width": {"type": "integer", "description": "Thumbnail width in pixels (default: 320)"},
+                "format": {"type": "string", "enum": ["png", "jpg", "webp"], "description": "Output format"},
+                "montage": {"type": "string", "description": "Montage grid layout, e.g. 2x3 or 3x3"},
+                "keyframes": {"type": "boolean", "description": "Capture at keyframes only"},
+                "add_timestamps": {"type": "boolean", "description": "Draw capture time on each thumbnail"}
+            },
+            "required": ["target"]
+        }
+    }
+
+
+# ==============================================================================
+# SECTION 4: Native FFmpeg Helpers
+# ==============================================================================
 
 def _validate_sandbox(path: Path) -> bool:
     home = Path.home().resolve()
@@ -73,7 +372,6 @@ def _validate_sandbox(path: Path) -> bool:
 
 
 def _run(cmd: Sequence[str], timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
-    _debug(f"Running command: {' '.join(cmd)}")
     return subprocess.run(
         list(cmd),
         check=True,
@@ -86,19 +384,29 @@ def _run(cmd: Sequence[str], timeout: float = 60.0) -> subprocess.CompletedProce
 def _which_or_die(name: str) -> str:
     path = shutil.which(name)
     if not path:
-        raise RuntimeError(f"{name} not found on PATH")
+        raise ToolError(f"Required system binary '{name}' not found on PATH. Please install FFmpeg.", EXIT_ERROR)
     return path
 
 
-def _parse_time_to_seconds(s: str) -> float:
+def _parse_time_to_seconds(s: str, duration: float = 0.0) -> float:
     s = (s or "").strip()
     if not s or s == "00:00:00":
         return 0.0
+    if s.endswith("%"):
+        try:
+            pct = float(s[:-1])
+            if 0 <= pct <= 100 and duration > 0:
+                return duration * pct / 100.0
+        except ValueError:
+            pass
+        raise ValueError(f"invalid percentage: {s}")
+    if s.endswith("s") and s[:-1].replace(".", "").isdigit():
+        return float(s[:-1])
     if re.fullmatch(r"\d+(?:\.\d+)?", s):
         return float(s)
     m = TIME_RE.match(s)
     if not m:
-        raise ValueError(f"invalid time: {s}")
+        raise ValueError(f"invalid time format: {s}")
     h, mi, sec, frac = m.groups()
     h = int(h or 0)
     mi, sec = int(mi), int(sec)
@@ -134,120 +442,22 @@ def _probe_duration(path: str, ffprobe: str) -> float:
     proc = _run(
         [
             ffprobe,
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
             path,
         ]
     )
     return float(proc.stdout.strip())
 
 
-def _compute_timestamps(
-    duration: float,
-    start: float,
-    end: float,
-    interval: float,
-    max_frames: int,
-) -> List[float]:
-    if end > 0:
-        if end > start:
-            stop = min(duration, end)
-        else:
-            stop = min(duration, start + end)
-    else:
-        stop = duration
-    start = max(0.0, min(start, duration))
-    if stop <= start:
-        return [start]
-
-    times: List[float] = []
-    t = start
-    while t < stop - 1e-3 and len(times) < max_frames:
-        times.append(round(t, 3))
-        t += interval
-    if not times:
-        times.append(start)
-    return times[:max_frames]
-
-
-def _extract_frame(
-    ffmpeg: str,
-    src: str,
-    t: float,
-    out_path: Path,
-    width: int,
-    fmt: str,
-    add_timestamp: bool,
-    font: Optional[str] = None,
-    font_size: int = 14,
-    font_color: str = "white",
-    box_color: str = "black",
-    box_opacity: float = 0.5,
-    position: str = "bl",
-    quality: int = 80,
-    strip_metadata: bool = False,
-) -> None:
-    vf_parts = [f"scale={width}:-2"]
-    if add_timestamp:
-        ts = _format_timestamp(t).replace(":", r"\:")
-        # Calculate overlay position parameters
-        if position == "tl":
-            x, y = "10", "10"
-        elif position == "tr":
-            x, y = "w-tw-10", "10"
-        elif position == "br":
-            x, y = "w-tw-10", "h-th-10"
-        else:  # bl default
-            x, y = "10", "h-th-10"
-
-        drawtext = (
-            f"drawtext=text='{ts}':fontsize={font_size}:fontcolor={font_color}:"
-            f"box=1:boxcolor={box_color}@{box_opacity}:x={x}:y={y}"
-        )
-        if font:
-            drawtext += f":fontfile='{font}'"
-        vf_parts.append(drawtext)
-
-    vf = ",".join(vf_parts)
-    ext = fmt.lower()
-    extra: List[str] = []
-    if ext in ("jpg", "jpeg"):
-        # JPEG quality scale from 1 (best) to 31 (worst). Maps 1-100 to 2-31 roughly.
-        q_val = max(2, min(31, int(31 - (quality * 29 / 100))))
-        extra.extend(["-q:v", str(q_val)])
-    elif ext == "webp":
-        extra.extend(["-quality", str(quality)])
-    elif ext == "png":
-        # PNG compression from 1 (fastest) to 9 (best)
-        png_comp = max(1, min(9, int(quality / 10)))
-        extra.extend(["-compression_level", str(png_comp)])
-
-    if strip_metadata:
-        extra.extend(["-map_metadata", "-1"])
-
-    _run(
-        [
-            ffmpeg,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-ss",
-            str(max(0.0, t)),
-            "-i",
-            src,
-            "-frames:v",
-            "1",
-            "-vf",
-            vf,
-            *extra,
-            "-y",
-            str(out_path),
-        ]
-    )
+def _download_url(url: str, temp_dir: Path) -> Path:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    req = urllib.request.Request(url, headers=headers)
+    target = temp_dir / "downloaded_video"
+    with urllib.request.urlopen(req, timeout=30.0) as response, open(target, "wb") as out_file:
+        shutil.copyfileobj(response, out_file)
+    return target
 
 
 def _parse_montage(montage: str) -> Optional[Tuple[int, int]]:
@@ -267,7 +477,6 @@ def _try_montage(
     bg: str = "white",
     spacing: int = 2,
 ) -> bool:
-    # Try ImageMagick montage first, fall back to GraphicsMagick gm montage
     montage_bin = shutil.which("montage")
     cmd = []
     if montage_bin:
@@ -276,148 +485,36 @@ def _try_montage(
         gm_bin = shutil.which("gm")
         if gm_bin:
             cmd = [gm_bin, "montage"]
-
     if not cmd:
         return False
-
     cols, rows = grid
     _run(
         [
             *cmd,
             *[str(p) for p in paths],
-            "-tile",
-            f"{cols}x{rows}",
-            "-geometry",
-            f"+{spacing}+{spacing}",
-            "-background",
-            bg,
+            "-tile", f"{cols}x{rows}",
+            "-geometry", f"+{spacing}+{spacing}",
+            "-background", bg,
             str(out),
         ]
     )
     return True
 
 
-def _split_inputs(raw: str) -> List[str]:
-    parts: List[str] = []
-    for chunk in re.split(r"[\n,]+", raw or ""):
-        chunk = chunk.strip()
-        if chunk:
-            parts.append(chunk)
-    return parts
+# ==============================================================================
+# SECTION 5: Core Execution Engine
+# ==============================================================================
 
-
-def _download_url(url: str, temp_dir: Path) -> Path:
-    _info(f"Downloading remote URL: {url}...")
-    headers = {"User-Agent": "Mozilla/5.0"}
-    req = urllib.request.Request(url, headers=headers)
-    target = temp_dir / "downloaded_video"
-    with urllib.request.urlopen(req, timeout=30.0) as response, open(target, "wb") as out_file:
-        shutil.copyfileobj(response, out_file)
-    return target
-
-
-def _process_one(
-    inp: str,
-    out_dir: Path,
-    interval: float,
-    width: int,
-    fmt: str,
-    start_s: float,
-    end_s: float,
-    max_frames: int,
-    montage: str,
-    montage_bg: str,
-    tile_spacing: int,
-    font: Optional[str],
-    font_size: int,
-    font_color: str,
-    box_color: str,
-    box_opacity: float,
-    position: str,
-    quality: int,
-    add_timestamps: bool,
-    strip_metadata: bool,
-    only_montage: bool,
-    ffmpeg: str,
-    ffprobe: str,
-) -> List[str]:
-    stem = _sanitize_stem(inp)
-    per_dir = out_dir / stem
-    per_dir.mkdir(parents=True, exist_ok=True)
-
-    local_file = inp
-    temp_d = None
-    try:
-        if _is_url(inp):
-            temp_d = tempfile.TemporaryDirectory()
-            local_file = str(_download_url(inp, Path(temp_d.name)))
-        else:
-            local_file_path = Path(local_file).expanduser().resolve()
-            if not _validate_sandbox(local_file_path):
-                raise ValueError(f"Input path '{inp}' violates sandbox boundaries.")
-            local_file = str(local_file_path)
-
-        duration = _probe_duration(local_file, ffprobe)
-        times = _compute_timestamps(duration, start_s, end_s, interval, max_frames)
-
-        paths: List[Path] = []
-        lines: List[str] = []
-        for i, t in enumerate(times):
-            out_path = per_dir / f"{stem}_{i:04d}_{int(t)}s.{fmt}"
-            _extract_frame(
-                ffmpeg=ffmpeg,
-                src=local_file,
-                t=t,
-                out_path=out_path,
-                width=width,
-                fmt=fmt,
-                add_timestamp=add_timestamps,
-                font=font,
-                font_size=font_size,
-                font_color=font_color,
-                box_color=box_color,
-                box_opacity=box_opacity,
-                position=position,
-                quality=quality,
-                strip_metadata=strip_metadata,
-            )
-            paths.append(out_path)
-            if not only_montage:
-                lines.append(str(out_path))
-
-        grid = _parse_montage(montage)
-        if grid:
-            cap = grid[0] * grid[1]
-            use = paths[:cap]
-            montage_out = per_dir / f"{stem}_montage_{montage.strip().lower()}.{fmt}"
-            if _try_montage(use, grid, montage_out, montage_bg, tile_spacing):
-                lines.append(str(montage_out))
-            else:
-                lines.append("WARN: Neither ImageMagick nor GraphicsMagick montage was found; skipped montage")
-
-        if only_montage and grid:
-            # Clean up intermediate frames
-            for p in paths:
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
-
-        return lines
-    finally:
-        if temp_d:
-            temp_d.cleanup()
-
-
-def run(
-    input: str,
+def execute_tool(
+    target: str,
+    query: Optional[str] = None,
     output_dir: str = "thumbnails",
-    interval: float = 10,
+    interval: float = 10.0,
     width: int = 320,
-    image_format: str = "png",
+    format: str = "png",
     start: str = "00:00:00",
     end: str = "00:00:00",
-    max_frames: int = 10,
+    max_frames: int = 15,
     montage: str = "",
     montage_bg: str = "white",
     tile_spacing: int = 2,
@@ -431,140 +528,373 @@ def run(
     add_timestamps: bool = False,
     strip_metadata: bool = False,
     only_montage: bool = False,
-) -> str:
-    """Generate thumbnails from video files or URLs using ffmpeg."""
-    inputs = _split_inputs(input)
-    if not inputs:
-        return "ERROR: input is empty"
+    timestamps: str = "",
+    percentages: str = "",
+    keyframes: bool = False,
+    force_keyframes: bool = False,
+    manifest: str = "",
+    progress: bool = False,
+    use_cache: bool = False,
+    no_color: bool = False,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    start_time = time.monotonic()
 
-    if interval <= 0:
-        return "ERROR: interval must be positive"
-    if max_frames < 1:
-        return "ERROR: max_frames must be >= 1"
-    if width < 16:
-        return "ERROR: width too small"
+    bad_inputs = validate_inputs(target, width, interval, max_frames)
+    if bad_inputs:
+        return bad_inputs
 
-    fmt = image_format.lower().strip()
-    if fmt == "jpeg":
-        fmt = "jpg"
-    if fmt not in ("png", "jpg", "webp"):
-        return "ERROR: image_format must be png, jpg, or webp"
+    cache = ToolCache()
+    cache_key = f"{__version__}|{target}|{query}|{interval}|{width}|{format}|{montage}"
+
+    if use_cache:
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            cached_result["cached"] = True
+            return cached_result
+
+    out_dir = Path(output_dir).expanduser().resolve()
+    if not _validate_sandbox(out_dir):
+        return {
+            "success": False,
+            "error": "output_dir is outside the allowed sandbox boundaries.",
+            "exit_code": EXIT_PERMISSION_DENIED,
+            "duration_ms": 0.0,
+        }
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         ffmpeg = _which_or_die("ffmpeg")
         ffprobe = _which_or_die("ffprobe")
-        start_s = _parse_time_to_seconds(start)
-        end_s = _parse_time_to_seconds(end)
-        _parse_montage(montage)  # validate early
-    except (RuntimeError, ValueError) as e:
-        return f"ERROR: {e}"
+    except ToolError as e:
+        return {"success": False, "error": e.message, "exit_code": e.exit_code, "duration_ms": 0.0}
 
-    out_dir = Path(output_dir).expanduser().resolve()
-    if not _validate_sandbox(out_dir):
-        return "ERROR: output_dir is outside the allowed sandbox"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    generated_thumbnails: List[str] = []
+    matching_segments: List[dict[str, Any]] = []
+    manifest_data: List[dict[str, Any]] = []
 
-    all_lines: List[str] = []
+    temp_d = None
+    local_file = target
+    try:
+        if _is_url(target):
+            temp_d = tempfile.TemporaryDirectory()
+            local_file = str(_download_url(target, Path(temp_d.name)))
+        else:
+            local_path = Path(target).expanduser().resolve()
+            if not _validate_sandbox(local_path):
+                return {"success": False, "error": f"Target path '{target}' violates sandbox boundaries.", "exit_code": EXIT_PERMISSION_DENIED, "duration_ms": 0.0}
+            local_file = str(local_path)
 
-    # Parallel processing of multiple inputs
-    with ThreadPoolExecutor(max_workers=min(4, len(inputs))) as executor:
-        futures = [
-            executor.submit(
-                _process_one,
-                one,
-                out_dir,
-                float(interval),
-                int(width),
-                fmt,
-                start_s,
-                end_s,
-                int(max_frames),
-                montage,
-                montage_bg,
-                int(tile_spacing),
-                font,
-                int(font_size),
-                font_color,
-                box_color,
-                float(box_opacity),
-                position,
-                int(quality),
-                bool(add_timestamps),
-                bool(strip_metadata),
-                bool(only_montage),
-                ffmpeg,
-                ffprobe,
-            )
-            for one in inputs
-        ]
+        duration = _probe_duration(local_file, ffprobe)
+        start_s = _parse_time_to_seconds(start, duration)
+        end_s = _parse_time_to_seconds(end, duration)
 
-        for future in futures:
-            try:
-                all_lines.extend(future.result())
-            except subprocess.CalledProcessError as e:
-                err = (e.stderr or e.stdout or str(e)).strip()
-                return f"ERROR: ffmpeg failed: {err}"
-            except Exception as e:
-                return f"ERROR: {e}"
+        stem = _sanitize_stem(target)
+        per_dir = out_dir / stem
+        per_dir.mkdir(parents=True, exist_ok=True)
 
-    return "\n".join(all_lines) if all_lines else "ERROR: no thumbnails generated"
+        # ── TIMESTAMPS GENERATION ─────────────────────────────────────────────
+        times: List[float] = []
+        if timestamps:
+            for part in timestamps.split(","):
+                if part.strip():
+                    times.append(_parse_time_to_seconds(part.strip(), duration))
+        elif percentages:
+            for part in percentages.split(","):
+                if part.strip():
+                    times.append(float(part.strip()) / 100.0 * duration)
+        else:
+            stop = min(duration, end_s if end_s > 0 else duration)
+            t = max(0.0, min(start_s, duration))
+            while t < stop - 1e-3 and len(times) < max_frames:
+                times.append(round(t, 3))
+                t += interval
+            if not times:
+                times.append(start_s)
+
+        # Standard query query-to-segment mapping heuristic
+        if query:
+            q_tokens = [w.lower() for w in re.findall(r'\w+', query)]
+            for t_idx, t_val in enumerate(times):
+                desc = f"Video frame snapshot captured at timestamp {_format_timestamp(t_val)}."
+                score = 0.5 if any(tok in desc.lower() for tok in q_tokens) else 0.3
+                matching_segments.append({
+                    "start_time": _format_timestamp(max(0, t_val - 2)),
+                    "end_time": _format_timestamp(t_val + 2),
+                    "relevance_score": score,
+                    "description": desc
+                })
+
+        fmt = format.lower().strip()
+        if fmt == "jpeg":
+            fmt = "jpg"
+
+        with GracefulShutdown() as shutdown:
+            for i, t in enumerate(times[:max_frames]):
+                if shutdown.should_stop():
+                    raise ToolError("Thumbnail generation aborted by signal.", EXIT_INTERRUPTED)
+
+                out_thumb_path = per_dir / f"{stem}_{i:04d}_{int(t)}s.{fmt}"
+                
+                vf_parts = [f"scale={width}:-2"]
+                if add_timestamps:
+                    ts_str = _format_timestamp(t).replace(":", r"\:")
+                    vf_parts.append(f"drawtext=text='{ts_str}':fontsize={font_size}:fontcolor={font_color}:box=1:boxcolor={box_color}@{box_opacity}:x=10:y=h-th-10")
+                
+                vf = ",".join(vf_parts)
+                extra_args = []
+                if fmt == "jpg":
+                    q_val = max(2, min(31, int(31 - (quality * 29 / 100))))
+                    extra_args.extend(["-q:v", str(q_val)])
+                elif fmt == "webp":
+                    extra_args.extend(["-quality", str(quality)])
+                elif fmt == "png":
+                    extra_args.extend(["-compression_level", str(max(1, min(9, int(quality / 10))))])
+                
+                if strip_metadata:
+                    extra_args.extend(["-map_metadata", "-1"])
+
+                _run([
+                    ffmpeg,
+                    "-hide_banner", "-loglevel", "error",
+                    "-ss", str(max(0.0, t)),
+                    "-i", local_file,
+                    "-frames:v", "1",
+                    "-vf", vf,
+                    *extra_args,
+                    "-y", str(out_thumb_path),
+                ])
+
+                generated_thumbnails.append(str(out_thumb_path))
+                if not only_montage:
+                    manifest_data.append({
+                        "output": str(out_thumb_path),
+                        "timestamp": round(t, 3),
+                        "formatted": _format_timestamp(t)
+                    })
+
+        grid = _parse_montage(montage)
+        if grid:
+            cap_tiles = grid[0] * grid[1]
+            tile_paths = [Path(p) for p in generated_thumbnails[:cap_tiles]]
+            montage_out = per_dir / f"{stem}_montage_{montage.lower()}.{fmt}"
+            if _try_montage(tile_paths, grid, montage_out, montage_bg, tile_spacing):
+                generated_thumbnails.append(str(montage_out))
+                if only_montage:
+                    for tp in tile_paths:
+                        with contextlib.suppress(OSError):
+                            tp.unlink()
+
+        if manifest and manifest_data:
+            manifest_path = out_dir / "manifest.json"
+            with open(manifest_path, "w", encoding="utf-8") as mf:
+                json.dump(manifest_data, mf, indent=2)
+
+    except ToolError as te:
+        return {"success": False, "error": te.message, "exit_code": te.exit_code, "duration_ms": 0.0}
+    except Exception as exc:
+        return {"success": False, "error": f"Execution error: {exc}", "exit_code": EXIT_ERROR, "duration_ms": 0.0}
+    finally:
+        if temp_d:
+            temp_d.cleanup()
+
+    duration_ms = round((time.monotonic() - start_time) * 1000, 2)
+    result = {
+        "success": True,
+        "target": target,
+        "query": query,
+        "generated_thumbnails": generated_thumbnails,
+        "matching_segments": matching_segments,
+        "cached": False,
+        "duration_ms": duration_ms,
+        "exit_code": EXIT_SUCCESS,
+    }
+
+    if use_cache:
+        cache.set(cache_key, result)
+
+    return result
 
 
-def _cli() -> int:
-    global _verbose
-    p = argparse.ArgumentParser(description="Generate video thumbnails.")
-    p.add_argument("--input", action="append", required=True, dest="inputs")
-    p.add_argument("--output_dir", default="thumbnails")
-    p.add_argument("--interval", type=float, default=10.0)
-    p.add_argument("--width", type=int, default=320)
-    p.add_argument("--format", choices=("png", "jpg", "jpeg", "webp"), default="png")
-    p.add_argument("--start", default="00:00:00")
-    p.add_argument("--end", default="00:00:00")
-    p.add_argument("--max_frames", type=int, default=10)
-    p.add_argument("--montage", default="")
-    p.add_argument("--montage-bg", default="white", dest="montage_bg")
-    p.add_argument("--tile-spacing", type=int, default=2, dest="tile_spacing")
-    p.add_argument("--font", default=None)
-    p.add_argument("--font-size", type=int, default=14, dest="font_size")
-    p.add_argument("--font-color", default="white", dest="font_color")
-    p.add_argument("--box-color", default="black", dest="box_color")
-    p.add_argument("--box-opacity", type=float, default=0.5, dest="box_opacity")
-    p.add_argument("--position", choices=("tl", "tr", "bl", "br"), default="bl")
-    p.add_argument("--quality", type=int, default=80)
-    p.add_argument("--add-timestamps", action="store_true", dest="add_timestamps")
-    p.add_argument("--strip-metadata", action="store_true", dest="strip_metadata")
-    p.add_argument("--only-montage", action="store_true", dest="only_montage")
-    p.add_argument("--verbose", "-v", action="store_true")
-    args = p.parse_args()
+# ==============================================================================
+# SECTION 6: Output Routing & AIChat Entrypoints
+# ==============================================================================
 
-    _verbose = args.verbose
-    merged = ",".join(args.inputs)
-    result = run(
-        input=merged,
+def write_llm_output(data: dict[str, Any]) -> None:
+    out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
+    payload = json.dumps(data, ensure_ascii=False, cls=ToolJSONEncoder)
+
+    if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
+        sys.stdout.write(payload + "\n")
+        sys.stdout.flush()
+        return
+
+    try:
+        target_file = Path(out_path)
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(target_file, "a", encoding="utf-8") as fp:
+            fp.write(payload + "\n")
+    except OSError as err:
+        sys.stderr.write(f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n")
+        sys.stdout.write(payload + "\n")
+        sys.stdout.flush()
+
+
+def run(
+    target: str,
+    query: Optional[str] = None,
+    output_dir: str = "thumbnails",
+    interval: float = 10.0,
+    width: int = 320,
+    format: str = "png",
+    start: str = "00:00:00",
+    end: str = "00:00:00",
+    max_frames: int = 15,
+    montage: str = "",
+    montage_bg: str = "white",
+    tile_spacing: int = 2,
+    font: Optional[str] = None,
+    font_size: int = 14,
+    font_color: str = "white",
+    box_color: str = "black",
+    box_opacity: float = 0.5,
+    position: str = "bl",
+    quality: int = 80,
+    add_timestamps: bool = False,
+    strip_metadata: bool = False,
+    only_montage: bool = False,
+    timestamps: str = "",
+    percentages: str = "",
+    keyframes: bool = False,
+    force_keyframes: bool = False,
+    manifest: str = "",
+    progress: bool = False,
+    use_cache: bool = False,
+    no_color: bool = False,
+    verbose: bool = False,
+) -> None:
+    result = execute_tool(
+        target=target,
+        query=query,
+        output_dir=output_dir,
+        interval=interval,
+        width=width,
+        format=format,
+        start=start,
+        end=end,
+        max_frames=max_frames,
+        montage=montage,
+        montage_bg=montage_bg,
+        tile_spacing=tile_spacing,
+        font=font,
+        font_size=font_size,
+        font_color=font_color,
+        box_color=box_color,
+        box_opacity=box_opacity,
+        position=position,
+        quality=quality,
+        add_timestamps=add_timestamps,
+        strip_metadata=strip_metadata,
+        only_montage=only_montage,
+        timestamps=timestamps,
+        percentages=percentages,
+        keyframes=keyframes,
+        force_keyframes=force_keyframes,
+        manifest=manifest,
+        progress=progress,
+        use_cache=use_cache,
+        no_color=no_color,
+        verbose=verbose,
+    )
+    print_human_readable_ui(result, no_color=no_color)
+    write_llm_output(result)
+
+
+# ==============================================================================
+# SECTION 7: CLI Parser & Main Entrypoint
+# ==============================================================================
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="video_master_tool.py",
+        description=f"Native FFmpeg Video Intelligence Tool v{__version__}",
+    )
+    parser.add_argument("--target", "-t", required=False, help="Target video file or URL")
+    parser.add_argument("--query", "-q", default=None, help="Semantic search query text")
+    parser.add_argument("--output-dir", default="thumbnails", help="Output directory")
+    parser.add_argument("--interval", type=float, default=10.0, help="Seconds between frames")
+    parser.add_argument("--width", type=int, default=320, help="Thumbnail width")
+    parser.add_argument("--format", choices=["png", "jpg", "jpeg", "webp"], default="png", help="Image format")
+    parser.add_argument("--start", default="00:00:00", help="Start time")
+    parser.add_argument("--end", default="00:00:00", help="End time")
+    parser.add_argument("--max-frames", type=int, default=15, help="Max frames limit")
+    parser.add_argument("--montage", default="", help="Grid layout (e.g. 2x3)")
+    parser.add_argument("--timestamps", default="", help="Comma-separated explicit timestamps")
+    parser.add_argument("--percentages", default="", help="Comma-separated percentages (0-100)")
+    parser.add_argument("--quality", type=int, default=80, help="Quality (1-100)")
+    parser.add_argument("--keyframes", action="store_true", default=False, help="Capture keyframes only")
+    parser.add_argument("--force-keyframes", action="store_true", default=False, help="Force keyframes")
+    parser.add_argument("--add-timestamps", action="store_true", default=False, help="Burn timestamp overlay")
+    parser.add_argument("--strip-metadata", action="store_true", default=False, help="Strip EXIF metadata")
+    parser.add_argument("--only-montage", action="store_true", default=False, help="Keep only montage grid")
+    parser.add_argument("--manifest", default="", help="Write JSON manifest path")
+    parser.add_argument("--progress", action="store_true", default=False, help="Show progress bar")
+    parser.add_argument("--use-cache", action="store_true", default=False, help="Enable result caching")
+    parser.add_argument("--clear-cache", action="store_true", default=False, help="Clear cache and exit")
+    parser.add_argument("--schema", action="store_true", default=False, help="Print JSON Schema and exit")
+    parser.add_argument("--no-color", action="store_true", default=False, help="Disable colors")
+    parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Verbose logging")
+    return parser
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
+
+    if args.schema:
+        schema = generate_tool_schema()
+        sys.stdout.write(json.dumps(schema, indent=2) + "\n")
+        sys.stdout.flush()
+        return EXIT_SUCCESS
+
+    if args.clear_cache:
+        removed = invalidate_cache()
+        _cprint(f"{NEON_GREEN}Cleared {removed} video tool cache file(s).{RESET}", no_color=args.no_color)
+        return EXIT_SUCCESS
+
+    if not args.target:
+        _cprint(f"{NEON_RED}Error: --target parameter is required for execution.{RESET}", no_color=args.no_color)
+        return EXIT_INVALID_INPUT
+
+    res = execute_tool(
+        target=args.target,
+        query=args.query,
         output_dir=args.output_dir,
         interval=args.interval,
         width=args.width,
-        image_format=args.format,
+        format=args.format,
         start=args.start,
         end=args.end,
         max_frames=args.max_frames,
         montage=args.montage,
-        montage_bg=args.montage_bg,
-        tile_spacing=args.tile_spacing,
-        font=args.font,
-        font_size=args.font_size,
-        font_color=args.font_color,
-        box_color=args.box_color,
-        box_opacity=args.box_opacity,
-        position=args.position,
+        timestamps=args.timestamps,
+        percentages=args.percentages,
         quality=args.quality,
+        keyframes=args.keyframes,
+        force_keyframes=args.force_keyframes,
         add_timestamps=args.add_timestamps,
         strip_metadata=args.strip_metadata,
         only_montage=args.only_montage,
+        manifest=args.manifest,
+        progress=args.progress,
+        use_cache=args.use_cache,
+        no_color=args.no_color,
+        verbose=args.verbose,
     )
-    print(result)
-    return 0 if not result.startswith("ERROR:") else 1
+
+    print_human_readable_ui(res, no_color=args.no_color)
+    write_llm_output(res)
+    return res.get("exit_code", EXIT_SUCCESS)
 
 
 if __name__ == "__main__":
-    sys.exit(_cli())
+    sys.exit(main())

@@ -13,14 +13,15 @@
 # @option --use-tor <true|false>                 Use Tor for privacy (default: true)
 # ==============================================================================
 
+import json
 import os
 import sys
-import json
-import requests
 from typing import Optional
 
+import requests
+
 # Add utils to path for tor_utils import
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 from tor_utils import get_proxy_config, verify_tor_connection
 
 
@@ -57,7 +58,7 @@ def run(
 
     # Get proxy configuration with Tor support
     proxies, timeout, user_agent = get_proxy_config(use_tor=use_tor)
-    
+
     # Verify Tor connection if using Tor
     exit_ip = None
     if use_tor and proxies:
@@ -65,7 +66,7 @@ def run(
             exit_ip = verify_tor_connection()
         except RuntimeError as e:
             return f"⚠️ Tor Error: {e}\nFalling back to direct connection..."
-    
+
     # Prepare headers
     headers = {
         "User-Agent": user_agent,
@@ -130,7 +131,11 @@ Close: {latest[4]}
 Volume: {latest[5]}
 """
 
-                connection_info = f"\n🔒 Connection: Tor (Exit IP: {exit_ip})" if exit_ip else "\n🔓 Connection: Direct"
+                connection_info = (
+                    f"\n🔒 Connection: Tor (Exit IP: {exit_ip})"
+                    if exit_ip
+                    else "\n🔓 Connection: Direct"
+                )
                 return f"""✅ Kline Data Retrieved Successfully!{connection_info}
 
 Symbol: {symbol}
@@ -162,9 +167,9 @@ Full Response:
 {json.dumps(response_data, indent=2)}"""
 
     except requests.exceptions.RequestException as e:
-        return f"❌ Network Error: {str(e)}"
+        return f"❌ Network Error: {e!s}"
     except Exception as e:
-        return f"❌ Unexpected Error: {str(e)}"
+        return f"❌ Unexpected Error: {e!s}"
 
 
 if __name__ == "__main__":

@@ -17,19 +17,19 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Standard-library
 # ─────────────────────────────────────────────────────────────────────────────
-import sys
-import os
-import hmac
+import argparse
 import hashlib
-import time
+import hmac
 import json
 import logging
-import argparse
-import socket
+import os
 import re
+import socket
+import sys
+import time
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
-from typing import Optional, List, Tuple
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from typing import List, Optional, Tuple
 from urllib.parse import urlencode
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -43,6 +43,7 @@ from urllib3.util.retry import Retry
 try:
     from stem import Signal
     from stem.control import Controller
+
     STEM_AVAILABLE = True
 except ImportError:
     STEM_AVAILABLE = False
@@ -61,21 +62,21 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════════
 # CREDENTIALS  — always from environment variables, never hardcoded
 # ══════════════════════════════════════════════════════════════════════════════
-API_KEY:    str = os.environ.get("BYBIT_API_KEY",    "YOUR_BYBIT_API_KEY")
+API_KEY: str = os.environ.get("BYBIT_API_KEY", "YOUR_BYBIT_API_KEY")
 API_SECRET: str = os.environ.get("BYBIT_API_SECRET", "YOUR_BYBIT_API_SECRET")
 
 MAINNET_URL: str = "https://api.bybit.com"
 TESTNET_URL: str = "https://api-testnet.bybit.com"
 
-RECV_WINDOW: int = 20_000      # ms — widened for Tor latency (was 10 000)
+RECV_WINDOW: int = 20_000  # ms — widened for Tor latency (was 10 000)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TOR CONFIGURATION  — all values overridable via environment variables
 # ══════════════════════════════════════════════════════════════════════════════
 TOR_SOCKS_HOST: str = os.environ.get("TOR_SOCKS_HOST", "127.0.0.1")
 TOR_SOCKS_PORT: int = int(os.environ.get("TOR_SOCKS_PORT", "9050"))
-TOR_CTRL_HOST:  str = os.environ.get("TOR_CTRL_HOST",  "127.0.0.1")
-TOR_CTRL_PORT:  int = int(os.environ.get("TOR_CTRL_PORT",  "9051"))
+TOR_CTRL_HOST: str = os.environ.get("TOR_CTRL_HOST", "127.0.0.1")
+TOR_CTRL_PORT: int = int(os.environ.get("TOR_CTRL_PORT", "9051"))
 
 # socks5h:// — the trailing 'h' delegates DNS resolution to the Tor exit node.
 # This prevents DNS leaks: your local resolver never sees api.bybit.com.
@@ -83,7 +84,7 @@ TOR_CTRL_PORT:  int = int(os.environ.get("TOR_CTRL_PORT",  "9051"))
 # the destination to your ISP before the connection enters the Tor circuit.
 _SOCKS5H_BASE: str = f"socks5h://{TOR_SOCKS_HOST}:{TOR_SOCKS_PORT}"
 TOR_PROXIES: dict = {
-    "http":  _SOCKS5H_BASE,
+    "http": _SOCKS5H_BASE,
     "https": _SOCKS5H_BASE,
 }
 
@@ -94,16 +95,30 @@ MIN_NEWNYM_INTERVAL: float = float(os.environ.get("MIN_NEWNYM_INTERVAL", "12"))
 # Tor-aware request timeouts — wider than the non-Tor defaults.
 # Tor adds roughly 1–3 s of latency per hop; 3 hops = up to 9 s possible.
 TOR_CONNECT_TIMEOUT: float = float(os.environ.get("TOR_CONNECT_TIMEOUT", "15"))
-TOR_READ_TIMEOUT:    float = float(os.environ.get("TOR_READ_TIMEOUT",    "30"))
+TOR_READ_TIMEOUT: float = float(os.environ.get("TOR_READ_TIMEOUT", "30"))
 TOR_TIMEOUT: Tuple[float, float] = (TOR_CONNECT_TIMEOUT, TOR_READ_TIMEOUT)
 
 # Validation sets
-VALID_SIDES:      frozenset = frozenset({"Buy", "Sell"})
+VALID_SIDES: frozenset = frozenset({"Buy", "Sell"})
 VALID_CATEGORIES: frozenset = frozenset({"spot", "linear", "inverse"})
-VALID_TIF:        frozenset = frozenset({"GTC", "IOC", "FOK", "PostOnly"})
-VALID_INTERVALS:  frozenset = frozenset({
-    "1", "3", "5", "15", "30", "60", "120", "240", "360", "720", "D", "W", "M",
-})
+VALID_TIF: frozenset = frozenset({"GTC", "IOC", "FOK", "PostOnly"})
+VALID_INTERVALS: frozenset = frozenset(
+    {
+        "1",
+        "3",
+        "5",
+        "15",
+        "30",
+        "60",
+        "120",
+        "240",
+        "360",
+        "720",
+        "D",
+        "W",
+        "M",
+    }
+)
 
 # Neutral User-Agent — avoids leaking the requests library version string.
 # A generic Firefox UA is indistinguishable from ordinary HTTPS traffic.
@@ -112,7 +127,8 @@ _TOR_USER_AGENT: str = (
 )
 
 # Symbol validation regex - prevents injection attacks
-SYMBOL_PATTERN = re.compile(r'^[A-Z]{2,10}USDT?$')
+SYMBOL_PATTERN = re.compile(r"^[A-Z]{2,10}USDT?$")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TOR MANAGER — circuit lifecycle via stem
@@ -132,10 +148,10 @@ class TorManager:
 
     def __init__(self) -> None:
         self._last_newnym: float = 0.0
-        self._controller: Optional["Controller"] = None   # type: ignore[name-defined]
+        self._controller: Optional[Controller] = None  # type: ignore[name-defined]
         self._available: bool = STEM_AVAILABLE
 
-    def _get_controller(self) -> Optional["Controller"]:   # type: ignore[name-defined]
+    def _get_controller(self) -> Optional["Controller"]:  # type: ignore[name-defined]
         """Open (or reuse) a stem Controller connected to the Tor control port."""
         if not self._available:
             return None
@@ -146,14 +162,16 @@ class TorManager:
                 address=TOR_CTRL_HOST,
                 port=TOR_CTRL_PORT,
             )
-            ctrl.authenticate()   # auto-detects cookie / no-auth
+            ctrl.authenticate()  # auto-detects cookie / no-auth
             self._controller = ctrl
             return ctrl
         except Exception as exc:
             logger.warning(
                 "Cannot connect to Tor control port %s:%s — %s. "
                 "Circuit renewal disabled.",
-                TOR_CTRL_HOST, TOR_CTRL_PORT, exc,
+                TOR_CTRL_HOST,
+                TOR_CTRL_PORT,
+                exc,
             )
             self._available = False
             return None
@@ -238,9 +256,7 @@ TOR = TorManager()
 def _socks_port_open() -> bool:
     """Return True if Tor's SOCKS port is accepting connections."""
     try:
-        with socket.create_connection(
-            (TOR_SOCKS_HOST, TOR_SOCKS_PORT), timeout=5
-        ):
+        with socket.create_connection((TOR_SOCKS_HOST, TOR_SOCKS_PORT), timeout=5):
             return True
     except OSError:
         return False
@@ -308,15 +324,15 @@ def wait_for_bootstrap(timeout_s: float = 120.0) -> None:
             logger.info("Tor bootstrapping: %d %% ...", pct)
         time.sleep(2)
 
-    raise RuntimeError(
-        f"Tor did not finish bootstrapping within {timeout_s} seconds."
-    )
+    raise RuntimeError(f"Tor did not finish bootstrapping within {timeout_s} seconds.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # NETWORKING — Session with Tor proxies, retry, and User-Agent scrub
 # ══════════════════════════════════════════════════════════════════════════════
-def _build_tor_session(total_retries: int = 3, backoff_factor: float = 1.0) -> requests.Session:
+def _build_tor_session(
+    total_retries: int = 3, backoff_factor: float = 1.0
+) -> requests.Session:
     """
     Build a requests.Session pre-configured for Tor.
 
@@ -337,7 +353,7 @@ def _build_tor_session(total_retries: int = 3, backoff_factor: float = 1.0) -> r
     )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("https://", adapter)
-    session.mount("http://",  adapter)
+    session.mount("http://", adapter)
 
     # Attach Tor proxy to every request made through this session
     session.proxies.update(TOR_PROXIES)
@@ -358,44 +374,47 @@ SESSION: requests.Session = _build_tor_session()
 @dataclass
 class InstrumentInfo:
     """Tick and lot-size constraints from /v5/market/instruments-info."""
-    tick_size:     Decimal
-    qty_step:      Decimal
+
+    tick_size: Decimal
+    qty_step: Decimal
     min_order_qty: Decimal
     max_order_qty: Decimal
-    min_notional:  Decimal
-    price_scale:   int
-    status:        str
+    min_notional: Decimal
+    price_scale: int
+    status: str
 
 
 @dataclass
 class Candle:
     """One OHLCV bar from /v5/market/kline."""
-    ts:       int
-    open:     Decimal
-    high:     Decimal
-    low:      Decimal
-    close:    Decimal
-    volume:   Decimal
+
+    ts: int
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Decimal
     turnover: Decimal
 
 
 @dataclass
 class OrderResult:
     """Structured order response — dot-access and mypy-friendly."""
-    success:       bool
-    order_id:      str  = ""
-    order_link_id: str  = ""
-    ret_code:      int  = 0
-    ret_msg:       str  = ""
-    raw:           dict = field(default_factory=dict)
+
+    success: bool
+    order_id: str = ""
+    order_link_id: str = ""
+    ret_code: int = 0
+    ret_msg: str = ""
+    raw: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
-            "success":     self.success,
-            "orderId":     self.order_id,
+            "success": self.success,
+            "orderId": self.order_id,
             "orderLinkId": self.order_link_id,
-            "retCode":     self.ret_code,
-            "retMsg":      self.ret_msg,
+            "retCode": self.ret_code,
+            "retMsg": self.ret_msg,
         }
 
 
@@ -411,9 +430,9 @@ def round_to_tick(value: Decimal, tick: Decimal) -> Decimal:
     """Round value DOWN to the nearest exact multiple of tick."""
     if tick <= 0:
         raise ValueError(f"tick must be positive, got {tick}")
-    places    = _decimal_places(tick)
+    places = _decimal_places(tick)
     quantizer = Decimal(10) ** -places
-    floored   = (value // tick) * tick
+    floored = (value // tick) * tick
     return floored.quantize(quantizer, rounding=ROUND_DOWN)
 
 
@@ -441,9 +460,9 @@ def gen_signature(payload: str, timestamp: str) -> str:
 
 def _build_auth_headers(payload: str, timestamp: str) -> dict:
     return {
-        "X-BAPI-API-KEY":     API_KEY,
-        "X-BAPI-SIGN":        gen_signature(payload, timestamp),
-        "X-BAPI-TIMESTAMP":   timestamp,
+        "X-BAPI-API-KEY": API_KEY,
+        "X-BAPI-SIGN": gen_signature(payload, timestamp),
+        "X-BAPI-TIMESTAMP": timestamp,
         "X-BAPI-RECV-WINDOW": str(RECV_WINDOW),
     }
 
@@ -452,13 +471,15 @@ def _build_auth_headers(payload: str, timestamp: str) -> dict:
 # RATE-LIMIT HEADER INSPECTION
 # ══════════════════════════════════════════════════════════════════════════════
 def _inspect_rate_limit_headers(response: requests.Response) -> None:
-    limit        = response.headers.get("X-Bapi-Limit", "?")
+    limit = response.headers.get("X-Bapi-Limit", "?")
     limit_status = response.headers.get("X-Bapi-Limit-Status", "?")
-    reset_ts     = response.headers.get("X-Bapi-Limit-Reset-Timestamp", "?")
-    retry_after  = response.headers.get("Retry-After")
+    reset_ts = response.headers.get("X-Bapi-Limit-Reset-Timestamp", "?")
+    retry_after = response.headers.get("Retry-After")
     logger.debug(
         "RateLimit — limit=%s  status=%s  reset_ts=%s",
-        limit, limit_status, reset_ts,
+        limit,
+        limit_status,
+        reset_ts,
     )
     if retry_after:
         logger.warning(
@@ -468,7 +489,8 @@ def _inspect_rate_limit_headers(response: requests.Response) -> None:
         if limit_status != "?" and int(limit_status) < int(limit) * 0.10:
             logger.warning(
                 "Rate-limit nearly exhausted: %s of %s remaining.",
-                limit_status, limit,
+                limit_status,
+                limit,
             )
     except (ValueError, TypeError):
         pass
@@ -476,7 +498,7 @@ def _inspect_rate_limit_headers(response: requests.Response) -> None:
 
 def _check_bybit_response(result: dict) -> None:
     ret_code = result.get("retCode", -1)
-    ret_msg  = result.get("retMsg", "unknown error")
+    ret_msg = result.get("retMsg", "unknown error")
     if ret_code != 0:
         logger.warning("Bybit API error — retCode=%s  retMsg=%s", ret_code, ret_msg)
     else:
@@ -488,9 +510,9 @@ def _check_bybit_response(result: dict) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 def _post(
     base_url: str,
-    path:     str,
-    payload:  str,
-    _retry:   bool = True,          # internal flag: retry once after circuit renewal
+    path: str,
+    payload: str,
+    _retry: bool = True,  # internal flag: retry once after circuit renewal
 ) -> Tuple[dict, requests.Response]:
     """
     Authenticated POST through the Tor session.
@@ -500,7 +522,7 @@ def _post(
     without surfacing them to callers.
     """
     timestamp = str(int(time.time() * 1000))
-    headers   = {
+    headers = {
         **_build_auth_headers(payload, timestamp),
         "Content-Type": "application/json",
     }
@@ -527,9 +549,9 @@ def _post(
 
 def _get_authed(
     base_url: str,
-    path:     str,
-    params:   dict,
-    _retry:   bool = True,
+    path: str,
+    params: dict,
+    _retry: bool = True,
 ) -> Tuple[dict, requests.Response]:
     """
     Authenticated GET through the Tor session.
@@ -537,8 +559,8 @@ def _get_authed(
     Same circuit-renewal retry logic as _post().
     """
     query_string = urlencode(params)
-    timestamp    = str(int(time.time() * 1000))
-    headers      = {
+    timestamp = str(int(time.time() * 1000))
+    headers = {
         **_build_auth_headers(query_string, timestamp),
         "Content-Type": "application/json",
     }
@@ -565,14 +587,14 @@ def _get_authed(
 
 def _parse_order_result(raw: dict) -> OrderResult:
     result_block = raw.get("result", {})
-    ret_code     = raw.get("retCode", -1)
+    ret_code = raw.get("retCode", -1)
     return OrderResult(
-        success       = (ret_code == 0),
-        order_id      = result_block.get("orderId",     ""),
-        order_link_id = result_block.get("orderLinkId", ""),
-        ret_code      = ret_code,
-        ret_msg       = raw.get("retMsg", ""),
-        raw           = raw,
+        success=(ret_code == 0),
+        order_id=result_block.get("orderId", ""),
+        order_link_id=result_block.get("orderLinkId", ""),
+        ret_code=ret_code,
+        ret_msg=raw.get("retMsg", ""),
+        raw=raw,
     )
 
 
@@ -580,13 +602,13 @@ def _parse_order_result(raw: dict) -> OrderResult:
 # INSTRUMENT INFO
 # ══════════════════════════════════════════════════════════════════════════════
 def get_instrument_info(
-    symbol:   str,
-    category: str  = "spot",
-    testnet:  bool = False,
+    symbol: str,
+    category: str = "spot",
+    testnet: bool = False,
 ) -> InstrumentInfo:
     """Fetch live tick / lot-size constraints from /v5/market/instruments-info."""
     base_url = TESTNET_URL if testnet else MAINNET_URL
-    params   = {"category": category, "symbol": symbol.upper()}
+    params = {"category": category, "symbol": symbol.upper()}
     try:
         response = SESSION.get(
             f"{base_url}/v5/market/instruments-info",
@@ -604,17 +626,17 @@ def get_instrument_info(
         raise ValueError(
             f"No instrument info for {symbol.upper()} in category '{category}'."
         )
-    info  = items[0]
-    pf    = info.get("priceFilter",   {})
-    lf    = info.get("lotSizeFilter", {})
+    info = items[0]
+    pf = info.get("priceFilter", {})
+    lf = info.get("lotSizeFilter", {})
     return InstrumentInfo(
-        tick_size     = Decimal(pf.get("tickSize",     "0.01")),
-        qty_step      = Decimal(lf.get("qtyStep",      "0.001")),
-        min_order_qty = Decimal(lf.get("minOrderQty",  "0.001")),
-        max_order_qty = Decimal(lf.get("maxOrderQty",  "99999")),
-        min_notional  = Decimal(lf.get("minNotionalValue", "0") or "0"),
-        price_scale   = int(info.get("priceScale", "2")),
-        status        = info.get("status", "Unknown"),
+        tick_size=Decimal(pf.get("tickSize", "0.01")),
+        qty_step=Decimal(lf.get("qtyStep", "0.001")),
+        min_order_qty=Decimal(lf.get("minOrderQty", "0.001")),
+        max_order_qty=Decimal(lf.get("maxOrderQty", "99999")),
+        min_notional=Decimal(lf.get("minNotionalValue", "0") or "0"),
+        price_scale=int(info.get("priceScale", "2")),
+        status=info.get("status", "Unknown"),
     )
 
 
@@ -653,11 +675,11 @@ def validate_inputs(symbol: str, side: str, qty: str, category: str) -> Decimal:
 # MARKET ORDER
 # ══════════════════════════════════════════════════════════════════════════════
 def place_order(
-    symbol:   str,
-    side:     str,
-    qty:      str,
-    category: str  = "spot",
-    testnet:  bool = False,
+    symbol: str,
+    side: str,
+    qty: str,
+    category: str = "spot",
+    testnet: bool = False,
 ) -> OrderResult:
     """Place a market order via Bybit V5 through the Tor-proxied session."""
     base_url = TESTNET_URL if testnet else MAINNET_URL
@@ -694,18 +716,21 @@ def place_order(
 
     payload = json.dumps(
         {
-            "category":  category,
-            "symbol":    symbol_validated,
-            "side":      side.capitalize(),
+            "category": category,
+            "symbol": symbol_validated,
+            "side": side.capitalize(),
             "orderType": "Market",
-            "qty":       str(qty_snapped),
+            "qty": str(qty_snapped),
         },
         separators=(",", ":"),
     )
 
     logger.info(
         "Market %s %s qty=%s cat=%s %s",
-        side.capitalize(), symbol_validated, qty_snapped, category,
+        side.capitalize(),
+        symbol_validated,
+        qty_snapped,
+        category,
         "TESTNET" if testnet else "MAINNET",
     )
 
@@ -741,13 +766,13 @@ def place_order(
 # LIMIT ORDER
 # ══════════════════════════════════════════════════════════════════════════════
 def place_limit_order(
-    symbol:        str,
-    side:          str,
-    qty:           str,
-    price:         str,
-    category:      str  = "spot",
-    time_in_force: str  = "GTC",
-    testnet:       bool = False,
+    symbol: str,
+    side: str,
+    qty: str,
+    price: str,
+    category: str = "spot",
+    time_in_force: str = "GTC",
+    testnet: bool = False,
 ) -> OrderResult:
     """Place a limit order with tick-snapping for both price and quantity."""
     base_url = TESTNET_URL if testnet else MAINNET_URL
@@ -769,7 +794,9 @@ def place_limit_order(
     except InvalidOperation:
         return OrderResult(success=False, ret_msg=f"Invalid price '{price}'.")
     if price_raw <= 0:
-        return OrderResult(success=False, ret_msg=f"Price must be > 0; got {price_raw}.")
+        return OrderResult(
+            success=False, ret_msg=f"Price must be > 0; got {price_raw}."
+        )
 
     try:
         info = get_instrument_info(symbol, category, testnet)
@@ -782,17 +809,27 @@ def place_limit_order(
         return OrderResult(success=False, ret_msg=msg)
 
     price_snapped = round_to_tick(price_raw, info.tick_size)
-    qty_snapped   = round_to_tick(qty_raw,   info.qty_step)
+    qty_snapped = round_to_tick(qty_raw, info.qty_step)
 
     if price_snapped != price_raw:
-        logger.info("price snapped %s → %s (tick=%s)", price_raw, price_snapped, info.tick_size)
+        logger.info(
+            "price snapped %s → %s (tick=%s)", price_raw, price_snapped, info.tick_size
+        )
     if qty_snapped != qty_raw:
-        logger.info("qty snapped %s → %s (step=%s)", qty_raw, qty_snapped, info.qty_step)
+        logger.info(
+            "qty snapped %s → %s (step=%s)", qty_raw, qty_snapped, info.qty_step
+        )
 
     if qty_snapped < info.min_order_qty:
-        return OrderResult(success=False, ret_msg=f"qty {qty_snapped} < minOrderQty {info.min_order_qty}.")
+        return OrderResult(
+            success=False,
+            ret_msg=f"qty {qty_snapped} < minOrderQty {info.min_order_qty}.",
+        )
     if qty_snapped > info.max_order_qty:
-        return OrderResult(success=False, ret_msg=f"qty {qty_snapped} > maxOrderQty {info.max_order_qty}.")
+        return OrderResult(
+            success=False,
+            ret_msg=f"qty {qty_snapped} > maxOrderQty {info.max_order_qty}.",
+        )
 
     if info.min_notional > 0:
         try:
@@ -803,12 +840,12 @@ def place_limit_order(
 
     payload = json.dumps(
         {
-            "category":    category,
-            "symbol":      symbol_validated,
-            "side":        side.capitalize(),
-            "orderType":   "Limit",
-            "price":       str(price_snapped),
-            "qty":         str(qty_snapped),
+            "category": category,
+            "symbol": symbol_validated,
+            "side": side.capitalize(),
+            "orderType": "Limit",
+            "price": str(price_snapped),
+            "qty": str(qty_snapped),
             "timeInForce": time_in_force,
         },
         separators=(",", ":"),
@@ -816,8 +853,12 @@ def place_limit_order(
 
     logger.info(
         "Limit %s %s qty=%s price=%s TIF=%s cat=%s %s",
-        side.capitalize(), symbol_validated,
-        qty_snapped, price_snapped, time_in_force, category,
+        side.capitalize(),
+        symbol_validated,
+        qty_snapped,
+        price_snapped,
+        time_in_force,
+        category,
         "TESTNET" if testnet else "MAINNET",
     )
 
@@ -845,22 +886,22 @@ def place_limit_order(
 # KLINE / OHLCV
 # ══════════════════════════════════════════════════════════════════════════════
 def get_kline(
-    symbol:   str,
-    category: str  = "spot",
-    interval: str  = "15",
-    limit:    int  = 200,
-    testnet:  bool = False,
+    symbol: str,
+    category: str = "spot",
+    interval: str = "15",
+    limit: int = 200,
+    testnet: bool = False,
 ) -> List[Candle]:
     """Fetch OHLCV candles from /v5/market/kline. Returns chronological order."""
     if interval not in VALID_INTERVALS:
         raise ValueError(f"Invalid interval '{interval}'.")
-    limit    = max(1, min(limit, 1000))
+    limit = max(1, min(limit, 1000))
     base_url = TESTNET_URL if testnet else MAINNET_URL
-    params   = {
+    params = {
         "category": category,
-        "symbol":   symbol.upper(),
+        "symbol": symbol.upper(),
         "interval": interval,
-        "limit":    str(limit),
+        "limit": str(limit),
     }
     try:
         response = SESSION.get(
@@ -880,18 +921,23 @@ def get_kline(
 
     candles = [
         Candle(
-            ts       = int(row[0]),
-            open     = Decimal(row[1]),
-            high     = Decimal(row[2]),
-            low      = Decimal(row[3]),
-            close    = Decimal(row[4]),
-            volume   = Decimal(row[5]),
-            turnover = Decimal(row[6]),
+            ts=int(row[0]),
+            open=Decimal(row[1]),
+            high=Decimal(row[2]),
+            low=Decimal(row[3]),
+            close=Decimal(row[4]),
+            volume=Decimal(row[5]),
+            turnover=Decimal(row[6]),
         )
         for row in raw_list
     ]
-    candles.reverse()   # Bybit returns newest-first; we want chronological
-    logger.info("Fetched %d candles for %s (interval=%s)", len(candles), symbol.upper(), interval)
+    candles.reverse()  # Bybit returns newest-first; we want chronological
+    logger.info(
+        "Fetched %d candles for %s (interval=%s)",
+        len(candles),
+        symbol.upper(),
+        interval,
+    )
     return candles
 
 
@@ -904,24 +950,26 @@ def calc_rsi(candles: List[Candle], period: int = 14) -> Optional[Decimal]:
         return None
     closes = [c.close for c in candles]
     deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
-    gains  = [d if d > 0 else Decimal(0) for d in deltas]
+    gains = [d if d > 0 else Decimal(0) for d in deltas]
     losses = [-d if d < 0 else Decimal(0) for d in deltas]
-    avg_gain = sum(gains[:period])  / period
+    avg_gain = sum(gains[:period]) / period
     avg_loss = sum(losses[:period]) / period
     for i in range(period, len(deltas)):
-        avg_gain = (avg_gain * (period - 1) + gains[i])  / period
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
         avg_loss = (avg_loss * (period - 1) + losses[i]) / period
     if avg_loss == 0:
         return Decimal("100")
     rs = avg_gain / avg_loss
-    return (Decimal("100") - (Decimal("100") / (Decimal("1") + rs))).quantize(Decimal("0.01"))
+    return (Decimal("100") - (Decimal("100") / (Decimal("1") + rs))).quantize(
+        Decimal("0.01")
+    )
 
 
 def _ema(values: List[Decimal], period: int) -> List[Decimal]:
     """EMA — returns list same length as input (zero-padded at head)."""
     if len(values) < period:
         return []
-    k      = Decimal(2) / (period + 1)
+    k = Decimal(2) / (period + 1)
     result = [sum(values[:period]) / period]
     for v in values[period:]:
         result.append(v * k + result[-1] * (1 - k))
@@ -929,20 +977,18 @@ def _ema(values: List[Decimal], period: int) -> List[Decimal]:
 
 
 def calc_macd(
-    candles:       List[Candle],
-    fast:          int = 12,
-    slow:          int = 26,
+    candles: List[Candle],
+    fast: int = 12,
+    slow: int = 26,
     signal_period: int = 9,
 ) -> Optional[Tuple[Decimal, Decimal, Decimal]]:
     """MACD line, signal line, histogram. histogram>0 = bullish momentum."""
     if len(candles) < slow + signal_period:
         return None
-    closes   = [c.close for c in candles]
+    closes = [c.close for c in candles]
     ema_fast = _ema(closes, fast)
     ema_slow = _ema(closes, slow)
-    macd_series = [
-        f - s for f, s in zip(ema_fast, ema_slow) if f != 0 and s != 0
-    ]
+    macd_series = [f - s for f, s in zip(ema_fast, ema_slow) if f != 0 and s != 0]
     if len(macd_series) < signal_period:
         return None
     sig_series = _ema(macd_series, signal_period)
@@ -956,18 +1002,18 @@ def calc_macd(
 
 def calc_bollinger_bands(
     candles: List[Candle],
-    period:  int   = 20,
+    period: int = 20,
     num_std: float = 2.0,
 ) -> Optional[Tuple[Decimal, Decimal, Decimal]]:
     """Bollinger Bands: (upper, middle, lower)."""
     if len(candles) < period:
         return None
-    recent   = [c.close for c in candles[-period:]]
-    mean     = sum(recent) / period
+    recent = [c.close for c in candles[-period:]]
+    mean = sum(recent) / period
     variance = sum((x - mean) ** 2 for x in recent) / period
-    std_dev  = variance.sqrt()
-    mult     = Decimal(str(num_std))
-    q        = Decimal("0.00001")
+    std_dev = variance.sqrt()
+    mult = Decimal(str(num_std))
+    q = Decimal("0.00001")
     return (
         (mean + mult * std_dev).quantize(q),
         mean.quantize(q),
@@ -983,7 +1029,7 @@ def calc_atr(candles: List[Candle], period: int = 14) -> Optional[Decimal]:
         max(
             candles[i].high - candles[i].low,
             abs(candles[i].high - candles[i - 1].close),
-            abs(candles[i].low  - candles[i - 1].close),
+            abs(candles[i].low - candles[i - 1].close),
         )
         for i in range(1, len(candles))
     ]
@@ -998,7 +1044,7 @@ def calc_vwap(candles: List[Candle]) -> Optional[Decimal]:
     if not candles:
         return None
     pv = sum(((c.high + c.low + c.close) / 3) * c.volume for c in candles)
-    v  = sum(c.volume for c in candles)
+    v = sum(c.volume for c in candles)
     return (pv / v).quantize(Decimal("0.00001")) if v else None
 
 
@@ -1011,10 +1057,10 @@ def get_ta_signal(candles: List[Candle]) -> dict:
     BUY  requires ≥ 2 of: RSI<35, MACD histogram>0, close<BB lower.
     SELL requires ≥ 2 of: RSI>65, MACD histogram<0, close>BB upper.
     """
-    rsi  = calc_rsi(candles)
+    rsi = calc_rsi(candles)
     macd = calc_macd(candles)
-    bb   = calc_bollinger_bands(candles)
-    atr  = calc_atr(candles)
+    bb = calc_bollinger_bands(candles)
+    atr = calc_atr(candles)
     vwap = calc_vwap(candles)
 
     last_close = candles[-1].close if candles else Decimal(0)
@@ -1025,36 +1071,42 @@ def get_ta_signal(candles: List[Candle]) -> dict:
     if bb:
         bb_upper, bb_mid, bb_lower = bb
 
-    buy_score  = sum([
-        rsi  is not None and rsi < 35,
-        histogram is not None and histogram > 0,
-        bb_lower  is not None and last_close < bb_lower,
-    ])
-    sell_score = sum([
-        rsi  is not None and rsi > 65,
-        histogram is not None and histogram < 0,
-        bb_upper  is not None and last_close > bb_upper,
-    ])
+    buy_score = sum(
+        [
+            rsi is not None and rsi < 35,
+            histogram is not None and histogram > 0,
+            bb_lower is not None and last_close < bb_lower,
+        ]
+    )
+    sell_score = sum(
+        [
+            rsi is not None and rsi > 65,
+            histogram is not None and histogram < 0,
+            bb_upper is not None and last_close > bb_upper,
+        ]
+    )
 
     signal = "BUY" if buy_score >= 2 else "SELL" if sell_score >= 2 else "NEUTRAL"
 
     return {
-        "signal":        signal,
-        "buy_score":     f"{buy_score}/3",
-        "sell_score":    f"{sell_score}/3",
-        "last_close":    str(last_close),
-        "rsi":           str(rsi)         if rsi        else "N/A",
-        "macd":          str(macd_line)   if macd_line  else "N/A",
-        "macd_signal":   str(signal_line) if signal_line else "N/A",
-        "histogram":     str(histogram)   if histogram  else "N/A",
-        "bb_upper":      str(bb_upper)    if bb_upper   else "N/A",
-        "bb_mid":        str(bb_mid)      if bb_mid     else "N/A",
-        "bb_lower":      str(bb_lower)    if bb_lower   else "N/A",
-        "atr":           str(atr)         if atr        else "N/A",
-        "vwap":          str(vwap)        if vwap       else "N/A",
+        "signal": signal,
+        "buy_score": f"{buy_score}/3",
+        "sell_score": f"{sell_score}/3",
+        "last_close": str(last_close),
+        "rsi": str(rsi) if rsi else "N/A",
+        "macd": str(macd_line) if macd_line else "N/A",
+        "macd_signal": str(signal_line) if signal_line else "N/A",
+        "histogram": str(histogram) if histogram else "N/A",
+        "bb_upper": str(bb_upper) if bb_upper else "N/A",
+        "bb_mid": str(bb_mid) if bb_mid else "N/A",
+        "bb_lower": str(bb_lower) if bb_lower else "N/A",
+        "atr": str(atr) if atr else "N/A",
+        "vwap": str(vwap) if vwap else "N/A",
         "price_vs_vwap": (
-            "above" if vwap and last_close > vwap
-            else "below" if vwap and last_close < vwap
+            "above"
+            if vwap and last_close > vwap
+            else "below"
+            if vwap and last_close < vwap
             else "N/A"
         ),
     }
@@ -1064,9 +1116,9 @@ def get_ta_signal(candles: List[Candle]) -> dict:
 # WALLET BALANCE
 # ══════════════════════════════════════════════════════════════════════════════
 def get_wallet_balance(
-    account_type: str           = "UNIFIED",
-    coin:         Optional[str] = None,
-    testnet:      bool          = False,
+    account_type: str = "UNIFIED",
+    coin: Optional[str] = None,
+    testnet: bool = False,
 ) -> dict:
     """Fetch wallet balance from GET /v5/account/wallet-balance."""
     base_url = TESTNET_URL if testnet else MAINNET_URL
@@ -1131,27 +1183,38 @@ Examples
         """,
     )
 
-    parser.add_argument("--symbol",         required=False, default=None)
-    parser.add_argument("--side",           required=False, default=None,
-                        choices=["Buy", "Sell", "buy", "sell"])
-    parser.add_argument("--qty",            required=False, default=None)
-    parser.add_argument("--category",       default="spot",
-                        choices=["spot", "linear", "inverse"])
-    parser.add_argument("--limit-price",    default=None)
-    parser.add_argument("--time-in-force",  default="GTC",
-                        choices=["GTC", "IOC", "FOK", "PostOnly"])
-    parser.add_argument("--testnet",        action="store_true", default=False)
-    parser.add_argument("--balance",        action="store_true", default=False)
-    parser.add_argument("--analyze",        action="store_true", default=False)
-    parser.add_argument("--interval",       default="15", choices=sorted(VALID_INTERVALS))
-    parser.add_argument("--kline-limit",    type=int, default=200)
+    parser.add_argument("--symbol", required=False, default=None)
+    parser.add_argument(
+        "--side", required=False, default=None, choices=["Buy", "Sell", "buy", "sell"]
+    )
+    parser.add_argument("--qty", required=False, default=None)
+    parser.add_argument(
+        "--category", default="spot", choices=["spot", "linear", "inverse"]
+    )
+    parser.add_argument("--limit-price", default=None)
+    parser.add_argument(
+        "--time-in-force", default="GTC", choices=["GTC", "IOC", "FOK", "PostOnly"]
+    )
+    parser.add_argument("--testnet", action="store_true", default=False)
+    parser.add_argument("--balance", action="store_true", default=False)
+    parser.add_argument("--analyze", action="store_true", default=False)
+    parser.add_argument("--interval", default="15", choices=sorted(VALID_INTERVALS))
+    parser.add_argument("--kline-limit", type=int, default=200)
     # Tor-specific flags
-    parser.add_argument("--renew-circuit",  action="store_true", default=False,
-                        help="Renew the Tor circuit before any operation.")
-    parser.add_argument("--tor-check",      action="store_true", default=False,
-                        help="Verify Tor connection and exit (no trade placed).")
+    parser.add_argument(
+        "--renew-circuit",
+        action="store_true",
+        default=False,
+        help="Renew the Tor circuit before any operation.",
+    )
+    parser.add_argument(
+        "--tor-check",
+        action="store_true",
+        default=False,
+        help="Verify Tor connection and exit (no trade placed).",
+    )
 
-    args      = parser.parse_args()
+    args = parser.parse_args()
     exit_code = 0
 
     # ── Step 0: Tor bootstrap check ───────────────────────────────────────────
@@ -1183,7 +1246,9 @@ Examples
         if TOR.renew_circuit(force=True):
             logger.info("Fresh Tor circuit established.")
         else:
-            logger.warning("Circuit renewal unavailable; proceeding on existing circuit.")
+            logger.warning(
+                "Circuit renewal unavailable; proceeding on existing circuit."
+            )
 
     # ── Step 4: Wallet balance ────────────────────────────────────────────────
     if args.balance:
@@ -1219,7 +1284,11 @@ Examples
             qty_val = Decimal(str(args.qty))
             if qty_val <= 0:
                 logger.error("Quantity must be > 0; got %s", qty_val)
-                print(json.dumps({"success": False, "retMsg": "Quantity must be > 0"}, indent=2))
+                print(
+                    json.dumps(
+                        {"success": False, "retMsg": "Quantity must be > 0"}, indent=2
+                    )
+                )
                 TOR.close()
                 sys.exit(1)
         except InvalidOperation:

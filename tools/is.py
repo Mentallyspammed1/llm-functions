@@ -1,36 +1,41 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import logging
 import os
-import signal
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal, Optional
 
 try:
     import speedtest
 except ImportError:
-    print("\033[31mError: 'speedtest-cli' library not found. Please run: pip install speedtest-cli\033[0m")
+    print(
+        "\033[31mError: 'speedtest-cli' library not found. Please run: pip install speedtest-cli\033[0m"
+    )
     sys.exit(127)
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color:
         import re
+
         text = re.sub(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text)
     print(text, file=target, flush=True, end=end)
+
 
 def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> None:
     if not sys.stderr.isatty() or no_color:
@@ -41,21 +46,36 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     box_w = 64
     border = "─" * box_w
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [NETWORK SPEED TEST]{RESET} {status_color}{BOLD}{status_symbol} {status_color}{'SUCCESS' if success else 'FAILED'}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [NETWORK SPEED TEST]{RESET} {status_color}{BOLD}{status_symbol} {status_color}{'SUCCESS' if success else 'FAILED'}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
     if success:
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Client IP:{RESET}   {data.get('client_ip')}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Server:{RESET}     {data.get('server_name')} ({data.get('server_location')})")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Client IP:{RESET}   {data.get('client_ip')}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Server:{RESET}     {data.get('server_name')} ({data.get('server_location')})"
+        )
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Metrics:{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_GREEN}↓ Download:{RESET} {NEON_YELLOW}{data.get('download')}{data.get('unit')}{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_GREEN}↑ Upload:{RESET}   {NEON_YELLOW}{data.get('upload')}{data.get('unit')}{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_GREEN}○ Latency:{RESET}  {NEON_YELLOW}{data.get('ping')} ms{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET}   {NEON_GREEN}↓ Download:{RESET} {NEON_YELLOW}{data.get('download')}{data.get('unit')}{RESET}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET}   {NEON_GREEN}↑ Upload:{RESET}   {NEON_YELLOW}{data.get('upload')}{data.get('unit')}{RESET}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET}   {NEON_GREEN}○ Latency:{RESET}  {NEON_YELLOW}{data.get('ping')} ms{RESET}"
+        )
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms')}ms{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms')}ms{RESET}"
+        )
     else:
         _cprint(f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}    {data.get('error')}")
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
+
 
 class ToolError(Exception):
     def __init__(self, message: str, exit_code: int = 1):
@@ -63,10 +83,13 @@ class ToolError(Exception):
         self.message = message
         self.exit_code = exit_code
 
+
 class ToolJSONEncoder(json.JSONEncoder):
     def default(self, obj: Any) -> Any:
-        if isinstance(obj, Path): return str(obj)
+        if isinstance(obj, Path):
+            return str(obj)
         return super().default(obj)
+
 
 def get_execution_context() -> dict[str, Any]:
     return {
@@ -74,6 +97,7 @@ def get_execution_context() -> dict[str, Any]:
         "cwd": os.getcwd(),
         "os": sys.platform,
     }
+
 
 def execute_speed_test(
     server_id: Optional[str] = None,
@@ -88,12 +112,16 @@ def execute_speed_test(
         else:
             st.get_best_server()
         if verbose:
-            _cprint(f"{NEON_CYAN}Testing download speed...{RESET}", end="", no_color=False)
+            _cprint(
+                f"{NEON_CYAN}Testing download speed...{RESET}", end="", no_color=False
+            )
         down_bps = st.download()
         if verbose:
             _cprint(f" Done. {RESET}", end="", no_color=False)
         if verbose:
-            _cprint(f"{NEON_CYAN}Testing upload speed...{RESET}", end="", no_color=False)
+            _cprint(
+                f"{NEON_CYAN}Testing upload speed...{RESET}", end="", no_color=False
+            )
         up_bps = st.upload()
         if verbose:
             _cprint(f" Done. {RESET}", end="", no_color=False)
@@ -120,9 +148,12 @@ def execute_speed_test(
             "exit_code": 1,
         }
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
         sys.stdout.flush()
@@ -132,6 +163,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
                 fp.write(json_payload)
         except OSError:
             sys.stdout.write(json_payload)
+
 
 def run(
     server: Optional[str] = None,
@@ -143,11 +175,16 @@ def run(
     print_human_readable_ui(result, no_color=no_color)
     write_llm_output(result)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AIChat Network Speed Tool")
     parser.add_argument("--server", help="Server ID")
-    parser.add_argument("--unit", choices=["Mbps", "Kbps"], default="Mbps", help="Output unit")
+    parser.add_argument(
+        "--unit", choices=["Mbps", "Kbps"], default="Mbps", help="Output unit"
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logs")
     parser.add_argument("--no-color", action="store_true", help="Disable color")
     args = parser.parse_args()
-    run(server=args.server, unit=args.unit, verbose=args.verbose, no_color=args.no_color)
+    run(
+        server=args.server, unit=args.unit, verbose=args.verbose, no_color=args.no_color
+    )

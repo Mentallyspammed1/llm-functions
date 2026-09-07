@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import os
 import re
 import sys
@@ -55,15 +54,15 @@ class ToolJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-NEON_CYAN   = "\033[38;5;51m"
-NEON_GREEN  = "\033[38;5;46m"
-NEON_RED    = "\033[38;5;196m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
 NEON_YELLOW = "\033[38;5;226m"
 NEON_PURPLE = "\033[38;5;129m"
-NEON_PINK   = "\033[38;5;198m"
-RESET       = "\033[0m"
-BOLD        = "\033[1m"
-DIM         = "\033[2m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[a-zA-Z]")
 
@@ -73,10 +72,15 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -128,10 +132,18 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         f"{status_color}{BOLD}{status_symbol} {'SUCCESS' if success else 'FAILED'}{RESET}"
     )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}File Path:{RESET}    {data.get('file_path', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Total Pages:{RESET}  {NEON_YELLOW}{data.get('total_pages', 0)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}File Size:{RESET}    {data.get('file_size_fmt', '0B')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}File Path:{RESET}    {data.get('file_path', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Total Pages:{RESET}  {NEON_YELLOW}{data.get('total_pages', 0)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}File Size:{RESET}    {data.get('file_size_fmt', '0B')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}     {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     pages = data.get("pages", [])
     if pages:
@@ -139,7 +151,9 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Extracted Pages ({len(pages)}):{RESET}")
         for p in pages[:3]:
             preview = p.get("snippet", "").replace("\n", " ")[:50]
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} Page {NEON_GREEN}{p['page_number']}{RESET} ({p['word_count']} words): {DIM}{preview}...{RESET}")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} Page {NEON_GREEN}{p['page_number']}{RESET} ({p['word_count']} words): {DIM}{preview}...{RESET}"
+            )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -199,13 +213,15 @@ def execute_tool(
             clean_text = re.sub(r"[ \t]+", " ", raw_text).strip()
             truncated_text = clean_text[:max_characters]
 
-            extracted_pages.append({
-                "page_number": idx + 1,
-                "character_count": len(clean_text),
-                "word_count": len(clean_text.split()),
-                "snippet": truncated_text[:200],
-                "text": truncated_text,
-            })
+            extracted_pages.append(
+                {
+                    "page_number": idx + 1,
+                    "character_count": len(clean_text),
+                    "word_count": len(clean_text.split()),
+                    "snippet": truncated_text[:200],
+                    "text": truncated_text,
+                }
+            )
 
         return {
             "success": True,
@@ -230,7 +246,9 @@ def execute_tool(
 
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
         sys.stdout.flush()
@@ -267,7 +285,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pyrmethus PDF Inspector Tool")
     parser.add_argument("--target", "-t", required=True, dest="target")
     parser.add_argument("--pages", dest="pages")
-    parser.add_argument("--max-characters", type=int, default=4000, dest="max_characters")
+    parser.add_argument(
+        "--max-characters", type=int, default=4000, dest="max_characters"
+    )
     parser.add_argument("--metadata-only", action="store_true", dest="metadata_only")
     parser.add_argument("--no-color", action="store_true", dest="no_color")
     parser.add_argument("--verbose", "-v", action="store_true", dest="verbose")

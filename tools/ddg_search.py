@@ -42,11 +42,12 @@ from datetime import datetime, timedelta
 from enum import Enum
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Optional
 
 # Optional BeautifulSoup import for superior HTML parsing resilience
 try:
     from bs4 import BeautifulSoup
+
     HAS_BS4 = True
 except ImportError:
     HAS_BS4 = False
@@ -55,7 +56,8 @@ except ImportError:
 # 1️⃣  Version & Exit-Code Constants
 # ---------------------------------------------------------------------------
 __version__ = "2.3.1-ENHANCED"
-__all__ = ["run", "execute_tool", "ToolCache", "__version__"]
+__all__ = ["ToolCache", "__version__", "execute_tool", "run"]
+
 
 class EXIT_CODE(Enum):
     SUCCESS = 0
@@ -63,10 +65,12 @@ class EXIT_CODE(Enum):
     INVALID_INPUT = 127
     INTERRUPTED = 130
 
+
 EXIT_SUCCESS = EXIT_CODE.SUCCESS.value
 EXIT_ERROR = EXIT_CODE.ERROR.value
 EXIT_INVALID_INPUT = EXIT_CODE.INVALID_INPUT.value
 EXIT_INTERRUPTED = EXIT_CODE.INTERRUPTED.value
+
 
 # ---------------------------------------------------------------------------
 # 2️⃣  Enums & Custom JSON Encoder
@@ -74,6 +78,7 @@ EXIT_INTERRUPTED = EXIT_CODE.INTERRUPTED.value
 class ExecutionMode(str, Enum):
     SUMMARY = "summary"
     DETAILED = "detailed"
+
 
 class ToolJSONEncoder(json.JSONEncoder):
     """Serialize Path, Enum, datetime, bytes, sets, etc. safely."""
@@ -93,28 +98,33 @@ class ToolJSONEncoder(json.JSONEncoder):
             return list(obj)
         return super().default(obj)
 
+
 # ---------------------------------------------------------------------------
 # 3️⃣  Terminal UI Helpers (color handling)
 # ---------------------------------------------------------------------------
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]"
-)
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
+
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
+
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
+
 
 def _cprint(
     text: str,
@@ -127,6 +137,7 @@ def _cprint(
     if no_color or not _is_tty():
         text = _strip_ansi(text)
     print(text, file=target, flush=True, end=end)
+
 
 def print_human_readable_ui(data: dict[str, Any], *, no_color: bool = False) -> None:
     """Render a colourful box for human users on stderr."""
@@ -146,11 +157,21 @@ def print_human_readable_ui(data: dict[str, Any], *, no_color: bool = False) -> 
         f"{status_color}{BOLD}{status_symbol} {status_text}{RESET}"
     )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}    {data.get('query', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Engine:{RESET}   {data.get('engine', 'web')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}    {NEON_YELLOW}{data.get('count', 0)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Query:{RESET}    {data.get('query', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Engine:{RESET}   {data.get('engine', 'web')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Count:{RESET}    {NEON_YELLOW}{data.get('count', 0)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Cached:{RESET}   {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET} {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -159,7 +180,9 @@ def print_human_readable_ui(data: dict[str, Any], *, no_color: bool = False) -> 
     instant = data.get("instant_answer")
     if instant and instant.get("abstract"):
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Instant Answer ({instant.get('source', 'DuckDuckGo')}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Instant Answer ({instant.get('source', 'DuckDuckGo')}):{RESET}"
+        )
         _cprint(f"{NEON_PURPLE}│{RESET} {DIM}{instant['abstract'][:120]}...{RESET}")
 
     results = data.get("results", [])
@@ -171,6 +194,7 @@ def print_human_readable_ui(data: dict[str, Any], *, no_color: bool = False) -> 
             _cprint(f"{NEON_PURPLE}│{RESET}     {DIM}{item.get('url')}{RESET}")
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
+
 # ---------------------------------------------------------------------------
 # 4️⃣  Cache Manager (persistent, size-limited, TTL)
 # ---------------------------------------------------------------------------
@@ -180,8 +204,16 @@ class ToolCache:
     _DEFAULT_MAX_FILES = 100
     _DEFAULT_TTL = 3600  # 1 hour
 
-    def __init__(self, *, cache_dir: Optional[Path] = None, max_files: int = _DEFAULT_MAX_FILES, ttl: int = _DEFAULT_TTL) -> None:
-        self.cache_dir = Path(cache_dir) if cache_dir else Path.home() / ".cache" / "aichat_tools"
+    def __init__(
+        self,
+        *,
+        cache_dir: Optional[Path] = None,
+        max_files: int = _DEFAULT_MAX_FILES,
+        ttl: int = _DEFAULT_TTL,
+    ) -> None:
+        self.cache_dir = (
+            Path(cache_dir) if cache_dir else Path.home() / ".cache" / "aichat_tools"
+        )
         self.max_files = max_files
         self.ttl = ttl
         try:
@@ -233,6 +265,7 @@ class ToolCache:
             if tmp_file.exists():
                 tmp_file.unlink(missing_ok=True)
 
+
 # ---------------------------------------------------------------------------
 # 5️⃣  Graceful Signal Handling
 # ---------------------------------------------------------------------------
@@ -258,6 +291,7 @@ class GracefulShutdown:
         except ValueError:
             pass
 
+
 # ---------------------------------------------------------------------------
 # 6️⃣  HTTP Helpers (with retries, timeout, user-agent)
 # ---------------------------------------------------------------------------
@@ -267,7 +301,9 @@ def _http_get(url: str, *, timeout: int, headers: dict[str, str]) -> str:
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read().decode(resp.headers.get_content_charset() or "utf-8", errors="ignore")
+                return resp.read().decode(
+                    resp.headers.get_content_charset() or "utf-8", errors="ignore"
+                )
         except Exception as exc:
             if attempt == max_retries:
                 raise
@@ -275,19 +311,27 @@ def _http_get(url: str, *, timeout: int, headers: dict[str, str]) -> str:
             logging.debug("Request failed (%s). Retrying in %.1fs...", exc, backoff)
             time.sleep(backoff)
 
-def _http_post(url: str, post_data: bytes, *, timeout: int, headers: dict[str, str]) -> str:
+
+def _http_post(
+    url: str, post_data: bytes, *, timeout: int, headers: dict[str, str]
+) -> str:
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
-            req = urllib.request.Request(url, data=post_data, headers=headers, method="POST")
+            req = urllib.request.Request(
+                url, data=post_data, headers=headers, method="POST"
+            )
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read().decode(resp.headers.get_content_charset() or "utf-8", errors="ignore")
+                return resp.read().decode(
+                    resp.headers.get_content_charset() or "utf-8", errors="ignore"
+                )
         except Exception as exc:
             if attempt == max_retries:
                 raise
             backoff = 0.5 * (2 ** (attempt - 1))
             logging.debug("POST failed (%s). Retrying in %.1fs...", exc, backoff)
             time.sleep(backoff)
+
 
 # ---------------------------------------------------------------------------
 # 7️⃣  Instant-Answer Fetcher
@@ -324,7 +368,14 @@ def fetch_instant_answer(query: str, *, timeout: int) -> dict[str, Any]:
             "related_topics": related[:5],
         }
     except Exception:
-        return {"abstract": "", "source": "", "url": "", "heading": "", "related_topics": []}
+        return {
+            "abstract": "",
+            "source": "",
+            "url": "",
+            "heading": "",
+            "related_topics": [],
+        }
+
 
 # ---------------------------------------------------------------------------
 # 8️⃣  Web-Result Fetcher (HTML parsing)
@@ -376,7 +427,9 @@ class DDGHTMLParser(HTMLParser):
                 link = "https:" + link
 
             if title_str and link and not link.startswith("https://duckduckgo.com/"):
-                self.results.append({"title": title_str, "url": link, "snippet": snippet_str})
+                self.results.append(
+                    {"title": title_str, "url": link, "snippet": snippet_str}
+                )
 
             self.in_result = False
 
@@ -385,6 +438,7 @@ class DDGHTMLParser(HTMLParser):
             self.current_title.append(data)
         elif self.in_snippet:
             self.current_snippet.append(data)
+
 
 def fetch_web_results(query: str, limit: int, *, timeout: int) -> list[dict[str, str]]:
     url = "https://html.duckduckgo.com/html/"
@@ -402,7 +456,9 @@ def fetch_web_results(query: str, limit: int, *, timeout: int) -> list[dict[str,
     except Exception as exc:
         raise RuntimeError(f"Failed to fetch web results: {exc}")
 
-    if "anomaly_detector" in payload or (("Notice:" in payload) and ("bots" in payload)):
+    if "anomaly_detector" in payload or (
+        ("Notice:" in payload) and ("bots" in payload)
+    ):
         raise RuntimeError("DuckDuckGo has rate-limited or blocked the request.")
 
     results: list[dict[str, str]] = []
@@ -422,12 +478,18 @@ def fetch_web_results(query: str, limit: int, *, timeout: int) -> list[dict[str,
                 link = "https:" + link
 
             title_text = html.unescape(title_el.get_text(strip=True))
-            snippet_el = res.find("a", class_="result__snippet") or res.find("div", class_="result__snippet")
-            snippet_text = html.unescape(snippet_el.get_text(strip=True)) if snippet_el else ""
+            snippet_el = res.find("a", class_="result__snippet") or res.find(
+                "div", class_="result__snippet"
+            )
+            snippet_text = (
+                html.unescape(snippet_el.get_text(strip=True)) if snippet_el else ""
+            )
             snippet_text = re.sub(r"\s+", " ", snippet_text)
 
             if title_text and link and not link.startswith("https://duckduckgo.com/"):
-                results.append({"title": title_text, "url": link, "snippet": snippet_text})
+                results.append(
+                    {"title": title_text, "url": link, "snippet": snippet_text}
+                )
 
             if len(results) >= limit:
                 break
@@ -444,6 +506,7 @@ def fetch_web_results(query: str, limit: int, *, timeout: int) -> list[dict[str,
             seen.add(r["url"])
             unique.append(r)
     return unique[:limit]
+
 
 # ---------------------------------------------------------------------------
 # 9️⃣  Core Execution Engine (with parallel worker support)
@@ -463,8 +526,7 @@ def execute_tool(
     """Run a single search and return a structured response dict."""
     start_time = time.monotonic()
     limit_val = limit if (limit is not None and limit > 0) else 5
-    if limit_val > 20:
-        limit_val = 20
+    limit_val = min(limit_val, 20)
 
     clean_query = query.strip()
     if not clean_query:
@@ -491,9 +553,15 @@ def execute_tool(
         # Utilize parallel threads when hybrid mode or multi-workers are requested
         max_threads = max(1, workers)
         if engine == "hybrid":
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
-                f_instant = executor.submit(fetch_instant_answer, clean_query, timeout=timeout)
-                f_web = executor.submit(fetch_web_results, clean_query, limit_val, timeout=timeout)
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_threads
+            ) as executor:
+                f_instant = executor.submit(
+                    fetch_instant_answer, clean_query, timeout=timeout
+                )
+                f_web = executor.submit(
+                    fetch_web_results, clean_query, limit_val, timeout=timeout
+                )
                 instant_data = f_instant.result()
                 web_results = f_web.result()
         elif engine == "instant":
@@ -510,7 +578,9 @@ def execute_tool(
             "mode": mode.value,
             "count": len(web_results),
             "instant_answer": instant_data if instant_data.get("abstract") else None,
-            "results": web_results if mode == ExecutionMode.DETAILED else web_results[:limit_val],
+            "results": web_results
+            if mode == ExecutionMode.DETAILED
+            else web_results[:limit_val],
             "cached": False,
             "duration_ms": duration_ms,
             "exit_code": EXIT_SUCCESS,
@@ -534,19 +604,20 @@ def execute_tool(
     finally:
         shutdown.restore()
 
+
 # ---------------------------------------------------------------------------
 # 🔟  LLM Output Writer (with Markdown and CSV support)
 # ---------------------------------------------------------------------------
 def write_llm_output(data: dict[str, Any], *, output_format: str) -> None:
     """Write the payload to LLM_OUTPUT (or stdout) respecting json, jsonl, csv, or md."""
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    
+
     if output_format == "jsonl":
         payload = json.dumps(data, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
     elif output_format == "md":
         lines = [
             f"# Search Results: {data.get('query', '')}",
-            f"**Engine:** {data.get('engine')} | **Duration:** {data.get('duration_ms')}ms\n"
+            f"**Engine:** {data.get('engine')} | **Duration:** {data.get('duration_ms')}ms\n",
         ]
         if data.get("instant_answer"):
             ia = data["instant_answer"]
@@ -554,17 +625,23 @@ def write_llm_output(data: dict[str, Any], *, output_format: str) -> None:
             lines.append(f"{ia.get('abstract')}\n[Source Link]({ia.get('url')})\n")
         lines.append("## Web Results")
         for item in data.get("results", []):
-            lines.append(f"- [{item.get('title')}]({item.get('url')})\n  > {item.get('snippet')}")
+            lines.append(
+                f"- [{item.get('title')}]({item.get('url')})\n  > {item.get('snippet')}"
+            )
         payload = "\n".join(lines) + "\n"
     elif output_format == "csv":
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["Title", "URL", "Snippet"])
         for item in data.get("results", []):
-            writer.writerow([item.get("title", ""), item.get("url", ""), item.get("snippet", "")])
+            writer.writerow(
+                [item.get("title", ""), item.get("url", ""), item.get("snippet", "")]
+            )
         payload = output.getvalue()
     else:
-        payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+        payload = (
+            json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+        )
 
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(payload)
@@ -578,6 +655,7 @@ def write_llm_output(data: dict[str, Any], *, output_format: str) -> None:
             sys.stderr.write(f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n")
             sys.stdout.write(payload)
             sys.stdout.flush()
+
 
 # ---------------------------------------------------------------------------
 # 1️⃣1️⃣ Programmatic Entrypoint (AIChat compatible)
@@ -611,6 +689,7 @@ def run(
     write_llm_output(result, output_format=output_format)
     return result
 
+
 # ---------------------------------------------------------------------------
 # 1️⃣2️⃣ CLI Argument Parser & Main
 # ---------------------------------------------------------------------------
@@ -619,8 +698,12 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="ddg_search.py",
         description=f"AIChat DuckDuckGo Master Search Tool v{__version__}",
     )
-    parser.add_argument("--query", "-q", required=True, help="Search query string (required)")
-    parser.add_argument("--limit", type=int, default=5, help="Maximum search results (default: 5)")
+    parser.add_argument(
+        "--query", "-q", required=True, help="Search query string (required)"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=5, help="Maximum search results (default: 5)"
+    )
     parser.add_argument(
         "--mode",
         choices=[ExecutionMode.SUMMARY.value, ExecutionMode.DETAILED.value],
@@ -633,19 +716,41 @@ def _build_parser() -> argparse.ArgumentParser:
         default="web",
         help="Search engine mode: web, instant, or hybrid (default: web)",
     )
-    parser.add_argument("--use-cache", action="store_true", dest="use_cache", help="Enable result caching")
-    parser.add_argument("--no-color", action="store_true", dest="no_color", help="Disable ANSI colour output")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
-    parser.add_argument("--log-file", help="Path to a file where debug logs will be appended")
+    parser.add_argument(
+        "--use-cache",
+        action="store_true",
+        dest="use_cache",
+        help="Enable result caching",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        dest="no_color",
+        help="Disable ANSI colour output",
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable debug logging"
+    )
+    parser.add_argument(
+        "--log-file", help="Path to a file where debug logs will be appended"
+    )
     parser.add_argument(
         "--output-format",
         choices=["json", "jsonl", "csv", "md"],
         default="json",
         help="Output format for LLM integration (default: json)",
     )
-    parser.add_argument("--timeout", type=int, default=15, help="Request timeout in seconds (default: 15)")
-    parser.add_argument("--workers", type=int, default=1, help="Number of parallel workers (default: 1)")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=15,
+        help="Request timeout in seconds (default: 15)",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=1, help="Number of parallel workers (default: 1)"
+    )
     return parser
+
 
 def main() -> None:
     parser = _build_parser()
@@ -660,7 +765,9 @@ def main() -> None:
     if args.log_file:
         file_handler = logging.FileHandler(args.log_file, mode="a", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+        )
         logging.getLogger().addHandler(file_handler)
 
     res = run(
@@ -677,6 +784,7 @@ def main() -> None:
         workers=args.workers,
     )
     sys.exit(res.get("exit_code", EXIT_SUCCESS))
+
 
 if __name__ == "__main__":
     main()

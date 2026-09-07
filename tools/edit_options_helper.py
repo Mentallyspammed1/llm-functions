@@ -9,9 +9,11 @@
 # =============================================================================
 
 from __future__ import annotations
+
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
-import json
+
 
 # ---------------------------------------------------------------------------
 # Helper: convert a raw dict (e.g. from argparse) into a typed EditOptions
@@ -23,6 +25,7 @@ def _dict_to_namespace(raw: Dict[str, Any]) -> Dict[str, Any]:
       * integers from strings when possible
       * lists from JSON strings or comma‑separated strings
     """
+
     def _coerce(value: Union[str, int, bool, None]) -> Any:
         if value is None:
             return None
@@ -79,55 +82,56 @@ class EditOptions:
     implement validation logic; validation is performed by the dispatcher
     before the operation is executed.
     """
-    operation: Optional[str] = None                     # required
-    file_path: Optional[str] = None                    # primary path
-    target_path: Optional[str] = None                  # secondary path
-    content: Optional[Union[str, int, float]] = None   # content to write/append
-    search_text: Optional[str] = None                  # pattern to search for
-    replacement: Optional[str] = None                  # replacement text
-    pattern: Optional[str] = None                      # alias for search_text
-    use_regex: bool = False                            # --regex flag
-    global_replace: bool = True                        # --no-global negates this
-    case_sensitive: bool = True                        # --case-insensitive negates this
-    encoding: str = "utf-8"                            # --encoding
-    line_context: int = 0                              # --context
-    include_hidden: bool = False                       # --include-hidden
-    sort_by: str = "name"                              # --sort
-    descending: bool = False                           # --descending
-    show_lines: bool = True                            # --no-lines negates this
-    add_newline: bool = False                          # --add-newline
-    context_lines: int = 3                             # --diff-context
-    truncate_size: int = 0                             # --truncate-size
-    max_backups: int = 15                              # --max-backups
-    max_matches: int = 1000                            # --max-matches
-    mode: Optional[str] = None                         # permission/compare mode
-    to_type: Optional[str] = None                      # --to-type (lf/crlf)
-    backup_timestamp: Optional[str] = None             # --backup-timestamp
-    recursive: bool = False                            # --recursive
-    verbose: bool = False                              # --verbose
-    algorithm: str = "sha256"                          # --algorithm (hash)
-    n_lines: int = 10                                  # --n-lines
-    compare_mode: str = "bytes"                        # --compare-mode
-    compression: str = "deflate"                       # --compression
-    password: Optional[str] = None                     # --password
-    variables: List[str] = field(default_factory=list) # --var (repeatable)
-    undefined_var: str = "error"                       # --undefined-var
-    file_pattern: str = "*"                            # --file-pattern
-    min_size: Optional[int] = None                     # --min-size
-    max_size_filter: Optional[int] = None              # --max-size-filter
-    modified_after: Optional[float] = None             # --modified-after
-    modified_before: Optional[float] = None            # --modified-before
-    file_type: str = "any"                             # --file-type
-    max_results: int = 1000                            # --max-results
+
+    operation: Optional[str] = None  # required
+    file_path: Optional[str] = None  # primary path
+    target_path: Optional[str] = None  # secondary path
+    content: Optional[Union[str, int, float]] = None  # content to write/append
+    search_text: Optional[str] = None  # pattern to search for
+    replacement: Optional[str] = None  # replacement text
+    pattern: Optional[str] = None  # alias for search_text
+    use_regex: bool = False  # --regex flag
+    global_replace: bool = True  # --no-global negates this
+    case_sensitive: bool = True  # --case-insensitive negates this
+    encoding: str = "utf-8"  # --encoding
+    line_context: int = 0  # --context
+    include_hidden: bool = False  # --include-hidden
+    sort_by: str = "name"  # --sort
+    descending: bool = False  # --descending
+    show_lines: bool = True  # --no-lines negates this
+    add_newline: bool = False  # --add-newline
+    context_lines: int = 3  # --diff-context
+    truncate_size: int = 0  # --truncate-size
+    max_backups: int = 15  # --max-backups
+    max_matches: int = 1000  # --max-matches
+    mode: Optional[str] = None  # permission/compare mode
+    to_type: Optional[str] = None  # --to-type (lf/crlf)
+    backup_timestamp: Optional[str] = None  # --backup-timestamp
+    recursive: bool = False  # --recursive
+    verbose: bool = False  # --verbose
+    algorithm: str = "sha256"  # --algorithm (hash)
+    n_lines: int = 10  # --n-lines
+    compare_mode: str = "bytes"  # --compare-mode
+    compression: str = "deflate"  # --compression
+    password: Optional[str] = None  # --password
+    variables: List[str] = field(default_factory=list)  # --var (repeatable)
+    undefined_var: str = "error"  # --undefined-var
+    file_pattern: str = "*"  # --file-pattern
+    min_size: Optional[int] = None  # --min-size
+    max_size_filter: Optional[int] = None  # --max-size-filter
+    modified_after: Optional[float] = None  # --modified-after
+    modified_before: Optional[float] = None  # --modified-before
+    file_type: str = "any"  # --file-type
+    max_results: int = 1000  # --max-results
     edits: Optional[List[Dict[str, Any]]] = field(default_factory=list)  # --edits
-    continue_on_error: bool = False                    # --continue-on-error
-    dry_run: bool = False                              # --dry-run
-    ops: Optional[List[Dict[str, Any]]] = None         # --ops (batch mode)
-    line_number: Optional[int] = None                  # --line
-    start_line: Optional[int] = None                   # --start-line
-    end_line: Optional[int] = None                     # --end-line
+    continue_on_error: bool = False  # --continue-on-error
+    dry_run: bool = False  # --dry-run
+    ops: Optional[List[Dict[str, Any]]] = None  # --ops (batch mode)
+    line_number: Optional[int] = None  # --line
+    start_line: Optional[int] = None  # --start-line
+    end_line: Optional[int] = None  # --end-line
     # Additional convenience fields that are derived from the raw CLI args
-    path_alias_resolved: bool = False                  # internal: did we map --path → file_path?
+    path_alias_resolved: bool = False  # internal: did we map --path → file_path?
 
     # -----------------------------------------------------------------------
     # Helper: convert this instance back to a plain dict suitable for JSON I/O
@@ -147,7 +151,10 @@ class EditOptions:
         if not self.file_path:
             missing.append("file_path")
         if missing:
-            return {"success": False, "error": f"Missing required option(s): {', '.join(missing)}"}
+            return {
+                "success": False,
+                "error": f"Missing required option(s): {', '.join(missing)}",
+            }
         return {"success": True}
 
 
@@ -203,4 +210,5 @@ def build_edit_options_from_dict(data: Dict[str, Any]) -> EditOptions:
 if __name__ == "__main__":
     # Simple demo: print the dataclass signature
     import pprint
+
     pprint.pprint(EditOptions.__dataclass_fields__)

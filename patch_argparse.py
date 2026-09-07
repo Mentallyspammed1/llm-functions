@@ -1,6 +1,6 @@
 import re
 
-with open('tools/bybit_wbta.py', 'r') as f:
+with open("tools/bybit_wbta.py") as f:
     code = f.read()
 
 # Replace everything from def main() down with argparse logic
@@ -63,18 +63,17 @@ if __name__ == "__main__":
 """
 
 # Find the start of def main() and cut it off, then append the new main block
-start_idx = code.find('def main() -> None:')
+start_idx = code.find("def main() -> None:")
 if start_idx != -1:
     # First extract the _coerce_bool and run functions from the old code, since they were at the bottom
     # We'll just define them ABOVE new_main
-    run_funcs = code[code.find('def _coerce_bool'):]
+    run_funcs = code[code.find("def _coerce_bool") :]
     # Remove the `if __name__ == "__main__": main()` if it exists inside run_funcs
-    run_funcs = re.sub(r'if __name__ == "__main__":\s+main\(\)', '', run_funcs)
-    
+    run_funcs = re.sub(r'if __name__ == "__main__":\s+main\(\)', "", run_funcs)
+
     code = code[:start_idx] + run_funcs + "\\n" + new_main
 else:
     print("Could not find def main()")
 
-with open('tools/bybit_wbta.py', 'w') as f:
+with open("tools/bybit_wbta.py", "w") as f:
     f.write(code)
-

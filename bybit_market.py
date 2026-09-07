@@ -7,82 +7,97 @@
 # @option --use_tor       Route through Tor proxy (default: true)
 """
 Bybit Market Data Tools
-Public market data endpoints - no authentication required
+Public market data endpoints — no authentication required.
+
+Runs on the unified `tools.bybit` client (no pybit dependency).
 """
-import os
-import json
+
 import argparse
+import json
+import os
+import sys
 from pathlib import Path
 
-# Load .env if exists
-env_path = Path(__file__).parent.parent / ".env"
-if env_path.exists():
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, val = line.split("=", 1)
-                os.environ.setdefault(key, val)
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from pybit.unified_trading import HTTP
+from tools.bybit.terminal import BybitRealm  # noqa: E402
 
-# Tor proxy support
-USE_TOR = os.getenv("BYBIT_USE_TOR", "true").lower() == "true"
-PROXY = "socks5h://127.0.0.1:9050" if USE_TOR else None
 
-TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
-
-session = HTTP(testnet=TESTNET, proxy=PROXY)
+def _realm():
+    return BybitRealm()
 
 
 def bybit_get_orderbook(symbol, limit=50):
     """Get orderbook depth (L2)"""
+    bot = _realm()
     try:
-        result = session.get_orderbook(category="linear", symbol=symbol, limit=limit)
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        print(json.dumps(bot.get_orderbook(symbol, limit=limit), indent=2))
+    finally:
+        bot.close()
 
 
 def bybit_get_ticker(symbol):
     """Get 24h ticker information"""
+    bot = _realm()
     try:
-        result = session.get_tickers(category="linear", symbol=symbol)
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        print(json.dumps(bot.get_ticker(symbol), indent=2))
+    finally:
+        bot.close()
 
 
 def bybit_get_klines(symbol, interval="15", limit=100):
     """Get candlestick/kline data"""
+    bot = _realm()
     try:
-        result = session.get_kline(
-            category="linear",
-            symbol=symbol,
-            interval=interval,
-            limit=limit
-        )
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        print(json.dumps(bot.get_klines(symbol, interval=interval, limit=limit), indent=2))
+    finally:
+        bot.close()
 
 
 def bybit_get_funding_rate(symbol):
     """Get current funding rate"""
+    bot = _realm()
     try:
-        result = session.get_funding_rate_history(category="linear", symbol=symbol, limit=1)
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        print(json.dumps(bot.get_funding_rate(symbol, limit=1), indent=2))
+    finally:
+        bot.close()
 
 
 def bybit_get_instruments(symbol):
     """Get instrument info (tick size, lot size, etc.)"""
+    bot = _realm()
     try:
-        result = session.get_instruments_info(category="linear", symbol=symbol)
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        print(json.dumps(bot.get_instruments_info("linear", symbol), indent=2))
+    finally:
+        bot.close()
+
+
+def run(**kwargs) -> dict:
+    """Unified entry point (used by run-tool.py)."""
+    action = kwargs.get("action", "ticker")
+    symbol = kwargs.get("symbol")
+    if not symbol:
+        return {"error": "--symbol is required"}
+    limit = int(kwargs.get("limit", 50))
+    interval = kwargs.get("interval", "15")
+
+    bot = _realm()
+    try:
+        if action == "orderbook":
+            return bot.get_orderbook(symbol, limit=limit)
+        if action == "ticker":
+            return bot.get_ticker(symbol)
+        if action == "klines":
+            return bot.get_klines(symbol, interval=interval, limit=limit)
+        if action == "funding":
+            return bot.get_funding_rate(symbol, limit=1)
+        if action == "instruments":
+            return bot.get_instruments_info("linear", symbol)
+        return {"error": f"Unknown action: {action}"}
+    finally:
+        bot.close()
 
 
 def main():
@@ -93,18 +108,7 @@ def main():
     parser.add_argument("--interval", default="15", help="Kline interval")
     args = parser.parse_args()
 
-    if args.action == "orderbook":
-        bybit_get_orderbook(args.symbol, args.limit)
-    elif args.action == "ticker":
-        bybit_get_ticker(args.symbol)
-    elif args.action == "klines":
-        bybit_get_klines(args.symbol, args.interval, args.limit)
-    elif args.action == "funding":
-        bybit_get_funding_rate(args.symbol)
-    elif args.action == "instruments":
-        bybit_get_instruments(args.symbol)
-    else:
-        print(json.dumps({"error": f"Unknown action: {args.action}"}))
+    print(json.dumps(run(**vars(args)), indent=2))
 
 
 if __name__ == "__main__":

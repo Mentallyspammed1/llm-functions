@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
+
 import requests
-import json
-import sys
+
 
 def run(ip_address: str, verbose: bool = False) -> dict:
     """
@@ -17,13 +17,13 @@ def run(ip_address: str, verbose: bool = False) -> dict:
         data = response.json()
         if data.get("status") == "fail":
             return {"success": False, "error": data.get("message", "Lookup failed")}
-        
+
         result = {
             "success": True,
             "ip": ip_address,
             "country": data.get("country"),
             "city": data.get("city"),
-            "timezone": data.get("timezone")
+            "timezone": data.get("timezone"),
         }
         if verbose:
             result["raw"] = data

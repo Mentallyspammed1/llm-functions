@@ -19,16 +19,14 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import logging
 import os
 import re
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 try:
     from PIL import Image, ImageOps
@@ -56,15 +54,15 @@ class ToolJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-NEON_CYAN   = "\033[38;5;51m"
-NEON_GREEN  = "\033[38;5;46m"
-NEON_RED    = "\033[38;5;196m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
 NEON_YELLOW = "\033[38;5;226m"
 NEON_PURPLE = "\033[38;5;129m"
-NEON_PINK   = "\033[38;5;198m"
-RESET       = "\033[0m"
-BOLD        = "\033[1m"
-DIM         = "\033[2m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[a-zA-Z]")
 
@@ -74,10 +72,15 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -124,15 +127,27 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         f"{status_color}{BOLD}{status_symbol} {'SUCCESS' if success else 'FAILED'}{RESET}"
     )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target:{RESET}      {data.get('target', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Format:{RESET}      {NEON_YELLOW}{data.get('format', 'N/A')}{RESET} ({data.get('mode')})")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Dimensions:{RESET}  {NEON_GREEN}{data.get('width')}x{data.get('height')}{RESET} px")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}File Size:{RESET}   {data.get('file_size_fmt')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target:{RESET}      {data.get('target', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Format:{RESET}      {NEON_YELLOW}{data.get('format', 'N/A')}{RESET} ({data.get('mode')})"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Dimensions:{RESET}  {NEON_GREEN}{data.get('width')}x{data.get('height')}{RESET} px"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}File Size:{RESET}   {data.get('file_size_fmt')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if data.get("saved_to"):
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_GREEN}Saved Output:{RESET} {data['saved_to']}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_GREEN}Saved Output:{RESET} {data['saved_to']}"
+        )
 
     _cprint(f"{NEON_PURPLE}╰{border}╯{RESET}")
 
@@ -204,7 +219,10 @@ def execute_tool(
                 if not strip_exif and "exif" in img.info:
                     save_kwargs["exif"] = img.info["exif"]
 
-                if proc_img.mode in ("RGBA", "P") and img_format.upper() in ("JPEG", "JPG"):
+                if proc_img.mode in ("RGBA", "P") and img_format.upper() in (
+                    "JPEG",
+                    "JPG",
+                ):
                     proc_img = proc_img.convert("RGB")
 
                 proc_img.save(target_out, format=img_format, **save_kwargs)
@@ -220,7 +238,9 @@ def execute_tool(
                 "width": new_w,
                 "height": new_h,
                 "original_dimensions": f"{orig_w}x{orig_h}",
-                "file_size_fmt": _human_bytes(Path(saved_path_str or target_path).stat().st_size),
+                "file_size_fmt": _human_bytes(
+                    Path(saved_path_str or target_path).stat().st_size
+                ),
                 "exif_stripped": strip_exif,
                 "saved_to": saved_path_str,
                 "exif_metadata": {} if strip_exif else exif_meta,
@@ -239,7 +259,9 @@ def execute_tool(
 
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
         sys.stdout.flush()

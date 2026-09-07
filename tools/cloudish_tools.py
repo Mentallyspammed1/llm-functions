@@ -28,18 +28,14 @@
 from __future__ import annotations
 
 import argparse
-import configparser
-import fnmatch
 import hashlib
 import json
-import logging
 import os
 import pickle
 import re
 import signal
 import socket
 import ssl
-import struct
 import subprocess
 import sys
 import time
@@ -50,18 +46,18 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Optional
 
 __version__ = "2.4.0"
 __all__ = [
-    "run",
-    "execute_tool",
     "ToolCache",
     "ToolError",
+    "__version__",
+    "execute_tool",
     "get_agent_var",
     "get_builtin_var",
     "get_execution_context",
-    "__version__",
+    "run",
 ]
 
 # ==============================================================================
@@ -78,14 +74,24 @@ EXIT_INTERRUPTED = 130
 
 
 class ToolError(Exception):
-    def __init__(self, message: str, exit_code: int = EXIT_ERROR, details: Optional[dict[str, Any]] = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        exit_code: int = EXIT_ERROR,
+        details: Optional[dict[str, Any]] = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.exit_code = exit_code
         self.details = details or {}
 
     def to_dict(self) -> dict[str, Any]:
-        return {"success": False, "error": self.message, "exit_code": self.exit_code, **self.details}
+        return {
+            "success": False,
+            "error": self.message,
+            "exit_code": self.exit_code,
+            **self.details,
+        }
 
 
 class ToolJSONEncoder(json.JSONEncoder):
@@ -109,15 +115,15 @@ class ToolJSONEncoder(json.JSONEncoder):
 # SECTION 2: Terminal Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\033\[[0-9;?]*[a-zA-Z]")
 
@@ -127,10 +133,15 @@ def _strip_ansi(text: str) -> str:
 
 
 def _is_tty() -> bool:
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in ("dumb", "")
+    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+        "dumb",
+        "",
+    )
 
 
-def _cprint(text: str, file: Any = None, no_color: bool = False, end: str = "\n") -> None:
+def _cprint(
+    text: str, file: Any = None, no_color: bool = False, end: str = "\n"
+) -> None:
     target = file or sys.stderr
     if no_color or not _is_tty():
         text = _strip_ansi(text)
@@ -166,11 +177,19 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [SYNCTHING & RCLONE SUITE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [SYNCTHING & RCLONE SUITE v{__version__}]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target:{RESET}      {data.get('target', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode:{RESET}        {data.get('mode', 'N/A')}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Target:{RESET}      {data.get('target', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Mode:{RESET}        {data.get('mode', 'N/A')}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}    {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     # Port Readiness Status
     if "ports_status" in data:
@@ -179,31 +198,47 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
         rc_color = NEON_GREEN if ps.get("rclone_5572") else NEON_YELLOW
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Network Daemons Probed:{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET}   Syncthing Port 8384: {st_color}{'ONLINE' if ps.get('syncthing_8384') else 'OFFLINE'}{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET}   Rclone RC Port 5572: {rc_color}{'ONLINE' if ps.get('rclone_5572') else 'OFFLINE'}{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET}   Syncthing Port 8384: {st_color}{'ONLINE' if ps.get('syncthing_8384') else 'OFFLINE'}{RESET}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET}   Rclone RC Port 5572: {rc_color}{'ONLINE' if ps.get('rclone_5572') else 'OFFLINE'}{RESET}"
+        )
 
     # Syncthing Summary
     if "status" in data:
         st = data["status"]
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Syncthing Daemon Status:{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET}   Device ID: {NEON_YELLOW}{st.get('myID', 'N/A')[:22]}...{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET}   Uptime:    {st.get('uptime_str', 'N/A')} | Version: {st.get('version', 'N/A')}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET}   Device ID: {NEON_YELLOW}{st.get('myID', 'N/A')[:22]}...{RESET}"
+        )
+        _cprint(
+            f"{NEON_PURPLE}│{RESET}   Uptime:    {st.get('uptime_str', 'N/A')} | Version: {st.get('version', 'N/A')}"
+        )
 
     # Sync Conflicts Found
-    if "conflicts" in data and data["conflicts"]:
+    if data.get("conflicts"):
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_YELLOW}⚠️ Discovered Sync Conflict Files ({len(data['conflicts'])}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_YELLOW}⚠️ Discovered Sync Conflict Files ({len(data['conflicts'])}):{RESET}"
+        )
         for c in data["conflicts"][:5]:
             _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_RED}›{RESET} {c.get('name')}")
-            _cprint(f"{NEON_PURPLE}│{RESET}     Path: {DIM}{c.get('path')}{RESET} ({format_bytes(c.get('size_bytes', 0))})")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}     Path: {DIM}{c.get('path')}{RESET} ({format_bytes(c.get('size_bytes', 0))})"
+            )
 
     # Rclone Remotes
     if "rclone_remotes" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Configured Rclone Cloud Remotes ({len(data['rclone_remotes'])}):{RESET}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {BOLD}Configured Rclone Cloud Remotes ({len(data['rclone_remotes'])}):{RESET}"
+        )
         for rem in data["rclone_remotes"]:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_GREEN}›{RESET} Remote: {NEON_CYAN}{rem.get('name')}{RESET} [{rem.get('type')}]")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_GREEN}›{RESET} Remote: {NEON_CYAN}{rem.get('name')}{RESET} [{rem.get('type')}]"
+            )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
@@ -216,6 +251,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # SECTION 3: Agent & Environment Helpers
 # ==============================================================================
 
+
 def get_agent_var(name: str, default: str = "") -> str:
     return os.environ.get(f"LLM_AGENT_VAR_{name.upper()}", default)
 
@@ -226,13 +262,16 @@ def get_builtin_var(name: str) -> Optional[str]:
 
 def get_execution_context() -> dict[str, Any]:
     termux_prefix = os.environ.get("PREFIX", "")
-    rclone_bin = subprocess.run(["which", "rclone"], capture_output=True, text=True).stdout.strip()
+    rclone_bin = subprocess.run(
+        ["which", "rclone"], capture_output=True, text=True
+    ).stdout.strip()
     return {
         "tool_name": os.environ.get("LLM_TOOL_NAME", "syncthing_rclone_suite"),
         "cache_dir": os.environ.get("LLM_TOOL_CACHE_DIR"),
         "output_path": os.environ.get("LLM_OUTPUT"),
         "cwd": get_builtin_var("__cwd__") or os.getcwd(),
-        "is_termux": "com.termux" in termux_prefix or Path("/data/data/com.termux").exists(),
+        "is_termux": "com.termux" in termux_prefix
+        or Path("/data/data/com.termux").exists(),
         "has_rclone": bool(rclone_bin),
         "rclone_bin_path": rclone_bin or None,
     }
@@ -252,6 +291,7 @@ def _parse_env_vars(env_vars: Optional[list[str]]) -> dict[str, str]:
 # ==============================================================================
 # SECTION 4: Native Caching & Signal Handlers
 # ==============================================================================
+
 
 class ToolCache:
     def __init__(self, cache_dir: Optional[Path] = None) -> None:
@@ -312,6 +352,7 @@ class GracefulShutdown:
 # SECTION 5: ADVANCED ENGINE & CONFLICT RESOLVER HELPERS
 # ==============================================================================
 
+
 def find_syncthing_config() -> tuple[Optional[str], Optional[str]]:
     home = Path.home()
     candidates = [
@@ -335,7 +376,9 @@ def find_syncthing_config() -> tuple[Optional[str], Optional[str]]:
                     apk = gui_node.find("apikey")
                     addr = gui_node.find("address")
                     key_val = apk.text.strip() if apk is not None and apk.text else None
-                    addr_val = addr.text.strip() if addr is not None and addr.text else None
+                    addr_val = (
+                        addr.text.strip() if addr is not None and addr.text else None
+                    )
                     if addr_val and not addr_val.startswith("http"):
                         addr_val = f"http://{addr_val}"
                     return key_val, addr_val
@@ -344,7 +387,9 @@ def find_syncthing_config() -> tuple[Optional[str], Optional[str]]:
     return None, None
 
 
-def find_sync_conflicts(folder_paths: list[str], limit: int = 50) -> list[dict[str, Any]]:
+def find_sync_conflicts(
+    folder_paths: list[str], limit: int = 50
+) -> list[dict[str, Any]]:
     """Scan local folders for Syncthing conflict files (*.sync-conflict-*)."""
     conflicts = []
     for fpath in folder_paths:
@@ -352,12 +397,16 @@ def find_sync_conflicts(folder_paths: list[str], limit: int = 50) -> list[dict[s
         if p.exists() and p.is_dir():
             for item in p.rglob("*.sync-conflict-*"):
                 try:
-                    conflicts.append({
-                        "path": str(item),
-                        "name": item.name,
-                        "size_bytes": item.stat().st_size if item.exists() else 0,
-                        "modified": datetime.fromtimestamp(item.stat().st_mtime, tz=timezone.utc).isoformat(),
-                    })
+                    conflicts.append(
+                        {
+                            "path": str(item),
+                            "name": item.name,
+                            "size_bytes": item.stat().st_size if item.exists() else 0,
+                            "modified": datetime.fromtimestamp(
+                                item.stat().st_mtime, tz=timezone.utc
+                            ).isoformat(),
+                        }
+                    )
                     if len(conflicts) >= limit:
                         break
                 except OSError:
@@ -400,7 +449,9 @@ def syncthing_api_call(
         body = err.read().decode("utf-8", errors="replace")
         raise ToolError(f"Syncthing API HTTP {err.code}: {err.reason} ({body.strip()})")
     except urllib.error.URLError as err:
-        raise ToolError(f"Failed to connect to Syncthing API at {base_url}: {err.reason}")
+        raise ToolError(
+            f"Failed to connect to Syncthing API at {base_url}: {err.reason}"
+        )
 
 
 def rclone_rc_call(
@@ -429,20 +480,34 @@ def run_rclone_cli(args: list[str], timeout: int = 15) -> dict[str, Any]:
         cmd = ["rclone"] + args
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if res.returncode != 0:
-            return {"success": False, "error": res.stderr.strip() or "Rclone command failed"}
+            return {
+                "success": False,
+                "error": res.stderr.strip() or "Rclone command failed",
+            }
         try:
-            return {"success": True, "json": json.loads(res.stdout)} if "--json" in args else {"success": True, "raw": res.stdout.strip()}
+            return (
+                {"success": True, "json": json.loads(res.stdout)}
+                if "--json" in args
+                else {"success": True, "raw": res.stdout.strip()}
+            )
         except json.JSONDecodeError:
             return {"success": True, "raw": res.stdout.strip()}
     except FileNotFoundError:
-        return {"success": False, "error": "Rclone executable not found in system PATH."}
+        return {
+            "success": False,
+            "error": "Rclone executable not found in system PATH.",
+        }
     except subprocess.TimeoutExpired:
-        return {"success": False, "error": f"Rclone operation timed out after {timeout}s."}
+        return {
+            "success": False,
+            "error": f"Rclone operation timed out after {timeout}s.",
+        }
 
 
 # ==============================================================================
 # SECTION 6: CORE EXECUTION ROUTER
 # ==============================================================================
+
 
 def execute_tool(
     target: Optional[str] = None,
@@ -465,7 +530,9 @@ def execute_tool(
 
     disc_key, disc_url = find_syncthing_config()
     final_api_key = api_key or os.environ.get("SYNCTHING_API_KEY") or disc_key
-    final_target = target or os.environ.get("SYNCTHING_URL") or disc_url or "http://127.0.0.1:8384"
+    final_target = (
+        target or os.environ.get("SYNCTHING_URL") or disc_url or "http://127.0.0.1:8384"
+    )
 
     cache = ToolCache()
     cache_key = f"{final_target}:{mode}:{folder_id}:{remote_path}:{limit_val}"
@@ -495,7 +562,13 @@ def execute_tool(
         if mode == "conflicts":
             if not final_api_key:
                 raise ToolError("Syncthing API key required for conflicts mode.")
-            folders = syncthing_api_call(final_target, "config/folders", final_api_key, insecure=insecure, timeout=timeout)
+            folders = syncthing_api_call(
+                final_target,
+                "config/folders",
+                final_api_key,
+                insecure=insecure,
+                timeout=timeout,
+            )
             folder_paths = [f["path"] for f in folders if "path" in f]
             res_data["conflicts"] = find_sync_conflicts(folder_paths, limit=limit_val)
 
@@ -505,15 +578,33 @@ def execute_tool(
                 raise ToolError(f"Mode '{mode}' requires --folder-id parameter.")
             if not final_api_key:
                 raise ToolError("Syncthing API key required.")
-            folder_cfg = syncthing_api_call(final_target, f"config/folders/{folder_id}", final_api_key, insecure=insecure, timeout=timeout)
+            folder_cfg = syncthing_api_call(
+                final_target,
+                f"config/folders/{folder_id}",
+                final_api_key,
+                insecure=insecure,
+                timeout=timeout,
+            )
             folder_cfg["paused"] = True if mode == "pause-folder" else False
-            syncthing_api_call(final_target, f"config/folders/{folder_id}", final_api_key, method="PUT", data_payload=folder_cfg, insecure=insecure, timeout=timeout)
-            res_data["message"] = f"Successfully {'paused' if mode == 'pause-folder' else 'resumed'} folder '{folder_id}'."
+            syncthing_api_call(
+                final_target,
+                f"config/folders/{folder_id}",
+                final_api_key,
+                method="PUT",
+                data_payload=folder_cfg,
+                insecure=insecure,
+                timeout=timeout,
+            )
+            res_data["message"] = (
+                f"Successfully {'paused' if mode == 'pause-folder' else 'resumed'} folder '{folder_id}'."
+            )
 
         # --- Rclone Remote Control (RC) Direct Call ---
         elif mode == "rclone-rc":
             endpoint = remote_path or "core/version"
-            res_data["rclone_rc_response"] = rclone_rc_call(rc_url, endpoint, timeout=timeout)
+            res_data["rclone_rc_response"] = rclone_rc_call(
+                rc_url, endpoint, timeout=timeout
+            )
 
         # --- Standard Rclone CLI Modes ---
         elif mode == "rclone-remotes":
@@ -523,32 +614,80 @@ def execute_tool(
         elif mode == "rclone-about":
             target_remote = target or "gdrive:"
             rc = run_rclone_cli(["about", target_remote, "--json"], timeout=timeout)
-            res_data["rclone_about"] = rc.get("json", {}) if rc["success"] else {"error": rc.get("error")}
+            res_data["rclone_about"] = (
+                rc.get("json", {}) if rc["success"] else {"error": rc.get("error")}
+            )
 
         # --- Standard Syncthing REST API Modes ---
-        elif mode in ("status", "folders", "devices", "connections", "rescan", "events", "errors", "needed", "config"):
+        elif mode in (
+            "status",
+            "folders",
+            "devices",
+            "connections",
+            "rescan",
+            "events",
+            "errors",
+            "needed",
+            "config",
+        ):
             if not final_api_key:
-                raise ToolError("Syncthing API Key missing. Provide --api-key or set SYNCTHING_API_KEY.")
+                raise ToolError(
+                    "Syncthing API Key missing. Provide --api-key or set SYNCTHING_API_KEY."
+                )
 
             if mode == "status":
-                st = syncthing_api_call(final_target, "system/status", final_api_key, insecure=insecure, timeout=timeout)
-                ver = syncthing_api_call(final_target, "system/version", final_api_key, insecure=insecure, timeout=timeout)
+                st = syncthing_api_call(
+                    final_target,
+                    "system/status",
+                    final_api_key,
+                    insecure=insecure,
+                    timeout=timeout,
+                )
+                ver = syncthing_api_call(
+                    final_target,
+                    "system/version",
+                    final_api_key,
+                    insecure=insecure,
+                    timeout=timeout,
+                )
                 st["uptime_str"] = str(timedelta(seconds=st.get("uptime", 0)))
                 st["version"] = ver.get("version")
                 res_data["status"] = st
 
             elif mode == "folders":
-                folders = syncthing_api_call(final_target, "config/folders", final_api_key, insecure=insecure, timeout=timeout)
+                folders = syncthing_api_call(
+                    final_target,
+                    "config/folders",
+                    final_api_key,
+                    insecure=insecure,
+                    timeout=timeout,
+                )
                 res_data["folders"] = folders
 
             elif mode == "devices":
-                devices = syncthing_api_call(final_target, "config/devices", final_api_key, insecure=insecure, timeout=timeout)
+                devices = syncthing_api_call(
+                    final_target,
+                    "config/devices",
+                    final_api_key,
+                    insecure=insecure,
+                    timeout=timeout,
+                )
                 res_data["devices"] = devices
 
             elif mode == "rescan":
                 params = {"folder": folder_id} if folder_id else {}
-                syncthing_api_call(final_target, "db/scan", final_api_key, method="POST", params=params, insecure=insecure, timeout=timeout)
-                res_data["message"] = f"Triggered rescan for {'folder: ' + folder_id if folder_id else 'all folders'}."
+                syncthing_api_call(
+                    final_target,
+                    "db/scan",
+                    final_api_key,
+                    method="POST",
+                    params=params,
+                    insecure=insecure,
+                    timeout=timeout,
+                )
+                res_data["message"] = (
+                    f"Triggered rescan for {'folder: ' + folder_id if folder_id else 'all folders'}."
+                )
 
         elif mode == "check-deps":
             res_data["diagnostics"] = {
@@ -570,18 +709,31 @@ def execute_tool(
         return res_data
 
     except ToolError as exc:
-        return {"success": False, "error": exc.message, "exit_code": exc.exit_code, "duration_ms": round((time.monotonic() - start_time) * 1000, 2)}
+        return {
+            "success": False,
+            "error": exc.message,
+            "exit_code": exc.exit_code,
+            "duration_ms": round((time.monotonic() - start_time) * 1000, 2),
+        }
     except Exception as exc:
-        return {"success": False, "error": f"Unexpected execution error: {exc}", "exit_code": EXIT_ERROR, "duration_ms": round((time.monotonic() - start_time) * 1000, 2)}
+        return {
+            "success": False,
+            "error": f"Unexpected execution error: {exc}",
+            "exit_code": EXIT_ERROR,
+            "duration_ms": round((time.monotonic() - start_time) * 1000, 2),
+        }
 
 
 # ==============================================================================
 # SECTION 7: Output Routing
 # ==============================================================================
 
+
 def write_llm_output(data: dict[str, Any]) -> None:
     out_path = os.environ.get("LLM_OUTPUT", "/dev/stdout")
-    json_payload = json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    json_payload = (
+        json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
+    )
 
     if out_path in {"/dev/stdout", "/dev/fd/1", "-"}:
         sys.stdout.write(json_payload)
@@ -601,12 +753,29 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # SECTION 8: Function Entry Point for AIChat
 # ==============================================================================
 
+
 def run(
     target: Optional[str] = None,
     mode: Literal[
-        "status", "folders", "devices", "folder-status", "pause-folder", "resume-folder",
-        "connections", "rescan", "conflicts", "events", "errors", "needed", "config",
-        "rclone-remotes", "rclone-about", "rclone-ls", "rclone-sync", "rclone-rc", "check-deps"
+        "status",
+        "folders",
+        "devices",
+        "folder-status",
+        "pause-folder",
+        "resume-folder",
+        "connections",
+        "rescan",
+        "conflicts",
+        "events",
+        "errors",
+        "needed",
+        "config",
+        "rclone-remotes",
+        "rclone-about",
+        "rclone-ls",
+        "rclone-sync",
+        "rclone-rc",
+        "check-deps",
     ] = "status",
     api_key: Optional[str] = None,
     rc_url: str = "http://127.0.0.1:5572",
@@ -647,34 +816,107 @@ def run(
 # SECTION 9: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="syncthing_rclone_suite.py",
         description=f"Syncthing & Rclone Master Suite v{__version__}",
     )
-    parser.add_argument("--target", "-t", metavar="URL_OR_REMOTE", help="Syncthing URL or Rclone remote name")
+    parser.add_argument(
+        "--target",
+        "-t",
+        metavar="URL_OR_REMOTE",
+        help="Syncthing URL or Rclone remote name",
+    )
     parser.add_argument(
         "--mode",
         choices=[
-            "status", "folders", "devices", "folder-status", "pause-folder", "resume-folder",
-            "connections", "rescan", "conflicts", "events", "errors", "needed", "config",
-            "rclone-remotes", "rclone-about", "rclone-ls", "rclone-sync", "rclone-rc", "check-deps"
+            "status",
+            "folders",
+            "devices",
+            "folder-status",
+            "pause-folder",
+            "resume-folder",
+            "connections",
+            "rescan",
+            "conflicts",
+            "events",
+            "errors",
+            "needed",
+            "config",
+            "rclone-remotes",
+            "rclone-about",
+            "rclone-ls",
+            "rclone-sync",
+            "rclone-rc",
+            "check-deps",
         ],
         default="status",
         help="Execution mode (default: status)",
     )
-    parser.add_argument("--api-key", dest="api_key", metavar="KEY", help="Syncthing API key")
-    parser.add_argument("--rc-url", dest="rc_url", default="http://127.0.0.1:5572", help="Rclone RC API URL")
-    parser.add_argument("--folder-id", dest="folder_id", metavar="ID", help="Syncthing folder ID")
-    parser.add_argument("--remote-path", dest="remote_path", metavar="PATH", help="Rclone remote subpath or RC endpoint")
-    parser.add_argument("--limit", type=int, default=50, help="Max items/files to process")
+    parser.add_argument(
+        "--api-key", dest="api_key", metavar="KEY", help="Syncthing API key"
+    )
+    parser.add_argument(
+        "--rc-url",
+        dest="rc_url",
+        default="http://127.0.0.1:5572",
+        help="Rclone RC API URL",
+    )
+    parser.add_argument(
+        "--folder-id", dest="folder_id", metavar="ID", help="Syncthing folder ID"
+    )
+    parser.add_argument(
+        "--remote-path",
+        dest="remote_path",
+        metavar="PATH",
+        help="Rclone remote subpath or RC endpoint",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=50, help="Max items/files to process"
+    )
     parser.add_argument("--timeout", type=int, default=15, help="Timeout in seconds")
-    parser.add_argument("--insecure", action="store_true", default=False, help="Disable TLS SSL verification")
-    parser.add_argument("--dry-run", action="store_true", default=False, dest="dry_run", help="Rclone dry-run mode")
-    parser.add_argument("--env-var", action="append", dest="env_var", metavar="KEY=VALUE", help="Custom env var")
-    parser.add_argument("--use-cache", action="store_true", default=False, dest="use_cache", help="Enable result caching")
-    parser.add_argument("--no-color", action="store_true", default=False, dest="no_color", help="Disable ANSI color output")
-    parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Enable debug logging")
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        default=False,
+        help="Disable TLS SSL verification",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        dest="dry_run",
+        help="Rclone dry-run mode",
+    )
+    parser.add_argument(
+        "--env-var",
+        action="append",
+        dest="env_var",
+        metavar="KEY=VALUE",
+        help="Custom env var",
+    )
+    parser.add_argument(
+        "--use-cache",
+        action="store_true",
+        default=False,
+        dest="use_cache",
+        help="Enable result caching",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        default=False,
+        dest="no_color",
+        help="Disable ANSI color output",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        default=False,
+        help="Enable debug logging",
+    )
     return parser
 
 

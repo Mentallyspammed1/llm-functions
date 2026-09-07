@@ -383,17 +383,21 @@ def calculate_momentum_score(symbol):
     oi_data = get_open_interest(symbol, "5min")
     ratio_data = get_long_short_ratio(symbol, "5min")
     kline_data = get_kline_data(symbol, "5min")
-    
+
     # Calculate components
     volume_weight = calculate_volume_weight(recent_trades)
     oi_change = calculate_oi_change(oi_data)
     long_short_bias = calculate_bias(ratio_data)
     price_acceleration = calculate_acceleration(kline_data)
-    
+
     # Final momentum score
-    momentum_score = (volume_weight * 0.4) + (oi_change * 0.3) + \
-                    (long_short_bias * 0.2) + (price_acceleration * 0.1)
-    
+    momentum_score = (
+        (volume_weight * 0.4)
+        + (oi_change * 0.3)
+        + (long_short_bias * 0.2)
+        + (price_acceleration * 0.1)
+    )
+
     return momentum_score
 ```
 
@@ -508,33 +512,37 @@ class MomentumDetector:
         self.symbol = symbol
         self.ws_public = WebSocket(testnet=True, channel_type="linear")
         self.data_buffer = {
-            'trades': deque(maxlen=1000),
-            'klines': deque(maxlen=100),
-            'oi': deque(maxlen=20)
+            "trades": deque(maxlen=1000),
+            "klines": deque(maxlen=100),
+            "oi": deque(maxlen=20),
         }
-        
+
     def on_trade_update(self, message):
         """Process real-time trade data from publicTrade.{symbol}"""
-        for trade in message['data']:
-            self.data_buffer['trades'].append({
-                'price': float(trade['p']),
-                'size': float(trade['v']),
-                'side': trade['S'],
-                'timestamp': trade['T']
-            })
+        for trade in message["data"]:
+            self.data_buffer["trades"].append(
+                {
+                    "price": float(trade["p"]),
+                    "size": float(trade["v"]),
+                    "side": trade["S"],
+                    "timestamp": trade["T"],
+                }
+            )
         self.calculate_real_time_momentum()
-    
+
     def on_kline_update(self, message):
         """Process kline updates from kline.{interval}.{symbol}"""
-        for kline in message['data']:
-            self.data_buffer['klines'].append({
-                'open': float(kline['open']),
-                'high': float(kline['high']),
-                'low': float(kline['low']),
-                'close': float(kline['close']),
-                'volume': float(kline['volume']),
-                'timestamp': kline['start']
-            })
+        for kline in message["data"]:
+            self.data_buffer["klines"].append(
+                {
+                    "open": float(kline["open"]),
+                    "high": float(kline["high"]),
+                    "low": float(kline["low"]),
+                    "close": float(kline["close"]),
+                    "volume": float(kline["volume"]),
+                    "timestamp": kline["start"],
+                }
+            )
 ```
 
 #### Advanced Momentum Scoring Algorithm
@@ -542,68 +550,70 @@ class MomentumDetector:
 ```python
 def calculate_comprehensive_momentum(self):
     """Enhanced momentum calculation with multiple indicators"""
-    
+
     # 1. Price Momentum (40% weight)
     price_momentum = self.calculate_price_momentum()
-    
-    # 2. Volume Momentum (25% weight) 
+
+    # 2. Volume Momentum (25% weight)
     volume_momentum = self.calculate_volume_momentum()
-    
+
     # 3. Order Flow Momentum (20% weight)
     order_flow_momentum = self.calculate_order_flow_momentum()
-    
+
     # 4. Open Interest Momentum (15% weight)
     oi_momentum = self.calculate_oi_momentum()
-    
+
     # Composite score
     composite_score = (
-        price_momentum * 0.4 +
-        volume_momentum * 0.25 + 
-        order_flow_momentum * 0.2 +
-        oi_momentum * 0.15
+        price_momentum * 0.4
+        + volume_momentum * 0.25
+        + order_flow_momentum * 0.2
+        + oi_momentum * 0.15
     )
-    
+
     return {
-        'composite_score': composite_score,
-        'components': {
-            'price_momentum': price_momentum,
-            'volume_momentum': volume_momentum,
-            'order_flow_momentum': order_flow_momentum,
-            'oi_momentum': oi_momentum
+        "composite_score": composite_score,
+        "components": {
+            "price_momentum": price_momentum,
+            "volume_momentum": volume_momentum,
+            "order_flow_momentum": order_flow_momentum,
+            "oi_momentum": oi_momentum,
         },
-        'signal_strength': self.classify_signal_strength(composite_score)
+        "signal_strength": self.classify_signal_strength(composite_score),
     }
+
 
 def calculate_price_momentum(self):
     """Calculate price-based momentum using multiple timeframes"""
-    recent_trades = list(self.data_buffer['trades'])[-50:]
-    
+    recent_trades = list(self.data_buffer["trades"])[-50:]
+
     if len(recent_trades) < 10:
         return 0
-    
+
     # Short-term momentum (last 10 trades)
     short_momentum = self.calculate_trend_strength(recent_trades[-10:])
-    
+
     # Medium-term momentum (last 50 trades)
     medium_momentum = self.calculate_trend_strength(recent_trades[-50:])
-    
+
     # Weighted combination
     return short_momentum * 0.7 + medium_momentum * 0.3
 
+
 def calculate_order_flow_momentum(self):
     """Analyze buy/sell pressure from recent trades"""
-    recent_trades = list(self.data_buffer['trades'])[-100:]
-    
-    buy_volume = sum(t['size'] for t in recent_trades if t['side'] == 'Buy')
-    sell_volume = sum(t['size'] for t in recent_trades if t['side'] == 'Sell')
+    recent_trades = list(self.data_buffer["trades"])[-100:]
+
+    buy_volume = sum(t["size"] for t in recent_trades if t["side"] == "Buy")
+    sell_volume = sum(t["size"] for t in recent_trades if t["side"] == "Sell")
     total_volume = buy_volume + sell_volume
-    
+
     if total_volume == 0:
         return 0
-    
+
     # Buy pressure ratio
     buy_pressure = buy_volume / total_volume
-    
+
     # Normalize to [-1, 1] range
     return (buy_pressure - 0.5) * 2
 ```
@@ -615,9 +625,9 @@ def calculate_order_flow_momentum(self):
 ```python
 def calculate_optimal_entry_timing(self, target_profit_usdt=0.0005):
     """Calculate optimal entry timing for micro-profit targets"""
-    
+
     momentum_data = self.calculate_comprehensive_momentum()
-    
+
     # Adjust thresholds based on target profit size
     if target_profit_usdt < 0.001:
         # Ultra-micro profit requires extreme momentum
@@ -628,20 +638,20 @@ def calculate_optimal_entry_timing(self, target_profit_usdt=0.0005):
         entry_threshold = 0.7
         min_volume_multiplier = 1.5
         max_spread_percentage = 0.01
-    
+
     # Check entry conditions
     entry_conditions = {
-        'momentum_sufficient': momentum_data['composite_score'] > entry_threshold,
-        'volume_sufficient': self.check_volume_sufficiency(min_volume_multiplier),
-        'spread_acceptable': self.check_spread_acceptability(max_spread_percentage),
-        'volatility_optimal': self.check_volatility_optimal()
+        "momentum_sufficient": momentum_data["composite_score"] > entry_threshold,
+        "volume_sufficient": self.check_volume_sufficiency(min_volume_multiplier),
+        "spread_acceptable": self.check_spread_acceptability(max_spread_percentage),
+        "volatility_optimal": self.check_volatility_optimal(),
     }
-    
+
     return {
-        'should_enter': all(entry_conditions.values()),
-        'conditions': entry_conditions,
-        'confidence_score': momentum_data['composite_score'],
-        'recommended_side': 'Buy' if momentum_data['composite_score'] > 0 else 'Sell'
+        "should_enter": all(entry_conditions.values()),
+        "conditions": entry_conditions,
+        "confidence_score": momentum_data["composite_score"],
+        "recommended_side": "Buy" if momentum_data["composite_score"] > 0 else "Sell",
     }
 ```
 
@@ -652,28 +662,28 @@ def calculate_optimal_entry_timing(self, target_profit_usdt=0.0005):
 ```python
 def calculate_dynamic_stop_loss(self, entry_price, side, momentum_strength):
     """Calculate adaptive stop loss based on market conditions"""
-    
+
     # Base stop loss percentage
     base_stop_pct = 0.1  # 0.1% base
-    
+
     # Adjust based on momentum strength
     momentum_multiplier = 1.0 + (momentum_strength - 0.7) * 2
-    
+
     # Adjust based on volatility
     volatility_multiplier = self.calculate_volatility_adjustment()
-    
+
     # Final stop loss percentage
     stop_pct = base_stop_pct * momentum_multiplier * volatility_multiplier
-    
-    if side == 'Buy':
+
+    if side == "Buy":
         stop_price = entry_price * (1 - stop_pct / 100)
     else:
         stop_price = entry_price * (1 + stop_pct / 100)
-    
+
     return {
-        'stop_price': stop_price,
-        'stop_percentage': stop_pct,
-        'risk_reward_ratio': self.calculate_risk_reward_ratio(entry_price, stop_price)
+        "stop_price": stop_price,
+        "stop_percentage": stop_pct,
+        "risk_reward_ratio": self.calculate_risk_reward_ratio(entry_price, stop_price),
     }
 ```
 
@@ -684,36 +694,36 @@ def calculate_dynamic_stop_loss(self, entry_price, side, momentum_strength):
 ```python
 def backtest_momentum_strategy(self, historical_data, target_profit=0.0005):
     """Backtest momentum strategy on historical data"""
-    
+
     results = {
-        'total_trades': 0,
-        'profitable_trades': 0,
-        'total_pnl': 0,
-        'max_drawdown': 0,
-        'win_rate': 0,
-        'avg_holding_time': 0
+        "total_trades": 0,
+        "profitable_trades": 0,
+        "total_pnl": 0,
+        "max_drawdown": 0,
+        "win_rate": 0,
+        "avg_holding_time": 0,
     }
-    
+
     for timestamp, market_data in historical_data:
         # Simulate momentum calculation
         momentum_score = self.simulate_momentum_calculation(market_data)
-        
+
         # Check entry signal
         if abs(momentum_score) > 0.8:
             # Simulate trade execution
             trade_result = self.simulate_trade_execution(
                 market_data, momentum_score, target_profit
             )
-            
+
             # Update results
-            results['total_trades'] += 1
-            if trade_result['profit'] > 0:
-                results['profitable_trades'] += 1
-            results['total_pnl'] += trade_result['profit']
-    
+            results["total_trades"] += 1
+            if trade_result["profit"] > 0:
+                results["profitable_trades"] += 1
+            results["total_pnl"] += trade_result["profit"]
+
     # Calculate final metrics
-    results['win_rate'] = results['profitable_trades'] / results['total_trades']
-    
+    results["win_rate"] = results["profitable_trades"] / results["total_trades"]
+
     return results
 ```
 
@@ -999,17 +1009,19 @@ To resolve the "Qty invalid" error, you need to:
 def adjust_quantity(symbol, calculated_qty):
     # Get instrument info
     instrument = get_instrument_info(symbol)
-    lot_size = instrument['lotSizeFilter']
-    
+    lot_size = instrument["lotSizeFilter"]
+
     # Adjust to step size
-    adjusted_qty = round(calculated_qty / float(lot_size['qtyStep'])) * float(lot_size['qtyStep'])
-    
+    adjusted_qty = round(calculated_qty / float(lot_size["qtyStep"])) * float(
+        lot_size["qtyStep"]
+    )
+
     # Validate range
-    if adjusted_qty < float(lot_size['minOrderQty']):
-        adjusted_qty = float(lot_size['minOrderQty'])
-    elif adjusted_qty > float(lot_size['maxOrderQty']):
-        adjusted_qty = float(lot_size['maxOrderQty'])
-    
+    if adjusted_qty < float(lot_size["minOrderQty"]):
+        adjusted_qty = float(lot_size["minOrderQty"])
+    elif adjusted_qty > float(lot_size["maxOrderQty"]):
+        adjusted_qty = float(lot_size["maxOrderQty"])
+
     return adjusted_qty
 ```
 
@@ -1127,10 +1139,10 @@ The 404 errors indicate you're using incorrect endpoints. The correct endpoint f
 ```python
 # Correct endpoint with required parameters
 wallet = bybit.api_request(
-    'GET', 
-    '/v5/account/wallet-balance', 
-    params={'accountType': 'UNIFIED'},  # Required parameter
-    signed=True
+    "GET",
+    "/v5/account/wallet-balance",
+    params={"accountType": "UNIFIED"},  # Required parameter
+    signed=True,
 )
 ```
 
@@ -1149,10 +1161,10 @@ If wallet-balance doesn't work, try these alternatives:
    ```python
    # GET /v5/asset/transfer/query-account-coins-balance
    balance = bybit.api_request(
-       'GET',
-       '/v5/asset/transfer/query-account-coins-balance',
-       params={'accountType': 'UNIFIED', 'coin': 'USDT'},
-       signed=True
+       "GET",
+       "/v5/asset/transfer/query-account-coins-balance",
+       params={"accountType": "UNIFIED", "coin": "USDT"},
+       signed=True,
    )
    ```
 
@@ -1160,10 +1172,7 @@ If wallet-balance doesn't work, try these alternatives:
    ```python
    # This endpoint was working for you
    positions = bybit.api_request(
-       'GET', 
-       '/v5/position/list', 
-       params={'category': 'linear'}, 
-       signed=True
+       "GET", "/v5/position/list", params={"category": "linear"}, signed=True
    )
    ```
 
@@ -1332,11 +1341,13 @@ def __init__(self, enabled=True, socks_port=9050):
     self.socks_port = socks_port
     self.tor_available = self._check_tor_availability()
 
+
 def _check_tor_availability(self):
     try:
         import socket
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = sock.connect_ex(('127.0.0.1', self.socks_port))
+        result = sock.connect_ex(("127.0.0.1", self.socks_port))
         sock.close()
         return result == 0
     except:
@@ -1350,10 +1361,10 @@ Once Tor is working, you can query the instrument information to resolve the "Qt
 ```python
 # Get instrument info for quantity requirements
 instruments = bybit.api_request(
-    'GET',
-    '/v5/market/instruments-info',
-    params={'category': 'spot', 'symbol': '0GUSDT'},
-    signed=False
+    "GET",
+    "/v5/market/instruments-info",
+    params={"category": "spot", "symbol": "0GUSDT"},
+    signed=False,
 )
 ```
 
@@ -2013,68 +2024,67 @@ Write fix snippets
 ```python
 def _make_torsocks_request(
     self,
-    method:    str,
-    url:       str,
-    headers:   Optional[dict] = None,
-    params:    Optional[dict] = None,
+    method: str,
+    url: str,
+    headers: Optional[dict] = None,
+    params: Optional[dict] = None,
     json_data: Optional[dict] = None,
-    timeout:   int            = 30,
+    timeout: int = 30,
 ) -> dict:
     """Execute HTTP request wrapped with torsocks."""
     if self._torsocks_path is None:
         self._find_torsocks()
         if self._torsocks_path is None:
             logger.warning("torsocks not found, falling back to direct")
-            return self._direct_request(method, url, headers, params, json_data, timeout)
-    
+            return self._direct_request(
+                method, url, headers, params, json_data, timeout
+            )
+
     # Build curl command with torsocks
-    cmd = [self._torsocks_path, 'curl', '-s', '-X', method.upper()]
-    
+    cmd = [self._torsocks_path, "curl", "-s", "-X", method.upper()]
+
     # Add headers - ensure Content-Type is set for POST
     if headers:
         for key, value in headers.items():
-            cmd.extend(['-H', f'{key}: {value}'])
-    
+            cmd.extend(["-H", f"{key}: {value}"])
+
     # Add timeout
-    cmd.extend(['--max-time', str(timeout)])
-    
+    cmd.extend(["--max-time", str(timeout)])
+
     # Add params for GET
-    if method.upper() == 'GET' and params:
-        query = '&'.join(f'{k}={v}' for k, v in params.items())
-        url = f'{url}?{query}'
-    
+    if method.upper() == "GET" and params:
+        query = "&".join(f"{k}={v}" for k, v in params.items())
+        url = f"{url}?{query}"
+
     # Add JSON body for POST
-    if method.upper() == 'POST' and json_data:
-        body = json.dumps(json_data, separators=(',', ':'))
-        cmd.extend(['-H', 'Content-Type: application/json'])
-        cmd.extend(['--data-raw', body])
-    
+    if method.upper() == "POST" and json_data:
+        body = json.dumps(json_data, separators=(",", ":"))
+        cmd.extend(["-H", "Content-Type: application/json"])
+        cmd.extend(["--data-raw", body])
+
     cmd.append(url)
-    
+
     try:
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout + 5
+            cmd, capture_output=True, text=True, timeout=timeout + 5
         )
-        
+
         response_text = result.stdout
         status_code = 200 if result.returncode == 0 else result.returncode
-        
+
         # Try to parse JSON
         parsed_json = None
         try:
             parsed_json = json.loads(response_text)
         except json.JSONDecodeError:
             pass
-        
+
         return {
-            'status_code': status_code,
-            'text':        response_text,
-            'json':        parsed_json,
+            "status_code": status_code,
+            "text": response_text,
+            "json": parsed_json,
         }
-        
+
     except subprocess.TimeoutExpired:
         logger.error("torsocks request timed out")
         raise requests.exceptions.Timeout("torsocks request timed out")
@@ -2086,32 +2096,34 @@ def _make_torsocks_request(
 ### 2. Add Quantity Validation with Lot Size Filter
 
 ```python
-def adjust_quantity_for_symbol(self, symbol: str, calculated_qty: float, category: str = "spot") -> float:
+def adjust_quantity_for_symbol(
+    self, symbol: str, calculated_qty: float, category: str = "spot"
+) -> float:
     """Adjust quantity to comply with symbol's lot size filter."""
     try:
         # Get instrument info
         instruments = self.api_request(
-            'GET',
-            '/v5/market/instruments-info',
-            params={'category': category, 'symbol': symbol},
-            signed=False
+            "GET",
+            "/v5/market/instruments-info",
+            params={"category": category, "symbol": symbol},
+            signed=False,
         )
-        
-        if not instruments.get('json', {}).get('result', {}).get('list'):
+
+        if not instruments.get("json", {}).get("result", {}).get("list"):
             logger.warning(f"No instrument info found for {symbol}")
             return calculated_qty
-        
-        instrument = instruments['json']['result']['list'][0]
-        lot_size = instrument.get('lotSizeFilter', {})
-        
-        # Extract lot size parameters docs:100-116 
-        min_qty = float(lot_size.get('minOrderQty', '0.001'))
-        max_qty = float(lot_size.get('maxOrderQty', '1000000'))
-        qty_step = float(lot_size.get('qtyStep', '0.001'))
-        
+
+        instrument = instruments["json"]["result"]["list"][0]
+        lot_size = instrument.get("lotSizeFilter", {})
+
+        # Extract lot size parameters docs:100-116
+        min_qty = float(lot_size.get("minOrderQty", "0.001"))
+        max_qty = float(lot_size.get("maxOrderQty", "1000000"))
+        qty_step = float(lot_size.get("qtyStep", "0.001"))
+
         # Adjust to step size
         adjusted_qty = round(calculated_qty / qty_step) * qty_step
-        
+
         # Validate range
         if adjusted_qty < min_qty:
             adjusted_qty = min_qty
@@ -2119,83 +2131,97 @@ def adjust_quantity_for_symbol(self, symbol: str, calculated_qty: float, categor
         elif adjusted_qty > max_qty:
             adjusted_qty = max_qty
             logger.warning(f"Quantity adjusted down to maximum: {max_qty}")
-        
+
         # Check minimum notional value
-        min_notional = float(lot_size.get('minNotionalValue', '5'))
+        min_notional = float(lot_size.get("minNotionalValue", "5"))
         # You would need current price for this check
-        
-        logger.info(f"Quantity adjusted from {calculated_qty} to {adjusted_qty} for {symbol}")
+
+        logger.info(
+            f"Quantity adjusted from {calculated_qty} to {adjusted_qty} for {symbol}"
+        )
         return adjusted_qty
-        
+
     except Exception as exc:
         logger.error(f"Failed to adjust quantity for {symbol}: {exc}")
         return calculated_qty
 
-def place_order_with_qty_validation(self, symbol: str, side: str, order_type: str, 
-                                   qty: float, price: float = None, **kwargs) -> dict:
+
+def place_order_with_qty_validation(
+    self,
+    symbol: str,
+    side: str,
+    order_type: str,
+    qty: float,
+    price: float = None,
+    **kwargs,
+) -> dict:
     """Place order with automatic quantity validation."""
     # Adjust quantity based on symbol requirements
     adjusted_qty = self.adjust_quantity_for_symbol(symbol, qty)
-    
+
     # Build order parameters
     order_params = {
-        'category': kwargs.get('category', 'spot'),
-        'symbol': symbol,
-        'side': side,
-        'orderType': order_type,
-        'qty': str(adjusted_qty)
+        "category": kwargs.get("category", "spot"),
+        "symbol": symbol,
+        "side": side,
+        "orderType": order_type,
+        "qty": str(adjusted_qty),
     }
-    
+
     if price is not None:
-        order_params['price'] = str(price)
-    
+        order_params["price"] = str(price)
+
     # Add additional parameters
     for key, value in kwargs.items():
         if key not in order_params and value is not None:
             order_params[key] = str(value) if isinstance(value, (int, float)) else value
-    
+
     # Place order
-    return self.api_request('POST', '/v5/order/create', json_data=order_params, signed=True)
+    return self.api_request(
+        "POST", "/v5/order/create", json_data=order_params, signed=True
+    )
 ```
 
 ### 3. Enhanced Error Handling for Network Issues
 
 ```python
-def api_request_with_retry(self, method: str, endpoint: str, max_retries: int = 3, **kwargs) -> dict:
+def api_request_with_retry(
+    self, method: str, endpoint: str, max_retries: int = 3, **kwargs
+) -> dict:
     """API request with comprehensive retry logic."""
     last_exception = None
-    
+
     for attempt in range(max_retries):
         try:
             return self.api_request(method, endpoint, **kwargs)
-            
+
         except requests.exceptions.ProxyError as exc:
             logger.warning(f"Proxy error on attempt {attempt + 1}: {exc}")
             if attempt == max_retries - 1:
                 # Try direct connection as last resort
                 logger.info("Attempting direct connection")
                 return self._direct_request(method, endpoint, **kwargs)
-            time.sleep(2 ** attempt)  # Exponential backoff
-            
+            time.sleep(2**attempt)  # Exponential backoff
+
         except requests.exceptions.ConnectionError as exc:
             logger.warning(f"Connection error on attempt {attempt + 1}: {exc}")
             if attempt == max_retries - 1:
                 raise
-            time.sleep(2 ** attempt)
-            
+            time.sleep(2**attempt)
+
         except requests.exceptions.Timeout as exc:
             logger.warning(f"Timeout on attempt {attempt + 1}: {exc}")
             if attempt == max_retries - 1:
                 raise
-            time.sleep(2 ** attempt)
-            
+            time.sleep(2**attempt)
+
         except Exception as exc:
             logger.error(f"Unexpected error on attempt {attempt + 1}: {exc}")
             last_exception = exc
             if attempt == max_retries - 1:
                 raise last_exception
             time.sleep(1)
-    
+
     raise last_exception
 ```
 
@@ -2204,39 +2230,39 @@ def api_request_with_retry(self, method: str, endpoint: str, max_retries: int = 
 ```python
 class InstrumentCache:
     """Cache for instrument information to reduce API calls."""
-    
+
     def __init__(self, ttl: int = 300):  # 5 minutes TTL
         self.cache = {}
         self.ttl = ttl
-        
+
     def get_instrument_info(self, symbol: str, category: str, api_client) -> dict:
         """Get instrument info with caching."""
         cache_key = f"{category}:{symbol}"
         now = time.time()
-        
+
         # Check cache
         if cache_key in self.cache:
             cached_data, timestamp = self.cache[cache_key]
             if now - timestamp < self.ttl:
                 return cached_data
-        
+
         # Fetch fresh data
         try:
             response = api_client.api_request(
-                'GET',
-                '/v5/market/instruments-info',
-                params={'category': category, 'symbol': symbol},
-                signed=False
+                "GET",
+                "/v5/market/instruments-info",
+                params={"category": category, "symbol": symbol},
+                signed=False,
             )
-            
-            if response.get('json', {}).get('result', {}).get('list'):
-                instrument_data = response['json']['result']['list'][0]
+
+            if response.get("json", {}).get("result", {}).get("list"):
+                instrument_data = response["json"]["result"]["list"][0]
                 self.cache[cache_key] = (instrument_data, now)
                 return instrument_data
-                
+
         except Exception as exc:
             logger.error(f"Failed to fetch instrument info for {symbol}: {exc}")
-        
+
         return {}
 ```
 
@@ -2286,33 +2312,36 @@ Based on your advanced multi-symbol scalper, here are key functionality enhancem
 ### 1. Complete Tor Network Implementation
 
 ```python
-def _make_torsocks_request(self, method: str, url: str, headers: Optional[dict] = None,
-                          params: Optional[dict] = None, json_data: Optional[dict] = None,
-                          timeout: int = 30) -> dict:
+def _make_torsocks_request(
+    self,
+    method: str,
+    url: str,
+    headers: Optional[dict] = None,
+    params: Optional[dict] = None,
+    json_data: Optional[dict] = None,
+    timeout: int = 30,
+) -> dict:
     """Execute HTTP request wrapped with torsocks."""
     try:
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout + 5
+            cmd, capture_output=True, text=True, timeout=timeout + 5
         )
-        
+
         response_text = result.stdout
         status_code = 200 if result.returncode == 0 else result.returncode
-        
+
         parsed_json = None
         try:
             parsed_json = json.loads(response_text)
         except json.JSONDecodeError:
             pass
-        
+
         return {
-            'status_code': status_code,
-            'text': response_text,
-            'json': parsed_json,
+            "status_code": status_code,
+            "text": response_text,
+            "json": parsed_json,
         }
-        
+
     except subprocess.TimeoutExpired:
         logger.error("torsocks request timed out")
         raise requests.exceptions.Timeout("torsocks request timed out")
@@ -2322,35 +2351,34 @@ def _make_torsocks_request(self, method: str, url: str, headers: Optional[dict] 
 
 ```python
 class WebSocketManager:
-    def __init__(self, bybit_core: 'BybitCore'):
+    def __init__(self, bybit_core: "BybitCore"):
         self.bybit_core = bybit_core
         self.ws_public = None
         self.ws_private = None
         self.subscriptions = {}
-        
+
     def connect_public_streams(self, symbols: List[str]):
         """Connect to public market data streams"""
         self.ws_public = websocket.WebSocketApp(
             "wss://stream.bybit.com/v5/public",
             on_message=self._on_public_message,
             on_error=self._on_error,
-            on_close=self._on_close
+            on_close=self._on_close,
         )
-        
+
         # Subscribe to trade streams for momentum detection
         for symbol in symbols:
-            self.ws_public.send(json.dumps({
-                "op": "subscribe",
-                "args": [f"publicTrade.{symbol}"]
-            }))
-    
+            self.ws_public.send(
+                json.dumps({"op": "subscribe", "args": [f"publicTrade.{symbol}"]})
+            )
+
     def connect_private_streams(self):
         """Connect to private account streams"""
         auth_payload = self._generate_auth_payload()
         self.ws_private = websocket.WebSocketApp(
             "wss://stream.bybit.com/v5/private",
             on_message=self._on_private_message,
-            on_open=lambda ws: ws.send(auth_payload)
+            on_open=lambda ws: ws.send(auth_payload),
         )
 ```
 
@@ -2358,77 +2386,85 @@ class WebSocketManager:
 
 ```python
 class AdvancedOrderManager:
-    def __init__(self, bybit_core: 'BybitCore'):
+    def __init__(self, bybit_core: "BybitCore"):
         self.bybit_core = bybit_core
-        
+
     def place_batch_orders(self, orders: List[dict]) -> dict:
         """Place multiple orders in a single request"""
         return self.bybit_core.api_request(
-            'POST',
-            '/v5/order/create-batch',
-            json_data={
-                'category': 'linear',
-                'request': orders
-            },
-            signed=True
+            "POST",
+            "/v5/order/create-batch",
+            json_data={"category": "linear", "request": orders},
+            signed=True,
         )
-    
-    def place_conditional_order(self, symbol: str, side: str, order_type: str,
-                              qty: str, trigger_price: str, **kwargs) -> dict:
+
+    def place_conditional_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        qty: str,
+        trigger_price: str,
+        **kwargs,
+    ) -> dict:
         """Place conditional order with trigger price"""
         order_params = {
-            'category': 'linear',
-            'symbol': symbol,
-            'side': side,
-            'orderType': order_type,
-            'qty': qty,
-            'triggerPrice': trigger_price,
-            'triggerDirection': '1' if side == 'Buy' else '2',
-            **kwargs
+            "category": "linear",
+            "symbol": symbol,
+            "side": side,
+            "orderType": order_type,
+            "qty": qty,
+            "triggerPrice": trigger_price,
+            "triggerDirection": "1" if side == "Buy" else "2",
+            **kwargs,
         }
-        return self.bybit_core.api_request('POST', '/v5/order/create', json_data=order_params, signed=True)
+        return self.bybit_core.api_request(
+            "POST", "/v5/order/create", json_data=order_params, signed=True
+        )
 ```
 
 ### 4. Position Management System
 
 ```python
 class PositionManager:
-    def __init__(self, bybit_core: 'BybitCore'):
+    def __init__(self, bybit_core: "BybitCore"):
         self.bybit_core = bybit_core
-        
+
     def set_leverage(self, symbol: str, buy_leverage: str, sell_leverage: str) -> dict:
         """Set leverage for a symbol"""
         return self.bybit_core.api_request(
-            'POST',
-            '/v5/position/set-leverage',
+            "POST",
+            "/v5/position/set-leverage",
             json_data={
-                'category': 'linear',
-                'symbol': symbol,
-                'buyLeverage': buy_leverage,
-                'sellLeverage': sell_leverage
+                "category": "linear",
+                "symbol": symbol,
+                "buyLeverage": buy_leverage,
+                "sellLeverage": sell_leverage,
             },
-            signed=True
+            signed=True,
         )
-    
-    def set_trading_stop(self, symbol: str, take_profit: str = None,
-                        stop_loss: str = None, tpsl_mode: str = "Full") -> dict:
+
+    def set_trading_stop(
+        self,
+        symbol: str,
+        take_profit: str = None,
+        stop_loss: str = None,
+        tpsl_mode: str = "Full",
+    ) -> dict:
         """Set TP/SL for position"""
         params = {
-            'category': 'linear',
-            'symbol': symbol,
-            'tpslMode': tpsl_mode,
-            'positionIdx': 0
+            "category": "linear",
+            "symbol": symbol,
+            "tpslMode": tpsl_mode,
+            "positionIdx": 0,
         }
         if take_profit:
-            params['takeProfit'] = take_profit
+            params["takeProfit"] = take_profit
         if stop_loss:
-            params['stopLoss'] = stop_loss
-            
+            params["stopLoss"] = stop_loss
+
         return self.bybit_core.api_request(
-            'POST',
-            '/v5/position/trading-stop',
-            json_data=params,
-            signed=True
+            "POST", "/v5/position/trading-stop", json_data=params, signed=True
         )
 ```
 
@@ -2441,22 +2477,28 @@ class RiskManager:
         self.max_position_pct = max_position_pct
         self.daily_pnl = 0.0
         self.start_of_day = time.time()
-        
-    def check_risk_limits(self, account_info: AccountInfo, position_value: float) -> bool:
+
+    def check_risk_limits(
+        self, account_info: AccountInfo, position_value: float
+    ) -> bool:
         """Check if new position violates risk limits"""
         # Check daily loss limit
         if self.daily_pnl < -self.max_daily_loss:
             logger.warning(f"Daily loss limit exceeded: {self.daily_pnl}")
             return False
-            
+
         # Check position size limit
-        max_position_size = float(account_info.total_equity) * (self.max_position_pct / 100)
+        max_position_size = float(account_info.total_equity) * (
+            self.max_position_pct / 100
+        )
         if position_value > max_position_size:
-            logger.warning(f"Position size exceeds limit: {position_value} > {max_position_size}")
+            logger.warning(
+                f"Position size exceeds limit: {position_value} > {max_position_size}"
+            )
             return False
-            
+
         return True
-    
+
     def update_daily_pnl(self, realized_pnl: float):
         """Update daily P&L tracking"""
         current_time = time.time()
@@ -2471,33 +2513,33 @@ class RiskManager:
 
 ```python
 class MarketAnalyzer:
-    def __init__(self, bybit_core: 'BybitCore'):
+    def __init__(self, bybit_core: "BybitCore"):
         self.bybit_core = bybit_core
-        
+
     def get_orderbook_depth(self, symbol: str, depth: int = 200) -> dict:
         """Get orderbook with specified depth"""
         return self.bybit_core.api_request(
-            'GET',
-            '/v5/market/orderbook',
-            params={'category': 'linear', 'symbol': symbol, 'limit': depth},
-            signed=False
+            "GET",
+            "/v5/market/orderbook",
+            params={"category": "linear", "symbol": symbol, "limit": depth},
+            signed=False,
         )
-    
+
     def calculate_orderbook_metrics(self, orderbook: dict) -> OrderBookMetrics:
         """Calculate orderbook imbalance and liquidity metrics"""
-        bids = orderbook['result']['b']
-        asks = orderbook['result']['a']
-        
+        bids = orderbook["result"]["b"]
+        asks = orderbook["result"]["a"]
+
         bid_volume = sum(float(bid[1]) for bid in bids[:10])
         ask_volume = sum(float(ask[1]) for ask in asks[:10])
-        
+
         volume_imbalance = (bid_volume - ask_volume) / (bid_volume + ask_volume)
-        
+
         return OrderBookMetrics(
             bid_depth_10=bid_volume,
             ask_depth_10=ask_volume,
             volume_imbalance=volume_imbalance,
-            bid_ask_spread=float(asks[0][0]) - float(bids[0][0])
+            bid_ask_spread=float(asks[0][0]) - float(bids[0][0]),
         )
 ```
 
@@ -2505,26 +2547,26 @@ class MarketAnalyzer:
 
 ```python
 class StrategyExecutor:
-    def __init__(self, config: TradingConfig, bybit_core: 'BybitCore'):
+    def __init__(self, config: TradingConfig, bybit_core: "BybitCore"):
         self.config = config
         self.bybit_core = bybit_core
         self.order_manager = AdvancedOrderManager(bybit_core)
         self.position_manager = PositionManager(bybit_core)
         self.risk_manager = RiskManager(config.max_daily_loss, config.max_position_pct)
         self.market_analyzer = MarketAnalyzer(bybit_core)
-        
+
     def execute_strategy(self, symbol: str, signal: TradingSignal):
         """Execute trading signal with risk checks"""
         # Get current account info
         account_info = self.get_account_info()
-        
+
         # Calculate position size
         position_value = float(signal.trigger_price) * self.config.base_qty
-        
+
         # Risk check
         if not self.risk_manager.check_risk_limits(account_info, position_value):
             return {"status": "rejected", "reason": "Risk limit exceeded"}
-            
+
         # Place order based on signal type
         if signal.signal_type == "LONG_ENTRY":
             return self.order_manager.place_conditional_order(
@@ -2534,7 +2576,7 @@ class StrategyExecutor:
                 qty=str(self.config.base_qty),
                 trigger_price=str(signal.trigger_price),
                 takeProfit=str(signal.take_profit),
-                stopLoss=str(signal.stop_loss)
+                stopLoss=str(signal.stop_loss),
             )
 ```
 
@@ -3424,15 +3466,15 @@ if __name__ == "__main__":
 ```python
 class WebSocketManager:
     """Enhanced WebSocket manager for real-time data"""
-    
-    def __init__(self, bybit_core: 'BybitCore'):
+
+    def __init__(self, bybit_core: "BybitCore"):
         self.bybit_core = bybit_core
         self.ws_public = None
         self.ws_private = None
         self.ws_trade = None
         self.subscriptions = {}
         self.data_handlers = {}
-        
+
     def connect_trade_service(self):
         """Connect to WebSocket trade service for order operations"""
         self.ws_trade = websocket.WebSocketApp(
@@ -3440,47 +3482,44 @@ class WebSocketManager:
             on_message=self._on_trade_message,
             on_error=self._on_error,
             on_close=self._on_close,
-            on_open=self._on_trade_open
+            on_open=self._on_trade_open,
         )
-        
+
         # Start in separate thread
         wst = threading.Thread(target=self.ws_trade.run_forever)
         wst.daemon = True
         wst.start()
-        
+
     def _on_trade_open(self, ws):
         """Handle trade service connection open"""
         # Authenticate
         auth_payload = self._generate_auth_payload()
-        ws.send(json.dumps({
-            "op": "auth",
-            "args": auth_payload
-        }))
-        
+        ws.send(json.dumps({"op": "auth", "args": auth_payload}))
+
     def place_order_ws(self, order_params: dict, req_id: str = None) -> dict:
         """Place order via WebSocket for faster execution"""
         if not self.ws_trade:
             raise Exception("Trade WebSocket not connected")
-            
+
         message = {
             "op": "order.create",
             "args": [order_params],
-            "reqId": req_id or str(int(time.time() * 1000))
+            "reqId": req_id or str(int(time.time() * 1000)),
         }
-        
+
         self.ws_trade.send(json.dumps(message))
-        
+
     def batch_place_orders_ws(self, orders: List[dict], req_id: str = None) -> dict:
         """Place batch orders via WebSocket"""
         if not self.ws_trade:
             raise Exception("Trade WebSocket not connected")
-            
+
         message = {
             "op": "order.create-batch",
             "args": orders,
-            "reqId": req_id or str(int(time.time() * 1000))
+            "reqId": req_id or str(int(time.time() * 1000)),
         }
-        
+
         self.ws_trade.send(json.dumps(message))
 ```
 
@@ -3542,43 +3581,50 @@ Here are more advanced features to enhance your trading dispatcher:
 ```python
 class CopyTradingManager:
     """Manage copy trading operations"""
-    
-    def __init__(self, dispatcher: 'BybitToolDispatcher'):
+
+    def __init__(self, dispatcher: "BybitToolDispatcher"):
         self.dispatcher = dispatcher
-        
-    def place_copy_trade_order(self, symbol: str, side: str, order_type: str,
-                              qty: str, price: str = None, position_idx: int = 1) -> dict:
+
+    def place_copy_trade_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        qty: str,
+        price: str = None,
+        position_idx: int = 1,
+    ) -> dict:
         """Place copy trading order with required position index"""
         order_params = {
-            'category': 'linear',
-            'symbol': symbol,
-            'side': side,
-            'orderType': order_type,
-            'qty': qty,
-            'positionIdx': position_idx  # Required for copy trading
+            "category": "linear",
+            "symbol": symbol,
+            "side": side,
+            "orderType": order_type,
+            "qty": qty,
+            "positionIdx": position_idx,  # Required for copy trading
         }
         if price:
-            order_params['price'] = price
-            
+            order_params["price"] = price
+
         return self.dispatcher.bybit.api_request(
-            'POST', '/v5/order/create', json_data=order_params, signed=True
+            "POST", "/v5/order/create", json_data=order_params, signed=True
         )
-    
+
     def get_copy_trading_symbols(self) -> dict:
         """Get symbols that support copy trading"""
         instruments = self.dispatcher.bybit.api_request(
-            'GET',
-            '/v5/market/instruments-info',
-            params={'category': 'linear'},
-            signed=False
+            "GET",
+            "/v5/market/instruments-info",
+            params={"category": "linear"},
+            signed=False,
         )
-        
+
         copy_symbols = []
-        for instrument in instruments.get('result', {}).get('list', []):
-            if instrument.get('copyTrading') in ['both', 'utaOnly']:
-                copy_symbols.append(instrument['symbol'])
-        
-        return {'symbols': copy_symbols}
+        for instrument in instruments.get("result", {}).get("list", []):
+            if instrument.get("copyTrading") in ["both", "utaOnly"]:
+                copy_symbols.append(instrument["symbol"])
+
+        return {"symbols": copy_symbols}
 ```
 
 ### 2. Earn Products Management
@@ -3586,38 +3632,39 @@ class CopyTradingManager:
 ```python
 class EarnManager:
     """Manage staking and earn products"""
-    
-    def __init__(self, dispatcher: 'BybitToolDispatcher'):
+
+    def __init__(self, dispatcher: "BybitToolDispatcher"):
         self.dispatcher = dispatcher
-        
+
     def get_earn_products(self, product_type: str = None) -> dict:
         """Get available earn products"""
         params = {}
         if product_type:
-            params['productType'] = product_type
-            
+            params["productType"] = product_type
+
         return self.dispatcher.bybit.api_request(
-            'GET', '/v5/earn/product-info', params=params, signed=True
+            "GET", "/v5/earn/product-info", params=params, signed=True
         )
-    
-    def purchase_earn_product(self, product_id: str, amount: str,
-                             auto_compound: bool = False) -> dict:
+
+    def purchase_earn_product(
+        self, product_id: str, amount: str, auto_compound: bool = False
+    ) -> dict:
         """Purchase staking or earn product"""
         return self.dispatcher.bybit.api_request(
-            'POST',
-            '/v5/earn/create-order',
+            "POST",
+            "/v5/earn/create-order",
             json_data={
-                'productId': product_id,
-                'amount': amount,
-                'autoCompound': str(auto_compound).lower()
+                "productId": product_id,
+                "amount": amount,
+                "autoCompound": str(auto_compound).lower(),
             },
-            signed=True
+            signed=True,
         )
-    
+
     def get_earn_positions(self) -> dict:
         """Get current earn positions"""
         return self.dispatcher.bybit.api_request(
-            'GET', '/v5/earn/position', signed=True
+            "GET", "/v5/earn/position", signed=True
         )
 ```
 
@@ -3626,43 +3673,51 @@ class EarnManager:
 ```python
 class AdvancedOrderManager:
     """Handle advanced order types and features"""
-    
-    def __init__(self, dispatcher: 'BybitToolDispatcher'):
+
+    def __init__(self, dispatcher: "BybitToolDispatcher"):
         self.dispatcher = dispatcher
-        
-    def place_rpi_order(self, symbol: str, side: str, qty: str, price: str,
-                       category: str = "spot") -> dict:
+
+    def place_rpi_order(
+        self, symbol: str, side: str, qty: str, price: str, category: str = "spot"
+    ) -> dict:
         """Place Retail Price Improvement order"""
         order_params = {
-            'category': category,
-            'symbol': symbol,
-            'side': side,
-            'orderType': 'Limit',
-            'qty': qty,
-            'price': price,
-            'timeInForce': 'RPI'  # Retail Price Improvement
+            "category": category,
+            "symbol": symbol,
+            "side": side,
+            "orderType": "Limit",
+            "qty": qty,
+            "price": price,
+            "timeInForce": "RPI",  # Retail Price Improvement
         }
-        
+
         return self.dispatcher.bybit.api_request(
-            'POST', '/v5/order/create', json_data=order_params, signed=True
+            "POST", "/v5/order/create", json_data=order_params, signed=True
         )
-    
-    def place_slippage_order(self, symbol: str, side: str, order_type: str,
-                            qty: str, slippage_type: str, slippage_value: str,
-                            category: str = "spot") -> dict:
+
+    def place_slippage_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        qty: str,
+        slippage_type: str,
+        slippage_value: str,
+        category: str = "spot",
+    ) -> dict:
         """Place order with slippage tolerance"""
         order_params = {
-            'category': category,
-            'symbol': symbol,
-            'side': side,
-            'orderType': order_type,
-            'qty': qty,
-            'slippageToleranceType': slippage_type,
-            'slippageTolerance': slippage_value
+            "category": category,
+            "symbol": symbol,
+            "side": side,
+            "orderType": order_type,
+            "qty": qty,
+            "slippageToleranceType": slippage_type,
+            "slippageTolerance": slippage_value,
         }
-        
+
         return self.dispatcher.bybit.api_request(
-            'POST', '/v5/order/create', json_data=order_params, signed=True
+            "POST", "/v5/order/create", json_data=order_params, signed=True
         )
 ```
 
@@ -3671,32 +3726,32 @@ class AdvancedOrderManager:
 ```python
 class PortfolioMarginManager:
     """Manage portfolio margin and advanced risk"""
-    
-    def __init__(self, dispatcher: 'BybitToolDispatcher'):
+
+    def __init__(self, dispatcher: "BybitToolDispatcher"):
         self.dispatcher = dispatcher
-        
+
     def set_spot_hedging(self, status: str) -> dict:
         """Enable/disable spot hedging for portfolio margin"""
         return self.dispatcher.bybit.api_request(
-            'POST',
-            '/v5/account/set-spot-hedge',
-            json_data={'status': status},
-            signed=True
+            "POST",
+            "/v5/account/set-spot-hedge",
+            json_data={"status": status},
+            signed=True,
         )
-    
+
     def get_collateral_info(self) -> dict:
         """Get collateral information for portfolio margin"""
         return self.dispatcher.bybit.api_request(
-            'GET', '/v5/account/collateral-info', signed=True
+            "GET", "/v5/account/collateral-info", signed=True
         )
-    
+
     def set_collateral_coin(self, coin: str, status: str) -> dict:
         """Set collateral coin status"""
         return self.dispatcher.bybit.api_request(
-            'POST',
-            '/v5/account/set-collateral',
-            json_data={'coin': coin, 'collateralSwitch': status},
-            signed=True
+            "POST",
+            "/v5/account/set-collateral",
+            json_data={"coin": coin, "collateralSwitch": status},
+            signed=True,
         )
 ```
 
@@ -3705,29 +3760,29 @@ class PortfolioMarginManager:
 ```python
 class InstitutionalManager:
     """Manage institutional trading features"""
-    
-    def __init__(self, dispatcher: 'BybitToolDispatcher'):
+
+    def __init__(self, dispatcher: "BybitToolDispatcher"):
         self.dispatcher = dispatcher
-        
+
     def get_institutional_loan_info(self) -> dict:
         """Get institutional loan information"""
         return self.dispatcher.bybit.api_request(
-            'GET', '/v5/ins-loan/query', signed=True
+            "GET", "/v5/ins-loan/query", signed=True
         )
-    
+
     def get_tiered_collateral_ratio(self) -> dict:
         """Get tiered collateral ratio for UTA loans"""
         return self.dispatcher.bybit.api_request(
-            'GET', '/v5/spot-margin-uta/tier-collateral-ratio', signed=True
+            "GET", "/v5/spot-margin-uta/tier-collateral-ratio", signed=True
         )
-    
+
     def upgrade_to_uta_pro(self) -> dict:
         """Upgrade account to UTA Pro"""
         return self.dispatcher.bybit.api_request(
-            'POST',
-            '/v5/account/upgrade-unified-account',
-            json_data={'upgradeType': 'PRO'},
-            signed=True
+            "POST",
+            "/v5/account/upgrade-unified-account",
+            json_data={"upgradeType": "PRO"},
+            signed=True,
         )
 ```
 
@@ -3736,44 +3791,50 @@ class InstitutionalManager:
 ```python
 class BacktestingEngine:
     """Backtesting framework for strategy validation"""
-    
-    def __init__(self, dispatcher: 'BybitToolDispatcher'):
+
+    def __init__(self, dispatcher: "BybitToolDispatcher"):
         self.dispatcher = dispatcher
-        
-    def get_historical_data(self, symbol: str, interval: str, start_time: int,
-                           end_time: int, category: str = "linear") -> dict:
+
+    def get_historical_data(
+        self,
+        symbol: str,
+        interval: str,
+        start_time: int,
+        end_time: int,
+        category: str = "linear",
+    ) -> dict:
         """Get historical kline data for backtesting"""
         params = {
-            'category': category,
-            'symbol': symbol,
-            'interval': interval,
-            'start': start_time,
-            'end': end_time,
-            'limit': 1000
+            "category": category,
+            "symbol": symbol,
+            "interval": interval,
+            "start": start_time,
+            "end": end_time,
+            "limit": 1000,
         }
-        
+
         return self.dispatcher.bybit.api_request(
-            'GET', '/v5/market/kline', params=params, signed=False
+            "GET", "/v5/market/kline", params=params, signed=False
         )
-    
+
     def simulate_strategy(self, strategy_config: dict, historical_data: list) -> dict:
         """Simulate trading strategy on historical data"""
         results = {
-            'total_trades': 0,
-            'winning_trades': 0,
-            'losing_trades': 0,
-            'total_pnl': 0.0,
-            'max_drawdown': 0.0,
-            'sharpe_ratio': 0.0,
-            'trades': []
+            "total_trades": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "total_pnl": 0.0,
+            "max_drawdown": 0.0,
+            "sharpe_ratio": 0.0,
+            "trades": [],
         }
-        
+
         # Implement strategy simulation logic
         for candle in historical_data:
             # Apply strategy logic to each candle
             # Record trades, PnL, etc.
             pass
-        
+
         return results
 ```
 
@@ -3782,20 +3843,20 @@ class BacktestingEngine:
 ```python
 class MultiAccountManager:
     """Manage multiple trading accounts"""
-    
-    def __init__(self, dispatcher: 'BybitToolDispatcher'):
+
+    def __init__(self, dispatcher: "BybitToolDispatcher"):
         self.dispatcher = dispatcher
         self.accounts = {}
-        
+
     def add_account(self, account_name: str, api_key: str, api_secret: str):
         """Add a new account to manage"""
         config = TradingConfig(
             api_key=api_key,
             api_secret=api_secret,
-            testnet=self.dispatcher.config.testnet
+            testnet=self.dispatcher.config.testnet,
         )
         self.accounts[account_name] = BybitToolDispatcher(config)
-        
+
     def get_all_balances(self) -> dict:
         """Get balances across all accounts"""
         all_balances = {}
@@ -3804,34 +3865,33 @@ class MultiAccountManager:
                 balance = dispatcher.get_wallet_balance()
                 all_balances[name] = balance
             except Exception as e:
-                all_balances[name] = {'error': str(e)}
-        
+                all_balances[name] = {"error": str(e)}
+
         return all_balances
-    
+
     def execute_parallel_orders(self, orders: List[dict]) -> dict:
         """Execute orders across multiple accounts in parallel"""
         results = {}
         threads = []
-        
+
         def place_order(account_name, dispatcher, order):
             try:
                 result = dispatcher.place_order(**order)
                 results[account_name] = result
             except Exception as e:
-                results[account_name] = {'error': str(e)}
-        
+                results[account_name] = {"error": str(e)}
+
         for account_name, dispatcher in self.accounts.items():
             for order in orders:
                 thread = threading.Thread(
-                    target=place_order,
-                    args=(account_name, dispatcher, order)
+                    target=place_order, args=(account_name, dispatcher, order)
                 )
                 threads.append(thread)
                 thread.start()
-        
+
         for thread in threads:
             thread.join()
-        
+
         return results
 ```
 
@@ -3935,37 +3995,41 @@ Based on your test results, here are targeted fixes for the failing Bybit V5 API
 ### 1. Funding Rate History Fix
 
 ```python
-def get_funding_rate_history(self, symbol: str, category: str = "linear", 
-                           start_time: int = None, end_time: int = None, 
-                           limit: int = 200) -> dict:
+def get_funding_rate_history(
+    self,
+    symbol: str,
+    category: str = "linear",
+    start_time: int = None,
+    end_time: int = None,
+    limit: int = 200,
+) -> dict:
     """Get funding rate history with proper error handling"""
     params = {
-        'category': category,
-        'symbol': symbol,
-        'limit': min(limit, 200)  # API limit is 200 docs:28-28 
+        "category": category,
+        "symbol": symbol,
+        "limit": min(limit, 200),  # API limit is 200 docs:28-28
     }
-    
+
     if start_time and end_time:
-        params['startTime'] = start_time
-        params['endTime'] = end_time
+        params["startTime"] = start_time
+        params["endTime"] = end_time
     elif end_time:
-        # endTime only returns 200 records up till endTime docs:14-15 
-        params['endTime'] = end_time
-    
+        # endTime only returns 200 records up till endTime docs:14-15
+        params["endTime"] = end_time
+
     try:
         response = self.bybit.api_request(
-            'GET', 
-            '/v5/market/funding/history', 
-            params=params, 
-            signed=False
+            "GET", "/v5/market/funding/history", params=params, signed=False
         )
         return response
     except Exception as e:
         logger.error(f"Funding rate history failed: {e}")
         # Fallback: try with different symbol format
-        if symbol.endswith('USDT'):
-            alt_symbol = symbol.replace('USDT', 'PERP')
-            return self.get_funding_rate_history(alt_symbol, category, start_time, end_time, limit)
+        if symbol.endswith("USDT"):
+            alt_symbol = symbol.replace("USDT", "PERP")
+            return self.get_funding_rate_history(
+                alt_symbol, category, start_time, end_time, limit
+            )
         raise
 ```
 
@@ -3977,56 +4041,43 @@ def get_server_time_v5(self) -> dict:
     try:
         # Try V5 endpoint first
         response = self.bybit.api_request(
-            'GET', 
-            '/v5/market/time', 
-            params={}, 
-            signed=False
+            "GET", "/v5/market/time", params={}, signed=False
         )
         return response
     except Exception as e:
         logger.warning(f"V5 server time failed, falling back to V3: {e}")
-        # Fallback to V3 endpoint which works docs:33-38 
-        return self.bybit.api_request(
-            'GET', 
-            '/v3/public/time', 
-            params={}, 
-            signed=False
-        )
+        # Fallback to V3 endpoint which works docs:33-38
+        return self.bybit.api_request("GET", "/v3/public/time", params={}, signed=False)
 ```
 
 ### 3. Instruments Info Fix
 
 ```python
-def get_instruments_info(self, category: str, symbol: str = None, 
-                        status: str = "Trading", limit: int = 500) -> dict:
+def get_instruments_info(
+    self, category: str, symbol: str = None, status: str = "Trading", limit: int = 500
+) -> dict:
     """Get instruments info with pagination support"""
     params = {
-        'category': category,
-        'status': status,
-        'limit': min(limit, 1000)  # API limit is 1000 docs:29-29 
+        "category": category,
+        "status": status,
+        "limit": min(limit, 1000),  # API limit is 1000 docs:29-29
     }
-    
+
     if symbol:
-        params['symbol'] = symbol
-    
+        params["symbol"] = symbol
+
     try:
         response = self.bybit.api_request(
-            'GET', 
-            '/v5/market/instruments-info', 
-            params=params, 
-            signed=False
+            "GET", "/v5/market/instruments-info", params=params, signed=False
         )
         return response
     except Exception as e:
         logger.error(f"Instruments info failed: {e}")
         # Try without status parameter
-        if 'status' in params:
-            params.pop('status')
+        if "status" in params:
+            params.pop("status")
             return self.bybit.api_request(
-                'GET', 
-                '/v5/market/instruments-info', 
-                params=params, 
-                signed=False
+                "GET", "/v5/market/instruments-info", params=params, signed=False
             )
         raise
 ```
@@ -4036,21 +4087,18 @@ def get_instruments_info(self, category: str, symbol: str = None,
 ```python
 def get_risk_limit(self, category: str, symbol: str = None) -> dict:
     """Get risk limit with cursor pagination"""
-    params = {'category': category}
+    params = {"category": category}
     if symbol:
-        params['symbol'] = symbol
-    
+        params["symbol"] = symbol
+
     try:
         response = self.bybit.api_request(
-            'GET', 
-            '/v5/market/risk-limit', 
-            params=params, 
-            signed=False
+            "GET", "/v5/market/risk-limit", params=params, signed=False
         )
         return response
     except Exception as e:
         logger.error(f"Risk limit failed: {e}")
-        # For linear category, API returns 15 symbols per request docs:11-11 
+        # For linear category, API returns 15 symbols per request docs:11-11
         if category == "linear" and not symbol:
             # Try with a common symbol
             return self.get_risk_limit(category, "BTCUSDT")
@@ -4060,22 +4108,20 @@ def get_risk_limit(self, category: str, symbol: str = None) -> dict:
 ### 5. Long Short Ratio Fix
 
 ```python
-def get_long_short_ratio(self, symbol: str, category: str = "linear", 
-                        period: str = "1h", limit: int = 50) -> dict:
+def get_long_short_ratio(
+    self, symbol: str, category: str = "linear", period: str = "1h", limit: int = 50
+) -> dict:
     """Get long/short ratio with parameter validation"""
     params = {
-        'category': category,
-        'symbol': symbol,
-        'period': period,
-        'limit': min(limit, 500)  # API limit is 500 docs:18-18 
+        "category": category,
+        "symbol": symbol,
+        "period": period,
+        "limit": min(limit, 500),  # API limit is 500 docs:18-18
     }
-    
+
     try:
         response = self.bybit.api_request(
-            'GET', 
-            '/v5/market/account-ratio', 
-            params=params, 
-            signed=False
+            "GET", "/v5/market/account-ratio", params=params, signed=False
         )
         return response
     except Exception as e:
@@ -4089,19 +4135,29 @@ def get_long_short_ratio(self, symbol: str, category: str = "linear",
 ### 6. Universal Error Handler
 
 ```python
-def api_request_with_retry(self, method: str, endpoint: str, params: dict = None, 
-                          max_retries: int = 3, signed: bool = False) -> dict:
+def api_request_with_retry(
+    self,
+    method: str,
+    endpoint: str,
+    params: dict = None,
+    max_retries: int = 3,
+    signed: bool = False,
+) -> dict:
     """Universal API request handler with retry logic"""
     last_error = None
-    
+
     for attempt in range(max_retries):
         try:
-            return self.bybit.api_request(method, endpoint, params=params, signed=signed)
+            return self.bybit.api_request(
+                method, endpoint, params=params, signed=signed
+            )
         except Exception as e:
             last_error = e
             if "404" in str(e) and attempt < max_retries - 1:
-                logger.warning(f"404 error on {endpoint}, attempt {attempt + 1}, retrying...")
-                time.sleep(2 ** attempt)  # Exponential backoff
+                logger.warning(
+                    f"404 error on {endpoint}, attempt {attempt + 1}, retrying..."
+                )
+                time.sleep(2**attempt)  # Exponential backoff
                 continue
             elif "403" in str(e):
                 logger.error(f"403 Forbidden on {endpoint} - check API permissions")
@@ -4109,7 +4165,7 @@ def api_request_with_retry(self, method: str, endpoint: str, params: dict = None
             elif attempt == max_retries - 1:
                 logger.error(f"Failed after {max_retries} attempts: {e}")
                 break
-    
+
     raise last_error
 ```
 
@@ -4119,21 +4175,25 @@ def api_request_with_retry(self, method: str, endpoint: str, params: dict = None
 def check_endpoint_status(self) -> dict:
     """Check which endpoints are accessible"""
     endpoints = {
-        'funding_history': lambda: self.get_funding_rate_history('BTCUSDT'),
-        'server_time_v5': lambda: self.get_server_time_v5(),
-        'instruments_info': lambda: self.get_instruments_info('spot'),
-        'risk_limit': lambda: self.get_risk_limit('linear'),
-        'long_short_ratio': lambda: self.get_long_short_ratio('BTCUSDT')
+        "funding_history": lambda: self.get_funding_rate_history("BTCUSDT"),
+        "server_time_v5": lambda: self.get_server_time_v5(),
+        "instruments_info": lambda: self.get_instruments_info("spot"),
+        "risk_limit": lambda: self.get_risk_limit("linear"),
+        "long_short_ratio": lambda: self.get_long_short_ratio("BTCUSDT"),
     }
-    
+
     status = {}
     for name, func in endpoints.items():
         try:
             result = func()
-            status[name] = '✅ Working' if result.get('retCode') == 0 else f'❌ {result.get("retMsg")}'
+            status[name] = (
+                "✅ Working"
+                if result.get("retCode") == 0
+                else f"❌ {result.get('retMsg')}"
+            )
         except Exception as e:
-            status[name] = f'❌ {str(e)[:50]}'
-    
+            status[name] = f"❌ {str(e)[:50]}"
+
     return status
 ```
 

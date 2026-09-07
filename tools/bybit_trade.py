@@ -1,190 +1,168 @@
 #!/usr/bin/env python3
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
+# @describe Bybit Trade Tools - place/cancel orders, leverage, TP/SL
+# @option --symbol!        Trading pair (e.g., BTCUSDT)
+# @option --side           Order side: Buy|Sell
+# @option --order_type     Order type: Market|Limit (default: Market)
+# @option --qty            Order quantity
+# @option --price         Limit price (required for Limit orders)
+# @option --time_in_force TIF: GTC|IOC|FOK|PostOnly (default: GTC)
+# @option --action        Action: place_order|cancel|cancel_all|leverage|trading_stop|order_history
+# @option --order_id      Order ID for cancel
+# @option --leverage     Leverage value (1-100)
+# @option --tp           Take profit price
+# @option --sl            Stop loss price
+# @option --use_tor      Route through Tor proxy (default: true)
 """
 Bybit Execution & Trade Tools
-Requires API_KEY and API_SECRET
+
+Runs on the unified `tools.bybit` client (no pybit dependency).
 """
-import os
+
+import argparse
 import json
-from pybit.unified_trading import HTTP
-from argc import argc as Argc
+import sys
+from pathlib import Path
 
-# Configuration
-TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
-USE_TOR = os.getenv("USE_TOR", "false").lower() == "true"
-TOR_PROXY = os.getenv("TOR_PROXY", "socks5h://127.0.0.1:9050")
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-session = HTTP(
-    testnet=TESTNET,
-    api_key=os.getenv("BYBIT_API_KEY"),
-    api_secret=os.getenv("BYBIT_API_SECRET"),
-    proxy=TOR_PROXY if USE_TOR else None
-)
+from tools.bybit.terminal import BybitRealm  # noqa: E402
 
-# @cmd Place trading order
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --side! Side (Buy/Sell)
-# @option --order-type! Type (Market/Limit)
-# @option --qty! Quantity
-# @option --price Price for limit orders
-# @option --time-in-force Time in force (GTC/IOC/FOK/PostOnly)
-# @option --reduce-only Reduce only position
-# @option --close-on-trigger Close on trigger
-def bybit_place_order(symbol, side, order_type, qty, price=None, time_in_force="GTC", reduce_only=False, close_on_trigger=False):
-    """Place a new order (Market or Limit)"""
-    params = {
-        "category": "linear",
-        "symbol": symbol,
-        "side": side,
-        "orderType": order_type,
-        "qty": str(qty),
-        "timeInForce": time_in_force
-    }
-    if price:
-        params["price"] = str(price)
-    if reduce_only:
-        params["reduceOnly"] = "true"
-    if close_on_trigger:
-        params["closeOnTrigger"] = "true"
-    
-    result = session.place_order(**params)
-    print(json.dumps(result))
 
-# @cmd Cancel single order
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --order-id! Order ID
-# @option --order-link-id Custom order link ID
-def bybit_cancel_order(symbol, order_id=None, order_link_id=None):
-    """Cancel a specific order by order ID"""
-    params = {"category": "linear", "symbol": symbol}
-    if order_id:
-        params["orderId"] = order_id
-    if order_link_id:
-        params["orderLinkId"] = order_link_id
-    
-    result = session.cancel_order(**params)
-    print(json.dumps(result))
+def _realm():
+    return BybitRealm()
 
-# @cmd Cancel all orders
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --category Product type (linear/inverse/option/spot)
-def bybit_cancel_all_orders(symbol, category="linear"):
+
+def bybit_place_order(symbol, side, order_type, qty, price=None, time_in_force="GTC"):
+    """Place a market or limit order"""
+    bot = _realm()
+    try:
+        res = bot.place_order(
+            symbol,
+            side,
+            qty,
+            order_type,
+            price=price,
+            time_in_force=time_in_force,
+        )
+        print(json.dumps(res, indent=2))
+    finally:
+        bot.close()
+
+
+def bybit_cancel_order(symbol, order_id):
+    """Cancel an order by ID"""
+    bot = _realm()
+    try:
+        print(json.dumps(bot.cancel_order(symbol, order_id), indent=2))
+    finally:
+        bot.close()
+
+
+def bybit_cancel_all_orders(symbol):
     """Cancel all open orders for a symbol"""
-    result = session.cancel_all_orders(category=category, symbol=symbol)
-    print(json.dumps(result))
+    bot = _realm()
+    try:
+        print(json.dumps(bot.cancel_all_orders(symbol=symbol), indent=2))
+    finally:
+        bot.close()
 
-# @cmd Set leverage
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --leverage! Leverage value (1-100)
-# @option --buy-leverage Buy side leverage
-# @option --sell-leverage Sell side leverage
-def bybit_set_leverage(symbol, leverage=None, buy_leverage=None, sell_leverage=None):
+
+def bybit_set_leverage(symbol, leverage):
     """Set leverage for a symbol"""
-    params = {"category": "linear", "symbol": symbol}
-    
-    if leverage:
-        params["buyLeverage"] = str(leverage)
-        params["sellLeverage"] = str(leverage)
-    else:
-        if buy_leverage:
-            params["buyLeverage"] = str(buy_leverage)
-        if sell_leverage:
-            params["sellLeverage"] = str(sell_leverage)
-    
-    result = session.set_leverage(**params)
-    print(json.dumps(result))
+    bot = _realm()
+    try:
+        print(json.dumps(bot.set_leverage(symbol, leverage), indent=2))
+    finally:
+        bot.close()
 
-# @cmd Set TP/SL
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --tp Take profit price
-# @option --sl Stop loss price
-# @option --tp-trigger Trigger price for TP
-# @option --sl-trigger Trigger price for SL
-def bybit_set_trading_stop(symbol, tp=None, sl=None, tp_trigger=None, sl_trigger=None):
-    """Set take profit and stop loss for open position"""
-    params = {"category": "linear", "symbol": symbol}
-    
-    if tp:
-        params["takeProfit"] = str(tp)
-    if sl:
-        params["stopLoss"] = str(sl)
-    if tp_trigger:
-        params["takeProfitTriggerBy"] = tp_trigger
-    if sl_trigger:
-        params["stopLossTriggerBy"] = sl_trigger
-    
-    result = session.set_trading_stop(**params)
-    print(json.dumps(result))
 
-# @cmd Amend order
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --order-id! Order ID
-# @option --order-link-id Custom order link ID
-# @option --qty New quantity
-# @option --price New price
-def bybit_amend_order(symbol, order_id=None, order_link_id=None, qty=None, price=None):
-    """Amend an existing order"""
-    params = {"category": "linear", "symbol": symbol}
-    
-    if order_id:
-        params["orderId"] = order_id
-    if order_link_id:
-        params["orderLinkId"] = order_link_id
-    if qty:
-        params["qty"] = str(qty)
-    if price:
-        params["price"] = str(price)
-    
-    result = session.amend_order(**params)
-    print(json.dumps(result))
+def bybit_set_trading_stop(symbol, tp=None, sl=None):
+    """Set take-profit / stop-loss on an open position"""
+    bot = _realm()
+    try:
+        print(
+            json.dumps(
+                bot.set_trading_stop(symbol, take_profit=tp, stop_loss=sl), indent=2
+            )
+        )
+    finally:
+        bot.close()
 
-# @cmd Set position mode
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --mode! Mode (0=One-Way, 3=Hedge)
-def bybit_set_position_mode(symbol, mode):
-    """Set position mode (One-Way or Hedge)"""
-    result = session.switch_position_mode(category="linear", symbol=symbol, mode=int(mode))
-    print(json.dumps(result))
 
-# @cmd Set risk limit
-# @option --symbol! Trading pair (e.g., BTCUSDT)
-# @option --risk-id! Risk ID
-def bybit_set_risk_limit(symbol, risk_id):
-    """Set risk limit for a symbol"""
-    result = session.set_risk_limit(category="linear", symbol=symbol, riskId=int(risk_id))
-    print(json.dumps(result))
+def bybit_get_order_history(symbol=None, limit=20):
+    """Get order history"""
+    bot = _realm()
+    try:
+        print(json.dumps(bot.get_order_history(symbol=symbol, limit=limit), indent=2))
+    finally:
+        bot.close()
 
-# @cmd Get execution list
-# @option --symbol Trading pair (e.g., BTCUSDT)
-# @option --order-id Order ID
-# @option --limit Number of records
-def bybit_get_executions(symbol=None, order_id=None, limit=50):
-    """Get execution history"""
-    params = {"category": "linear"}
-    if symbol:
-        params["symbol"] = symbol
-    if order_id:
-        params["orderId"] = order_id
-    if limit:
-        params["limit"] = limit
-    
-    result = session.get_executions(**params)
-    print(json.dumps(result))
 
-# @cmd Get borrow history
-# @option --coin Coin name
-# @option --limit Number of records
-def bybit_get_borrow_history(coin=None, limit=50):
-    """Get borrow history"""
-    result = session.get_borrow_history(coin=coin, limit=limit)
-    print(json.dumps(result))
+def run(**kwargs) -> dict:
+    """Unified entry point (used by run-tool.py)."""
+    action = kwargs.get("action", "place_order")
+    symbol = kwargs.get("symbol")
+    if not symbol and action not in ("order_history",):
+        return {"status": "error", "msg": "--symbol is required"}
 
-# @cmd Get collateral info
-def bybit_get_collateral_info():
-    """Get collateral information"""
-    result = session.get_collateral_info()
-    print(json.dumps(result))
+    bot = _realm()
+    try:
+        if action == "place_order":
+            qty = kwargs.get("qty")
+            side = kwargs.get("side")
+            if not qty or not side:
+                return {"status": "error", "msg": "--qty and --side required"}
+            return bot.place_order(
+                symbol,
+                side,
+                float(qty),
+                kwargs.get("order_type", "Market"),
+                price=kwargs.get("price"),
+                time_in_force=kwargs.get("time_in_force", "GTC"),
+            )
+        if action == "cancel":
+            return bot.cancel_order(symbol, kwargs.get("order_id"))
+        if action == "cancel_all":
+            return bot.cancel_all_orders(symbol=symbol)
+        if action == "leverage":
+            lev = kwargs.get("leverage")
+            if lev is None:
+                return {"status": "error", "msg": "--leverage required"}
+            return bot.set_leverage(symbol, int(float(lev)))
+        if action == "trading_stop":
+            return bot.set_trading_stop(
+                symbol,
+                take_profit=kwargs.get("tp"),
+                stop_loss=kwargs.get("sl"),
+            )
+        if action == "order_history":
+            return bot.get_order_history(
+                symbol=symbol, limit=int(kwargs.get("limit", 20))
+            )
+        return {"status": "error", "msg": f"Unknown action: {action}"}
+    finally:
+        bot.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Bybit Trade Tools")
+    parser.add_argument("--symbol", default=None)
+    parser.add_argument("--side", default=None)
+    parser.add_argument("--order_type", default="Market")
+    parser.add_argument("--qty", default=None)
+    parser.add_argument("--price", default=None)
+    parser.add_argument("--time_in_force", default="GTC")
+    parser.add_argument("--action", default="place_order")
+    parser.add_argument("--order_id", default=None)
+    parser.add_argument("--leverage", default=None)
+    parser.add_argument("--tp", default=None)
+    parser.add_argument("--sl", default=None)
+    parser.add_argument("--limit", type=int, default=20)
+    args = parser.parse_args()
+    print(json.dumps(run(**vars(args)), indent=2))
+
 
 if __name__ == "__main__":
-    Argc().run()
+    main()

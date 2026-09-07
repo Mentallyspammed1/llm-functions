@@ -10,25 +10,25 @@
 
 import json
 import os
+import socket
 import ssl
 import sys
 import time
-import socket
-import urllib.request
 import urllib.error
 import urllib.parse
+import urllib.request
 from typing import Optional
 
 # ── constants ────────────────────────────────────────────────────────────────
-_DEFAULT_UA      = (
+_DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
 _ALLOWED_METHODS = ("HEAD", "GET", "OPTIONS", "POST")
 _DEFAULT_TIMEOUT = 10.0
-_MAX_TIMEOUT     = 120.0
-_MIN_TIMEOUT     = 0.5
+_MAX_TIMEOUT = 120.0
+_MIN_TIMEOUT = 0.5
 
 # Security-relevant headers to flag in analysis
 _SECURITY_HEADERS = [
@@ -45,6 +45,7 @@ _SECURITY_HEADERS = [
 ]
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _coerce_bool(value) -> bool:
     """Robustly convert env-var strings, ints, or bools to bool."""
@@ -87,7 +88,7 @@ def _build_ssl_context(ignore_ssl: bool) -> Optional[ssl.SSLContext]:
     ctx = ssl.create_default_context()
     if ignore_ssl:
         ctx.check_hostname = False
-        ctx.verify_mode    = ssl.CERT_NONE
+        ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
 
@@ -105,13 +106,13 @@ def _analyse_headers(headers: dict) -> dict:
     Improvement 4: lightweight security-header audit baked into every
     response so callers get actionable data without a second tool.
     """
-    present  = [h for h in _SECURITY_HEADERS if h in headers]
-    missing  = [h for h in _SECURITY_HEADERS if h not in headers]
-    score    = round(len(present) / len(_SECURITY_HEADERS) * 100)
+    present = [h for h in _SECURITY_HEADERS if h in headers]
+    missing = [h for h in _SECURITY_HEADERS if h not in headers]
+    score = round(len(present) / len(_SECURITY_HEADERS) * 100)
     return {
         "security_headers_present": present,
         "security_headers_missing": missing,
-        "security_score_pct":       score,
+        "security_score_pct": score,
     }
 
 
@@ -121,10 +122,21 @@ def _extract_server_info(headers: dict) -> dict:
     block so callers don't have to grep the full header dict.
     """
     info: dict = {}
-    for key in ("server", "x-powered-by", "via", "x-cache",
-                 "cf-ray", "x-amz-request-id", "content-type",
-                 "content-length", "cache-control", "etag",
-                 "last-modified", "expires", "age"):
+    for key in (
+        "server",
+        "x-powered-by",
+        "via",
+        "x-cache",
+        "cf-ray",
+        "x-amz-request-id",
+        "content-type",
+        "content-length",
+        "cache-control",
+        "etag",
+        "last-modified",
+        "expires",
+        "age",
+    ):
         if key in headers:
             info[key] = headers[key]
     return info
@@ -148,39 +160,42 @@ def _classify_status(code: int) -> str:
 
 # ── no-redirect handler ──────────────────────────────────────────────────────
 
+
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     """
     Improvement 7: optional redirect suppression — when follow_redirects
     is False we capture the 3xx response instead of silently following it,
     which lets callers see the Location header and chain manually.
     """
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None   # do not follow
+        return None  # do not follow
 
 
 # ── core function ────────────────────────────────────────────────────────────
 
+
 def run(
-    url:              str,
-    method:           str   = "HEAD",
-    user_agent:       str   = None,
-    timeout:          float = _DEFAULT_TIMEOUT,
-    ignore_ssl:       bool  = False,
-    follow_redirects: bool  = True,
-    output:           str   = "json",
+    url: str,
+    method: str = "HEAD",
+    user_agent: str = None,
+    timeout: float = _DEFAULT_TIMEOUT,
+    ignore_ssl: bool = False,
+    follow_redirects: bool = True,
+    output: str = "json",
 ) -> str:
     # ── 1. coerce / validate inputs ─────────────────────────────────────────
-    method           = (method or "HEAD").upper().strip()
-    ignore_ssl       = _coerce_bool(ignore_ssl)
+    method = (method or "HEAD").upper().strip()
+    ignore_ssl = _coerce_bool(ignore_ssl)
     follow_redirects = _coerce_bool(follow_redirects)
-    timeout          = _coerce_timeout(timeout)
-    output           = (output or "json").lower().strip()
+    timeout = _coerce_timeout(timeout)
+    output = (output or "json").lower().strip()
 
     # Improvement 8: accept any method in _ALLOWED_METHODS, not just HEAD/GET
     if method not in _ALLOWED_METHODS:
         method = "HEAD"
 
-    ua  = (user_agent or "").strip() or _DEFAULT_UA
+    ua = (user_agent or "").strip() or _DEFAULT_UA
     ctx = _build_ssl_context(ignore_ssl)
 
     # Improvement 9: validate URL before touching the network
@@ -191,9 +206,7 @@ def run(
     # ── 2. build opener ──────────────────────────────────────────────────────
     # Improvement 10: pluggable opener so redirect behaviour is controllable
     if follow_redirects:
-        opener = urllib.request.build_opener(
-            urllib.request.HTTPSHandler(context=ctx)
-        )
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
     else:
         opener = urllib.request.build_opener(
             urllib.request.HTTPSHandler(context=ctx),
@@ -203,13 +216,13 @@ def run(
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent":      ua,
+            "User-Agent": ua,
             # Improvement 11: send realistic Accept headers so servers
             # don't serve degraded responses to bare HEAD requests
-            "Accept":          "*/*",
+            "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate, br",
-            "Connection":      "close",
+            "Connection": "close",
         },
         method=method,
     )
@@ -219,9 +232,9 @@ def run(
     try:
         try:
             with opener.open(req, timeout=timeout) as r:
-                elapsed     = time.perf_counter() - start_time
+                elapsed = time.perf_counter() - start_time
                 raw_headers = _normalise_headers(dict(r.info()))
-                final_url   = r.geturl()
+                final_url = r.geturl()
                 status_code = r.getcode()
 
                 # Improvement 12: capture redirect chain length
@@ -230,23 +243,23 @@ def run(
                     redirect_count = 1  # urllib collapses chain; flag if moved
 
                 result = {
-                    "success":         True,
-                    "url":             final_url,
-                    "original_url":    url,
-                    "status_code":     status_code,
+                    "success": True,
+                    "url": final_url,
+                    "original_url": url,
+                    "status_code": status_code,
                     "status_category": _classify_status(status_code),
-                    "elapsed_ms":      round(elapsed * 1000, 2),
-                    "method":          method,
-                    "ssl_verified":    not ignore_ssl,
-                    "redirected":      final_url != url,
-                    "redirect_count":  redirect_count,
-                    "headers":         raw_headers,
-                    "server_info":     _extract_server_info(raw_headers),
-                    "security_audit":  _analyse_headers(raw_headers),
+                    "elapsed_ms": round(elapsed * 1000, 2),
+                    "method": method,
+                    "ssl_verified": not ignore_ssl,
+                    "redirected": final_url != url,
+                    "redirect_count": redirect_count,
+                    "headers": raw_headers,
+                    "server_info": _extract_server_info(raw_headers),
+                    "security_audit": _analyse_headers(raw_headers),
                 }
 
         except urllib.error.HTTPError as he:
-            elapsed     = time.perf_counter() - start_time
+            elapsed = time.perf_counter() - start_time
             raw_headers = _normalise_headers(dict(he.headers))
 
             # Improvement 13: HTTPError is still a valid response —
@@ -259,62 +272,77 @@ def run(
                     pass
 
             result = {
-                "success":         True,
-                "url":             url,
-                "original_url":    url,
-                "status_code":     he.code,
+                "success": True,
+                "url": url,
+                "original_url": url,
+                "status_code": he.code,
                 "status_category": _classify_status(he.code),
-                "elapsed_ms":      round(elapsed * 1000, 2),
-                "method":          method,
-                "ssl_verified":    not ignore_ssl,
-                "redirected":      False,
-                "redirect_count":  0,
-                "headers":         raw_headers,
-                "server_info":     _extract_server_info(raw_headers),
-                "security_audit":  _analyse_headers(raw_headers),
-                "error_reason":    he.reason,
+                "elapsed_ms": round(elapsed * 1000, 2),
+                "method": method,
+                "ssl_verified": not ignore_ssl,
+                "redirected": False,
+                "redirect_count": 0,
+                "headers": raw_headers,
+                "server_info": _extract_server_info(raw_headers),
+                "security_audit": _analyse_headers(raw_headers),
+                "error_reason": he.reason,
                 **({"body_snippet": body_snippet} if body_snippet else {}),
             }
 
     # Improvement 14: granular exception mapping — gives callers a
     # machine-readable error_type field instead of raw exception text only
     except ssl.SSLError as exc:
-        return json.dumps({
-            "success":    False,
-            "error_type": "ssl_error",
-            "error":      str(exc),
-            "hint":       "Try --ignore-ssl true to bypass certificate verification.",
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": False,
+                "error_type": "ssl_error",
+                "error": str(exc),
+                "hint": "Try --ignore-ssl true to bypass certificate verification.",
+            },
+            indent=2,
+        )
 
     except socket.timeout:
-        return json.dumps({
-            "success":    False,
-            "error_type": "timeout",
-            "error":      f"Request timed out after {timeout}s.",
-            "hint":       "Increase --timeout or check network connectivity.",
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": False,
+                "error_type": "timeout",
+                "error": f"Request timed out after {timeout}s.",
+                "hint": "Increase --timeout or check network connectivity.",
+            },
+            indent=2,
+        )
 
     except urllib.error.URLError as exc:
         reason = str(exc.reason) if hasattr(exc, "reason") else str(exc)
-        return json.dumps({
-            "success":    False,
-            "error_type": "url_error",
-            "error":      reason,
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": False,
+                "error_type": "url_error",
+                "error": reason,
+            },
+            indent=2,
+        )
 
     except OSError as exc:
-        return json.dumps({
-            "success":    False,
-            "error_type": "os_error",
-            "error":      str(exc),
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": False,
+                "error_type": "os_error",
+                "error": str(exc),
+            },
+            indent=2,
+        )
 
     except Exception as exc:
-        return json.dumps({
-            "success":    False,
-            "error_type": "unexpected",
-            "error":      str(exc),
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": False,
+                "error_type": "unexpected",
+                "error": str(exc),
+            },
+            indent=2,
+        )
 
     # ── 4. format output ─────────────────────────────────────────────────────
     # Improvement 15: optional pretty-print mode renders a human-readable
@@ -371,10 +399,15 @@ if __name__ == "__main__":
         kwargs["url"] = sys.argv[1]
 
     if not kwargs.get("url"):
-        print(json.dumps({
-            "success": False,
-            "error":   "Missing required argument: --url",
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "success": False,
+                    "error": "Missing required argument: --url",
+                },
+                indent=2,
+            )
+        )
         sys.exit(1)
 
     print(run(**kwargs))

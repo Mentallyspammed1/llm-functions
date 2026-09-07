@@ -32,15 +32,15 @@ __version__ = "1.1.0"
 # SECTION 1: Color Palette & Formatting Helpers
 # ==============================================================================
 
-NEON_CYAN    = "\033[38;5;51m"
-NEON_GREEN   = "\033[38;5;46m"
-NEON_RED     = "\033[38;5;196m"
-NEON_YELLOW  = "\033[38;5;226m"
-NEON_PURPLE  = "\033[38;5;129m"
-NEON_PINK    = "\033[38;5;198m"
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
+NEON_CYAN = "\033[38;5;51m"
+NEON_GREEN = "\033[38;5;46m"
+NEON_RED = "\033[38;5;196m"
+NEON_YELLOW = "\033[38;5;226m"
+NEON_PURPLE = "\033[38;5;129m"
+NEON_PINK = "\033[38;5;198m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[mGKHF]")
 
@@ -80,30 +80,46 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     border = "─" * box_w
 
     _cprint(f"{NEON_PURPLE}╭{border}╮{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [MEMORY ANALYTICS & INSIGHTS]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_PINK}⚡ [MEMORY ANALYTICS & INSIGHTS]{RESET} {status_color}{BOLD}{status_symbol} {status_text}{RESET}"
+    )
     _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Analytics Type:{RESET} {NEON_YELLOW}{data.get('analytics_type', 'summary')}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Period (Days):{RESET}  {data.get('period_days', 7)}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Total Memories:{RESET} {NEON_GREEN}{data.get('total_memories', 0):,}{RESET}")
-    _cprint(f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}       {DIM}{data.get('duration_ms', 0)}ms{RESET}")
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Analytics Type:{RESET} {NEON_YELLOW}{data.get('analytics_type', 'summary')}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Period (Days):{RESET}  {data.get('period_days', 7)}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Total Memories:{RESET} {NEON_GREEN}{data.get('total_memories', 0):,}{RESET}"
+    )
+    _cprint(
+        f"{NEON_PURPLE}│{RESET} {NEON_CYAN}Duration:{RESET}       {DIM}{data.get('duration_ms', 0)}ms{RESET}"
+    )
 
     if not success and "error" in data:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
-        _cprint(f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}          {data['error']}")
+        _cprint(
+            f"{NEON_PURPLE}│{RESET} {NEON_RED}Error:{RESET}          {data['error']}"
+        )
 
     by_type = data.get("by_type", {})
     if by_type:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Distribution by Memory Type:{RESET}")
         for t_name, count in by_type.items():
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {t_name:<15}: {NEON_YELLOW}{count:,}{RESET} entries")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} {t_name:<15}: {NEON_YELLOW}{count:,}{RESET} entries"
+            )
 
     top_tags = data.get("top_tags", {})
     if top_tags:
         _cprint(f"{NEON_PURPLE}├{border}┤{RESET}")
         _cprint(f"{NEON_PURPLE}│{RESET} {BOLD}Top Tags Used:{RESET}")
         for tag, count in list(top_tags.items())[:5]:
-            _cprint(f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} #{tag:<14}: {NEON_GREEN}{count:,}{RESET} occurrences")
+            _cprint(
+                f"{NEON_PURPLE}│{RESET}   {NEON_CYAN}›{RESET} #{tag:<14}: {NEON_GREEN}{count:,}{RESET} occurrences"
+            )
 
     recs = data.get("recommendations", [])
     if recs:
@@ -118,6 +134,7 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
 # ==============================================================================
 # SECTION 2: Core Logic Implementation
 # ==============================================================================
+
 
 def _parse_timestamp(ts_str: Optional[str]) -> Optional[datetime]:
     """Parse ISO timestamp with fallback handling for timezone offsets."""
@@ -134,7 +151,7 @@ def _parse_timestamp(ts_str: Optional[str]) -> Optional[datetime]:
 def generate_summary(memory_dir: Path, days: int) -> dict[str, Any]:
     """Generate overall memory usage statistics."""
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-    
+
     total_count = 0
     by_type: defaultdict[str, int] = defaultdict(int)
     by_session: defaultdict[str, int] = defaultdict(int)
@@ -144,9 +161,10 @@ def generate_summary(memory_dir: Path, days: int) -> dict[str, Any]:
     for jsonl_file in memory_dir.glob("*.jsonl"):
         m_type = jsonl_file.stem
         try:
-            with open(jsonl_file, "r", encoding="utf-8") as f:
+            with open(jsonl_file, encoding="utf-8") as f:
                 for line in f:
-                    if not line.strip(): continue
+                    if not line.strip():
+                        continue
                     try:
                         entry = json.loads(line)
                         dt = _parse_timestamp(entry.get("timestamp"))
@@ -154,11 +172,11 @@ def generate_summary(memory_dir: Path, days: int) -> dict[str, Any]:
                             total_count += 1
                             by_type[entry.get("type", m_type)] += 1
                             by_session[entry.get("session", "default")] += 1
-                            
+
                             for tag in entry.get("tags", []):
                                 if tag:
                                     top_tags[str(tag).strip()] += 1
-                            
+
                             day_key = dt.strftime("%Y-%m-%d")
                             activity_by_day[day_key] += 1
                     except json.JSONDecodeError:
@@ -172,7 +190,7 @@ def generate_summary(memory_dir: Path, days: int) -> dict[str, Any]:
         "by_type": dict(by_type),
         "by_session": dict(by_session),
         "top_tags": dict(top_tags.most_common(10)),
-        "activity_by_day": dict(sorted(activity_by_day.items()))
+        "activity_by_day": dict(sorted(activity_by_day.items())),
     }
 
 
@@ -183,9 +201,10 @@ def analyze_patterns(memory_dir: Path, days: int) -> dict[str, Any]:
 
     for jsonl_file in memory_dir.glob("*.jsonl"):
         try:
-            with open(jsonl_file, "r", encoding="utf-8") as f:
+            with open(jsonl_file, encoding="utf-8") as f:
                 for line in f:
-                    if not line.strip(): continue
+                    if not line.strip():
+                        continue
                     try:
                         entry = json.loads(line)
                         tags = [t for t in entry.get("tags", []) if t]
@@ -195,7 +214,7 @@ def analyze_patterns(memory_dir: Path, days: int) -> dict[str, Any]:
                         session_types[session][m_type] += 1
 
                         for i, tag in enumerate(tags):
-                            for other in tags[i + 1:]:
+                            for other in tags[i + 1 :]:
                                 co_occurrence[tag][other] += 1
                                 co_occurrence[other][tag] += 1
                     except json.JSONDecodeError:
@@ -209,21 +228,24 @@ def analyze_patterns(memory_dir: Path, days: int) -> dict[str, Any]:
     return {
         "period_days": days,
         "tag_co_occurrence": formatted_co,
-        "session_type_distribution": formatted_sessions
+        "session_type_distribution": formatted_sessions,
     }
 
 
 def analyze_trends(memory_dir: Path, days: int) -> dict[str, Any]:
     """Analyze volume trends per memory type across time."""
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-    daily_type_volume: defaultdict[str, defaultdict[str, int]] = defaultdict(lambda: defaultdict(int))
+    daily_type_volume: defaultdict[str, defaultdict[str, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
 
     for jsonl_file in memory_dir.glob("*.jsonl"):
         m_type = jsonl_file.stem
         try:
-            with open(jsonl_file, "r", encoding="utf-8") as f:
+            with open(jsonl_file, encoding="utf-8") as f:
                 for line in f:
-                    if not line.strip(): continue
+                    if not line.strip():
+                        continue
                     try:
                         entry = json.loads(line)
                         dt = _parse_timestamp(entry.get("timestamp"))
@@ -235,12 +257,11 @@ def analyze_trends(memory_dir: Path, days: int) -> dict[str, Any]:
         except OSError:
             continue
 
-    sorted_trends = {day: dict(types) for day, types in sorted(daily_type_volume.items())}
-
-    return {
-        "period_days": days,
-        "daily_volume_by_type": sorted_trends
+    sorted_trends = {
+        day: dict(types) for day, types in sorted(daily_type_volume.items())
     }
+
+    return {"period_days": days, "daily_volume_by_type": sorted_trends}
 
 
 def analyze_recommendations(memory_dir: Path, days: int) -> dict[str, Any]:
@@ -253,21 +274,29 @@ def analyze_recommendations(memory_dir: Path, days: int) -> dict[str, Any]:
     recs: list[str] = []
 
     if total_memories > 300:
-        recs.append(f"High memory density detected ({total_memories:,} entries in {days} days). Run 'memory_manager.py --action cleanup --days 30' to prune old context.")
+        recs.append(
+            f"High memory density detected ({total_memories:,} entries in {days} days). Run 'memory_manager.py --action cleanup --days 30' to prune old context."
+        )
 
     if not top_tags:
-        recs.append("No memory tags found. Add '--tags tag1,tag2' when storing memories to enable categorized searching.")
+        recs.append(
+            "No memory tags found. Add '--tags tag1,tag2' when storing memories to enable categorized searching."
+        )
 
     if by_type.get("conversation", 0) > 200:
-        recs.append("Conversation log exceeds 200 items. Export or summarize active context into 'knowledge' memories for faster retrieval.")
+        recs.append(
+            "Conversation log exceeds 200 items. Export or summarize active context into 'knowledge' memories for faster retrieval."
+        )
 
     if not recs:
-        recs.append("Memory health is optimal. No maintenance actions required at this time.")
+        recs.append(
+            "Memory health is optimal. No maintenance actions required at this time."
+        )
 
     return {
         "period_days": days,
         "total_memories": total_memories,
-        "recommendations": recs
+        "recommendations": recs,
     }
 
 
@@ -288,7 +317,7 @@ def execute_tool(
         return {
             "success": False,
             "error": f"Memory directory not found: {memory_dir}",
-            "exit_code": 1
+            "exit_code": 1,
         }
 
     a_type = analytics_type.lower().strip()
@@ -307,17 +336,17 @@ def execute_tool(
             return {
                 "success": False,
                 "error": f"Unknown analytics_type: '{analytics_type}' (choose summary, patterns, trends, recommendations)",
-                "exit_code": 1
+                "exit_code": 1,
             }
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-        
+
         output_payload = {
             "success": True,
             "analytics_type": a_type,
             "duration_ms": duration_ms,
             "exit_code": 0,
-            **result
+            **result,
         }
 
         return output_payload
@@ -326,13 +355,14 @@ def execute_tool(
         return {
             "success": False,
             "error": f"Memory analytics failed: {exc}",
-            "exit_code": 1
+            "exit_code": 1,
         }
 
 
 # ==============================================================================
 # SECTION 3: Output Routing (LLM vs Human Terminal)
 # ==============================================================================
+
 
 def write_llm_output(data: dict[str, Any]) -> None:
     """Format and write clean JSON output to LLM_OUTPUT destination."""
@@ -358,6 +388,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
 # SECTION 4: Function Entry Point for AIChat
 # ==============================================================================
 
+
 def run(
     analytics_type: str = "summary",
     days: int = 7,
@@ -374,7 +405,7 @@ def run(
         no_color=no_color,
         verbose=verbose,
     )
-    
+
     print_human_readable_ui(result, no_color=no_color)
     write_llm_output(result)
 
@@ -383,20 +414,23 @@ def run(
 # SECTION 5: CLI Argument Parser
 # ==============================================================================
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="memory_analytics.py",
         description=f"AIChat Memory Analytics Tool v{__version__}",
     )
     parser.add_argument(
-        "--analytics-type", "-a",
+        "--analytics-type",
+        "-a",
         choices=["summary", "patterns", "trends", "recommendations"],
         default="summary",
         dest="analytics_type",
         help="Type of analytics (default: summary)",
     )
     parser.add_argument(
-        "--days", "-d",
+        "--days",
+        "-d",
         type=int,
         default=7,
         help="Number of past days to analyze (default: 7)",
@@ -409,7 +443,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI color output",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Enable detailed debug logging",
@@ -425,7 +460,7 @@ if __name__ == "__main__":
         no_color=args.no_color,
         verbose=args.verbose,
     )
-    
+
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)
     sys.exit(res.get("exit_code", 0))

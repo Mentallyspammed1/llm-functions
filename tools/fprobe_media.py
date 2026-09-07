@@ -36,13 +36,17 @@ def _human_summary(data: Dict[str, Any], path: str) -> str:
     streams: List[Dict[str, Any]] = data.get("streams") or []
     lines = [f"file: {path}"]
     if fmt.get("format_long_name") or fmt.get("format_name"):
-        lines.append(f"container: {fmt.get('format_long_name') or fmt.get('format_name')}")
+        lines.append(
+            f"container: {fmt.get('format_long_name') or fmt.get('format_name')}"
+        )
     dur = fmt.get("duration")
     if dur is not None:
         try:
             d = float(dur)
             lines.append(f"duration_sec: {d:.3f}")
-            lines.append(f"duration_hms: {int(d//3600):02d}:{int((d%3600)//60):02d}:{int(d%60):02d}")
+            lines.append(
+                f"duration_hms: {int(d // 3600):02d}:{int((d % 3600) // 60):02d}:{int(d % 60):02d}"
+            )
         except ValueError:
             lines.append(f"duration: {dur}")
     if fmt.get("bit_rate"):
