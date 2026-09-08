@@ -1615,6 +1615,86 @@
     }
   },
   {
+    "name": "bybit_suite",
+    "description": "Unified Bybit Trading Suite — market data, indicators, price-action trend analysis, WBTA observatory, trade plans, backtests and gated order execution through one dispatcher.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action: health_check | market_snapshot | get_ticker |"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Trading pair (e.g. BTCUSDT; default BTCUSDT)."
+        },
+        "symbols": {
+          "type": "string",
+          "description": "Comma-separated symbols for trend_scan."
+        },
+        "side": {
+          "type": "string",
+          "description": "Buy | Sell | auto."
+        },
+        "qty": {
+          "type": "integer",
+          "description": "Order quantity."
+        },
+        "price": {
+          "type": "integer",
+          "description": "Limit price."
+        },
+        "stop_loss": {
+          "type": "integer",
+          "description": "Stop-loss price."
+        },
+        "take_profit": {
+          "type": "integer",
+          "description": "Take-profit price."
+        },
+        "risk_pct": {
+          "type": "integer",
+          "description": "Risk per trade (% of balance; default 1.0)."
+        },
+        "leverage": {
+          "type": "integer",
+          "description": "Leverage (default 1)."
+        },
+        "rr": {
+          "type": "integer",
+          "description": "Reward:risk multiple (default 2.0)."
+        },
+        "interval": {
+          "type": "string",
+          "description": "Kline timeframe: 1,5,15,60,240,D (default 60)."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Number of candles (default 300)."
+        },
+        "min_confidence": {
+          "type": "integer",
+          "description": "Min signal confidence (default 55)."
+        },
+        "execute": {
+          "type": "boolean",
+          "description": "Explicitly allow live order placement (default false)."
+        },
+        "category": {
+          "type": "string",
+          "description": "linear | spot | inverse (default linear)."
+        },
+        "json": {
+          "type": "boolean",
+          "description": "Raw JSON output."
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
     "name": "bybit_realm",
     "description": "Unified Entry Point — Bybit Realm v5.0",
     "parameters": {
