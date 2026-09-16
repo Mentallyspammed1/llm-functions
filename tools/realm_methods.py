@@ -1,3 +1,4 @@
+import threading
 class BybitRealm:
     """
     Full-featured Bybit V5 API client.
