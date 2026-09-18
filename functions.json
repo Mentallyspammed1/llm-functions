@@ -4786,6 +4786,18 @@
           "type": "string",
           "description": "Shell to use: bash/sh/zsh (default: bash)"
         },
+        "stdin": {
+          "type": "string",
+          "description": "Optional stdin content to pipe to command"
+        },
+        "retry": {
+          "type": "integer",
+          "description": "Number of retries on failure (default: 0)"
+        },
+        "retry_delay": {
+          "type": "string",
+          "description": "Delay between retries (default: 1s)"
+        },
         "use_cache": {
           "type": "boolean",
           "description": "Enable result caching for identical command operations"
@@ -4801,6 +4813,10 @@
         "verbose": {
           "type": "boolean",
           "description": "Show extra debug info (PATH, shell, env vars)"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Show what would be executed without running"
         }
       },
       "required": [
