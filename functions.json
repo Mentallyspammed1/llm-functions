@@ -8704,5 +8704,137 @@
         "target"
       ]
     }
+  },
+  {
+    "name": "exec",
+    "description": "Execute a shell command with timeout and capture stdout/stderr",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": "Shell command to execute (required — note the !)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Operation mode: run|check (default: run)"
+        },
+        "shell": {
+          "type": "string",
+          "description": "Shell binary for execution (default: /bin/sh)"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory for the command"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Wall-clock timeout, e.g. 60s, 1m, 2h (default: 5m)"
+        },
+        "env": {
+          "type": "string",
+          "description": "Extra environment variable (repeatable)"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate the action without making changes"
+        },
+        "stdin": {
+          "type": "boolean",
+          "description": "Read primary input from stdin when --input is absent"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        },
+        "validate": {
+          "type": "boolean",
+          "description": "Cross-check header/argparse/schema sync and exit"
+        }
+      },
+      "required": [
+        "input"
+      ]
+    }
+  },
+  {
+    "name": "editor",
+    "description": "Read and edit files with colored unified diff output",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": "Target file path (required — note the !)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Operation mode: read|edit|insert|append|delete|create (default: read)"
+        },
+        "old": {
+          "type": "string",
+          "description": "Exact text to replace (edit mode)"
+        },
+        "new": {
+          "type": "string",
+          "description": "New text (edit/insert/append/create)"
+        },
+        "line": {
+          "type": "integer",
+          "description": "Line number for insert (default: after end); insert position"
+        },
+        "position": {
+          "type": "string",
+          "description": "Insert position: before|after (default: after)"
+        },
+        "from_line": {
+          "type": "integer",
+          "description": "First line of range (read/delete)"
+        },
+        "to_line": {
+          "type": "integer",
+          "description": "Last line of range, inclusive (read/delete)"
+        },
+        "replace_all": {
+          "type": "boolean",
+          "description": "Replace every occurrence in edit mode"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Wall-clock timeout, e.g. 60s, 1m, 2h (default: 5m)"
+        },
+        "env": {
+          "type": "string",
+          "description": "Extra environment variable (repeatable)"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate the action without making changes"
+        },
+        "stdin": {
+          "type": "boolean",
+          "description": "Read primary input from stdin when --input is absent"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        },
+        "validate": {
+          "type": "boolean",
+          "description": "Cross-check header/argparse/schema sync and exit"
+        }
+      },
+      "required": [
+        "input"
+      ]
+    }
   }
 ]
