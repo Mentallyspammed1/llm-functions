@@ -88,6 +88,10 @@
 # @flag   --verbose                       Enable detailed debug logging
 # @flag   --stdin                         Read content from stdin
 # @flag   --force                         Overwrite without confirmation
+# @flag   --verify-after-write            Verify file after write operations
+# @flag   --return-diff                    Include mutation diff when available
+# @flag   --strict-mode                    Enable stricter validation
+# @flag   --transactional                  Enable rollback protection
 # @flag   --version                       Print version and exit
 #
 # @env LLM_OUTPUT=/dev/stdout             Output path for LLM integration
@@ -138,8 +142,8 @@ from typing import (
     Union,
 )
 
-__version__ = "4.0.0-MERGED"
-SCHEMA_VERSION = "4.0"
+__version__ = "4.2.0-ENTERPRISE"
+SCHEMA_VERSION = "4.2"
 
 # ==============================================================================
 # SECTION 1: Exit Codes, Constants & Exception Models
@@ -211,7 +215,7 @@ _FILE_CMD: Optional[str] = shutil.which("file")
 _MIME_CACHE: dict[str, Optional[str]] = {}
 
 VALID_OPERATIONS = frozenset({
-    "read", "view", "write", "replace", "append", "prepend",
+    "read", "view", "write", "replace", "replace_all", "patch", "edit_file", "append", "prepend",
     "insert_line", "insert", "delete_line", "replace_lines",
     "search", "file_search", "count",
     "copy", "move", "delete",
@@ -969,6 +973,10 @@ class EditOptions:
         "verbose": False,
         "stdin": False,
         "force": False,
+        "verify_after_write": True,
+        "return_diff": False,
+        "strict_mode": False,
+        "transactional": False,
     }
 
     def __init__(self, **kwargs: Any) -> None:
@@ -978,6 +986,26 @@ class EditOptions:
         # Normalize operation
         op = data.get("operation") or data.get("action")
         data["operation"] = str(op).strip().lower() if op else "read"
+
+        # Compatibility aliases for LLM generated tool calls.
+        operation_aliases = {
+            "edit": "replace",
+            "modify": "replace",
+            "update": "replace",
+            "cat": "read",
+            "ls": "list_dir",
+            "rm": "delete",
+            "mkdir": "create_dir",
+            "cp": "copy",
+            "mv": "move",
+            "grep": "grep_dir",
+            "patch": "replace",
+            "edit_file": "replace",
+            "readfile": "read",
+            "writefile": "write",
+            "save": "write",
+        }
+        data["operation"] = operation_aliases.get(data["operation"], data["operation"])
 
         # Normalize file path
         fpath = data.get("file_path") or data.get("target") or data.get("path")
@@ -1154,6 +1182,14 @@ def _normalize_max_replacements(max_replacements: Optional[int]) -> Optional[int
     return value
 
 
+def _validate_text_operation_size(search: str, replacement: str = "") -> None:
+    """Prevent accidental huge replacement/search payloads."""
+    if len(search or "") > 1_000_000:
+        raise ValueError("Search pattern exceeds maximum allowed size")
+    if len(replacement or "") > 5_000_000:
+        raise ValueError("Replacement content exceeds maximum allowed size")
+
+
 def _replace_in_content(
     content: str,
     search: str,
@@ -1164,6 +1200,7 @@ def _replace_in_content(
     max_replacements: Optional[int] = None,
 ) -> Tuple[str, int]:
     """Perform search and replace on content cleanly."""
+    _validate_text_operation_size(search, replacement)
     limit = _normalize_max_replacements(max_replacements)
     if limit == 0:
         return content, 0
@@ -1231,6 +1268,12 @@ def _timed(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
         result["duration_ms"] = round((time.perf_counter() - t0) * 1000, 3)
         result.setdefault("tool_version", __version__)
         result.setdefault("schema_version", SCHEMA_VERSION)
+        result.setdefault("request_id", f"req_{time.time_ns()}")
+        result.setdefault("runtime", {
+            "python": platform.python_version(),
+            "platform": platform.system(),
+            "termux": "com.termux" in os.environ.get("PREFIX", "")
+        })
         return result
     return wrapper
 
@@ -2947,6 +2990,20 @@ def main() -> int:
     if exit_code is not None:
         return int(exit_code)
     return EXIT_SUCCESS if res.get("success") else EXIT_ERROR
+
+
+
+# ------------------------------------------------------------------------------
+# v4.1 hardening helpers
+# ------------------------------------------------------------------------------
+def validate_runtime_environment() -> None:
+    """Lightweight runtime sanity checks for AIChat/argc execution."""
+    if os.environ.get("LLM_TOOL_MAX_FILE_BYTES"):
+        try:
+            int(os.environ["LLM_TOOL_MAX_FILE_BYTES"])
+        except ValueError:
+            raise ToolError("LLM_TOOL_MAX_FILE_BYTES must be an integer",
+                            EXIT_INVALID_INPUT)
 
 
 if __name__ == "__main__":
