@@ -186,6 +186,7 @@ HTTP_PORT = _cfg_val("http_port", "MCP_HTTP_PORT", 8000, int)
 BIND_HOST = str(_cfg_val("bind_host", "MCP_BIND_HOST", "0.0.0.0"))
 LOG_LEVEL = str(_cfg_val("log_level", "MCP_LOG_LEVEL", "INFO"))
 ENABLE_DANGEROUS = _cfg_val("enable_dangerous", "MCP_ENABLE_DANGEROUS", False, bool)
+    print(f"DEBUG: enable_dangerous raw env={os.getenv("MCP_ENABLE_DANGEROUS")} result={ENABLE_DANGEROUS}")
 ALLOW_TOKEN_IN_QUERY = _cfg_val("allow_token_in_query", "MCP_ALLOW_TOKEN_IN_QUERY", False, bool)
 
 # Search & request limits
@@ -2992,7 +2993,7 @@ def lint_code(language: str, code: str = "", filepath: str = "") -> str:
                 os.unlink(tmp_path)
 
 
-def _rlimit_preexec(cpu_seconds: int = 10, address_space_mb: int = 8192, file_size_mb: int = 256):
+def _rlimit_preexec(cpu_seconds: int = 10, address_space_mb: int = 512, file_size_mb: int = 16):
     """Return a preexec_fn applying resource limits to a child process (POSIX only)."""
     if not HAS_RESOURCE:
         return None

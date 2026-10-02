@@ -2992,7 +2992,7 @@ def lint_code(language: str, code: str = "", filepath: str = "") -> str:
                 os.unlink(tmp_path)
 
 
-def _rlimit_preexec(cpu_seconds: int = 10, address_space_mb: int = 8192, file_size_mb: int = 256):
+def _rlimit_preexec(cpu_seconds: int = 10, address_space_mb: int = 512, file_size_mb: int = 16):
     """Return a preexec_fn applying resource limits to a child process (POSIX only)."""
     if not HAS_RESOURCE:
         return None
@@ -3025,7 +3025,7 @@ def _run_subprocess(cmd: List[str], timeout: int, cwd: Optional[str] = None,
         timeout=timeout,
         env=env,
         input=stdin_text,
-        preexec_fn=_rlimit_preexec(cpu_seconds or timeout + 5),
+        preexec_fn=_rlimit_preexec(cpu_seconds or timeout + 5, address_space_mb=2048),
         shell=False,
     )
     return {"stdout": proc.stdout, "stderr": proc.stderr, "exit_code": proc.returncode,
@@ -3264,6 +3264,9 @@ def safe_execute_python(code: str, timeout_seconds: int = 15, memory_mb: int = 2
             runner_path = tf.name
 
         clean_env = {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONHASHSEED": "0",
+        print(f"DEBUG sandbox root: {SANDBOX_ROOT}", file=sys.stderr)
+        print(f"DEBUG clean_env: {clean_env}", file=sys.stderr)
+        print(f"DEBUG cwd: {tempfile.gettempdir()}", file=sys.stderr)
                      "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": SANDBOX_ROOT,
                      "PYTHONIOENCODING": "utf-8"}
         started = time.time()
