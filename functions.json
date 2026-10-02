@@ -5885,6 +5885,22 @@
           "type": "boolean",
           "description": "Overwrite without confirmation"
         },
+        "verify_after_write": {
+          "type": "boolean",
+          "description": "Verify file after write operations"
+        },
+        "return_diff": {
+          "type": "boolean",
+          "description": "Include mutation diff when available"
+        },
+        "strict_mode": {
+          "type": "boolean",
+          "description": "Enable stricter validation"
+        },
+        "transactional": {
+          "type": "boolean",
+          "description": "Enable rollback protection"
+        },
         "version": {
           "type": "boolean",
           "description": "Print version and exit"
