@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 """
-mcp_tool_server.py - Enhanced local MCP tool server (Production Hardened v4.0)
+mcp_tool_server.py - Enhanced local MCP tool server (Production Hardened v4.1)
 
-v4.0 highlights
+v4.1 highlights
 ---------------
-* Security fixes: real sandboxed python execution, no-shell bash execution with a
-  strict allow-list, per-redirect SSRF validation, fail-closed DNS checks, constant
-  time auth comparison, secret redaction, protected config env vars.
-* Correctness fixes: HTTP body truncation is now detected (never silent), config
-  file booleans parse correctly, retries actually retry, telemetry is accurate,
-  atomic memory writes, zip-slip safe extraction, RSS <link>text</link> support.
-* A completely rebuilt multi-engine web search stack (parallel engines, reciprocal
-  rank fusion, pagination, safe-search, time filters, optional API back-ends,
-  TTL caching) plus news/image/answer/academic/code search and a one-shot
-  `research_topic` pipeline.
-* ~40 new tools: diagnostics, cache control, memory search/delete, text analytics,
-  data conversion (csv/json/yaml), encoding helpers, git introspection, archive
-  inspection, whois, parallel fetching, HTML->markdown and more.
+* Tightened execution and filesystem boundaries: shell path traversal and nested
+  interpreter escape routes are rejected; child process groups are terminated on
+  timeout; archive extraction has entry and expanded-size limits.
+* Correctness and resilience: argument coercion rejects malformed/non-finite values,
+  oversized HTTP bodies close cleanly, DNS record types are honored, and tool
+  failures are reflected consistently in telemetry and MCP responses.
+* Maintains the multi-engine web search, parsing, conversion, filesystem, memory,
+  diagnostics, and system tools introduced in v4.0, with expanded offline coverage.
 
-Backwards compatible: every v3.8 tool name and parameter name still works.
+Backwards compatible: existing tool names and parameters retain their defaults.
 """
 
 # ---------------------------------------------------------------------------
@@ -34,6 +29,7 @@ import difflib
 import fnmatch
 import hashlib
 import hmac
+import http.client
 import html as html_module
 import io
 import ipaddress
@@ -41,13 +37,17 @@ import itertools
 import json
 import logging
 import mimetypes
+import math
+import ntpath
 import os
 import platform
 import random
 import re
 import shlex
 import shutil
+import signal
 import socket
+import stat
 import string
 import subprocess
 import sys
@@ -63,14 +63,14 @@ import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from contextlib import contextmanager
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, Generator, List, Optional, Sequence, Set, Tuple, Type
 
 SERVER_NAME = "mcp-enhanced-wizard"
-SERVER_VERSION = "4.0.0"
+SERVER_VERSION = "4.1.0"
 USER_AGENT = f"MCP-Tool-Server/{SERVER_VERSION} (+compatible; robust-fetcher)"
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -116,6 +116,8 @@ def _to_bool(value: Any, default: bool = False) -> bool:
     if value is None:
         return default
     if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            return default
         return bool(value)
     text = str(value).strip().lower()
     if text in _TRUTHY:
@@ -149,8 +151,13 @@ _user_cfg: Dict[str, Any] = {}
 _config_error: str = ""
 if os.path.exists(CONFIG_PATH):
     try:
+        if os.path.getsize(CONFIG_PATH) > 1024 * 1024:
+            raise ValueError("config file exceeds the 1 MiB size limit")
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
+            raw_config = f.read(1024 * 1024 + 1)
+        if len(raw_config.encode("utf-8")) > 1024 * 1024:
+            raise ValueError("config file exceeds the 1 MiB size limit")
+        loaded = json.loads(raw_config)
         _user_cfg = loaded if isinstance(loaded, dict) else {}
         if not isinstance(loaded, dict):
             _config_error = "config file must contain a JSON object"
@@ -196,7 +203,11 @@ MCP_MAX_LINKS = _cfg_val("max_links", "MCP_MAX_LINKS", 500, int)
 MCP_MAX_FEED_ITEMS = _cfg_val("max_feed_items", "MCP_MAX_FEED_ITEMS", 100, int)
 MAX_HTTP_BYTES = _cfg_val("max_http_bytes", "MCP_MAX_HTTP_BYTES", 2 * 1024 * 1024, int)
 MAX_DOWNLOAD_BYTES = _cfg_val("max_download_bytes", "MCP_MAX_DOWNLOAD_BYTES", 64 * 1024 * 1024, int)
+MAX_ARCHIVE_ENTRIES = _cfg_val("max_archive_entries", "MCP_MAX_ARCHIVE_ENTRIES", 5000, int)
+MAX_ARCHIVE_UNPACKED_BYTES = _cfg_val("max_archive_unpacked_bytes", "MCP_MAX_ARCHIVE_UNPACKED_BYTES",
+                                      256 * 1024 * 1024, int)
 MAX_TEXT_CHARS = _cfg_val("max_text_chars", "MCP_MAX_TEXT_CHARS", 64000, int)
+MAX_FILE_SCAN_BYTES = 32 * 1024 * 1024
 HTTP_TIMEOUT = max(2, min(_cfg_val("http_timeout", "MCP_HTTP_TIMEOUT", 15, int), 120))
 ALLOW_PRIVATE_NETWORKS = _cfg_val("allow_private_networks", "MCP_ALLOW_PRIVATE_NETWORKS", False, bool)
 CORS_ORIGIN = str(_cfg_val("cors_origin", "MCP_CORS_ORIGIN", "*"))
@@ -248,11 +259,20 @@ BLOCKED_HOSTS: Set[str] = {h.lower() for h in _cfg_list(
 
 # Environment variables that can never be read back or overwritten.
 _SECRET_HINTS = ("token", "key", "secret", "auth", "pwd", "passwd", "password", "credential",
-                 "session", "cookie", "private")
+                 "session", "cookie", "private", "proxy", "database", "dsn", "connection_string")
 _PROTECTED_ENV = {"PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "DYLD_INSERT_LIBRARIES",
                   "DYLD_LIBRARY_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME",
-                  "PYTHONEXECUTABLE", "BASH_ENV", "ENV", "IFS", "SHELL", "HOME", "TMPDIR",
-                  "NODE_OPTIONS", "PERL5LIB", "RUBYOPT", "GIT_SSH", "GIT_SSH_COMMAND"}
+                  "PYTHONEXECUTABLE", "PYTHONINSPECT", "PYTHONWARNINGS", "PYTHONUSERBASE",
+                  "BASH_ENV", "ENV", "IFS", "SHELL", "HOME", "TMPDIR", "NODE_OPTIONS",
+                  "PERL5LIB", "PERL5OPT", "RUBYOPT", "GIT_SSH", "GIT_SSH_COMMAND",
+                  "GIT_EXTERNAL_DIFF", "GIT_PAGER", "GIT_CONFIG", "GIT_CONFIG_GLOBAL",
+                  "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT", "GIT_INDEX_FILE", "GIT_DIR",
+                  "GIT_WORK_TREE", "PAGER", "LESSOPEN", "LESSCLOSE", "HTTP_PROXY",
+                  "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR",
+                  "SSLKEYLOGFILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"}
+_PROTECTED_ENV_PREFIXES = ("GIT_", "LD_", "DYLD_", "PYTHON", "NODE_", "BASH_", "PERL",
+                           "RUBY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                           "SSL_", "REQUESTS_", "CURL_")
 
 # ---------------------------------------------------------------------------
 # Logging Setup - Structured, Color-Aware
@@ -340,6 +360,10 @@ def _bump(counter: str, amount: int = 1) -> None:
 # ---------------------------------------------------------------------------
 _cache_lock = threading.Lock()
 _response_cache: "Dict[str, Tuple[float, Any]]" = {}
+_cache_sizes: Dict[str, int] = {}
+_cache_size_bytes = 0
+CACHE_MAX_BYTES = 32 * 1024 * 1024
+CACHE_MAX_ENTRY_BYTES = 1024 * 1024
 _cache_counters = {"hits": 0, "misses": 0, "evictions": 0, "sets": 0}
 
 
@@ -357,27 +381,53 @@ def _cache_get(key: str) -> Optional[Any]:
                 _cache_counters["hits"] += 1
                 return val
             _response_cache.pop(key, None)
+            global _cache_size_bytes
+            _cache_size_bytes -= _cache_sizes.pop(key, 0)
         _cache_counters["misses"] += 1
     return None
 
 
 def _cache_set(key: str, val: Any, ttl_seconds: float = 60.0) -> None:
-    if ttl_seconds <= 0:
+    global _cache_size_bytes
+    try:
+        ttl = float(ttl_seconds)
+        if not math.isfinite(ttl) or ttl <= 0:
+            return
+        ttl = min(ttl, 24 * 60 * 60)
+        if isinstance(val, str):
+            value_size = len(val.encode("utf-8"))
+        elif isinstance(val, bytes):
+            value_size = len(val)
+        else:
+            value_size = len(json.dumps(val, ensure_ascii=False, default=_json_default).encode("utf-8"))
+    except (TypeError, ValueError, OverflowError, UnicodeError):
         return
+    if value_size > CACHE_MAX_ENTRY_BYTES:
+        return
+    max_entries = _bounded_int(CACHE_MAX_ENTRIES, 512, 16, 10000)
     with _cache_lock:
-        if len(_response_cache) >= max(16, CACHE_MAX_ENTRIES):
-            # drop the soonest-to-expire entries (cheap, bounded eviction)
-            for stale_key, _ in sorted(_response_cache.items(), key=lambda kv: kv[1][0])[:max(1, CACHE_MAX_ENTRIES // 8)]:
-                _response_cache.pop(stale_key, None)
-                _cache_counters["evictions"] += 1
-        _response_cache[key] = (time.time() + float(ttl_seconds), val)
+        old_size = _cache_sizes.pop(key, 0)
+        _response_cache.pop(key, None)
+        _cache_size_bytes -= old_size
+        while _response_cache and (len(_response_cache) >= max_entries
+                                   or _cache_size_bytes + value_size > CACHE_MAX_BYTES):
+            stale_key = min(_response_cache, key=lambda cache_key: _response_cache[cache_key][0])
+            _response_cache.pop(stale_key, None)
+            _cache_size_bytes -= _cache_sizes.pop(stale_key, 0)
+            _cache_counters["evictions"] += 1
+        _response_cache[key] = (time.time() + ttl, val)
+        _cache_sizes[key] = value_size
+        _cache_size_bytes += value_size
         _cache_counters["sets"] += 1
 
 
 def _cache_clear() -> int:
+    global _cache_size_bytes
     with _cache_lock:
         count = len(_response_cache)
         _response_cache.clear()
+        _cache_sizes.clear()
+        _cache_size_bytes = 0
     return count
 
 
@@ -413,14 +463,50 @@ def _ok(payload: Optional[Dict[str, Any]] = None, **extra: Any) -> str:
 
 
 def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    """Convert an integer-like value and clamp it, falling back on invalid input."""
     try:
         if isinstance(value, str):
             value = value.strip()
             if not value:
                 return default
-        return max(minimum, min(int(float(value)), maximum))
-    except (TypeError, ValueError):
+        if isinstance(value, float) and not math.isfinite(value):
+            return default
+        number = int(float(value))
+        return max(minimum, min(number, maximum))
+    except (TypeError, ValueError, OverflowError):
         return default
+
+
+# Clamp operator-configurable values once, so every tool and HTTP path shares
+# conservative resource ceilings even when the local config is malformed.
+MCP_MAX_SEARCH_RESULTS = _bounded_int(MCP_MAX_SEARCH_RESULTS, 50, 1, 500)
+MCP_MAX_REQUEST_BYTES = _bounded_int(MCP_MAX_REQUEST_BYTES, 2 * 1024 * 1024,
+                                     1024, 32 * 1024 * 1024)
+MCP_MAX_RETRY_ATTEMPTS = _bounded_int(MCP_MAX_RETRY_ATTEMPTS, 3, 1, 10)
+MCP_MAX_LINKS = _bounded_int(MCP_MAX_LINKS, 500, 1, 2000)
+MCP_MAX_FEED_ITEMS = _bounded_int(MCP_MAX_FEED_ITEMS, 100, 1, 1000)
+MAX_HTTP_BYTES = _bounded_int(MAX_HTTP_BYTES, 2 * 1024 * 1024,
+                              1024, 64 * 1024 * 1024)
+MAX_HTML_BYTES = min(MAX_HTTP_BYTES, 4 * 1024 * 1024)
+MAX_DOWNLOAD_BYTES = _bounded_int(MAX_DOWNLOAD_BYTES, 64 * 1024 * 1024,
+                                  1024, 1024 * 1024 * 1024)
+MAX_ARCHIVE_ENTRIES = _bounded_int(MAX_ARCHIVE_ENTRIES, 5000, 1, 10000)
+MAX_ARCHIVE_UNPACKED_BYTES = _bounded_int(MAX_ARCHIVE_UNPACKED_BYTES, 256 * 1024 * 1024,
+                                          1024, 1024 * 1024 * 1024)
+MAX_TEXT_CHARS = _bounded_int(MAX_TEXT_CHARS, 64000, 1024, 1_000_000)
+MAX_MEMORY_BYTES = _bounded_int(MAX_MEMORY_BYTES, 8 * 1024 * 1024, 1024, 64 * 1024 * 1024)
+CACHE_MAX_ENTRIES = _bounded_int(CACHE_MAX_ENTRIES, 512, 16, 10000)
+SEARCH_PARALLELISM = _bounded_int(SEARCH_PARALLELISM, 6, 1, 20)
+SEARCH_CACHE_TTL = _bounded_int(SEARCH_CACHE_TTL, 300, 0, 86400)
+FETCH_CACHE_TTL = _bounded_int(FETCH_CACHE_TTL, 120, 0, 86400)
+DEFAULT_SEARCH_ENGINES = str(DEFAULT_SEARCH_ENGINES)[:200]
+try:
+    RETRY_BACKOFF = float(RETRY_BACKOFF)
+    if not math.isfinite(RETRY_BACKOFF):
+        raise ValueError
+    RETRY_BACKOFF = max(0.0, min(RETRY_BACKOFF, 10.0))
+except (TypeError, ValueError, OverflowError):
+    RETRY_BACKOFF = 0.5
 
 
 def _clean_text(value: Any, limit: int = 0) -> str:
@@ -507,6 +593,8 @@ def _ip_is_blocked(ip: "ipaddress._BaseAddress") -> bool:
             ip = ip.ipv4_mapped
         elif getattr(ip, "sixtofour", None):
             ip = ip.sixtofour
+        elif getattr(ip, "teredo", None):
+            ip = ip.teredo[1]
     return bool(ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
                 or ip.is_multicast or ip.is_unspecified)
 
@@ -556,12 +644,96 @@ def _assert_safe_remote(url: str) -> str:
     return normalized
 
 
+def _resolved_connection_addresses(host: str, port: int,
+                                  allow_private: Optional[bool] = None):
+    """Resolve once per socket and validate the exact addresses we will connect to."""
+    normalized = str(host or "").strip().strip("[]").lower().rstrip(".")
+    if normalized in BLOCKED_HOSTS:
+        raise ValueError(f"Destination host '{normalized}' is blocked by policy")
+    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    if not addresses:
+        raise OSError(f"No addresses found for {host}")
+    if allow_private is None:
+        allow_private = ALLOW_PRIVATE_NETWORKS
+    if not allow_private:
+        for _family, _socktype, _proto, _canonname, sockaddr in addresses:
+            try:
+                address = ipaddress.ip_address(str(sockaddr[0]).split("%", 1)[0])
+            except (ValueError, IndexError):
+                continue
+            if _ip_is_blocked(address):
+                raise ValueError("Connection blocked: DNS resolved to a private or reserved address")
+    return addresses
+
+
+def _create_pinned_socket(host: str, port: int, timeout, source_address=None,
+                          allow_private: Optional[bool] = None):
+    """Connect to a validated getaddrinfo result without a second DNS lookup."""
+    addresses = _resolved_connection_addresses(host, port, allow_private=allow_private)
+    last_error = None
+    for family, socktype, proto, _canonname, sockaddr in addresses:
+        sock = None
+        try:
+            sock = socket.socket(family, socktype, proto)
+            if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                sock.settimeout(timeout)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            last_error = exc
+            if sock is not None:
+                with contextlib.suppress(OSError):
+                    sock.close()
+    if last_error is not None:
+        raise last_error
+    raise OSError(f"Could not connect to {host}:{port}")
+
+
+class _PinnedConnectionMixin:
+    def _connect_pinned(self):
+        self.sock = _create_pinned_socket(self.host, self.port, self.timeout, self.source_address)
+
+
+class _SafeHTTPConnection(_PinnedConnectionMixin, http.client.HTTPConnection):
+    def connect(self):
+        self._connect_pinned()
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _SafeHTTPSConnection(_PinnedConnectionMixin, http.client.HTTPSConnection):
+    def connect(self):
+        self._connect_pinned()
+        if self._tunnel_host:
+            self._tunnel()
+        server_hostname = self._tunnel_host or self.host
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=server_hostname)
+
+
+class _SafeHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_SafeHTTPConnection, req)
+
+
+class _SafeHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_SafeHTTPSConnection, req, context=self._context,
+                            check_hostname=self._check_hostname)
+
+
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Validate *every* redirect hop instead of only the first/last URL."""
 
     max_redirections = 6
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirects = getattr(req, "redirect_dict", {})
+        if len(redirects) >= self.max_redirections:
+            raise urllib.error.HTTPError(req.full_url, code,
+                                          f"Redirect limit ({self.max_redirections}) exceeded",
+                                          headers, fp)
         try:
             _assert_safe_remote(newurl)
         except ValueError as exc:
@@ -582,7 +754,10 @@ _shared_opener: Optional[urllib.request.OpenerDirector] = None
 def _build_opener(max_redirects: int = 6) -> urllib.request.OpenerDirector:
     handler = _SafeRedirectHandler()
     handler.max_redirections = max(0, int(max_redirects))
-    return urllib.request.build_opener(handler)
+    # Bypass proxy env vars so the pinned connection is the actual destination.
+    # Every HTTP/TLS socket validates and connects to the same resolved address.
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), handler,
+                                       _SafeHTTPHandler(), _SafeHTTPSHandler())
 
 
 def _get_opener() -> urllib.request.OpenerDirector:
@@ -626,13 +801,13 @@ def _retry_on_exception(max_attempts: int = MCP_MAX_RETRY_ATTEMPTS,
 # Temporary File Context Manager
 # ---------------------------------------------------------------------------
 @contextmanager
-def temporary_file(suffix: str = "", delete: bool = True) -> Generator[io.TextIOWrapper, None, None]:
-    fd, path = tempfile.mkstemp(suffix=suffix)
-    # Open by *path* (not by fd) so that ``file_obj.name`` is the filesystem path -
-    # opening from the raw descriptor made ``.name`` an int and broke every caller
-    # that passed ``tf.name`` to subprocess.
-    os.close(fd)
-    file_obj = open(path, "w+", encoding="utf-8")
+def temporary_file(suffix: str = "", delete: bool = True) -> Generator[Any, None, None]:
+    # Keep the securely-created descriptor open; closing and reopening the path
+    # would introduce a symlink/race window. NamedTemporaryFile exposes a path in
+    # ``.name`` for subprocess callers while retaining mkstemp's exclusive create.
+    file_obj = tempfile.NamedTemporaryFile(mode="w+", suffix=suffix, delete=False,
+                                            encoding="utf-8")
+    path = file_obj.name
     try:
         yield file_obj
     finally:
@@ -657,13 +832,19 @@ def _read_stream_limited(resp, limit: int = MAX_HTTP_BYTES) -> Tuple[bytes, bool
     total = 0
     truncated = False
     while total < limit:
-        chunk = resp.read(min(65536, limit - total))
+        remaining = limit - total
+        chunk = resp.read(min(65536, remaining))
         if not chunk:
+            break
+        if len(chunk) > remaining:
+            chunks.append(chunk[:remaining])
+            total += remaining
+            truncated = True
             break
         chunks.append(chunk)
         total += len(chunk)
-    if total >= limit:
-        # probe one extra byte to learn whether the body continued
+    if total >= limit and not truncated:
+        # Probe one extra byte to learn whether the body continued.
         with contextlib.suppress(Exception):
             extra = resp.read(1)
             if extra:
@@ -713,7 +894,8 @@ def _http_fetch(url: str,
     """
     target = _assert_safe_remote(url)
     timeout = max(2, min(int(timeout or HTTP_TIMEOUT), 300))
-    max_bytes = int(max_bytes or MAX_HTTP_BYTES)
+    max_bytes = (_bounded_int(max_bytes, MAX_HTTP_BYTES, 1024, MAX_HTTP_BYTES)
+                 if max_bytes else MAX_HTTP_BYTES)
     request_headers = {"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
     for key, value in (headers or {}).items():
         request_headers[str(key)] = str(value)
@@ -755,6 +937,15 @@ def _fetch_url(url: str, timeout: int = HTTP_TIMEOUT, max_bytes: int = MAX_HTTP_
     return result["text"]
 
 
+def _safe_parse_xml(text: str) -> ET.Element:
+    """Parse bounded XML without DTDs or entity declarations."""
+    if len(text) > 4 * 1024 * 1024:
+        raise ValueError("XML exceeds the 4 MiB parsing limit")
+    if re.search(r"<!\s*(?:DOCTYPE|ENTITY)\b", text, re.I):
+        raise ValueError("XML document types and entity declarations are not allowed")
+    return ET.fromstring(text)
+
+
 def _http_get_text(url: str,
                    headers: Optional[Dict[str, str]] = None,
                    timeout: Optional[int] = None,
@@ -762,6 +953,11 @@ def _http_get_text(url: str,
                    data: Optional[bytes] = None,
                    cache_ttl: float = 0.0) -> str:
     """Convenience helper for scrapers: returns decoded text ('' on HTTP error)."""
+    if max_bytes is None:
+        max_bytes = min(MAX_HTTP_BYTES, 2 * 1024 * 1024)
+    else:
+        max_bytes = _bounded_int(max_bytes, min(MAX_HTTP_BYTES, 2 * 1024 * 1024),
+                                 1024, MAX_HTTP_BYTES)
     key = ""
     if cache_ttl > 0:
         key = _cache_key("get", url, sorted((headers or {}).items()), data)
@@ -794,12 +990,15 @@ class _RichHTMLParser(HTMLParser):
         self.canonical = ""
         self.lang = ""
         self._skip = 0
+        self._text_chars = 0
         self._title_depth = 0
         self._title_parts: List[str] = []
+        self._title_chars = 0
         self._anchor_depth = 0
         self._anchor: Optional[Dict[str, str]] = None
         self._heading: Optional[str] = None
         self._heading_parts: List[str] = []
+        self._heading_chars = 0
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
@@ -810,26 +1009,30 @@ class _RichHTMLParser(HTMLParser):
         if self._skip:
             return
         if tag == "html" and attr_dict.get("lang"):
-            self.lang = attr_dict["lang"]
+            self.lang = attr_dict["lang"][:100]
         if tag == "title":
             self._title_depth += 1
         elif tag == "meta":
             key = attr_dict.get("name") or attr_dict.get("property") or attr_dict.get("itemprop")
             if key:
-                self.meta[key.lower()] = attr_dict.get("content", "")
+                meta_key = key.lower()[:200]
+                if meta_key in self.meta or len(self.meta) < 500:
+                    self.meta[meta_key] = attr_dict.get("content", "")[:2000]
         elif tag == "link" and "canonical" in attr_dict.get("rel", "").lower().split():
-            self.canonical = attr_dict.get("href", "")
+            self.canonical = attr_dict.get("href", "")[:2048]
         elif tag == "a":
             self._anchor_depth = 1
-            self._anchor = {"url": attr_dict.get("href", ""), "text": "",
-                            "rel": attr_dict.get("rel", ""), "title": attr_dict.get("title", "")}
+            self._anchor = {"url": attr_dict.get("href", "")[:2048], "text": "",
+                            "rel": attr_dict.get("rel", "")[:200],
+                            "title": attr_dict.get("title", "")[:500]}
         elif self._anchor_depth:
             self._anchor_depth += 1
         if tag in self.HEADINGS:
-            self._heading = tag
+            self._heading = tag if len(self.headings) < 200 else None
             self._heading_parts = []
+            self._heading_chars = 0
         if tag in self.BLOCK:
-            self.parts.append("\n")
+            self._append_text("\n")
 
     def handle_startendtag(self, tag, attrs):
         self.handle_starttag(tag, attrs)
@@ -847,18 +1050,26 @@ class _RichHTMLParser(HTMLParser):
             self._title_depth -= 1
         if tag in self.HEADINGS and self._heading:
             text = " ".join(self._heading_parts).strip()
-            if text:
+            if text and len(self.headings) < 200:
                 self.headings.append({"level": self._heading, "text": text[:300]})
             self._heading, self._heading_parts = None, []
+            self._heading_chars = 0
         if tag == "a" and self._anchor_depth:
-            if self._anchor and self._anchor.get("url"):
+            if self._anchor and self._anchor.get("url") and len(self.links) < MCP_MAX_LINKS:
                 self.links.append(self._anchor)
             self._anchor = None
             self._anchor_depth = 0
         elif self._anchor_depth:
             self._anchor_depth = max(0, self._anchor_depth - 1)
         if tag in self.BLOCK:
-            self.parts.append("\n")
+            self._append_text("\n")
+
+    def _append_text(self, text: str):
+        remaining = max(0, MAX_TEXT_CHARS * 2 - self._text_chars)
+        if remaining:
+            piece = text[:remaining]
+            self.parts.append(piece)
+            self._text_chars += len(piece)
 
     def handle_data(self, data):
         if self._skip:
@@ -866,13 +1077,20 @@ class _RichHTMLParser(HTMLParser):
         clean = re.sub(r"\s+", " ", data).strip()
         if not clean:
             return
-        self.parts.append(clean)
-        if self._title_depth:
-            self._title_parts.append(clean)
-        if self._heading is not None:
-            self._heading_parts.append(clean)
+        self._append_text(clean)
+        if self._title_depth and self._title_chars < 2000:
+            title_piece = clean[:2000 - self._title_chars]
+            self._title_parts.append(title_piece)
+            self._title_chars += len(title_piece)
+        if self._heading is not None and self._heading_chars < 5000:
+            heading_piece = clean[:5000 - self._heading_chars]
+            self._heading_parts.append(heading_piece)
+            self._heading_chars += len(heading_piece)
         if self._anchor_depth and self._anchor is not None:
-            self._anchor["text"] += (" " if self._anchor["text"] else "") + clean
+            remaining = 500 - len(self._anchor["text"])
+            if remaining > 0:
+                separator = " " if self._anchor["text"] else ""
+                self._anchor["text"] += (separator + clean)[:remaining]
 
     def text(self) -> str:
         value = " ".join(self.parts)
@@ -885,86 +1103,214 @@ class _RichHTMLParser(HTMLParser):
 
 def _extract_html_details(html: str, base_url: str = "") -> dict:
     parser = _RichHTMLParser()
+    source = str(html or "")
+    input_truncated = len(source) > MAX_HTML_BYTES
+    if input_truncated:
+        source = source[:MAX_HTML_BYTES]
     try:
-        parser.feed(str(html or ""))
+        parser.feed(source)
         parser.close()
     except Exception as exc:  # malformed markup should degrade, not explode
         log.debug("HTML parse warning: %s", exc)
     title = " ".join(parser._title_parts).strip()
-    canonical = urllib.parse.urljoin(base_url, parser.canonical) if parser.canonical else ""
+    canonical = ""
+    if parser.canonical:
+        with contextlib.suppress(ValueError):
+            canonical = _validated_http_url(urllib.parse.urljoin(base_url, parser.canonical))
     links, seen = [], set()
     for link in parser.links:
-        absolute = urllib.parse.urljoin(base_url, link["url"])
-        parsed = urllib.parse.urlsplit(absolute)
-        if parsed.scheme not in ("http", "https") or absolute in seen:
+        try:
+            absolute = _validated_http_url(urllib.parse.urljoin(base_url, link["url"]))
+        except ValueError:
+            continue
+        if absolute in seen:
             continue
         seen.add(absolute)
         links.append({"text": _clean_text(link["text"], 500), "url": absolute,
                       "rel": link.get("rel", "")})
         if len(links) >= MCP_MAX_LINKS:
             break
-    image = parser.meta.get("og:image", "")
+    image = ""
+    if parser.meta.get("og:image"):
+        with contextlib.suppress(ValueError):
+            image = _validated_http_url(urllib.parse.urljoin(base_url, parser.meta["og:image"]))
     return {
         "title": title or parser.meta.get("og:title", ""),
         "text": parser.text(),
         "description": parser.meta.get("description") or parser.meta.get("og:description") or "",
-        "image": urllib.parse.urljoin(base_url, image) if image else "",
+        "image": image,
         "canonical_url": canonical,
         "language": parser.lang,
         "site_name": parser.meta.get("og:site_name", ""),
         "headings": parser.headings[:200],
         "meta_tags": parser.meta,
         "links": links,
+        "input_truncated": input_truncated,
     }
 
 
 def _html_to_markdown(html: str, base_url: str = "") -> str:
-    """Small, dependency-free HTML -> Markdown converter."""
-    text = str(html or "")
-    text = re.sub(r"(?is)<(script|style|noscript|template|svg)\b.*?</\1>", " ", text)
-    text = re.sub(r"(?is)<!--.*?-->", " ", text)
+    """Convert bounded HTML to Markdown without regex-driven tag matching."""
+    source = str(html or "")[:MAX_HTML_BYTES]
+    max_output = max(1024, min(MAX_TEXT_CHARS * 4, 4 * 1024 * 1024))
 
-    def _heading(match):
-        level = int(match.group(1))
-        return "\n\n" + "#" * level + " " + _strip_tags(match.group(2)) + "\n\n"
+    class MarkdownParser(HTMLParser):
+        SKIP = {"script", "style", "noscript", "template", "svg", "canvas"}
+        BLOCK = {"p", "div", "article", "section", "main", "header", "footer", "nav",
+                 "li", "blockquote", "pre", "br", "hr", "table", "tr", "ul", "ol",
+                 "h1", "h2", "h3", "h4", "h5", "h6"}
 
-    text = re.sub(r"(?is)<h([1-6])[^>]*>(.*?)</h\1>", _heading, text)
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.parts: List[str] = []
+            self.output_chars = 0
+            self.truncated = False
+            self.skip_depth = 0
+            self.anchors: List[str] = []
+            self.anchor_overflow = 0
+            self.pre_depth = 0
+            self.pre_parts: List[str] = []
+            self.pre_chars = 0
+            self.code_blocks: List[str] = []
+            self.marker = "MTS_CODE_" + uuid.uuid4().hex + "_"
 
-    def _link(match):
-        href = html_module.unescape(match.group(1))
-        label = _strip_tags(match.group(2))
-        if base_url:
-            href = urllib.parse.urljoin(base_url, href)
-        return f"[{label}]({href})" if label else href
+        def append(self, value: str):
+            if not value:
+                return
+            remaining = max_output - self.output_chars
+            if remaining > 0:
+                piece = value[:remaining]
+                self.parts.append(piece)
+                self.output_chars += len(piece)
+            if len(value) > max(0, remaining):
+                self.truncated = True
 
-    text = re.sub(r"(?is)<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", _link, text)
+        def _safe_url(self, value: str) -> str:
+            try:
+                candidate = urllib.parse.urljoin(base_url, html_module.unescape(value))
+                return _validated_http_url(candidate)
+            except (TypeError, ValueError):
+                return ""
 
-    def _image(match):
-        attrs = match.group(1)
-        src = re.search(r"src=[\"']([^\"']+)[\"']", attrs, re.I)
-        alt = re.search(r"alt=[\"']([^\"']*)[\"']", attrs, re.I)
-        if not src:
-            return ""
-        url = urllib.parse.urljoin(base_url, html_module.unescape(src.group(1))) if base_url else src.group(1)
-        return f"![{alt.group(1) if alt else ''}]({url})"
+        def handle_starttag(self, tag, attrs):
+            tag = tag.lower()
+            attributes = {str(key).lower(): (value or "") for key, value in attrs}
+            if tag in self.SKIP:
+                self.skip_depth += 1
+                return
+            if self.skip_depth:
+                return
+            if tag == "pre":
+                if self.pre_depth == 0:
+                    self.pre_parts = []
+                    self.pre_chars = 0
+                self.pre_depth += 1
+                return
+            if self.pre_depth:
+                return
+            if tag in self.BLOCK:
+                self.append("\n\n")
+            if tag.startswith("h") and len(tag) == 2 and tag[1] in "123456":
+                self.append("#" * int(tag[1]) + " ")
+            elif tag == "a":
+                href = self._safe_url(attributes.get("href", ""))
+                if self.anchor_overflow == 0 and len(self.anchors) < 1000:
+                    self.anchors.append(href)
+                    if href:
+                        self.append("[")
+                else:
+                    self.anchor_overflow += 1
+                    self.truncated = True
+            elif tag == "img":
+                url = self._safe_url(attributes.get("src", ""))
+                if url:
+                    alt = html_module.unescape(attributes.get("alt", ""))[:500]
+                    self.append(f"![{alt}]({url})")
+            elif tag in ("strong", "b"):
+                self.append("**")
+            elif tag in ("em", "i"):
+                self.append("*")
+            elif tag == "code":
+                self.append("`")
+            elif tag == "li":
+                self.append("- ")
+            elif tag == "blockquote":
+                self.append("> ")
+            elif tag in ("td", "th"):
+                self.append(" | ")
+            elif tag == "br":
+                self.append("\n")
+            elif tag == "hr":
+                self.append("\n---\n")
 
-    text = re.sub(r"(?is)<img([^>]*)/?>", _image, text)
-    text = re.sub(r"(?is)<(strong|b)[^>]*>(.*?)</\1>", lambda m: f"**{_strip_tags(m.group(2))}**", text)
-    text = re.sub(r"(?is)<(em|i)[^>]*>(.*?)</\1>", lambda m: f"*{_strip_tags(m.group(2))}*", text)
-    text = re.sub(r"(?is)<code[^>]*>(.*?)</code>", lambda m: f"`{_strip_tags(m.group(1))}`", text)
-    text = re.sub(r"(?is)<pre[^>]*>(.*?)</pre>",
-                  lambda m: "\n\n```\n" + html_module.unescape(re.sub(r"<[^>]+>", "", m.group(1))).strip() + "\n```\n\n",
-                  text)
-    text = re.sub(r"(?is)<li[^>]*>(.*?)</li>", lambda m: "\n- " + _strip_tags(m.group(1)), text)
-    text = re.sub(r"(?is)<blockquote[^>]*>(.*?)</blockquote>",
-                  lambda m: "\n> " + _strip_tags(m.group(1)) + "\n", text)
-    text = re.sub(r"(?i)<(br|hr)\s*/?>", "\n", text)
-    text = re.sub(r"(?i)</(p|div|section|article|tr|table|ul|ol|h[1-6])>", "\n\n", text)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = html_module.unescape(text)
-    text = re.sub(r"[ \t\r\f\v]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return "\n".join(line.rstrip() for line in text.splitlines()).strip()
+        def handle_endtag(self, tag):
+            tag = tag.lower()
+            if tag in self.SKIP and self.skip_depth:
+                self.skip_depth -= 1
+                return
+            if self.skip_depth:
+                return
+            if tag == "pre" and self.pre_depth:
+                self.pre_depth -= 1
+                if self.pre_depth == 0:
+                    code = "".join(self.pre_parts).strip("\n")
+                    if len(code) > max_output:
+                        code = code[:max_output]
+                        self.truncated = True
+                    if len(self.code_blocks) < 1000:
+                        marker = f"{self.marker}{len(self.code_blocks)}__"
+                        self.code_blocks.append("\n\n```\n" + code + "\n```\n\n")
+                        self.append(marker)
+                    else:
+                        self.truncated = True
+                    self.pre_parts = []
+                    self.pre_chars = 0
+                return
+            if self.pre_depth:
+                return
+            if tag == "a" and self.anchor_overflow:
+                self.anchor_overflow -= 1
+            elif tag == "a" and self.anchors:
+                href = self.anchors.pop()
+                if href:
+                    self.append(f"]({href})")
+            elif tag in ("strong", "b"):
+                self.append("**")
+            elif tag in ("em", "i"):
+                self.append("*")
+            elif tag == "code":
+                self.append("`")
+            if tag in self.BLOCK:
+                self.append("\n\n")
+
+        def handle_data(self, data):
+            if self.skip_depth:
+                return
+            if self.pre_depth:
+                remaining = max(0, max_output - self.pre_chars)
+                if remaining:
+                    piece = data[:remaining]
+                    self.pre_parts.append(piece)
+                    self.pre_chars += len(piece)
+                if len(data) > remaining:
+                    self.truncated = True
+                return
+            self.append(re.sub(r"\s+", " ", data))
+
+    try:
+        parser = MarkdownParser()
+        parser.feed(source)
+        parser.close()
+        markdown = "".join(parser.parts)
+        markdown = re.sub(r"[ \t\r\f\v]+", " ", markdown)
+        markdown = re.sub(r" *\n *", "\n", markdown)
+        markdown = re.sub(r"\n{3,}", "\n\n", markdown).strip()
+        for index, code in enumerate(parser.code_blocks):
+            markdown = markdown.replace(f"{parser.marker}{index}__", code.strip())
+        return markdown[:max_output]
+    except Exception as exc:
+        log.debug("Markdown conversion failed: %s", exc)
+        return _extract_html_details(source, base_url).get("text", "")[:max_output]
 
 
 # ---------------------------------------------------------------------------
@@ -973,22 +1319,29 @@ def _html_to_markdown(html: str, base_url: str = "") -> str:
 _memory_lock = threading.RLock()
 
 
+def _memory_size_limit() -> int:
+    return _bounded_int(MAX_MEMORY_BYTES, 8 * 1024 * 1024, 1024, 64 * 1024 * 1024)
+
+
 def _load_memory() -> dict:
     if not os.path.exists(MEMORY_FILE):
         return {}
-    try:
-        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception as exc:
-        log.warning("Memory file unreadable (%s); starting empty", exc)
-        return {}
+    limit = _memory_size_limit()
+    if os.path.getsize(MEMORY_FILE) > limit:
+        raise ValueError(f"Memory file exceeds the configured {limit} byte limit")
+    with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+        raw = f.read(limit + 1)
+    if len(raw.encode("utf-8")) > limit:
+        raise ValueError(f"Memory file exceeds the configured {limit} byte limit")
+    data = json.loads(raw)
+    return data if isinstance(data, dict) else {}
 
 
 def _save_memory(data: dict) -> int:
+    limit = _memory_size_limit()
     payload = json.dumps(data, indent=2, ensure_ascii=False, default=_json_default)
-    if len(payload.encode("utf-8")) > MAX_MEMORY_BYTES:
-        raise ValueError(f"Memory store would exceed {MAX_MEMORY_BYTES} bytes")
+    if len(payload.encode("utf-8")) > limit:
+        raise ValueError(f"Memory store would exceed {limit} bytes")
     return _atomic_write(MEMORY_FILE, payload)
 
 
@@ -996,12 +1349,20 @@ def memory_store(key: str, value: str, tags: str = "") -> str:
     """Persist a value under *key* with optional comma-separated tags."""
     if not key or not isinstance(key, str):
         return _error("Key must be a non-empty string")
+    if len(key) > 1024:
+        return _error("Key exceeds the 1,024 character limit")
+    value = "" if value is None else str(value)
+    if len(value.encode("utf-8")) > MCP_MAX_REQUEST_BYTES:
+        return _error("Value exceeds configured request size limit")
+    tags_text = str(tags or "")
+    if len(tags_text) > 4096:
+        return _error("Tags exceed the 4,096 character limit")
     try:
         with _memory_lock:
             mem = _load_memory()
             mem[key] = {
                 "value": value,
-                "tags": [t.strip() for t in str(tags or "").split(",") if t.strip()],
+                "tags": [t.strip()[:200] for t in tags_text.split(",") if t.strip()][:50],
                 "updated": time.time(),
                 "updated_iso": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             }
@@ -1012,8 +1373,11 @@ def memory_store(key: str, value: str, tags: str = "") -> str:
 
 
 def memory_recall(key: str = "", tag: str = "") -> str:
-    """Recall one memory entry by key, or all entries carrying a tag."""
+    """Recall one memory entry by key, or a bounded set of entries carrying a tag."""
     try:
+        key, tag = str(key or ""), str(tag or "")
+        if len(key) > 1024 or len(tag) > 200:
+            return _error("key exceeds 1,024 characters or tag exceeds 200 characters")
         with _memory_lock:
             mem = _load_memory()
             if key:
@@ -1021,23 +1385,28 @@ def memory_recall(key: str = "", tag: str = "") -> str:
                 if not item:
                     return _error(f"Key '{key}' not found", key=key)
                 return _ok({"key": key, **item})
+            ordered = sorted(mem.items(), key=lambda kv: kv[1].get("updated", 0), reverse=True)
             if tag:
-                matched = {k: v for k, v in mem.items() if tag in v.get("tags", [])}
-                return _ok({"tag": tag, "count": len(matched), "items": matched})
-            return _ok({"count": len(mem), "items": mem})
+                ordered = [(k, v) for k, v in ordered if tag in v.get("tags", [])]
+            total = len(ordered)
+            bounded = dict(ordered[:500])
+            return _ok({"tag": tag, "count": total, "truncated": total > len(bounded),
+                        "items": bounded})
     except Exception as exc:
         return _error(str(exc))
 
 
 def memory_list() -> str:
-    """List stored memory keys with their tags and update times."""
+    """List up to 500 stored memory keys with their tags and update times."""
     try:
         with _memory_lock:
             mem = _load_memory()
+            ordered = sorted(mem.items(), key=lambda kv: kv[1].get("updated", 0), reverse=True)
             summary = [{"key": k, "tags": v.get("tags", []), "updated": v.get("updated"),
                         "value_preview": _clean_text(v.get("value", ""), 120)}
-                       for k, v in sorted(mem.items(), key=lambda kv: kv[1].get("updated", 0), reverse=True)]
-            return _ok({"count": len(summary), "keys": summary})
+                       for k, v in ordered[:500]]
+            return _ok({"count": len(ordered), "returned": len(summary),
+                        "truncated": len(ordered) > len(summary), "keys": summary})
     except Exception as exc:
         return _error(str(exc))
 
@@ -1063,7 +1432,8 @@ def memory_delete(key: str = "", tag: str = "", confirm_all: bool = False) -> st
             else:
                 return _error("Provide key=, tag=, or confirm_all=true")
             _save_memory(mem)
-        return _ok({"deleted": removed, "count": len(removed), "remaining": len(mem)})
+        return _ok({"deleted": removed[:500], "count": len(removed),
+                    "deleted_truncated": len(removed) > 500, "remaining": len(mem)})
     except Exception as exc:
         return _error(f"memory_delete failed: {exc}")
 
@@ -1071,9 +1441,12 @@ def memory_delete(key: str = "", tag: str = "", confirm_all: bool = False) -> st
 def memory_search(query: str, search_values: bool = True, max_results: int = 25) -> str:
     """Substring search across memory keys, tags and (optionally) values."""
     try:
-        needle = str(query or "").strip().lower()
-        if not needle:
+        query = str(query or "").strip()
+        if not query:
             return _error("query must be a non-empty string")
+        if len(query) > 2000:
+            return _error("query exceeds the 2,000 character memory search limit")
+        needle = query.lower()
         limit = _bounded_int(max_results, 25, 1, 500)
         search_values = _to_bool(search_values, True)
         hits = []
@@ -1136,13 +1509,15 @@ def _normalize_url_for_dedupe(url: str) -> str:
             host = host[2:]
         if host.endswith("."):
             host = host[:-1]
-        query = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query, keep_blank_values=False)
+        query = [(k, v) for k, v in urllib.parse.parse_qsl(
+            parts.query, keep_blank_values=False, max_num_fields=2000)
                  if k.lower() not in _TRACKING_PARAMS]
         query.sort()
         path = re.sub(r"/+$", "", parts.path) or "/"
         if path.endswith("/index.html"):
             path = path[: -len("index.html")].rstrip("/") or "/"
-        port = f":{parts.port}" if parts.port and parts.port not in (80, 443) else ""
+        default_port = 80 if parts.scheme.lower() == "http" else 443
+        port = f":{parts.port}" if parts.port and parts.port != default_port else ""
         return urllib.parse.urlunsplit(("https", host + port, path,
                                         urllib.parse.urlencode(query), ""))
     except Exception:
@@ -1158,17 +1533,26 @@ def _clean_search_url(href: str) -> str:
         href = "https:" + href
     if href.startswith("/"):
         return ""
-    parsed = urllib.parse.urlsplit(href)
-    host = (parsed.hostname or "").lower()
-    qs = urllib.parse.parse_qs(parsed.query)
+    def safe(candidate: str) -> str:
+        try:
+            return _validated_http_url(candidate)
+        except ValueError:
+            return ""
+
+    try:
+        parsed = urllib.parse.urlsplit(href)
+        host = (parsed.hostname or "").lower()
+        qs = urllib.parse.parse_qs(parsed.query, max_num_fields=2000)
+    except ValueError:
+        return ""
     # DuckDuckGo / Bing / Google style redirectors
     for param in ("uddg", "u3", "url", "q", "u"):
         if host.endswith("duckduckgo.com") and param == "uddg" and qs.get(param):
-            return urllib.parse.unquote(qs[param][0])
+            return safe(urllib.parse.unquote(qs[param][0]))
         if host.endswith(("google.com", "bing.com", "yandex.com")) and param in ("url", "q", "u") and qs.get(param):
             candidate = urllib.parse.unquote(qs[param][0])
             if candidate.startswith("http"):
-                return candidate
+                return safe(candidate)
     # Bing base64 `u=a1...` wrapper
     match = re.search(r"(?:[?&]|&amp;|^)u=a1([A-Za-z0-9_\-]+)", href)
     if match:
@@ -1177,8 +1561,8 @@ def _clean_search_url(href: str) -> str:
         with contextlib.suppress(Exception):
             decoded = base64.b64decode(raw).decode("utf-8")
             if decoded.startswith("http"):
-                return decoded
-    return href
+                return safe(decoded)
+    return safe(href)
 
 
 def _mk_result(title: Any, url: Any, snippet: Any, engine: str, rank: int,
@@ -1198,7 +1582,8 @@ def _mk_result(title: Any, url: Any, snippet: Any, engine: str, rank: int,
     return item
 
 
-_ANCHOR_RE = re.compile(r"<a\b([^>]*)>(.*?)</a>", re.I | re.S)
+_ANCHOR_RE = re.compile(
+    r"<a\b((?:[^\"'>]|\"[^\"]*\"|'[^']*')*)>(.*?)</a\s*>", re.I | re.S)
 _ATTR_RE = re.compile(r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
 
 
@@ -1511,41 +1896,93 @@ def available_engines() -> List[str]:
 
 
 def _select_engines(requested: str) -> List[str]:
+    """Resolve an engine selector, honoring the configured default and rejecting typos."""
     raw = str(requested or "").strip().lower()
+    if len(raw) > 1000:
+        return []
     if raw in ("", "auto", "default"):
-        return available_engines()[:4]
+        configured = str(DEFAULT_SEARCH_ENGINES or "auto").strip().lower()
+        if configured not in ("", "auto", "default"):
+            raw = configured
+        else:
+            return available_engines()[:4]
     if raw == "all":
         return available_engines()
-    picked = []
-    for name in re.split(r"[,\s]+", raw):
-        if not name:
-            continue
-        if name in SEARCH_ENGINES and name not in picked:
-            picked.append(name)
-    return picked or available_engines()[:4]
+    names = [name for name in re.split(r"[,\s]+", raw) if name]
+    if not names or any(name not in SEARCH_ENGINES for name in names):
+        return []
+    return list(dict.fromkeys(names))
 
 
 def _run_engines(engines: Sequence[str], query: str, per_engine: int, page: int, safe: bool,
                  time_range: str, region: str, timeout: float = 25.0
                  ) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, str]]:
-    """Execute the selected engines in parallel; never let one failure kill the rest."""
+    """Run selected engines concurrently with a real overall deadline and fault isolation."""
     buckets: Dict[str, List[Dict[str, Any]]] = {}
     errors: Dict[str, str] = {}
     if not engines:
         return buckets, {"engines": "no engines available"}
-    workers = max(1, min(len(engines), SEARCH_PARALLELISM))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(SEARCH_ENGINES[name], query, per_engine, page, safe,
-                               time_range, region): name for name in engines}
-        for future in as_completed(futures, timeout=timeout + 5):
+
+    valid_engines = []
+    for name in engines:
+        if name in SEARCH_ENGINES and name not in valid_engines:
+            valid_engines.append(name)
+        elif name not in SEARCH_ENGINES:
+            errors[name] = "unknown search engine"
+    if not valid_engines:
+        return buckets, errors or {"engines": "no engines available"}
+
+    try:
+        timeout_value = float(timeout)
+        if not math.isfinite(timeout_value):
+            timeout_value = 25.0
+    except (TypeError, ValueError, OverflowError):
+        timeout_value = 25.0
+    timeout_value = max(0.0, min(timeout_value, 300.0))
+    workers = max(1, min(len(valid_engines), max(1, SEARCH_PARALLELISM)))
+    pool = ThreadPoolExecutor(max_workers=workers)
+    futures = {pool.submit(SEARCH_ENGINES[name], query, per_engine, page, safe,
+                           time_range, region): name for name in valid_engines}
+    pending = set(futures)
+    deadline = time.monotonic() + timeout_value
+    try:
+        while pending:
+            remaining = max(0.0, deadline - time.monotonic())
+            completed, pending = wait(pending, timeout=remaining, return_when=FIRST_COMPLETED)
+            if not completed:
+                break
+            for future in completed:
+                name = futures[future]
+                try:
+                    results = future.result() or []
+                    if not isinstance(results, (list, tuple)):
+                        raise TypeError("engine returned a non-list result")
+                    safe_results = []
+                    for result in results[:max(per_engine * 3, 20)]:
+                        if not isinstance(result, dict):
+                            continue
+                        safe_url = _clean_search_url(result.get("url", ""))
+                        if not safe_url:
+                            continue
+                        item = dict(result)
+                        item["url"] = safe_url
+                        item["title"] = _clean_text(item.get("title", ""), 500)
+                        item["snippet"] = _clean_text(item.get("snippet", ""), 2000)
+                        item["domain"] = (urllib.parse.urlsplit(safe_url).hostname or "").lower()
+                        safe_results.append(item)
+                    buckets[name] = safe_results
+                    if not buckets[name]:
+                        errors.setdefault(name, "no results")
+                except Exception as exc:
+                    errors[name] = f"{type(exc).__name__}: {exc}"[:300]
+        for future in pending:
             name = futures[future]
-            try:
-                results = future.result(timeout=timeout) or []
-                buckets[name] = [r for r in results if r]
-                if not buckets[name]:
-                    errors.setdefault(name, "no results")
-            except Exception as exc:
-                errors[name] = f"{type(exc).__name__}: {exc}"[:300]
+            errors[name] = f"TimeoutError: engine exceeded {timeout_value:g}s deadline"
+            future.cancel()
+    finally:
+        # Do not block the caller on a misbehaving engine. Running HTTP requests
+        # retain their own socket deadlines and are isolated in these worker threads.
+        pool.shutdown(wait=not pending)
     return buckets, errors
 
 
@@ -1668,17 +2105,25 @@ def web_search(query: str,
         fetch_content = _to_bool(fetch_content, False)
         use_cache = _to_bool(use_cache, True)
         time_range = _normalize_time_range(time_range)
-        region = str(region or "us-en").strip().lower() or "us-en"
+        region = str(region or "us-en").strip().lower()[:64] or "us-en"
 
         query = str(query or "").replace(r"\"", '"').replace(r"\:", ":").strip()
         if not query:
             return _error("query must be a non-empty string")
+        if len(query) > 2000:
+            return _error("query exceeds 2,000 characters")
         domain = str(domain or "").strip().lstrip("@").replace("https://", "").replace("http://", "").strip("/")
+        if len(domain) > 253:
+            return _error("domain exceeds 253 characters")
         search_query = query
         if domain and not re.search(r"(?:^|\s)site:", search_query, re.I):
             search_query = f"site:{domain} {search_query}".strip()
 
-        selected = _select_engines(engines if engines else DEFAULT_SEARCH_ENGINES)
+        requested_engines = engines if str(engines or "").strip() else DEFAULT_SEARCH_ENGINES
+        selected = _select_engines(requested_engines)
+        if not selected:
+            return _error("No valid search engines selected", requested=str(requested_engines),
+                          available=available_engines(), supported=sorted(SEARCH_ENGINES))
         cache_id = _cache_key("search", search_query, max_results, page, safe_search,
                               tuple(selected), time_range, region)
         if use_cache:
@@ -1741,10 +2186,13 @@ def web_search_news(query: str, max_results: int = 10, time_range: str = "week",
     try:
         max_results = _bounded_int(max_results, 10, 1, MCP_MAX_SEARCH_RESULTS)
         time_range = _normalize_time_range(time_range) or "week"
+        safe_search = _to_bool(safe_search, False)
         query = str(query or "").strip()
         if not query:
             return _error("query must be a non-empty string")
-        region = str(region or "US:en")
+        if len(query) > 2000:
+            return _error("query exceeds 2,000 characters")
+        region = str(region or "US:en")[:64]
         country, _, lang = region.partition(":")
         lang = lang or "en"
         items: List[Dict[str, Any]] = []
@@ -1753,46 +2201,62 @@ def web_search_news(query: str, max_results: int = 10, time_range: str = "week",
         def google_news():
             when = {"day": "1d", "week": "7d", "month": "30d", "year": "1y"}.get(time_range, "7d")
             params = {"q": f"{query} when:{when}", "hl": f"{lang}-{country}",
-                      "gl": country, "ceid": f"{country}:{lang}"}
+                      "gl": country, "ceid": f"{country}:{lang}",
+                      "safe": "active" if safe_search else "off"}
             body = _http_get_text("https://news.google.com/rss/search?" + urllib.parse.urlencode(params),
                                   headers={"User-Agent": BROWSER_UA}, timeout=15)
-            root = ET.fromstring(body)
+            root = _safe_parse_xml(body)
             out = []
-            for node in root.iter("item"):
-                title = (node.findtext("title") or "").strip()
-                link = (node.findtext("link") or "").strip()
-                source = node.findtext("{*}source") or node.findtext("source") or ""
-                out.append({"title": title, "url": link, "snippet": _strip_tags(node.findtext("description") or ""),
-                            "published": node.findtext("pubDate") or "", "source": source,
-                            "engine": "google_news"})
+            for node in itertools.islice(root.iter("item"), max_results * 2):
+                title = (node.findtext("title") or "").strip()[:400]
+                link = (node.findtext("link") or "").strip()[:2048]
+                source = (node.findtext("{*}source") or node.findtext("source") or "")[:200]
+                out.append({"title": title, "url": link,
+                            "snippet": _strip_tags(node.findtext("description") or "")[:1000],
+                            "published": (node.findtext("pubDate") or "")[:200],
+                            "source": source, "engine": "google_news"})
             return out
 
         def bing_news():
-            params = {"q": query, "format": "rss",
+            params = {"q": query, "format": "rss", "adlt": "strict" if safe_search else "off",
                       "qft": {"day": "interval=\"4\"", "week": "interval=\"7\"",
                               "month": "interval=\"9\""}.get(time_range, ""),
                       "setlang": lang}
             params = {k: v for k, v in params.items() if v}
             body = _http_get_text("https://www.bing.com/news/search?" + urllib.parse.urlencode(params),
                                   headers={"User-Agent": BROWSER_UA}, timeout=15)
-            root = ET.fromstring(body)
+            root = _safe_parse_xml(body)
             out = []
-            for node in root.iter("item"):
-                out.append({"title": (node.findtext("title") or "").strip(),
-                            "url": (node.findtext("link") or "").strip(),
-                            "snippet": _strip_tags(node.findtext("description") or ""),
-                            "published": node.findtext("pubDate") or "",
+            for node in itertools.islice(root.iter("item"), max_results * 2):
+                out.append({"title": (node.findtext("title") or "").strip()[:400],
+                            "url": (node.findtext("link") or "").strip()[:2048],
+                            "snippet": _strip_tags(node.findtext("description") or "")[:1000],
+                            "published": (node.findtext("pubDate") or "")[:200],
                             "source": "", "engine": "bing_news"})
             return out
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = {pool.submit(google_news): "google_news", pool.submit(bing_news): "bing_news"}
-            for future in as_completed(futures, timeout=30):
-                name = futures[future]
-                try:
-                    items.extend(future.result(timeout=20) or [])
-                except Exception as exc:
-                    errors[name] = f"{type(exc).__name__}: {exc}"[:300]
+        pool = ThreadPoolExecutor(max_workers=2)
+        futures = {pool.submit(google_news): "google_news", pool.submit(bing_news): "bing_news"}
+        pending = set(futures)
+        deadline = time.monotonic() + 30.0
+        try:
+            while pending:
+                completed, pending = wait(pending,
+                                          timeout=max(0.0, deadline - time.monotonic()),
+                                          return_when=FIRST_COMPLETED)
+                if not completed:
+                    break
+                for future in completed:
+                    name = futures[future]
+                    try:
+                        items.extend(future.result() or [])
+                    except Exception as exc:
+                        errors[name] = f"{type(exc).__name__}: {exc}"[:300]
+            for future in pending:
+                errors[futures[future]] = "TimeoutError: news engine exceeded 30s deadline"
+                future.cancel()
+        finally:
+            pool.shutdown(wait=not pending)
 
         seen, merged = set(), []
         for item in items:
@@ -1814,7 +2278,7 @@ def web_search_news(query: str, max_results: int = 10, time_range: str = "week",
             if len(merged) >= max_results:
                 break
         payload = {"ok": bool(merged), "query": query, "time_range": time_range,
-                   "count": len(merged), "articles": merged}
+                   "safe_search": safe_search, "count": len(merged), "articles": merged}
         if errors:
             payload["engine_errors"] = errors
         if not merged:
@@ -1832,6 +2296,8 @@ def web_search_images(query: str, max_results: int = 10, safe_search: bool = Tru
         query = str(query or "").strip()
         if not query:
             return _error("query must be a non-empty string")
+        if len(query) > 2000:
+            return _error("query exceeds 2,000 characters")
         images: List[Dict[str, Any]] = []
         errors: Dict[str, str] = {}
         try:
@@ -1846,10 +2312,14 @@ def web_search_images(query: str, max_results: int = 10, safe_search: bool = Tru
                                   headers={"User-Agent": BROWSER_UA, "Referer": "https://duckduckgo.com/",
                                            "Accept": "application/json"}, timeout=15)
             for hit in json.loads(body).get("results", []):
-                images.append({"title": _clean_text(hit.get("title"), 300), "image_url": hit.get("image"),
-                               "thumbnail": hit.get("thumbnail"), "source_url": hit.get("url"),
-                               "width": hit.get("width"), "height": hit.get("height"),
-                               "engine": "duckduckgo_images"})
+                image_url = _clean_search_url(hit.get("image", ""))
+                if image_url:
+                    images.append({"title": _clean_text(hit.get("title"), 300),
+                                   "image_url": image_url,
+                                   "thumbnail": _clean_search_url(hit.get("thumbnail", "")),
+                                   "source_url": _clean_search_url(hit.get("url", "")),
+                                   "width": hit.get("width"), "height": hit.get("height"),
+                                   "engine": "duckduckgo_images"})
                 if len(images) >= max_results:
                     break
         except Exception as exc:
@@ -1863,10 +2333,13 @@ def web_search_images(query: str, max_results: int = 10, safe_search: bool = Tru
                 for match in re.finditer(r'm=["\']({&quot;.*?})["\']', body):
                     with contextlib.suppress(Exception):
                         meta = json.loads(html_module.unescape(match.group(1)))
-                        if meta.get("murl"):
+                        image_url = _clean_search_url(meta.get("murl", ""))
+                        if image_url:
                             images.append({"title": _clean_text(meta.get("t"), 300),
-                                           "image_url": meta.get("murl"), "thumbnail": meta.get("turl"),
-                                           "source_url": meta.get("purl"), "engine": "bing_images"})
+                                           "image_url": image_url,
+                                           "thumbnail": _clean_search_url(meta.get("turl", "")),
+                                           "source_url": _clean_search_url(meta.get("purl", "")),
+                                           "engine": "bing_images"})
                     if len(images) >= max_results:
                         break
             except Exception as exc:
@@ -1889,6 +2362,8 @@ def web_search_answer(query: str, include_wikipedia: bool = True) -> str:
         query = str(query or "").strip()
         if not query:
             return _error("query must be a non-empty string")
+        if len(query) > 2000:
+            return _error("query exceeds 2,000 characters")
         answer: Dict[str, Any] = {"ok": True, "query": query, "answers": []}
         with contextlib.suppress(Exception):
             params = {"q": query, "format": "json", "no_html": "1", "skip_disambig": "1", "t": "mcp"}
@@ -1896,14 +2371,17 @@ def web_search_answer(query: str, include_wikipedia: bool = True) -> str:
                                              headers={"User-Agent": USER_AGENT}, timeout=12,
                                              cache_ttl=SEARCH_CACHE_TTL))
             if data.get("AbstractText"):
-                answer["answers"].append({"source": "duckduckgo", "type": data.get("Type", ""),
-                                          "text": data["AbstractText"],
-                                          "url": data.get("AbstractURL", ""),
-                                          "heading": data.get("Heading", "")})
+                answer["answers"].append({"source": "duckduckgo", "type": data.get("Type", "")[:50],
+                                          "text": str(data["AbstractText"])[:4000],
+                                          "url": _clean_search_url(data.get("AbstractURL", "")),
+                                          "heading": str(data.get("Heading", ""))[:500]})
             if data.get("Answer"):
                 answer["answers"].append({"source": "duckduckgo_instant",
-                                          "text": str(data["Answer"]), "url": data.get("AbstractURL", "")})
-            related = [t.get("Text") for t in data.get("RelatedTopics", []) if isinstance(t, dict) and t.get("Text")]
+                                          "text": str(data["Answer"])[:2000],
+                                          "url": _clean_search_url(data.get("AbstractURL", ""))})
+            related = [_clean_text(t.get("Text"), 1000)
+                       for t in data.get("RelatedTopics", [])
+                       if isinstance(t, dict) and t.get("Text")]
             if related:
                 answer["related_topics"] = related[:8]
         if _to_bool(include_wikipedia, True):
@@ -1930,6 +2408,8 @@ def web_search_suggestions(query: str, max_results: int = 10) -> str:
         query = str(query or "").strip()
         if not query:
             return _error("query must be a non-empty string")
+        if len(query) > 2000:
+            return _error("query exceeds 2,000 characters")
         limit = _bounded_int(max_results, 10, 1, 50)
         suggestions: List[str] = []
         with contextlib.suppress(Exception):
@@ -1937,15 +2417,16 @@ def web_search_suggestions(query: str, max_results: int = 10) -> str:
                                              headers={"User-Agent": BROWSER_UA}, timeout=10,
                                              cache_ttl=SEARCH_CACHE_TTL))
             if isinstance(data, list) and len(data) > 1 and isinstance(data[1], list):
-                suggestions.extend(str(s) for s in data[1])
+                suggestions.extend(str(s)[:500] for s in data[1][:limit * 3])
             elif isinstance(data, list):
-                suggestions.extend(str(d.get("phrase", "")) for d in data if isinstance(d, dict))
+                suggestions.extend(str(d.get("phrase", ""))[:500]
+                                   for d in data[:limit * 3] if isinstance(d, dict))
         with contextlib.suppress(Exception):
             body = _http_get_text("https://api.bing.com/osjson.aspx?" + urllib.parse.urlencode({"query": query}),
                                   headers={"User-Agent": BROWSER_UA}, timeout=10, cache_ttl=SEARCH_CACHE_TTL)
             data = json.loads(body)
-            if isinstance(data, list) and len(data) > 1:
-                suggestions.extend(str(s) for s in data[1])
+            if isinstance(data, list) and len(data) > 1 and isinstance(data[1], list):
+                suggestions.extend(str(s)[:500] for s in data[1][:limit * 3])
         unique = [s for s in dict.fromkeys(x.strip() for x in suggestions if x.strip())][:limit]
         return _json_result({"ok": bool(unique), "query": query, "count": len(unique),
                              "suggestions": unique})
@@ -1959,6 +2440,8 @@ def wikipedia_lookup(query: str, language: str = "en", sentences: int = 5) -> st
         query = str(query or "").strip()
         if not query:
             return _error("query must be a non-empty string")
+        if len(query) > 2000:
+            return _error("query exceeds 2,000 characters")
         lang = re.sub(r"[^a-z]", "", str(language or "en").lower())[:5] or "en"
         sentences = _bounded_int(sentences, 5, 1, 20)
         title = query
@@ -1986,16 +2469,17 @@ def wikipedia_lookup(query: str, language: str = "en", sentences: int = 5) -> st
             data = summary_for(title)
         if not data:
             return _error(f"No Wikipedia summary available for: {query}")
-        extract = data.get("extract", "")
-        parts = re.split(r"(?<=[.!?])\s+", extract)
+        extract = str(data.get("extract", ""))
+        parts = re.split(r"(?<=[.!?])\s+", extract[:200000])
         return _ok({
             "query": query,
-            "title": data.get("title", title),
-            "description": data.get("description", ""),
-            "extract": " ".join(parts[:sentences]).strip(),
-            "full_extract": extract,
-            "url": data.get("content_urls", {}).get("desktop", {}).get("page", ""),
-            "thumbnail": data.get("thumbnail", {}).get("source", ""),
+            "title": str(data.get("title", title))[:500],
+            "description": str(data.get("description", ""))[:1000],
+            "extract": " ".join(parts[:sentences]).strip()[:5000],
+            "full_extract": extract[:20000],
+            "extract_truncated": len(extract) > 20000,
+            "url": _clean_search_url(data.get("content_urls", {}).get("desktop", {}).get("page", "")),
+            "thumbnail": _clean_search_url(data.get("thumbnail", {}).get("source", "")),
             "language": lang,
         })
     except Exception as exc:
@@ -2008,6 +2492,8 @@ def arxiv_search(query: str, max_results: int = 10, sort_by: str = "relevance") 
         query = str(query or "").strip()
         if not query:
             return _error("query must be a non-empty string")
+        if len(query) > 2000:
+            return _error("query exceeds 2,000 characters")
         limit = _bounded_int(max_results, 10, 1, 50)
         sort_map = {"relevance": "relevance", "recent": "submittedDate", "updated": "lastUpdatedDate"}
         params = {"search_query": f"all:{query}" if ":" not in query else query,
@@ -2016,20 +2502,23 @@ def arxiv_search(query: str, max_results: int = 10, sort_by: str = "relevance") 
                   "sortOrder": "descending"}
         body = _http_get_text("http://export.arxiv.org/api/query?" + urllib.parse.urlencode(params),
                               headers={"User-Agent": USER_AGENT}, timeout=20, cache_ttl=SEARCH_CACHE_TTL)
-        root = ET.fromstring(body)
+        root = _safe_parse_xml(body)
         ns = {"a": "http://www.w3.org/2005/Atom"}
         papers = []
-        for entry in root.findall("a:entry", ns):
-            links = {link.get("title") or link.get("rel"): link.get("href") for link in entry.findall("a:link", ns)}
+        for entry in itertools.islice(root.iter("{http://www.w3.org/2005/Atom}entry"), limit):
+            links = {link.get("title") or link.get("rel"): link.get("href")
+                     for link in itertools.islice(entry.iter("{http://www.w3.org/2005/Atom}link"), 20)}
             papers.append({
                 "title": _clean_text(entry.findtext("a:title", "", ns), 500),
-                "authors": [_clean_text(a.findtext("a:name", "", ns)) for a in entry.findall("a:author", ns)][:20],
+                "authors": [_clean_text(a.findtext("a:name", "", ns), 200)
+                            for a in itertools.islice(entry.iter("{http://www.w3.org/2005/Atom}author"), 20)],
                 "summary": _clean_text(entry.findtext("a:summary", "", ns), 3000),
-                "published": entry.findtext("a:published", "", ns),
-                "updated": entry.findtext("a:updated", "", ns),
-                "url": entry.findtext("a:id", "", ns),
-                "pdf_url": links.get("pdf", ""),
-                "categories": [c.get("term") for c in entry.findall("a:category", ns)][:10],
+                "published": entry.findtext("a:published", "", ns)[:100],
+                "updated": entry.findtext("a:updated", "", ns)[:100],
+                "url": _clean_search_url(entry.findtext("a:id", "", ns)),
+                "pdf_url": _clean_search_url(links.get("pdf", "")),
+                "categories": [c.get("term", "")[:200]
+                               for c in itertools.islice(entry.iter("{http://www.w3.org/2005/Atom}category"), 10)],
             })
         return _json_result({"ok": bool(papers), "query": query, "count": len(papers), "papers": papers})
     except Exception as exc:
@@ -2043,6 +2532,8 @@ def github_search(query: str, search_type: str = "repositories", max_results: in
         query = str(query or "").strip()
         if not query:
             return _error("query must be a non-empty string")
+        if len(query) > 2000:
+            return _error("query exceeds 2,000 characters")
         kind = str(search_type or "repositories").lower().strip()
         if kind in ("repo", "repos", "repository"):
             kind = "repositories"
@@ -2053,7 +2544,7 @@ def github_search(query: str, search_type: str = "repositories", max_results: in
         limit = _bounded_int(max_results, 10, 1, 50)
         params = {"q": query, "per_page": limit}
         if sort:
-            params["sort"] = str(sort)
+            params["sort"] = str(sort)[:50]
         headers = {"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT,
                    "X-GitHub-Api-Version": "2022-11-28"}
         if GITHUB_TOKEN:
@@ -2064,25 +2555,41 @@ def github_search(query: str, search_type: str = "repositories", max_results: in
         items = []
         for hit in data.get("items", [])[:limit]:
             if kind == "repositories":
-                items.append({"name": hit.get("full_name"), "url": hit.get("html_url"),
-                              "description": hit.get("description"), "stars": hit.get("stargazers_count"),
-                              "forks": hit.get("forks_count"), "language": hit.get("language"),
-                              "updated": hit.get("updated_at"), "topics": hit.get("topics", [])[:10]})
+                topics = hit.get("topics", [])
+                topics = topics if isinstance(topics, list) else []
+                items.append({"name": _clean_text(hit.get("full_name"), 300),
+                              "url": _clean_search_url(hit.get("html_url", "")),
+                              "description": _clean_text(hit.get("description"), 2000),
+                              "stars": hit.get("stargazers_count"), "forks": hit.get("forks_count"),
+                              "language": _clean_text(hit.get("language"), 100),
+                              "updated": str(hit.get("updated_at", ""))[:100],
+                              "topics": [_clean_text(topic, 100) for topic in topics[:10]]})
             elif kind == "code":
-                items.append({"name": hit.get("name"), "path": hit.get("path"),
-                              "repository": (hit.get("repository") or {}).get("full_name"),
-                              "url": hit.get("html_url")})
+                items.append({"name": _clean_text(hit.get("name"), 300),
+                              "path": _clean_text(hit.get("path"), 1000),
+                              "repository": _clean_text((hit.get("repository") or {}).get("full_name"), 300),
+                              "url": _clean_search_url(hit.get("html_url", ""))})
             elif kind == "issues":
-                items.append({"title": hit.get("title"), "url": hit.get("html_url"),
-                              "state": hit.get("state"), "comments": hit.get("comments"),
-                              "created": hit.get("created_at"),
+                items.append({"title": _clean_text(hit.get("title"), 500),
+                              "url": _clean_search_url(hit.get("html_url", "")),
+                              "state": _clean_text(hit.get("state"), 30),
+                              "comments": hit.get("comments"),
+                              "created": str(hit.get("created_at", ""))[:100],
                               "body": _clean_text(hit.get("body"), 800)})
             elif kind == "users":
-                items.append({"login": hit.get("login"), "url": hit.get("html_url"),
-                              "type": hit.get("type"), "score": hit.get("score")})
+                items.append({"login": _clean_text(hit.get("login"), 200),
+                              "url": _clean_search_url(hit.get("html_url", "")),
+                              "type": _clean_text(hit.get("type"), 50), "score": hit.get("score")})
             else:
-                items.append({k: hit.get(k) for k in ("name", "html_url", "url", "description",
-                                                      "sha", "score") if hit.get(k) is not None})
+                item = {k: hit.get(k) for k in ("name", "html_url", "url", "description",
+                                                  "sha", "score") if hit.get(k) is not None}
+                for url_key in ("html_url", "url"):
+                    if url_key in item:
+                        item[url_key] = _clean_search_url(item[url_key])
+                for text_key in ("name", "description", "sha"):
+                    if text_key in item:
+                        item[text_key] = _clean_text(item[text_key], 1000)
+                items.append(item)
         return _json_result({"ok": bool(items), "query": query, "search_type": kind,
                              "total_available": data.get("total_count", 0),
                              "count": len(items), "items": items,
@@ -2098,11 +2605,15 @@ def stackexchange_search(query: str, site: str = "stackoverflow", max_results: i
         query = str(query or "").strip()
         if not query:
             return _error("query must be a non-empty string")
+        if len(query) > 2000:
+            return _error("query exceeds 2,000 characters")
         limit = _bounded_int(max_results, 10, 1, 50)
-        params = {"order": "desc", "sort": "relevance", "q": query, "site": str(site or "stackoverflow"),
+        site = str(site or "stackoverflow")[:100]
+        tagged = str(tagged or "")[:500]
+        params = {"order": "desc", "sort": "relevance", "q": query, "site": site,
                   "pagesize": limit, "filter": "withbody"}
         if tagged:
-            params["tagged"] = str(tagged)
+            params["tagged"] = tagged
         body = _http_get_text("https://api.stackexchange.com/2.3/search/advanced?" + urllib.parse.urlencode(params),
                               headers={"User-Agent": USER_AGENT, "Accept": "application/json",
                                        "Accept-Encoding": "identity"},
@@ -2110,9 +2621,13 @@ def stackexchange_search(query: str, site: str = "stackoverflow", max_results: i
         data = json.loads(body)
         items = []
         for hit in data.get("items", [])[:limit]:
-            items.append({"title": _clean_text(hit.get("title"), 400), "url": hit.get("link"),
+            tags = hit.get("tags", [])
+            tags = tags if isinstance(tags, list) else []
+            items.append({"title": _clean_text(hit.get("title"), 400),
+                          "url": _clean_search_url(hit.get("link", "")),
                           "score": hit.get("score"), "answers": hit.get("answer_count"),
-                          "is_answered": hit.get("is_answered"), "tags": hit.get("tags", [])[:10],
+                          "is_answered": hit.get("is_answered"),
+                          "tags": [_clean_text(tag, 100) for tag in tags[:10]],
                           "created": hit.get("creation_date"),
                           "excerpt": _strip_tags(hit.get("body", ""))[:1200]})
         return _json_result({"ok": bool(items), "query": query, "site": params["site"],
@@ -2214,9 +2729,12 @@ def fetch_many_urls(urls: str, max_chars: int = 4000, as_markdown: bool = False)
         if _to_bool(as_markdown, False):
             def grab(url: str) -> Dict[str, Any]:
                 try:
-                    result = _http_fetch(url, timeout=HTTP_TIMEOUT)
+                    result = _http_fetch(url, timeout=HTTP_TIMEOUT,
+                                         max_bytes=min(MAX_HTTP_BYTES, MAX_HTML_BYTES))
+                    markdown = _html_to_markdown(result["text"], result["url"])
                     return {"url": url, "final_url": result["url"], "status": result["status"],
-                            "markdown": _html_to_markdown(result["text"], result["url"])[:max_chars]}
+                            "truncated": result["truncated"] or len(markdown) > max_chars,
+                            "markdown": markdown[:max_chars]}
                 except Exception as exc:
                     return {"url": url, "error": f"{type(exc).__name__}: {exc}"[:300]}
             with ThreadPoolExecutor(max_workers=min(len(url_list), 6)) as pool:
@@ -2234,14 +2752,16 @@ def url_to_markdown(url: str, max_chars: int = 20000, include_links: bool = True
     """Fetch a page and convert it to readable Markdown."""
     try:
         max_chars = _bounded_int(max_chars, 20000, 200, MAX_TEXT_CHARS)
-        result = _http_fetch(url, timeout=HTTP_TIMEOUT)
+        result = _http_fetch(url, timeout=HTTP_TIMEOUT,
+                             max_bytes=min(MAX_HTTP_BYTES, MAX_HTML_BYTES))
         markdown = _html_to_markdown(result["text"], result["url"])
         if not _to_bool(include_links, True):
             markdown = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", markdown)
         details = _extract_html_details(result["text"], result["url"])
         return _json_result({"ok": True, "url": url, "final_url": result["url"],
                              "title": details["title"], "description": details["description"],
-                             "length": len(markdown), "truncated": len(markdown) > max_chars,
+                             "length": len(markdown),
+                             "truncated": result["truncated"] or len(markdown) > max_chars,
                              "markdown": markdown[:max_chars]})
     except Exception as exc:
         return _error(f"url_to_markdown failed: {exc}")
@@ -2251,7 +2771,8 @@ def fetch_webpage_text(url: str, max_chars: int = 8000, summarize: bool = False)
     """Fetch a URL and return the extracted readable text (optionally summarised)."""
     try:
         max_chars = _bounded_int(max_chars, 8000, 256, MAX_TEXT_CHARS)
-        result = _http_fetch_retrying(url, timeout=HTTP_TIMEOUT)
+        result = _http_fetch_retrying(url, timeout=HTTP_TIMEOUT,
+                                      max_bytes=min(MAX_HTTP_BYTES, MAX_HTML_BYTES))
         details = _extract_html_details(result["text"], result["url"])
         text = details["text"] or result["text"]
         payload = {
@@ -2293,7 +2814,7 @@ def _looks_binary(path: str) -> bool:
 
 
 def read_file(filepath: str, start_line: int = 1, line_count: int = 500) -> str:
-    """Read a text file (optionally a line range) from inside the sandbox."""
+    """Read a bounded text range from inside the sandbox."""
     try:
         path = _safe_path(filepath)
         if os.path.isdir(path):
@@ -2302,18 +2823,62 @@ def read_file(filepath: str, start_line: int = 1, line_count: int = 500) -> str:
             return _error(f"File '{filepath}' not found")
         start_line = _bounded_int(start_line, 1, 1, 10_000_000)
         line_count = _bounded_int(line_count, 500, 1, 20_000)
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            sliced_lines = list(itertools.islice(f, start_line - 1, start_line - 1 + line_count))
-            f.seek(0)
-            total_lines = sum(1 for _ in f)
+        file_size = os.path.getsize(path)
+        total_lines: Optional[int] = None
+        with open(path, "r", encoding="utf-8", errors="replace") as stream:
+            if file_size <= MAX_FILE_SCAN_BYTES:
+                total_lines = sum(1 for _ in stream)
+                stream.seek(0)
+
+            skipped = 0
+            scanned_chars = 0
+            while skipped < start_line - 1:
+                chunk = stream.readline(MAX_TEXT_CHARS + 1)
+                if not chunk:
+                    break
+                scanned_chars += len(chunk)
+                while not chunk.endswith("\n"):
+                    chunk = stream.readline(MAX_TEXT_CHARS + 1)
+                    if not chunk:
+                        break
+                    scanned_chars += len(chunk)
+                    if scanned_chars > MAX_FILE_SCAN_BYTES:
+                        return _error("Requested line range requires scanning more than 32 MiB")
+                if scanned_chars > MAX_FILE_SCAN_BYTES:
+                    return _error("Requested line range requires scanning more than 32 MiB")
+                skipped += 1
+
+            sliced_lines: List[str] = []
+            content_chars = 0
+            content_truncated = False
+            while len(sliced_lines) < line_count and content_chars < MAX_TEXT_CHARS:
+                remaining = MAX_TEXT_CHARS - content_chars
+                chunk = stream.readline(remaining + 1)
+                if not chunk:
+                    break
+                if len(chunk) > remaining:
+                    chunk = chunk[:remaining]
+                    content_truncated = True
+                sliced_lines.append(chunk)
+                content_chars += len(chunk)
+                if content_truncated or not chunk.endswith("\n"):
+                    break
+
+        content = "".join(sliced_lines)
+        has_more = (start_line - 1 + len(sliced_lines) < total_lines
+                    if total_lines is not None else None)
+        if total_lines is None and (content_truncated or len(sliced_lines) >= line_count):
+            has_more = True
         return _ok({
             "filepath": filepath,
             "resolved_path": path,
             "total_lines": total_lines,
+            "total_lines_known": total_lines is not None,
             "start_line": start_line,
             "returned_lines": len(sliced_lines),
-            "has_more": start_line - 1 + len(sliced_lines) < total_lines,
-            "content": "".join(sliced_lines),
+            "has_more": has_more,
+            "content_truncated": content_truncated,
+            "content": content,
         })
     except Exception as exc:
         return _error(f"Error reading file: {exc}")
@@ -2328,8 +2893,21 @@ def write_file(filepath: str, content: str, create_backup: bool = False) -> str:
             raise ValueError("Content exceeds configured file write limit")
         backup = ""
         if _to_bool(create_backup, False) and os.path.exists(path):
+            if not os.path.isfile(path):
+                raise ValueError("Backups are supported only for regular files")
             backup = f"{path}.bak"
-            shutil.copy2(path, backup)
+            _safe_path(backup)
+            backup_fd, backup_tmp = tempfile.mkstemp(prefix=".mts-backup-",
+                                                     dir=os.path.dirname(path) or SANDBOX_ROOT)
+            os.close(backup_fd)
+            try:
+                shutil.copyfile(path, backup_tmp)
+                shutil.copystat(path, backup_tmp)
+                os.replace(backup_tmp, backup)
+            except Exception:
+                with contextlib.suppress(OSError):
+                    os.unlink(backup_tmp)
+                raise
         written = _atomic_write(path, content)
         return _ok({"status": "success", "filepath": filepath, "resolved_path": path,
                     "bytes_written": written, "backup": backup})
@@ -2344,9 +2922,17 @@ def edit_file_replace(filepath: str, target_snippet: str, replacement_snippet: s
         path = _safe_path(filepath)
         if not os.path.exists(path):
             return _error(f"File '{filepath}' does not exist.")
+        if os.path.getsize(path) > MAX_FILE_SCAN_BYTES:
+            return _error("Target file exceeds the 32 MiB edit limit")
+        snippet_bytes = (len(str(target_snippet or "").encode("utf-8"))
+                         + len(str(replacement_snippet or "").encode("utf-8")))
+        if snippet_bytes > MCP_MAX_REQUEST_BYTES:
+            return _error("Edit snippets exceed configured request size limit")
         replace_all = _to_bool(replace_all, False)
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read(MAX_FILE_SCAN_BYTES + 1)
+        if len(content.encode("utf-8")) > MAX_FILE_SCAN_BYTES:
+            return _error("Target file exceeds the 32 MiB edit limit")
         if not target_snippet:
             return _error("target_snippet must be a non-empty string")
         count = content.count(target_snippet)
@@ -2356,6 +2942,8 @@ def edit_file_replace(filepath: str, target_snippet: str, replacement_snippet: s
             return _error(f"Target snippet appears {count} times. Set replace_all=true.", occurrences=count)
         updated = content.replace(target_snippet, replacement_snippet) if replace_all \
             else content.replace(target_snippet, replacement_snippet, 1)
+        if len(updated.encode("utf-8")) > MAX_FILE_SCAN_BYTES * 2:
+            return _error("Edited file would exceed the 64 MiB write limit")
         _atomic_write(path, updated)
         return _ok({"status": "success", "filepath": filepath,
                     "replacements_made": count if replace_all else 1,
@@ -2369,8 +2957,12 @@ def append_to_file(filepath: str, content: str) -> str:
     try:
         path = _safe_path(filepath)
         content = "" if content is None else str(content)
-        if len(content.encode("utf-8")) > MCP_MAX_REQUEST_BYTES:
+        content_bytes = len(content.encode("utf-8"))
+        if content_bytes > MCP_MAX_REQUEST_BYTES:
             raise ValueError("Content exceeds configured write limit")
+        current_size = os.path.getsize(path) if os.path.exists(path) else 0
+        if current_size + content_bytes > 64 * 1024 * 1024:
+            raise ValueError("Appended file would exceed the 64 MiB file write limit")
         _ensure_parent(path)
         with open(path, "a", encoding="utf-8") as f:
             f.write(content)
@@ -2389,21 +2981,32 @@ def list_directory(path: str = ".", show_hidden: bool = True, sort_by: str = "na
             return _error(f"'{path}' is not a directory")
         show_hidden = _to_bool(show_hidden, True)
         items = []
-        for name in sorted(os.listdir(target)):
-            if not show_hidden and name.startswith("."):
-                continue
-            full = os.path.join(target, name)
-            with contextlib.suppress(OSError):
-                is_dir = os.path.isdir(full)
-                stat = os.lstat(full)
-                items.append({
-                    "name": name,
-                    "type": "directory" if is_dir else ("symlink" if os.path.islink(full) else "file"),
-                    "size_bytes": 0 if is_dir else stat.st_size,
-                    "modified": stat.st_mtime,
-                    "modified_time": time.ctime(stat.st_mtime),
-                    "mode": oct(stat.st_mode & 0o777),
-                })
+        truncated = False
+        entry_limit = 2000
+        scanned = 0
+        with os.scandir(target) as scan:
+            for entry in scan:
+                scanned += 1
+                if scanned > entry_limit * 10:
+                    truncated = True
+                    break
+                if not show_hidden and entry.name.startswith("."):
+                    continue
+                if len(items) >= entry_limit:
+                    truncated = True
+                    break
+                with contextlib.suppress(OSError):
+                    is_symlink = entry.is_symlink()
+                    stat_info = entry.stat(follow_symlinks=False)
+                    is_dir = not is_symlink and stat.S_ISDIR(stat_info.st_mode)
+                    items.append({
+                        "name": entry.name,
+                        "type": "symlink" if is_symlink else ("directory" if is_dir else "file"),
+                        "size_bytes": 0 if is_dir else stat_info.st_size,
+                        "modified": stat_info.st_mtime,
+                        "modified_time": time.ctime(stat_info.st_mtime),
+                        "mode": oct(stat_info.st_mode & 0o777),
+                    })
         key = str(sort_by or "name").lower()
         if key in ("size", "size_bytes"):
             items.sort(key=lambda i: i["size_bytes"], reverse=True)
@@ -2411,7 +3014,7 @@ def list_directory(path: str = ".", show_hidden: bool = True, sort_by: str = "na
             items.sort(key=lambda i: i["modified"], reverse=True)
         elif key == "type":
             items.sort(key=lambda i: (i["type"], i["name"]))
-        return _ok({"path": target, "count": len(items), "items": items})
+        return _ok({"path": target, "count": len(items), "truncated": truncated, "items": items})
     except Exception as exc:
         return _error(f"Error listing directory: {exc}")
 
@@ -2446,7 +3049,14 @@ def file_stat(filepath: str) -> str:
                     info["line_count"] = sum(1 for _ in f)
         elif os.path.isdir(path):
             with contextlib.suppress(OSError):
-                info["entry_count"] = len(os.listdir(path))
+                entries_seen = 0
+                with os.scandir(path) as directory:
+                    for _entry in directory:
+                        entries_seen += 1
+                        if entries_seen > 10000:
+                            break
+                info["entry_count"] = min(entries_seen, 10000)
+                info["entry_count_truncated"] = entries_seen > 10000
         return _ok(info)
     except Exception as exc:
         return _error(f"file_stat failed: {exc}")
@@ -2494,10 +3104,22 @@ def copy_file(source: str, destination: str) -> str:
     try:
         src = _safe_path(source, must_exist=True)
         dst = _safe_path(destination)
-        _ensure_parent(dst)
         if os.path.isdir(src):
-            shutil.copytree(src, dst, dirs_exist_ok=True)
+            common = os.path.commonpath((src, dst))
+            if common in (src, dst):
+                return _error("Directory copies cannot overlap the source and destination paths")
+            _archive_manifest(
+                src, dst,
+                _bounded_int(MAX_ARCHIVE_ENTRIES, 5000, 1, 10000),
+                _bounded_int(MAX_ARCHIVE_UNPACKED_BYTES, 256 * 1024 * 1024,
+                             1024, 1024 * 1024 * 1024))
+            _ensure_parent(dst)
+            shutil.copytree(src, dst, dirs_exist_ok=True, symlinks=False)
         else:
+            size = os.path.getsize(src)
+            if size > MAX_ARCHIVE_UNPACKED_BYTES:
+                return _error("Source file exceeds the configured copy size limit")
+            _ensure_parent(dst)
             shutil.copy2(src, dst)
         return _ok({"status": "success", "source": src, "destination": dst})
     except Exception as exc:
@@ -2509,7 +3131,21 @@ def move_file(source: str, destination: str) -> str:
     try:
         src = _safe_path(source, must_exist=True)
         dst = _safe_path(destination)
+        if os.path.isdir(src):
+            common = os.path.commonpath((src, dst))
+            if common in (src, dst):
+                return _error("Directory moves cannot overlap the source and destination paths")
         _ensure_parent(dst)
+        cross_device = os.stat(src).st_dev != os.stat(os.path.dirname(dst) or SANDBOX_ROOT).st_dev
+        if os.path.isdir(src):
+            if cross_device:
+                _archive_manifest(
+                    src, dst,
+                    _bounded_int(MAX_ARCHIVE_ENTRIES, 5000, 1, 10000),
+                    _bounded_int(MAX_ARCHIVE_UNPACKED_BYTES, 256 * 1024 * 1024,
+                                 1024, 1024 * 1024 * 1024))
+        elif cross_device and os.path.getsize(src) > MAX_ARCHIVE_UNPACKED_BYTES:
+            return _error("Cross-device file move exceeds the configured copy size limit")
         shutil.move(src, dst)
         return _ok({"status": "success", "source": src, "destination": dst})
     except Exception as exc:
@@ -2522,6 +3158,11 @@ def file_checksum(filepath: str, algorithm: str = "sha256") -> str:
         path = _safe_path(filepath)
         if not os.path.isfile(path):
             return _error(f"File '{filepath}' not found")
+        size_bytes = os.path.getsize(path)
+        checksum_limit = _bounded_int(MAX_ARCHIVE_UNPACKED_BYTES, 256 * 1024 * 1024,
+                                     1024, 1024 * 1024 * 1024)
+        if size_bytes > checksum_limit:
+            return _error(f"File exceeds the {checksum_limit} byte checksum limit")
         alg = str(algorithm or "sha256").lower().strip().replace("-", "_")
         if alg not in hashlib.algorithms_available:
             return _error(f"Unsupported algorithm '{algorithm}'",
@@ -2535,7 +3176,7 @@ def file_checksum(filepath: str, algorithm: str = "sha256") -> str:
                 hasher.update(chunk)
         digest = hasher.hexdigest() if hasattr(hasher, "hexdigest") else ""
         return _ok({"filepath": filepath, "algorithm": alg, "checksum": digest,
-                    "size_bytes": os.path.getsize(path)})
+                    "size_bytes": size_bytes})
     except Exception as exc:
         return _error(str(exc))
 
@@ -2545,31 +3186,54 @@ def search_files(directory: str = ".", pattern: str = "*", max_depth: int = 5,
     """Find files by glob pattern with a bounded depth and result count."""
     try:
         base = _safe_path(directory, must_exist=True)
+        if not os.path.isdir(base):
+            return _error(f"'{directory}' is not a directory")
         max_depth = _bounded_int(max_depth, 5, 0, 32)
         max_results = _bounded_int(max_results, 200, 1, 2000)
         include_dirs = _to_bool(include_dirs, False)
         pattern = str(pattern or "*")
+        if len(pattern) > 1024:
+            return _error("pattern exceeds 1,024 characters")
         matches: List[Dict[str, Any]] = []
-        base_depth = base.rstrip(os.sep).count(os.sep)
         truncated = False
-        for root, dirs, files in os.walk(base):
-            if root.count(os.sep) - base_depth >= max_depth:
-                dirs.clear()
-            names = list(files) + (list(dirs) if include_dirs else [])
-            for filename in fnmatch.filter(sorted(names), pattern):
-                full_path = os.path.join(root, filename)
-                with contextlib.suppress(OSError):
-                    matches.append({
-                        "path": full_path,
-                        "name": filename,
-                        "type": "directory" if os.path.isdir(full_path) else "file",
-                        "size_bytes": 0 if os.path.isdir(full_path) else os.path.getsize(full_path),
-                    })
+        scanned = 0
+        scan_limit = 50000
+        pending = [(base, 0)]
+        while pending and not truncated:
+            root, depth = pending.pop()
+            child_directories = []
+            try:
+                with os.scandir(root) as scan:
+                    entries = []
+                    for entry in scan:
+                        scanned += 1
+                        if scanned > scan_limit:
+                            truncated = True
+                            break
+                        entries.append(entry)
+            except OSError:
+                continue
+            for entry in sorted(entries, key=lambda item: item.name):
+                try:
+                    if entry.is_symlink():
+                        continue
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    info = entry.stat(follow_symlinks=False)
+                    if is_dir:
+                        if include_dirs and fnmatch.fnmatchcase(entry.name, pattern):
+                            matches.append({"path": entry.path, "name": entry.name,
+                                            "type": "directory", "size_bytes": 0})
+                        if depth < max_depth:
+                            child_directories.append((entry.path, depth + 1))
+                    elif stat.S_ISREG(info.st_mode) and fnmatch.fnmatchcase(entry.name, pattern):
+                        matches.append({"path": entry.path, "name": entry.name,
+                                        "type": "file", "size_bytes": info.st_size})
+                except OSError:
+                    continue
                 if len(matches) >= max_results:
                     truncated = True
                     break
-            if truncated:
-                break
+            pending.extend(reversed(child_directories))
         return _ok({"directory": base, "pattern": pattern, "count": len(matches),
                     "truncated": truncated, "files": matches})
     except Exception as exc:
@@ -2580,7 +3244,7 @@ def search_file_content(directory: str = ".", query: str = "", file_extension: s
                         case_insensitive: bool = False, is_regex: bool = False,
                         max_results: int = 200, max_depth: int = 12,
                         context_chars: int = 240) -> str:
-    """Grep-like content search across the sandbox (binary files and huge files skipped)."""
+    """Grep-like search with bounded traversal and isolated regex evaluation."""
     try:
         base = _safe_path(directory, must_exist=True)
         query = str(query or "")
@@ -2594,54 +3258,125 @@ def search_file_content(directory: str = ".", query: str = "", file_extension: s
         max_depth = _bounded_int(max_depth, 12, 0, 32)
         context_chars = _bounded_int(context_chars, 240, 40, 2000)
 
-        pattern = None
         if is_regex:
+            if _regex_has_nested_repeats(query):
+                return _error("Pattern contains nested/ambiguous repetitions that may cause excessive backtracking")
             try:
-                pattern = re.compile(query, re.I if case_insensitive else 0)
+                re.compile(query, re.I if case_insensitive else 0)
             except re.error as exc:
                 return _error(f"Invalid regular expression: {exc}")
         needle = query.lower() if case_insensitive else query
 
         results: List[Dict[str, Any]] = []
         files_scanned = 0
+        files_considered = 0
+        bytes_scanned = 0
+        scan_byte_limit = 64 * 1024 * 1024
         truncated = False
+        regex_timed_out = False
+        regex_error = ""
+        regex_deadline = time.monotonic() + 20.0 if is_regex else None
         base_depth = base.rstrip(os.sep).count(os.sep)
         ext = ""
         if file_extension:
             ext = file_extension if str(file_extension).startswith(".") else f".{file_extension}"
 
-        for root, dirs, files in os.walk(base):
-            if root.count(os.sep) - base_depth >= max_depth:
-                dirs.clear()
-            dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", ".venv", "venv"}]
+        entries_scanned = 0
+        pending_directories = [(base, 0)]
+        while pending_directories and not truncated:
+            root, depth = pending_directories.pop()
+            child_directories = []
+            files = []
+            try:
+                with os.scandir(root) as scan:
+                    for entry in scan:
+                        entries_scanned += 1
+                        if entries_scanned > 50000:
+                            truncated = True
+                            break
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            if (depth < max_depth
+                                    and entry.name not in {".git", "node_modules", "__pycache__", ".venv", "venv"}):
+                                child_directories.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            files.append(entry.name)
+            except OSError:
+                continue
             for filename in sorted(files):
                 if ext and not filename.endswith(ext):
                     continue
+                files_considered += 1
+                if files_considered > 10000:
+                    truncated = True
+                    break
                 path = os.path.join(root, filename)
                 try:
-                    if os.path.getsize(path) > 8 * 1024 * 1024 or _looks_binary(path):
+                    # Never follow a symlink while recursively scanning. A link inside
+                    # the sandbox may point at a host secret or a huge external file.
+                    if os.path.islink(path):
                         continue
+                    file_size = os.path.getsize(path)
+                    if file_size > 8 * 1024 * 1024 or _looks_binary(path):
+                        continue
+                    if bytes_scanned + file_size > scan_byte_limit:
+                        truncated = True
+                        break
+                    bytes_scanned += file_size
                     files_scanned += 1
-                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                        for idx, line in enumerate(f, 1):
-                            if len(line) > 20000:
+                    if is_regex:
+                        remaining_time = max(0.0, regex_deadline - time.monotonic())
+                        if not remaining_time:
+                            regex_timed_out = truncated = True
+                            break
+                        with open(path, "r", encoding="utf-8", errors="ignore") as stream:
+                            content = stream.read(8 * 1024 * 1024 + 1)
+                        if len(content) > 8 * 1024 * 1024:
+                            truncated = True
+                            break
+                        worker_result = _regex_worker_search(
+                            query, content, "i" if case_insensitive else "", max_results - len(results),
+                            line_mode=True, context_chars=context_chars,
+                            timeout=min(2.0, remaining_time))
+                        for match in worker_result.get("matches", []):
+                            results.append({"filepath": path, **match})
+                        if worker_result.get("truncated") or worker_result.get("output_limited"):
+                            truncated = True
+                            break
+                    else:
+                        with open(path, "r", encoding="utf-8", errors="ignore") as stream:
+                            for line_number, line in enumerate(stream, 1):
                                 line = line[:20000]
-                            hit = bool(pattern.search(line)) if pattern else \
-                                (needle in line.lower() if case_insensitive else needle in line)
-                            if hit:
-                                results.append({"filepath": path, "line_number": idx,
-                                                "content": line.strip()[:context_chars]})
-                                if len(results) >= max_results:
-                                    truncated = True
-                                    break
-                except Exception:
-                    continue
-                if truncated:
+                                hit = needle in line.lower() if case_insensitive else needle in line
+                                if hit:
+                                    results.append({"filepath": path, "line_number": line_number,
+                                                    "content": line.strip()[:context_chars]})
+                                    if len(results) >= max_results:
+                                        truncated = True
+                                        break
+                except subprocess.TimeoutExpired:
+                    regex_timed_out = truncated = True
                     break
-            if truncated:
-                break
-        return _ok({"query": query, "directory": base, "files_scanned": files_scanned,
-                    "match_count": len(results), "truncated": truncated, "matches": results})
+                except Exception as exc:
+                    if is_regex:
+                        regex_error = f"{type(exc).__name__}: {exc}"[:300]
+                        truncated = True
+                        break
+                    continue
+                if len(results) >= max_results:
+                    truncated = True
+                    break
+            if not truncated:
+                pending_directories.extend((child, depth + 1)
+                                           for child in reversed(child_directories))
+        payload = {"query": query, "directory": base, "files_scanned": files_scanned,
+                   "match_count": len(results), "truncated": truncated, "matches": results}
+        if regex_timed_out:
+            payload["regex_timed_out"] = True
+        if regex_error:
+            payload["regex_error"] = regex_error
+        return _ok(payload)
     except Exception as exc:
         return _error(str(exc))
 
@@ -2661,14 +3396,25 @@ def file_tree(path: str = ".", max_depth: int = 4,
         def walk(current: str, prefix: str = "", depth: int = 0):
             if depth > max_depth or state["truncated"]:
                 return
+            remaining = max(1, max_entries - state["count"] + 1)
             try:
-                entries = sorted(os.listdir(current))
+                with os.scandir(current) as scan:
+                    entries = []
+                    for entry in scan:
+                        if entry.name in ignore_set:
+                            continue
+                        entries.append(entry.name)
+                        if len(entries) >= remaining:
+                            break
+                entries.sort()
             except (PermissionError, OSError):
                 return
-            visible = [e for e in entries if e not in ignore_set]
-            dirs = [e for e in visible if os.path.isdir(os.path.join(current, e))]
-            files = [e for e in visible if not os.path.isdir(os.path.join(current, e))]
-            ordered = [(d, True) for d in dirs] + [(f, False) for f in files]
+            # The scan is deliberately bounded; exceeding the output allowance is
+            # signalled by the extra (max_entries + 1) sentinel entry.
+            dirs = [name for name in entries if not os.path.islink(os.path.join(current, name))
+                    and os.path.isdir(os.path.join(current, name))]
+            files = [name for name in entries if name not in dirs]
+            ordered = [(name, True) for name in dirs] + [(name, False) for name in files]
             for index, (name, is_dir) in enumerate(ordered):
                 if state["count"] >= max_entries:
                     state["truncated"] = True
@@ -2682,6 +3428,8 @@ def file_tree(path: str = ".", max_depth: int = 4,
                     walk(os.path.join(current, name), prefix + ("    " if last else "│   "), depth + 1)
                 else:
                     state["files"] += 1
+                if state["truncated"]:
+                    return
 
         walk(base)
         return _ok({"path": base, "directories": state["dirs"], "files": state["files"],
@@ -2698,23 +3446,40 @@ def disk_usage(path: str = ".", top_n: int = 15) -> str:
         top_n = _bounded_int(top_n, 15, 1, 100)
         sizes: List[Tuple[int, str]] = []
         scanned = 0
-        for root, dirs, files in os.walk(base):
-            dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__"}]
-            for name in files:
-                full = os.path.join(root, name)
-                with contextlib.suppress(OSError):
-                    sizes.append((os.path.getsize(full), full))
-                scanned += 1
-                if scanned > 200000:
-                    break
-            if scanned > 200000:
-                break
+        entries_scanned = 0
+        truncated = False
+        pending_directories = [base]
+        while pending_directories and not truncated:
+            root = pending_directories.pop()
+            child_directories = []
+            try:
+                with os.scandir(root) as scan:
+                    for entry in scan:
+                        entries_scanned += 1
+                        if entries_scanned > 200000:
+                            truncated = True
+                            break
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            if entry.name not in {".git", "node_modules", "__pycache__"}:
+                                child_directories.append(entry.path)
+                            continue
+                        if not entry.is_file(follow_symlinks=False):
+                            continue
+                        scanned += 1
+                        with contextlib.suppress(OSError):
+                            sizes.append((entry.stat(follow_symlinks=False).st_size, entry.path))
+            except OSError:
+                continue
+            pending_directories.extend(reversed(child_directories))
         sizes.sort(reverse=True)
         return _ok({
             "path": base,
             "filesystem": {"total": _human_bytes(total), "used": _human_bytes(used),
                            "free": _human_bytes(free), "used_percent": round(used / total * 100, 1) if total else 0},
-            "files_scanned": scanned,
+            "files_scanned": min(scanned, 200000),
+            "truncated": truncated,
             "total_size": _human_bytes(sum(s for s, _ in sizes)),
             "largest": [{"path": p, "size": _human_bytes(s), "size_bytes": s} for s, p in sizes[:top_n]],
         })
@@ -2722,18 +3487,139 @@ def disk_usage(path: str = ".", top_n: int = 15) -> str:
         return _error(f"disk_usage failed: {exc}")
 
 
+def _archive_manifest(source: str, destination: str, max_entries: int,
+                      max_unpacked_bytes: int) -> Tuple[List[Tuple[str, str, bool, os.stat_result]], int]:
+    """Collect a bounded manifest without following links or special files."""
+    root = os.path.realpath(source)
+    output = os.path.abspath(destination)
+    pending = [root]
+    entries: List[Tuple[str, str, bool, os.stat_result]] = []
+    total_bytes = 0
+    while pending:
+        current = pending.pop()
+        try:
+            with os.scandir(current) as scan:
+                for item in scan:
+                    full_path = item.path
+                    if os.path.abspath(full_path) == output:
+                        continue
+                    if item.is_symlink():
+                        raise ValueError(f"Refusing to archive symlink: {full_path}")
+                    info = item.stat(follow_symlinks=False)
+                    is_directory = stat.S_ISDIR(info.st_mode)
+                    if not is_directory and not stat.S_ISREG(info.st_mode):
+                        raise ValueError(f"Refusing to archive non-regular file: {full_path}")
+                    real_path = os.path.realpath(full_path)
+                    if os.path.commonpath((root, real_path)) != root:
+                        raise ValueError(f"Archive entry escapes source directory: {full_path}")
+                    relative = os.path.relpath(full_path, root).replace(os.sep, "/")
+                    normalized = relative.replace("\\", "/")
+                    drive, _ = ntpath.splitdrive(normalized)
+                    if drive or normalized.startswith("/") or any(
+                            part in ("", ".", "..") for part in normalized.split("/")):
+                        raise ValueError(f"Unsafe archive member path: {relative}")
+                    if len(entries) >= max_entries:
+                        raise ValueError(f"Source has more than {max_entries} archive entries")
+                    entries.append((full_path, normalized, is_directory, info))
+                    if is_directory:
+                        pending.append(full_path)
+                    else:
+                        total_bytes += max(0, info.st_size)
+                        if total_bytes > max_unpacked_bytes:
+                            raise ValueError(f"Source exceeds the {max_unpacked_bytes} byte archive limit")
+        except OSError as exc:
+            raise ValueError(f"Could not scan archive source '{current}': {exc}") from exc
+    entries.sort(key=lambda item: item[1])
+    return entries, total_bytes
+
+
+def _open_regular_nofollow(path: str):
+    """Open a regular file without following symlinks where the OS supports it."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"Archive source is no longer a regular file: {path}")
+        return os.fdopen(fd, "rb"), info
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _write_archive_manifest(entries: Sequence[Tuple[str, str, bool, os.stat_result]],
+                            destination: str, archive_format: str,
+                            max_unpacked_bytes: int) -> int:
+    """Write a previously checked manifest to zip or tar without recursive walks."""
+    total_bytes = 0
+    if archive_format == "zip":
+        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED,
+                             allowZip64=True) as archive:
+            for full_path, name, is_directory, original_stat in entries:
+                timestamp = max(315532800, min(original_stat.st_mtime, 4354819198))
+                date_time = time.localtime(timestamp)[:6]
+                member_name = name.rstrip("/") + "/" if is_directory else name
+                info = zipfile.ZipInfo(member_name, date_time)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = (original_stat.st_mode & 0xFFFF) << 16
+                if is_directory:
+                    info.external_attr |= 0x10
+                    archive.writestr(info, b"")
+                    continue
+                source, _ = _open_regular_nofollow(full_path)
+                with source, archive.open(info, "w") as target:
+                    while True:
+                        chunk = source.read(65536)
+                        if not chunk:
+                            break
+                        total_bytes += len(chunk)
+                        if total_bytes > max_unpacked_bytes:
+                            raise ValueError(f"Source grew beyond the {max_unpacked_bytes} byte archive limit")
+                        target.write(chunk)
+        return total_bytes
+
+    tar_modes = {"tar": "w", "gztar": "w:gz", "bztar": "w:bz2", "xztar": "w:xz"}
+    with tarfile.open(destination, mode=tar_modes[archive_format]) as archive:
+        for full_path, name, is_directory, original_stat in entries:
+            info = tarfile.TarInfo(name.rstrip("/") + ("/" if is_directory else ""))
+            info.mode = stat.S_IMODE(original_stat.st_mode)
+            info.mtime = original_stat.st_mtime
+            if is_directory:
+                info.type = tarfile.DIRTYPE
+                archive.addfile(info)
+                continue
+            source, current_stat = _open_regular_nofollow(full_path)
+            with source:
+                info.size = current_stat.st_size
+                total_bytes += info.size
+                if total_bytes > max_unpacked_bytes:
+                    raise ValueError(f"Source grew beyond the {max_unpacked_bytes} byte archive limit")
+                archive.addfile(info, source)
+    return total_bytes
+
+
 def compress_decompress_archive(archive_path: str, action: str = "extract",
-                                target_directory: str = ".", format: str = "") -> str:
-    """Create or extract zip/tar archives with path-traversal (zip-slip) protection."""
+                                target_directory: str = ".", format: str = "",
+                                max_entries: int = 5000,
+                                max_unpacked_bytes: int = 268435456) -> str:
+    """Create or extract zip/tar archives with traversal and decompression-bomb limits."""
     try:
         action = str(action or "extract").lower().strip()
+        configured_entries = _bounded_int(MAX_ARCHIVE_ENTRIES, 5000, 1, 10000)
+        configured_bytes = _bounded_int(MAX_ARCHIVE_UNPACKED_BYTES, 268435456,
+                                        1024, 1024 * 1024 * 1024)
+        entry_limit = _bounded_int(max_entries, min(5000, configured_entries),
+                                   1, configured_entries)
+        byte_limit = _bounded_int(max_unpacked_bytes, min(268435456, configured_bytes),
+                                  1024, configured_bytes)
         if action in ("extract", "unpack", "decompress"):
             arc = _safe_path(archive_path, must_exist=True)
             tgt = _safe_path(target_directory)
             os.makedirs(tgt, exist_ok=True)
-            extracted = _safe_extract(arc, tgt)
+            extracted = _safe_extract(arc, tgt, entry_limit, byte_limit)
             return _ok({"status": "success", "action": "extracted", "archive": arc,
                         "target": tgt, "members": len(extracted),
+                        "max_entries": entry_limit, "max_unpacked_bytes": byte_limit,
                         "extracted": extracted[:200]})
         if action in ("create", "compress", "pack"):
             source = _safe_path(target_directory, must_exist=True)
@@ -2754,58 +3640,132 @@ def compress_decompress_archive(archive_path: str, action: str = "extract",
                     requested = "zip"
             suffixes = {"zip": ".zip", "gztar": ".tar.gz", "bztar": ".tar.bz2",
                         "xztar": ".tar.xz", "tar": ".tar"}
+            accepted_suffixes = {"zip": (".zip",), "gztar": (".tar.gz", ".tgz"),
+                                 "bztar": (".tar.bz2", ".tbz2"),
+                                 "xztar": (".tar.xz", ".txz"), "tar": (".tar",)}
             if requested not in suffixes:
                 return _error(f"Unsupported archive format '{requested}'", supported=sorted(suffixes))
+            if not os.path.isdir(source):
+                return _error("target_directory must be a directory when creating an archive")
             out_path = _safe_path(archive_path)
             suffix = suffixes[requested]
-            base_name = out_path[: -len(suffix)] if out_path.lower().endswith(suffix) else out_path
-            created = shutil.make_archive(base_name, requested, source)
+            if out_path.lower().endswith(accepted_suffixes[requested]):
+                created = out_path
+            else:
+                created = _safe_path(out_path + suffixes[requested])
+            if os.path.isdir(created):
+                return _error("Archive destination is a directory")
+            entries, source_bytes = _archive_manifest(source, created, entry_limit, byte_limit)
+            _ensure_parent(created)
+            fd, temporary = tempfile.mkstemp(prefix=".mts-archive-", suffix=suffix,
+                                             dir=os.path.dirname(created) or SANDBOX_ROOT)
+            os.close(fd)
+            try:
+                actual_bytes = _write_archive_manifest(entries, temporary, requested, byte_limit)
+                os.replace(temporary, created)
+            except Exception:
+                with contextlib.suppress(OSError):
+                    os.unlink(temporary)
+                raise
             return _ok({"status": "success", "action": "created", "archive": created,
-                        "format": requested, "size_bytes": os.path.getsize(created)})
+                        "format": requested, "entries": len(entries),
+                        "source_bytes": max(source_bytes, actual_bytes),
+                        "size_bytes": os.path.getsize(created)})
         return _error("action must be 'extract' or 'create'")
     except Exception as exc:
         return _error(f"compress_decompress_archive failed: {exc}")
 
 
-def _safe_extract(archive: str, target: str) -> List[str]:
-    """Extract zip/tar rejecting absolute paths, '..' traversal, symlinks and devices."""
+def _preflight_zip(archive: str, max_entries: int,
+                   max_directory_bytes: int = MAX_FILE_SCAN_BYTES) -> int:
+    """Check ZIP directory bounds before ZipFile materializes every member record."""
+    endrec_reader = getattr(zipfile, "_EndRecData", None)
+    if endrec_reader is None:
+        raise RuntimeError("ZIP archive preflight is unavailable in this Python version")
+    with open(archive, "rb") as handle:
+        endrec = endrec_reader(handle)
+    if not endrec:
+        raise ValueError("Invalid ZIP end-of-directory record")
+    entry_count = int(endrec[zipfile._ECD_ENTRIES_TOTAL])
+    directory_size = int(endrec[zipfile._ECD_SIZE])
+    if entry_count > max_entries:
+        raise ValueError(f"Archive has more than {max_entries} entries")
+    if directory_size > max_directory_bytes:
+        raise ValueError("ZIP central directory exceeds the inspection size limit")
+    return entry_count
+
+
+def _safe_extract(archive: str, target: str, max_entries: int = 5000,
+                  max_unpacked_bytes: int = 268435456) -> List[str]:
+    """Extract only regular files/dirs, rejecting traversal, links and archive bombs."""
     target_root = os.path.realpath(target)
+    max_entries = _bounded_int(max_entries, 5000, 1, 10000)
+    max_unpacked_bytes = _bounded_int(max_unpacked_bytes, 268435456, 1024, 1024 * 1024 * 1024)
+    archive_size_limit = min(1024 * 1024 * 1024, max_unpacked_bytes + 64 * 1024 * 1024)
+    if os.path.getsize(archive) > archive_size_limit:
+        raise ValueError(f"Archive exceeds the {archive_size_limit} byte inspection limit")
 
     def _check(name: str) -> str:
-        destination = os.path.realpath(os.path.join(target_root, name))
-        if os.path.commonpath((target_root, destination)) != target_root:
+        normalized = str(name or "").replace("\\", "/")
+        drive, _ = ntpath.splitdrive(normalized)
+        if drive or normalized.startswith("/") or any(part == ".." for part in normalized.split("/")):
+            raise ValueError(f"Blocked path traversal in archive member: {name}")
+        destination = os.path.realpath(os.path.join(target_root, *normalized.split("/")))
+        try:
+            if os.path.commonpath((target_root, destination)) != target_root:
+                raise ValueError
+        except ValueError:
             raise ValueError(f"Blocked path traversal in archive member: {name}")
         return destination
 
-    extracted: List[str] = []
     if zipfile.is_zipfile(archive):
+        _preflight_zip(archive, max_entries)
         with zipfile.ZipFile(archive) as zf:
-            for info in zf.infolist():
-                if info.is_dir():
-                    continue
+            infos = zf.infolist()
+            if len(infos) > max_entries:
+                raise ValueError(f"Archive has {len(infos)} entries; limit is {max_entries}")
+            expanded = 0
+            for info in infos:
                 _check(info.filename)
+                mode = (info.external_attr >> 16) & 0xFFFF
+                if stat.S_ISLNK(mode):
+                    raise ValueError(f"Blocked symlink member in archive: {info.filename}")
+                expanded += 0 if info.is_dir() else max(0, info.file_size)
+                if expanded > max_unpacked_bytes:
+                    raise ValueError(f"Archive expands beyond the {max_unpacked_bytes} byte limit")
+            extracted = []
+            for info in infos:
                 zf.extract(info, target_root)
-                extracted.append(info.filename)
-        return extracted
+                if not info.is_dir():
+                    extracted.append(info.filename)
+            return extracted
+
     if tarfile.is_tarfile(archive):
         with tarfile.open(archive) as tf:
+            # Validate incrementally: getmembers() would first load an unbounded
+            # attacker-controlled member table before enforcing max_entries.
             members = []
-            for member in tf.getmembers():
+            expanded = 0
+            for member in tf:
+                members.append(member)
+                if len(members) > max_entries:
+                    raise ValueError(f"Archive has more than {max_entries} entries")
+                _check(member.name)
                 if member.issym() or member.islnk():
                     raise ValueError(f"Blocked link member in archive: {member.name}")
-                if member.isdev() or member.isfifo():
+                if member.isdev() or member.isfifo() or not (member.isdir() or member.isfile()):
                     raise ValueError(f"Blocked special member in archive: {member.name}")
-                _check(member.name)
-                members.append(member)
+                if member.isfile():
+                    expanded += max(0, member.size)
+                    if expanded > max_unpacked_bytes:
+                        raise ValueError(f"Archive expands beyond the {max_unpacked_bytes} byte limit")
             if hasattr(tarfile, "data_filter"):
                 tf.extractall(target_root, members=members, filter="data")
-            else:  # pragma: no cover - Python < 3.12
+            else:  # pragma: no cover - older Python
                 tf.extractall(target_root, members=members)
-            extracted = [m.name for m in members]
-        return extracted
-    # gzip/bz2/xz single files fall back to shutil
-    shutil.unpack_archive(archive, target_root)
-    return [os.path.basename(archive)]
+            return [member.name for member in members if member.isfile()]
+
+    raise ValueError("Unsupported archive format; only zip and tar archives are accepted")
 
 
 def archive_list(archive_path: str, max_entries: int = 500) -> str:
@@ -2815,18 +3775,31 @@ def archive_list(archive_path: str, max_entries: int = 500) -> str:
         limit = _bounded_int(max_entries, 500, 1, 10000)
         entries: List[Dict[str, Any]] = []
         kind = "unknown"
+        truncated = False
         if zipfile.is_zipfile(arc):
             kind = "zip"
+            total_entries = _preflight_zip(arc, _bounded_int(MAX_ARCHIVE_ENTRIES, 5000, 1, 10000))
             with zipfile.ZipFile(arc) as zf:
                 for info in zf.infolist()[:limit]:
                     entries.append({"name": info.filename, "size": info.file_size,
                                     "compressed": info.compress_size,
                                     "is_dir": info.is_dir(),
                                     "modified": "%04d-%02d-%02d %02d:%02d" % info.date_time[:5]})
+            truncated = total_entries > len(entries)
         elif tarfile.is_tarfile(arc):
             kind = "tar"
+            expanded_bytes = 0
+            expanded_limit = _bounded_int(MAX_ARCHIVE_UNPACKED_BYTES, 268435456,
+                                          1024, 1024 * 1024 * 1024)
             with tarfile.open(arc) as tf:
-                for member in itertools.islice(tf, limit):
+                for member in itertools.islice(tf, limit + 1):
+                    if len(entries) >= limit:
+                        truncated = True
+                        break
+                    if member.isfile():
+                        expanded_bytes += max(0, member.size)
+                        if expanded_bytes > expanded_limit:
+                            raise ValueError(f"Archive exceeds the {expanded_limit} byte inspection limit")
                     entries.append({"name": member.name, "size": member.size,
                                     "is_dir": member.isdir(), "mode": oct(member.mode),
                                     "modified": member.mtime})
@@ -2835,7 +3808,7 @@ def archive_list(archive_path: str, max_entries: int = 500) -> str:
         suspicious = [e["name"] for e in entries
                       if e["name"].startswith("/") or ".." in e["name"].split("/")]
         return _ok({"archive": arc, "type": kind, "count": len(entries),
-                    "suspicious_paths": suspicious[:20], "entries": entries})
+                    "truncated": truncated, "suspicious_paths": suspicious[:20], "entries": entries})
     except Exception as exc:
         return _error(f"archive_list failed: {exc}")
 
@@ -2845,35 +3818,75 @@ def apply_patch(filepath: str, patch: str, mode: str = "auto") -> str:
     try:
         path = _safe_path(filepath)
         mode = str(mode or "auto").lower().strip()
+        patch_text = str(patch or "")
+        if len(patch_text.encode("utf-8")) > MCP_MAX_REQUEST_BYTES:
+            return _error("Patch exceeds configured size limit")
         if not os.path.exists(path) and mode != "replace":
             return _error(f"File not found: {filepath}")
-        stripped = str(patch or "").strip()
+        if os.path.isfile(path) and os.path.getsize(path) > MCP_MAX_REQUEST_BYTES:
+            return _error("Target file exceeds configured patch limit")
+        stripped = patch_text.strip()
         looks_like_diff = stripped.startswith(("---", "diff ", "Index:", "@@"))
         if mode == "replace" or (mode == "auto" and not looks_like_diff and not os.path.exists(path)):
-            _atomic_write(path, patch)
+            _atomic_write(path, patch_text)
             return _ok({"status": "success", "mode": "full_replace", "filepath": filepath,
-                        "bytes_written": len(str(patch).encode("utf-8"))})
+                        "bytes_written": len(patch_text.encode("utf-8"))})
         if not looks_like_diff:
             return _error("Input does not look like a unified diff. "
                           "Pass mode='replace' to overwrite the file instead.",
                           hint="v3.8 silently overwrote the file here; that behaviour is now opt-in.")
         if not shutil.which("patch"):
             return _error("The 'patch' utility is not installed on this system")
-        backup = f"{path}.orig"
-        with contextlib.suppress(OSError):
+        patch_bin = shutil.which("patch")
+        clean_env = {"PATH": os.getenv("PATH", "/usr/bin:/bin"), "HOME": SANDBOX_ROOT,
+                     "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "POSIXLY_CORRECT": "1"}
+        backup_fd, backup = tempfile.mkstemp(prefix=".mts-patch-", suffix=".bak",
+                                             dir=os.path.dirname(path) or SANDBOX_ROOT)
+        os.close(backup_fd)
+        try:
             shutil.copy2(path, backup)
-        res = subprocess.run(["patch", "-p0", "--forward", "--batch", path],
-                             input=patch, text=True, capture_output=True, timeout=20)
-        if res.returncode == 0:
+        except Exception:
             with contextlib.suppress(OSError):
                 os.unlink(backup)
-            return _ok({"status": "success", "mode": "patch", "filepath": filepath,
-                        "stdout": res.stdout[-2000:]})
-        with contextlib.suppress(OSError):
-            if os.path.exists(backup):
-                shutil.move(backup, path)
-        return _error("patch failed and the file was restored", filepath=filepath,
-                      stderr=(res.stderr or res.stdout)[-2000:], exit_code=res.returncode)
+            raise
+        preserve_backup = False
+        try:
+            try:
+                res = _run_subprocess([patch_bin, "-p0", "--forward", "--batch", path],
+                                      timeout=20, cwd=SANDBOX_ROOT, env=clean_env,
+                                      cpu_seconds=20, address_space_mb=512,
+                                      file_size_mb=16, stdin_text=patch_text, max_output_bytes=50000)
+            except Exception as exc:
+                try:
+                    os.replace(backup, path)
+                    backup = ""
+                except OSError as restore_exc:
+                    preserve_backup = True
+                    raise RuntimeError(f"Patch failed and the original could not be restored; "
+                                       f"backup retained at {backup}: {restore_exc}") from exc
+                raise
+            if res["exit_code"] == 0:
+                with contextlib.suppress(OSError):
+                    os.unlink(backup)
+                backup = ""
+                return _ok({"status": "success", "mode": "patch", "filepath": filepath,
+                            "stdout": res["stdout"][-2000:],
+                            "truncated": res["stdout_truncated"] or res["stderr_truncated"]})
+            try:
+                os.replace(backup, path)
+                backup = ""
+            except OSError as restore_exc:
+                preserve_backup = True
+                raise RuntimeError(f"Patch failed and the original could not be restored; "
+                                   f"backup retained at {backup}: {restore_exc}") from restore_exc
+            return _error("patch failed and the file was restored", filepath=filepath,
+                          stderr=(res["stderr"] or res["stdout"])[-2000:],
+                          exit_code=res["exit_code"],
+                          truncated=res["stdout_truncated"] or res["stderr_truncated"])
+        finally:
+            if backup and not preserve_backup:
+                with contextlib.suppress(OSError):
+                    os.unlink(backup)
     except Exception as exc:
         return _error(f"apply_patch failed: {exc}")
 
@@ -2885,21 +3898,38 @@ def lint_code(language: str, code: str = "", filepath: str = "") -> str:
     """Syntax-check Python, JavaScript, JSON, YAML or shell source."""
     tmp_path = ""
     try:
-        target_code = code or ""
+        target_code = str(code or "")
         if filepath:
-            with open(_safe_path(filepath, must_exist=True), "r", encoding="utf-8") as f:
-                target_code = f.read()
+            source_path = _safe_path(filepath, must_exist=True)
+            if os.path.getsize(source_path) > MCP_MAX_REQUEST_BYTES:
+                return _error("Source file exceeds configured lint limit")
+            with open(source_path, "r", encoding="utf-8", errors="replace") as f:
+                target_code = f.read(MCP_MAX_REQUEST_BYTES + 1)
+        if len(target_code.encode("utf-8")) > MCP_MAX_REQUEST_BYTES:
+            return _error("Source exceeds configured lint limit")
         if not target_code.strip():
             return _error("Provide code= or filepath= with content to lint")
         lang = str(language or "").lower().strip()
 
         if lang in ("python", "py", "python3"):
+            if len(target_code.encode("utf-8")) > 1024 * 1024:
+                return _error("Python source exceeds the 1 MiB linting limit")
             try:
                 tree = ast.parse(target_code)
             except SyntaxError as exc:
                 return _json_result({"ok": False, "status": "syntax_error", "language": "python",
                                      "line": exc.lineno, "offset": exc.offset,
                                      "text": exc.text, "error": str(exc)})
+            except (RecursionError, MemoryError, ValueError) as exc:
+                return _error(f"Python source is too complex to lint safely ({type(exc).__name__})")
+            pending = [tree]
+            node_count = 0
+            while pending:
+                node = pending.pop()
+                node_count += 1
+                if node_count > 100000:
+                    return _error("Python source exceeds the 100,000 AST node linting limit")
+                pending.extend(ast.iter_child_nodes(node))
             warnings = []
             assigned = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
             imported = set()
@@ -2931,17 +3961,23 @@ def lint_code(language: str, code: str = "", filepath: str = "") -> str:
             return _json_result(result)
 
         if lang in ("javascript", "js", "node", "mjs"):
-            if not shutil.which("node"):
+            node = shutil.which("node")
+            if not node:
                 return _error("Node.js is not installed; cannot lint JavaScript")
             with temporary_file(".js", delete=False) as tf:
                 tf.write(target_code)
                 tf.flush()
                 tmp_path = tf.name
-            res = subprocess.run(["node", "--check", tmp_path], capture_output=True, text=True, timeout=15)
-            if res.returncode == 0:
-                return _ok({"status": "ok", "language": "javascript", "message": "Syntax OK"})
+            clean_env = {"PATH": os.getenv("PATH", "/usr/bin:/bin"), "HOME": SANDBOX_ROOT,
+                         "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
+            res = _run_subprocess([node, "--check", tmp_path], timeout=15,
+                                  cwd=SANDBOX_ROOT, env=clean_env, cpu_seconds=15,
+                                  address_space_mb=1024, file_size_mb=1, max_output_bytes=50000)
+            if res["exit_code"] == 0:
+                return _ok({"status": "ok", "language": "javascript", "message": "Syntax OK",
+                            "truncated": res["stderr_truncated"]})
             return _json_result({"ok": False, "status": "syntax_error", "language": "javascript",
-                                 "error": res.stderr.strip()})
+                                 "error": res["stderr"].strip(), "truncated": res["stderr_truncated"]})
 
         if lang == "json":
             try:
@@ -2964,21 +4000,27 @@ def lint_code(language: str, code: str = "", filepath: str = "") -> str:
             return _ok({"status": "ok", "language": "yaml", "message": "Valid YAML"})
 
         if lang in ("bash", "sh", "shell"):
-            if not shutil.which("bash"):
+            bash = shutil.which("bash")
+            if not bash:
                 return _error("bash is not installed; cannot lint shell scripts")
             # `bash -n` only parses - it never executes - so no command allow-list is needed.
-            res = subprocess.run(["bash", "-n"], input=target_code, text=True,
-                                 capture_output=True, timeout=10)
+            clean_env = {"PATH": os.getenv("PATH", "/usr/bin:/bin"), "HOME": SANDBOX_ROOT,
+                         "LANG": "C.UTF-8"}
+            res = _run_subprocess([bash, "-n"], timeout=10, cwd=SANDBOX_ROOT,
+                                  env=clean_env, stdin_text=target_code,
+                                  cpu_seconds=10, address_space_mb=512,
+                                  file_size_mb=1, max_output_bytes=50000)
             warnings = []
             if re.search(r"\brm\s+-rf\s+/(?:\s|$)", target_code):
                 warnings.append("destructive 'rm -rf /' detected")
             if re.search(r"\$\{?\w+\}?\s*\|\s*(?:bash|sh)\b", target_code):
                 warnings.append("piping a variable into a shell interpreter")
-            if res.returncode == 0:
+            if res["exit_code"] == 0:
                 return _ok({"status": "ok", "language": "bash", "message": "Syntax OK",
-                            "warnings": warnings})
+                            "warnings": warnings, "truncated": res["stderr_truncated"]})
             return _json_result({"ok": False, "status": "syntax_error", "language": "bash",
-                                 "error": res.stderr.strip(), "warnings": warnings})
+                                 "error": res["stderr"].strip(), "warnings": warnings,
+                                 "truncated": res["stderr_truncated"]})
 
         return _error(f"Unsupported language: {language}",
                       supported=["python", "javascript", "json", "yaml", "bash"])
@@ -2999,8 +4041,6 @@ def _rlimit_preexec(cpu_seconds: int = 10, address_space_mb: int = 8192, file_si
 
     def _apply():  # pragma: no cover - runs in the child process
         with contextlib.suppress(Exception):
-            os.setsid()
-        with contextlib.suppress(Exception):
             _resource.setrlimit(_resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 2))
         with contextlib.suppress(Exception):
             limit = address_space_mb * 1024 * 1024
@@ -3015,35 +4055,144 @@ def _rlimit_preexec(cpu_seconds: int = 10, address_space_mb: int = 8192, file_si
 
 def _run_subprocess(cmd: List[str], timeout: int, cwd: Optional[str] = None,
                     env: Optional[Dict[str, str]] = None, cpu_seconds: Optional[int] = None,
-                    stdin_text: Optional[str] = None) -> Dict[str, Any]:
-    started = time.time()
-    proc = subprocess.run(
+                    stdin_text: Optional[str] = None, address_space_mb: int = 8192,
+                    file_size_mb: int = 256, max_output_bytes: int = 1_000_000,
+                    stdout_mode: str = "tail") -> Dict[str, Any]:
+    """Run without a shell, cap captured output, and kill the whole process group on timeout."""
+    started = time.monotonic()
+    output_limit = max(0, int(max_output_bytes))
+    proc = subprocess.Popen(
         cmd,
         cwd=cwd or SANDBOX_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
+        bufsize=0,
         env=env,
-        input=stdin_text,
-        preexec_fn=_rlimit_preexec(cpu_seconds or timeout + 5),
+        preexec_fn=_rlimit_preexec(cpu_seconds or timeout + 5, address_space_mb, file_size_mb),
+        start_new_session=(os.name == "posix"),
         shell=False,
     )
-    return {"stdout": proc.stdout, "stderr": proc.stderr, "exit_code": proc.returncode,
-            "execution_time_sec": round(time.time() - started, 3)}
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    totals = {"stdout": 0, "stderr": 0}
+
+    def drain(pipe, name):
+        try:
+            while True:
+                chunk = pipe.read(8192)
+                if not chunk:
+                    break
+                totals[name] += len(chunk)
+                if output_limit:
+                    if name == "stdout" and stdout_mode == "head":
+                        remaining = output_limit - len(buffers[name])
+                        if remaining > 0:
+                            buffers[name].extend(chunk[:remaining])
+                    elif len(chunk) >= output_limit:
+                        buffers[name][:] = chunk[-output_limit:]
+                    else:
+                        buffers[name].extend(chunk)
+                        excess = len(buffers[name]) - output_limit
+                        if excess > 0:
+                            del buffers[name][:excess]
+        except (OSError, ValueError):
+            pass
+        finally:
+            with contextlib.suppress(Exception):
+                pipe.close()
+
+    readers = [threading.Thread(target=drain, args=(proc.stdout, "stdout"), daemon=True),
+               threading.Thread(target=drain, args=(proc.stderr, "stderr"), daemon=True)]
+    for reader in readers:
+        reader.start()
+
+    writer = None
+    if stdin_text is not None:
+        input_bytes = str(stdin_text).encode("utf-8")
+
+        def write_stdin():
+            try:
+                view = memoryview(input_bytes)
+                while view:
+                    written = proc.stdin.write(view[:65536])
+                    if not written:
+                        break
+                    view = view[written:]
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+            finally:
+                with contextlib.suppress(Exception):
+                    proc.stdin.close()
+
+        writer = threading.Thread(target=write_stdin, daemon=True)
+        writer.start()
+
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    timed_out = False
+
+    def kill_process_group():
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            if os.name == "posix":
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:  # pragma: no cover - Windows fallback
+                proc.kill()
+
+    try:
+        proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        kill_process_group()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=1.0)
+
+    remaining = max(0.0, deadline - time.monotonic())
+    if writer is not None:
+        writer.join(timeout=remaining)
+    for reader in readers:
+        reader.join(timeout=max(0.0, deadline - time.monotonic()))
+    if (writer is not None and writer.is_alive()) or any(reader.is_alive() for reader in readers):
+        # A child may exit while a grandchild still holds an inherited pipe open.
+        # Do not let those descriptors make a timed operation wait forever.
+        timed_out = True
+        kill_process_group()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=1.0)
+        if writer is not None:
+            writer.join(timeout=1.0)
+        for reader in readers:
+            reader.join(timeout=1.0)
+
+    stdout = bytes(buffers["stdout"]).decode("utf-8", "replace")
+    stderr = bytes(buffers["stderr"]).decode("utf-8", "replace")
+    if timed_out:
+        raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr)
+    return {"stdout": stdout, "stderr": stderr, "exit_code": proc.returncode,
+            "stdout_truncated": totals["stdout"] > output_limit,
+            "stderr_truncated": totals["stderr"] > output_limit,
+            "execution_time_sec": round(time.monotonic() - started, 3)}
 
 
 def execute_python_code(code: str, timeout_seconds: int = 30) -> str:
-    """Run Python code in a subprocess (requires MCP_ENABLE_DANGEROUS=true)."""
+    """Run unrestricted Python in a resource-limited subprocess (dangerous opt-in required)."""
     if not ENABLE_DANGEROUS:
         return _error("Dangerous tool execution disabled. Set MCP_ENABLE_DANGEROUS=true.")
     tmp = ""
     try:
+        source = str(code or "")
+        if len(source.encode("utf-8")) > MCP_MAX_REQUEST_BYTES:
+            return _error("code exceeds configured request limit")
+        timeout = _bounded_int(timeout_seconds, 30, 1, 300)
         with temporary_file(".py", delete=False) as tf:
-            tf.write(str(code or ""))
+            tf.write(source)
             tf.flush()
             tmp = tf.name
-        timeout = _bounded_int(timeout_seconds, 30, 1, 300)
-        result = _run_subprocess([sys.executable or "python3", tmp], timeout)
+        clean_env = {"PATH": os.getenv("PATH", "/usr/bin:/bin"), "HOME": SANDBOX_ROOT,
+                     "LANG": "C.UTF-8", "PYTHONIOENCODING": "utf-8",
+                     "PYTHONDONTWRITEBYTECODE": "1"}
+        result = _run_subprocess([sys.executable or "python3", tmp], timeout,
+                                 cwd=SANDBOX_ROOT, env=clean_env, cpu_seconds=timeout,
+                                 address_space_mb=2048, file_size_mb=64,
+                                 max_output_bytes=100000)
         result["ok"] = result["exit_code"] == 0
         result["stdout"] = result["stdout"][-100000:]
         result["stderr"] = result["stderr"][-20000:]
@@ -3059,18 +4208,27 @@ def execute_python_code(code: str, timeout_seconds: int = 30) -> str:
 
 
 def execute_javascript_code(code: str, timeout_seconds: int = 30) -> str:
-    """Run JavaScript with Node.js in a subprocess (requires MCP_ENABLE_DANGEROUS=true)."""
+    """Run unrestricted JavaScript in a resource-limited subprocess (dangerous opt-in required)."""
     if not ENABLE_DANGEROUS:
         return _error("Dangerous tool execution disabled. Set MCP_ENABLE_DANGEROUS=true.")
-    if not shutil.which("node"):
+    node = shutil.which("node")
+    if not node:
         return _error("Node.js not installed")
     tmp = ""
     try:
+        source = str(code or "")
+        if len(source.encode("utf-8")) > MCP_MAX_REQUEST_BYTES:
+            return _error("code exceeds configured request limit")
+        timeout = _bounded_int(timeout_seconds, 30, 1, 300)
         with temporary_file(".js", delete=False) as tf:
-            tf.write(str(code or ""))
+            tf.write(source)
             tf.flush()
             tmp = tf.name
-        result = _run_subprocess(["node", tmp], _bounded_int(timeout_seconds, 30, 1, 300))
+        clean_env = {"PATH": os.getenv("PATH", "/usr/bin:/bin"), "HOME": SANDBOX_ROOT,
+                     "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
+        result = _run_subprocess([node, tmp], timeout, cwd=SANDBOX_ROOT, env=clean_env,
+                                 cpu_seconds=timeout, address_space_mb=4096, file_size_mb=64,
+                                 max_output_bytes=100000)
         result["ok"] = result["exit_code"] == 0
         result["stdout"] = result["stdout"][-100000:]
         result["stderr"] = result["stderr"][-20000:]
@@ -3094,6 +4252,102 @@ _ARG_DENY_PATTERNS = [
 ]
 
 
+_FIND_DANGEROUS_ACTIONS = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0",
+                           "-fprintf", "-fls"}
+
+
+def _safe_sed_substitution(script: str) -> bool:
+    """Allow only sed's non-writing substitution form; block e/w/r script commands."""
+    if len(script) < 4 or script[0] != "s" or script[1].isalnum() or script[1].isspace():
+        return False
+    delimiter = script[1]
+    delimiters = []
+    escaped = False
+    for index, char in enumerate(script[2:], 2):
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == delimiter:
+            delimiters.append(index)
+            if len(delimiters) == 2:
+                break
+    if len(delimiters) != 2:
+        return False
+    return bool(re.fullmatch(r"[gipIM0-9]*", script[delimiters[-1] + 1:]))
+
+
+def _validate_bash_path_arguments(tokens: Sequence[str], program: str) -> Optional[str]:
+    """Reject paths outside the sandbox, including paths reached through symlinks."""
+    options_ended = False
+    root = os.path.realpath(SANDBOX_ROOT)
+    for token in tokens[1:]:
+        if token == "--" and not options_ended:
+            options_ended = True
+            continue
+        candidates: List[str] = []
+        if options_ended or not token.startswith("-") or token == "-":
+            candidates.append(token)
+        elif "=" in token:
+            candidates.append(token.split("=", 1)[1])
+        else:
+            # Attached option values can themselves be paths, e.g. -I/etc/passwd.
+            match = re.match(r"^-[A-Za-z]+(.+)$", token)
+            if match:
+                candidates.append(match.group(1))
+        for candidate in candidates:
+            if candidate in ("", "-"):
+                continue
+            try:
+                resolved = _safe_path(candidate)
+            except ValueError:
+                return f"Argument '{candidate}' points outside the sandbox root"
+            if program in _DANGEROUS_BASH_CMDS and resolved == root:
+                return "Refusing to run a destructive command against the sandbox root"
+    return None
+
+
+def _validate_restricted_command(program: str, tokens: Sequence[str]) -> Optional[str]:
+    """Reject command-specific sub-languages with file-write/exec capabilities."""
+    if program == "awk":
+        return "awk programs are not supported by the restricted runner; use search_file_content"
+    if program == "find":
+        for token in tokens[1:]:
+            option = token.split("=", 1)[0].lower()
+            if option in _FIND_DANGEROUS_ACTIONS:
+                return f"find action '{option}' is blocked"
+    if program == "sed":
+        scripts: List[str] = []
+        index = 1
+        while index < len(tokens):
+            token = tokens[index]
+            if token in ("-f", "--file", "-i", "--in-place") or token.startswith("--in-place="):
+                return "sed script files and in-place writes are blocked"
+            if token in ("-e", "--expression"):
+                index += 1
+                if index >= len(tokens) or not _safe_sed_substitution(tokens[index]):
+                    return "only non-writing sed substitution expressions are allowed"
+                scripts.append(tokens[index])
+            elif token.startswith("--expression="):
+                script = token.split("=", 1)[1]
+                if not _safe_sed_substitution(script):
+                    return "only non-writing sed substitution expressions are allowed"
+                scripts.append(script)
+            elif token.startswith("-e") and len(token) > 2:
+                script = token[2:]
+                if not _safe_sed_substitution(script):
+                    return "only non-writing sed substitution expressions are allowed"
+                scripts.append(script)
+            elif not token.startswith("-") and not scripts:
+                if not _safe_sed_substitution(token):
+                    return "only non-writing sed substitution expressions are allowed"
+                scripts.append(token)
+            index += 1
+        if not scripts:
+            return "a safe sed substitution expression is required"
+    return None
+
+
 def execute_bash_command(command: str, timeout_seconds: int = 60) -> str:
     """Run one allow-listed command WITHOUT a shell (no chaining, pipes or redirection)."""
     if not ENABLE_DANGEROUS:
@@ -3102,6 +4356,8 @@ def execute_bash_command(command: str, timeout_seconds: int = 60) -> str:
         raw = str(command or "")
         if not raw.strip():
             return _error("Empty command")
+        if len(raw) > MCP_MAX_REQUEST_BYTES:
+            return _error("Command exceeds configured request limit")
         found = [ch for ch in _SHELL_METACHARS if ch in raw]
         if found:
             return _error("Shell metacharacters are not permitted (no chaining, pipes, "
@@ -3117,19 +4373,18 @@ def execute_bash_command(command: str, timeout_seconds: int = 60) -> str:
         if program not in ALLOWED_BASH_CMDS:
             return _error(f"Command '{program}' is not in the allowed whitelist.",
                           allowed=sorted(ALLOWED_BASH_CMDS))
+        restricted_error = _validate_restricted_command(program, tokens)
+        if restricted_error:
+            return _error(restricted_error)
         for pattern, message in _ARG_DENY_PATTERNS:
             if any(pattern.search(tok) for tok in tokens[1:]):
                 return _error(f"Rejected argument: {message}")
         resolved = shutil.which(program)
         if not resolved:
             return _error(f"Command '{program}' was not found on PATH")
-        # Reject arguments that escape the sandbox for path-ish tokens.
-        for token in tokens[1:]:
-            if token.startswith("/") or token.startswith("~"):
-                try:
-                    _safe_path(token)
-                except ValueError:
-                    return _error(f"Argument '{token}' points outside the sandbox root")
+        path_error = _validate_bash_path_arguments(tokens, program)
+        if path_error:
+            return _error(path_error)
         env = {"PATH": os.getenv("PATH", "/usr/bin:/bin"), "HOME": SANDBOX_ROOT,
                "LANG": os.getenv("LANG", "C.UTF-8"), "TERM": "dumb"}
         result = _run_subprocess([resolved] + tokens[1:],
@@ -3162,9 +4417,9 @@ _SAFE_BUILTINS = sorted({
 
 _SAFE_MODULES = sorted({
     "math", "cmath", "statistics", "random", "decimal", "fractions", "itertools", "functools",
-    "operator", "collections", "heapq", "bisect", "string", "re", "json", "datetime", "time",
+    "collections", "heapq", "bisect", "string", "re", "json", "datetime", "time",
     "textwrap", "unicodedata", "uuid", "hashlib", "base64", "binascii", "struct", "array",
-    "copy", "enum", "dataclasses", "typing", "abc", "numbers", "pprint", "difflib", "csv",
+    "copy", "enum", "abc", "numbers", "pprint", "difflib", "csv",
 })
 
 _FORBIDDEN_NAMES = {"eval", "exec", "compile", "open", "input", "__import__", "globals", "locals",
@@ -3173,7 +4428,7 @@ _FORBIDDEN_NAMES = {"eval", "exec", "compile", "open", "input", "__import__", "g
                     "credits", "copyright"}
 
 _SANDBOX_RUNNER = '''
-import builtins, sys
+import builtins, sys, types
 
 ALLOWED_BUILTINS = __ALLOWED_BUILTINS__
 ALLOWED_MODULES = __ALLOWED_MODULES__
@@ -3181,11 +4436,40 @@ ALLOWED_MODULES = __ALLOWED_MODULES__
 _real_import = builtins.__import__
 
 
+class _SafeModuleProxy:
+    """Expose public non-module exports without leaking a module's import graph."""
+    __slots__ = ("_module", "_exports")
+
+    def __init__(self, module):
+        exports = tuple(name for name, value in vars(module).items()
+                        if name and not name.startswith("_")
+                        and not isinstance(value, types.ModuleType))
+        object.__setattr__(self, "_module", module)
+        object.__setattr__(self, "_exports", frozenset(exports))
+
+    def __getattr__(self, name):
+        if name == "__all__":
+            return tuple(sorted(object.__getattribute__(self, "_exports")))
+        if not name or name.startswith("_"):
+            raise AttributeError(name)
+        exports = object.__getattribute__(self, "_exports")
+        if name not in exports:
+            raise AttributeError(name)
+        value = getattr(object.__getattribute__(self, "_module"), name)
+        if isinstance(value, types.ModuleType):
+            raise AttributeError(name)
+        return value
+
+
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-    root = str(name).split(".")[0]
-    if level != 0 or root not in ALLOWED_MODULES:
+    # Permit only explicitly listed root modules; never expose their attributes
+    # that are modules (for example uuid.os or statistics.sys).
+    if level != 0 or str(name) not in ALLOWED_MODULES:
         raise ImportError("import of '%s' is blocked in safe mode" % name)
-    return _real_import(name, globals, locals, fromlist, level)
+    if any(str(item).startswith("_") for item in (fromlist or ())):
+        raise ImportError("private imports are blocked in safe mode")
+    module = _real_import(name, globals, locals, fromlist, level)
+    return _SafeModuleProxy(module)
 
 
 safe_builtins = {name: getattr(builtins, name) for name in ALLOWED_BUILTINS if hasattr(builtins, name)}
@@ -3211,28 +4495,44 @@ except BaseException as exc:
 
 def _validate_sandbox_ast(code: str) -> Optional[str]:
     """Allow-list based static validation for safe_execute_python."""
+    if len(code.encode("utf-8")) > 1024 * 1024:
+        return "code exceeds the 1 MiB safe-execution limit"
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
         return f"Syntax error: {exc}"
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and (node.attr.startswith("__") or node.attr in {"f_globals", "gi_frame", "cr_frame"}):
-            return f"access to attribute '{node.attr}' is disallowed"
+    except (RecursionError, MemoryError, ValueError) as exc:
+        return f"code is too complex to parse safely ({type(exc).__name__})"
+    pending = [(tree, 0)]
+    node_count = 0
+    while pending:
+        node, depth = pending.pop()
+        node_count += 1
+        if node_count > 100000:
+            return "code exceeds the 100,000 AST node limit"
+        if depth > 200:
+            return "code exceeds the 200-level AST nesting limit"
+        pending.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+            return f"access to private attribute '{node.attr}' is disallowed"
         if isinstance(node, ast.Name) and node.id in _FORBIDDEN_NAMES:
             return f"use of '{node.id}' is disallowed in safe mode"
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if re.search(r"__[A-Za-z0-9_]+__", node.value):
+                return "dunder attribute names in strings are disallowed in safe mode"
+            if len(node.value) > 100000:
+                return "string literal is too large"
         if isinstance(node, ast.Import):
             for alias in node.names:
-                root = alias.name.split(".")[0]
-                if root not in _SAFE_MODULES:
+                if alias.name not in _SAFE_MODULES:
                     return f"import of '{alias.name}' is not on the safe-module allow-list"
         if isinstance(node, ast.ImportFrom):
-            root = (node.module or "").split(".")[0]
-            if node.level or root not in _SAFE_MODULES:
+            if node.level or node.module not in _SAFE_MODULES:
                 return f"import from '{node.module}' is not on the safe-module allow-list"
+            if any(alias.name.startswith("_") for alias in node.names):
+                return "private imports are disallowed in safe mode"
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             continue
-        if isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) > 100000:
-            return "string literal is too large"
     return None
 
 
@@ -3243,6 +4543,8 @@ def safe_execute_python(code: str, timeout_seconds: int = 15, memory_mb: int = 2
     code = str(code or "")
     if not code.strip():
         return _error("code must be a non-empty string")
+    if len(code.encode("utf-8")) > MCP_MAX_REQUEST_BYTES:
+        return _error("code exceeds configured request limit")
     violation = _validate_sandbox_ast(code)
     if violation:
         return _error(f"Security violation: {violation}")
@@ -3267,22 +4569,21 @@ def safe_execute_python(code: str, timeout_seconds: int = 15, memory_mb: int = 2
                      "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": SANDBOX_ROOT,
                      "PYTHONIOENCODING": "utf-8"}
         started = time.time()
-        proc = subprocess.run(
+        proc = _run_subprocess(
             [sys.executable or "python3", "-I", "-S", runner_path, code_path],
-            capture_output=True, text=True, timeout=timeout, env=clean_env, cwd=tempfile.gettempdir(),
-            preexec_fn=_rlimit_preexec(cpu_seconds=timeout, address_space_mb=memory_mb, file_size_mb=1),
-            shell=False,
+            timeout=timeout, cwd=tempfile.gettempdir(), env=clean_env,
+            cpu_seconds=timeout, address_space_mb=memory_mb, file_size_mb=1,
         )
         payload = {
-            "ok": proc.returncode == 0,
-            "stdout": proc.stdout[-8000:],
-            "stderr": proc.stderr[-4000:],
-            "exit_code": proc.returncode,
-            "execution_time_sec": round(time.time() - started, 3),
+            "ok": proc["exit_code"] == 0,
+            "stdout": proc["stdout"][-8000:],
+            "stderr": proc["stderr"][-4000:],
+            "exit_code": proc["exit_code"],
+            "execution_time_sec": proc["execution_time_sec"],
             "restricted": True,
             "allowed_modules": _SAFE_MODULES,
         }
-        if proc.returncode != 0:
+        if proc["exit_code"] != 0:
             payload["error"] = "Sandboxed execution exited with a non-zero status"
         return _json_result(payload)
     except subprocess.TimeoutExpired:
@@ -3320,9 +4621,19 @@ def process_list(filter_name: str = "", max_results: int = 50) -> str:
             return _ok({"source": "psutil", "count": len(rows), "processes": rows})
         if not shutil.which("ps"):
             return _error("Neither psutil nor `ps` is available")
-        res = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10)
-        lines = [line for line in res.stdout.strip().split("\n") if not needle or needle in line.lower()]
-        return _ok({"source": "ps", "count": max(0, len(lines) - 1), "output": lines[:limit]})
+        env = {"PATH": os.getenv("PATH", "/usr/bin:/bin"), "HOME": SANDBOX_ROOT,
+               "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
+        result = _run_subprocess(["ps", "-eo", "pid,comm,user,pcpu,pmem,state"],
+                                 timeout=10, cwd=SANDBOX_ROOT, env=env,
+                                 max_output_bytes=512000)
+        if result["exit_code"] != 0:
+            return _error(result["stderr"].strip() or "ps failed")
+        lines = result["stdout"].splitlines()
+        rows = lines[1:] if lines else []
+        if needle:
+            rows = [line for line in rows if needle in line.lower()]
+        return _ok({"source": "ps", "count": len(rows), "output": rows[:limit],
+                    "truncated": result["stdout_truncated"] or len(rows) > limit})
     except Exception as exc:
         return _error(str(exc))
 
@@ -3333,25 +4644,42 @@ def process_list(filter_name: str = "", max_results: int = 50) -> str:
 def _parse_headers_arg(headers: Any) -> Dict[str, str]:
     if not headers:
         return {}
+    parsed: Dict[str, str] = {}
     if isinstance(headers, dict):
-        return {str(k): str(v) for k, v in headers.items()}
-    text = str(headers).strip()
-    if not text or text in ("{}", "null"):
-        return {}
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return {str(k): str(v) for k, v in data.items()}
-    except json.JSONDecodeError:
-        pass
-    out = {}
-    for line in text.splitlines():
-        if ":" in line:
-            key, _, value = line.partition(":")
-            out[key.strip()] = value.strip()
-    if not out:
-        raise ValueError("headers must be a JSON object or 'Key: Value' lines")
-    return out
+        parsed = {str(k): str(v) for k, v in headers.items()}
+    else:
+        text = str(headers).strip()
+        if not text or text in ("{}", "null"):
+            return {}
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict):
+                parsed = {str(k): str(v) for k, v in data.items()}
+        except json.JSONDecodeError:
+            pass
+        if not parsed:
+            for line in text.splitlines():
+                if ":" in line:
+                    key, _, value = line.partition(":")
+                    parsed[key.strip()] = value.strip()
+            if not parsed:
+                raise ValueError("headers must be a JSON object or 'Key: Value' lines")
+    if len(parsed) > 100:
+        raise ValueError("At most 100 request headers are allowed")
+    validated: Dict[str, str] = {}
+    seen_names = set()
+    for key, value in parsed.items():
+        if key.lower() in seen_names:
+            raise ValueError(f"Duplicate HTTP header name: {key}")
+        seen_names.add(key.lower())
+        if (not key or len(key) > 256
+                or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", key)):
+            raise ValueError(f"Invalid HTTP header name: {key[:80]}")
+        if len(value) > 8192 or any(ord(char) < 32 and char != "\t" or ord(char) == 127
+                                    for char in value):
+            raise ValueError(f"Invalid or oversized value for HTTP header '{key}'")
+        validated[key] = value
+    return validated
 
 
 def http_request(url: str, method: str = "GET", headers: str = "{}", data: str = "",
@@ -3367,18 +4695,24 @@ def http_request(url: str, method: str = "GET", headers: str = "{}", data: str =
         if body and len(body) > MCP_MAX_REQUEST_BYTES:
             return _error("Request body exceeds limit")
         max_chars = _bounded_int(max_response_chars, 5000, 100, MAX_TEXT_CHARS)
+        response_byte_limit = min(MAX_HTTP_BYTES, max(1024, max_chars * 4))
         timeout = _bounded_int(timeout_seconds, HTTP_TIMEOUT, 1, 300) if timeout_seconds else HTTP_TIMEOUT
         try:
-            result = _http_fetch(url, method=method, headers=req_headers, data=body, timeout=timeout)
+            result = _http_fetch(url, method=method, headers=req_headers, data=body,
+                                 timeout=timeout, max_bytes=response_byte_limit)
             status, resp_headers = result["status"], result["headers"]
             text, final_url = result["text"], result["url"]
             truncated = result["truncated"]
             content_type = result["content_type"]
         except urllib.error.HTTPError as exc:
-            raw = exc.read(MAX_HTTP_BYTES) if hasattr(exc, "read") else b""
+            if str(getattr(exc, "reason", "")).startswith("Blocked redirect:"):
+                return _error(f"Blocked redirect: {exc.reason}", status=exc.code)
+            raw, truncated = (_read_stream_limited(exc, response_byte_limit)
+                              if hasattr(exc, "read") else (b"", False))
             status, resp_headers = exc.code, {k.lower(): v for k, v in (exc.headers or {}).items()}
             content_type = resp_headers.get("content-type", "")
-            text, final_url, truncated = _decode_response(raw, content_type), url, False
+            text = _decode_response(raw, content_type)
+            final_url = getattr(exc, "url", None) or url
         payload: Dict[str, Any] = {
             "ok": 200 <= int(status) < 400,
             "status_code": status,
@@ -3390,8 +4724,11 @@ def http_request(url: str, method: str = "GET", headers: str = "{}", data: str =
             "response": text[:max_chars],
         }
         if "json" in content_type.lower():
-            with contextlib.suppress(Exception):
-                payload["json"] = json.loads(text)
+            if not truncated and len(text) <= 1024 * 1024:
+                with contextlib.suppress(Exception):
+                    payload["json"] = json.loads(text)
+            else:
+                payload["json_omitted"] = "response is truncated or exceeds the 1 MiB JSON preview limit"
         return _json_result(payload)
     except Exception as exc:
         return _error(str(exc))
@@ -3400,15 +4737,22 @@ def http_request(url: str, method: str = "GET", headers: str = "{}", data: str =
 def fetch_json_api(url: str, headers: str = "{}", method: str = "GET", data: str = "") -> str:
     """Call a JSON API and return the parsed document."""
     try:
+        method = str(method or "GET").upper()
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+            return _error("Unsupported HTTP method", allowed=["GET", "POST", "PUT", "PATCH",
+                                                               "DELETE", "HEAD", "OPTIONS"])
         req_headers = _parse_headers_arg(headers)
         req_headers.setdefault("User-Agent", USER_AGENT)
         req_headers.setdefault("Accept", "application/json")
         body = None
         if data:
             body = str(data).encode("utf-8")
+            if len(body) > MCP_MAX_REQUEST_BYTES:
+                return _error("Request body exceeds limit")
             req_headers.setdefault("Content-Type", "application/json")
-        result = _http_fetch(url, method=str(method or "GET").upper(), headers=req_headers,
-                             data=body, timeout=HTTP_TIMEOUT, strict_size=True)
+        result = _http_fetch(url, method=method, headers=req_headers, data=body,
+                             timeout=HTTP_TIMEOUT, max_bytes=min(MAX_HTTP_BYTES, 1024 * 1024),
+                             strict_size=True)
         try:
             parsed = json.loads(result["text"])
         except json.JSONDecodeError as exc:
@@ -3425,48 +4769,54 @@ def fetch_json_api(url: str, headers: str = "{}", method: str = "GET", data: str
 
 def web_download_file(url: str, destination_filepath: str, max_bytes: int = 0,
                       overwrite: bool = True) -> str:
-    """Stream a remote file to disk; fails loudly instead of truncating silently."""
+    """Stream a remote file to disk atomically; fail loudly instead of truncating."""
+    temp_path = ""
     try:
         dst = _safe_path(destination_filepath)
-        if os.path.exists(dst) and not _to_bool(overwrite, True):
+        overwrite = _to_bool(overwrite, True)
+        if os.path.exists(dst) and not overwrite:
             return _error(f"Destination '{destination_filepath}' already exists")
         _ensure_parent(dst)
         limit = _bounded_int(max_bytes, MAX_DOWNLOAD_BYTES, 1024, MAX_DOWNLOAD_BYTES) if max_bytes else MAX_DOWNLOAD_BYTES
         target = _assert_safe_remote(url)
-        req = urllib.request.Request(target, headers={"User-Agent": USER_AGENT})
-        temp_path = dst + ".part"
+        req = urllib.request.Request(target, headers={"User-Agent": USER_AGENT,
+                                                       "Accept-Encoding": "identity"})
+        fd, temp_path = tempfile.mkstemp(prefix=".mts-download-", dir=os.path.dirname(dst) or ".")
         digest = hashlib.sha256()
         total = 0
-        with _get_opener().open(req, timeout=max(HTTP_TIMEOUT, 30)) as resp:
-            _assert_safe_remote(resp.geturl())
-            declared = resp.headers.get("Content-Length")
-            if declared and declared.isdigit() and int(declared) > limit:
-                return _error(f"Remote file is {int(declared)} bytes which exceeds the "
-                              f"{limit} byte limit", content_length=int(declared))
-            with open(temp_path, "wb") as out:
+        with os.fdopen(fd, "wb") as out:
+            with _get_opener().open(req, timeout=max(HTTP_TIMEOUT, 30)) as resp:
+                _assert_safe_remote(resp.geturl())
+                declared = resp.headers.get("Content-Length")
+                if declared and declared.isdigit() and int(declared) > limit:
+                    raise ValueError(f"Remote file is {int(declared)} bytes which exceeds the {limit} byte limit")
                 while True:
                     chunk = resp.read(262144)
                     if not chunk:
                         break
                     total += len(chunk)
                     if total > limit:
-                        out.close()
-                        with contextlib.suppress(OSError):
-                            os.unlink(temp_path)
-                        return _error(f"Download aborted: exceeded {limit} bytes "
-                                      f"(increase max_bytes to allow more)")
+                        raise ValueError(f"Download aborted: exceeded {limit} bytes (increase max_bytes to allow more)")
                     digest.update(chunk)
                     out.write(chunk)
-            content_type = resp.headers.get("Content-Type", "")
-            final_url = resp.geturl()
-        os.replace(temp_path, dst)
+                out.flush()
+                os.fsync(out.fileno())
+                content_type = resp.headers.get("Content-Type", "")
+                final_url = resp.geturl()
+        if overwrite:
+            os.replace(temp_path, dst)
+        else:
+            # Linking is an atomic create-if-absent operation on the same filesystem.
+            os.link(temp_path, dst)
+            os.unlink(temp_path)
+        temp_path = ""
         _bump("bytes_downloaded", total)
         return _ok({"status": "success", "url": url, "final_url": final_url, "saved_to": dst,
                     "size_bytes": total, "size_human": _human_bytes(total),
                     "sha256": digest.hexdigest(), "content_type": content_type})
     except Exception as exc:
-        with contextlib.suppress(Exception):
-            if 'temp_path' in locals() and os.path.exists(temp_path):
+        if temp_path:
+            with contextlib.suppress(OSError):
                 os.unlink(temp_path)
         return _error(f"web_download_file failed: {exc}")
 
@@ -3476,7 +4826,8 @@ def web_scrape_links(url: str, filter_domain: bool = False, max_links: int = 300
     try:
         filter_domain = _to_bool(filter_domain, False)
         limit = _bounded_int(max_links, 300, 1, MCP_MAX_LINKS)
-        result = _http_fetch_retrying(url, timeout=HTTP_TIMEOUT)
+        result = _http_fetch_retrying(url, timeout=HTTP_TIMEOUT,
+                                      max_bytes=min(MAX_HTTP_BYTES, MAX_HTML_BYTES))
         details = _extract_html_details(result["text"], result["url"])
         base_host = (urllib.parse.urlsplit(result["url"]).hostname or "").lower()
         links = []
@@ -3492,6 +4843,8 @@ def web_scrape_links(url: str, filter_domain: bool = False, max_links: int = 300
         return _ok({"source_url": url, "final_url": result["url"], "count": len(links),
                     "internal": sum(1 for l in links if not l["is_external"]),
                     "external": sum(1 for l in links if l["is_external"]),
+                    "truncated": (result["truncated"] or details["input_truncated"]
+                                  or len(details["links"]) >= MCP_MAX_LINKS or len(links) >= limit),
                     "links": links})
     except Exception as exc:
         return _error(f"web_scrape_links failed: {exc}")
@@ -3500,39 +4853,100 @@ def web_scrape_links(url: str, filter_domain: bool = False, max_links: int = 300
 def extract_metadata(url: str) -> str:
     """Fetch a page and return its title, description, canonical URL and meta tags."""
     try:
-        result = _http_fetch_retrying(url, timeout=HTTP_TIMEOUT)
+        result = _http_fetch_retrying(url, timeout=HTTP_TIMEOUT,
+                                      max_bytes=min(MAX_HTTP_BYTES, MAX_HTML_BYTES))
         details = _extract_html_details(result["text"], result["url"])
         return _ok({"url": url, "final_url": result["url"], "title": details["title"],
                     "description": details["description"], "image": details["image"],
                     "canonical_url": details["canonical_url"], "language": details["language"],
                     "site_name": details["site_name"], "headings": details["headings"][:30],
+                    "truncated": result["truncated"] or details["input_truncated"],
                     "meta_tags": details["meta_tags"]})
     except Exception as exc:
         return _error(f"extract_metadata failed: {exc}")
 
 
 def dns_lookup(domain: str, record_types: str = "A") -> str:
-    """Resolve a hostname to IP addresses and report reverse DNS where possible."""
+    """Resolve requested DNS record types and report reverse DNS where available."""
     try:
-        host = str(domain).strip()
+        host = str(domain or "").strip()
         if "://" in host:
             host = urllib.parse.urlsplit(host).hostname or ""
         host = host.split("/", 1)[0].strip("[]").rstrip(".")
         if not host or len(host) > 253:
             return _error("Invalid hostname")
-        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-        ipv4 = sorted({i[4][0] for i in infos if i[0] == socket.AF_INET})
-        ipv6 = sorted({i[4][0] for i in infos if i[0] == socket.AF_INET6})
-        addresses = sorted({i[4][0] for i in infos})
+        record_spec = str(record_types or "A")
+        if len(record_spec) > 200:
+            return _error("record_types is too long (max 200 characters)")
+        requested = list(dict.fromkeys(t.strip().upper() for t in
+                                       re.split(r"[,\s]+", record_spec) if t.strip()))
+        if len(requested) > 10:
+            return _error("At most 10 DNS record types may be requested at once")
+        supported = {"A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "CAA", "SRV", "PTR"}
+        unsupported = [kind for kind in requested if kind not in supported]
+        if unsupported:
+            return _error("Unsupported DNS record type", unsupported=unsupported,
+                          supported=sorted(supported))
+        if not requested:
+            requested = ["A"]
+
+        records: Dict[str, List[Any]] = {}
+        errors: Dict[str, str] = {}
+        query_names: Dict[str, str] = {}
+        address_infos = []
+        for kind in requested:
+            if kind in ("A", "AAAA"):
+                family = socket.AF_INET if kind == "A" else socket.AF_INET6
+                try:
+                    infos = socket.getaddrinfo(host, None, family=family, type=socket.SOCK_STREAM)
+                    address_infos.extend(infos)
+                    records[kind] = sorted({info[4][0] for info in infos})
+                except OSError as exc:
+                    records[kind] = []
+                    errors[kind] = f"{type(exc).__name__}: {exc}"[:200]
+                continue
+
+            # The system resolver API in the standard library only exposes A/AAAA.
+            # Use Google's fixed JSON DoH endpoint for other DNS record types.
+            query_name = host
+            if kind == "PTR":
+                with contextlib.suppress(ValueError):
+                    query_name = ipaddress.ip_address(host).reverse_pointer
+            query_names[kind] = query_name
+            query = urllib.parse.urlencode({"name": query_name, "type": kind})
+            body = _http_get_text("https://dns.google/resolve?" + query,
+                                  headers={"Accept": "application/dns-json", "User-Agent": USER_AGENT},
+                                  timeout=HTTP_TIMEOUT, max_bytes=256 * 1024,
+                                  cache_ttl=FETCH_CACHE_TTL)
+            response = json.loads(body)
+            answers = response.get("Answer", []) if isinstance(response, dict) else []
+            values = [answer.get("data") for answer in answers
+                      if isinstance(answer, dict) and answer.get("data") is not None]
+            records[kind] = values
+            if not values and isinstance(response, dict) and response.get("Status") not in (0, None):
+                errors[kind] = f"DNS status {response.get('Status')}"
+
+        addresses = sorted({info[4][0] for info in address_infos})
+        ipv4 = sorted({info[4][0] for info in address_infos if info[0] == socket.AF_INET})
+        ipv6 = sorted({info[4][0] for info in address_infos if info[0] == socket.AF_INET6})
         reverse = {}
         for address in addresses[:5]:
             with contextlib.suppress(Exception):
                 reverse[address] = socket.gethostbyaddr(address)[0]
-        private = [a for a in addresses if _ip_is_blocked(ipaddress.ip_address(a))]
-        return _ok({"domain": host, "ip_addresses": addresses, "ipv4": ipv4, "ipv6": ipv6,
-                    "count": len(addresses), "reverse_dns": reverse,
-                    "canonical_name": infos[0][3] if infos and infos[0][3] else "",
-                    "private_addresses": private})
+        private = [address for address in addresses
+                   if _ip_is_blocked(ipaddress.ip_address(address))]
+        cname = (records.get("CNAME") or [""])[0]
+        found = any(records.get(kind) for kind in records)
+        payload = {"ok": found, "domain": host, "record_types": requested, "records": records,
+                   "query_names": query_names, "ip_addresses": addresses, "ipv4": ipv4, "ipv6": ipv6,
+                   "count": len(addresses), "reverse_dns": reverse,
+                   "canonical_name": cname or (address_infos[0][3] if address_infos else ""),
+                   "private_addresses": private}
+        if errors:
+            payload["lookup_errors"] = errors
+        if not found:
+            payload["error"] = f"No DNS records found for {host} ({', '.join(requested)})"
+        return _json_result(payload)
     except Exception as exc:
         return _error(f"dns_lookup failed: {exc}")
 
@@ -3622,7 +5036,7 @@ def read_url_hardened(url: str, max_chars: int = 64000, max_redirects: int = 5) 
         opener = _build_opener(max_redirects)
         with opener.open(req, timeout=HTTP_TIMEOUT) as resp:
             final_url = _assert_safe_remote(resp.geturl())
-            data, truncated = _read_stream_limited(resp, MAX_HTTP_BYTES)
+            data, truncated = _read_stream_limited(resp, min(MAX_HTTP_BYTES, MAX_HTML_BYTES))
             content_type = resp.headers.get("Content-Type", "")
             status = getattr(resp, "status", None) or resp.getcode()
         raw = _decode_response(data, content_type)
@@ -3652,15 +5066,27 @@ def sitemap_parse(sitemap_url: str, max_urls: int = 500, recurse: bool = False) 
         seen_sitemaps: Set[str] = set()
         urls: List[Dict[str, Any]] = []
         indexes: List[str] = []
+        indexes_truncated = False
+        urls_truncated = False
 
         def parse_one(target: str, depth: int = 0):
-            if target in seen_sitemaps or len(urls) >= limit or depth > 2:
+            nonlocal indexes_truncated, urls_truncated
+            if target in seen_sitemaps:
+                return
+            if depth > 2 or len(seen_sitemaps) >= 25:
+                if recurse:
+                    urls_truncated = True
                 return
             seen_sitemaps.add(target)
-            xml_content = _fetch_url(target)
-            root = ET.fromstring(xml_content)
+            fetched = _http_fetch_retrying(target, max_bytes=min(MAX_HTTP_BYTES, 4 * 1024 * 1024))
+            if fetched["truncated"]:
+                raise ValueError("Sitemap exceeds the 4 MiB parsing limit")
+            target = fetched["url"]
+            root = _safe_parse_xml(fetched["text"])
             is_index = root.tag.split("}")[-1].lower() == "sitemapindex"
             for node in root:
+                if urls_truncated:
+                    return
                 name = node.tag.split("}")[-1].lower()
                 if name not in {"url", "sitemap"}:
                     continue
@@ -3668,21 +5094,31 @@ def sitemap_parse(sitemap_url: str, max_urls: int = 500, recurse: bool = False) 
                 loc = values.get("loc")
                 if not loc:
                     continue
+                try:
+                    loc = _validated_http_url(urllib.parse.urljoin(target, loc))
+                except ValueError:
+                    continue
                 if name == "sitemap" or is_index:
-                    indexes.append(loc)
+                    if len(indexes) < 200:
+                        indexes.append(loc)
+                    else:
+                        indexes_truncated = True
                     if recurse:
                         with contextlib.suppress(Exception):
                             parse_one(loc, depth + 1)
                 else:
+                    if len(urls) >= limit:
+                        urls_truncated = True
+                        return
                     urls.append({"url": loc, "lastmod": values.get("lastmod"),
                                  "changefreq": values.get("changefreq"),
                                  "priority": values.get("priority")})
-                if len(urls) >= limit:
-                    return
 
         parse_one(sitemap_url)
         return _ok({"sitemap_url": sitemap_url, "count": len(urls),
-                    "nested_sitemaps": indexes[:200], "urls": urls[:limit]})
+                    "truncated": urls_truncated,
+                    "nested_sitemaps": indexes, "nested_sitemaps_truncated": indexes_truncated,
+                    "urls": urls[:limit]})
     except Exception as exc:
         return _error(f"sitemap_parse failed: {exc}")
 
@@ -3691,19 +5127,26 @@ def rss_feed_parse(feed_url: str, max_items: int = 0) -> str:
     """Parse an RSS or Atom feed into normalised items (handles <link>text</link>)."""
     try:
         limit = _bounded_int(max_items, MCP_MAX_FEED_ITEMS, 1, 1000) if max_items else MCP_MAX_FEED_ITEMS
-        xml_content = _fetch_url(feed_url)
-        root = ET.fromstring(xml_content)
+        fetched = _http_fetch_retrying(feed_url, max_bytes=min(MAX_HTTP_BYTES, 4 * 1024 * 1024))
+        if fetched["truncated"]:
+            raise ValueError("RSS/Atom feed exceeds the 4 MiB parsing limit")
+        feed_base = fetched["url"]
+        root = _safe_parse_xml(fetched["text"])
         channel_title = ""
         for tag in ("title", "{http://www.w3.org/2005/Atom}title"):
             node = root.find(f"./channel/{tag}") if tag == "title" else root.find(tag)
             if node is not None and node.text:
-                channel_title = node.text.strip()
+                channel_title = node.text.strip()[:1000]
                 break
         items = []
+        items_truncated = False
         for node in root.iter():
             name = node.tag.split("}")[-1].lower()
             if name not in {"item", "entry"}:
                 continue
+            if len(items) >= limit:
+                items_truncated = True
+                break
             values: Dict[str, str] = {}
             enclosures: List[str] = []
             categories: List[str] = []
@@ -3713,34 +5156,44 @@ def rss_feed_parse(feed_url: str, max_items: int = 0) -> str:
                     # Atom uses href attributes, RSS 2.0 puts the URL in the text node
                     value = (child.attrib.get("href") or (child.text or "")).strip()
                 elif key == "enclosure":
-                    if child.attrib.get("url"):
-                        enclosures.append(child.attrib["url"])
+                    enclosure_url = child.attrib.get("url", "")
+                    if enclosure_url and len(enclosures) < 10 and len(enclosure_url) <= 2048:
+                        enclosures.append(enclosure_url)
                     continue
                 elif key == "category":
                     text = (child.text or child.attrib.get("term") or "").strip()
-                    if text:
-                        categories.append(text)
+                    if text and len(categories) < 15:
+                        categories.append(text[:500])
                     continue
                 else:
                     value = " ".join("".join(child.itertext()).split())
                 if key in {"title", "description", "summary", "content", "encoded", "pubdate",
                            "published", "updated", "link", "id", "guid", "author", "creator"}:
-                    values.setdefault(key, value)
+                    values.setdefault(key, value[:4096])
             link = values.get("link") or values.get("guid") or ""
+            link_url = ""
+            if link and len(link) <= 2048:
+                with contextlib.suppress(ValueError):
+                    link_url = _validated_http_url(urllib.parse.urljoin(feed_base, link))[:2048]
+            safe_enclosures = []
+            for enclosure in enclosures[:10]:
+                with contextlib.suppress(ValueError):
+                    safe_enclosures.append(_validated_http_url(urllib.parse.urljoin(feed_base, enclosure)))
             items.append({
-                "title": values.get("title", ""),
-                "link": link if link.startswith("http") else urllib.parse.urljoin(feed_url, link),
-                "pub_date": values.get("pubdate") or values.get("published") or values.get("updated"),
-                "author": values.get("author") or values.get("creator") or "",
+                "title": values.get("title", "")[:1000],
+                "link": link_url,
+                "pub_date": (values.get("pubdate") or values.get("published")
+                             or values.get("updated", ""))[:500],
+                "author": (values.get("author") or values.get("creator") or "")[:500],
                 "categories": categories[:15],
-                "enclosures": enclosures[:10],
+                "enclosures": safe_enclosures,
                 "description": _strip_tags(values.get("description") or values.get("summary")
                                            or values.get("content") or values.get("encoded", ""))[:4000],
             })
             if len(items) >= limit:
                 break
         return _ok({"feed_url": feed_url, "feed_title": channel_title,
-                    "count": len(items), "items": items})
+                    "count": len(items), "truncated": items_truncated, "items": items})
     except ET.ParseError as exc:
         return _error(f"rss_feed_parse failed: malformed XML ({exc})")
     except Exception as exc:
@@ -3754,17 +5207,17 @@ def whois_lookup(domain: str, timeout_seconds: int = 10) -> str:
         if "://" in host:
             host = urllib.parse.urlsplit(host).hostname or ""
         host = host.split("/", 1)[0].strip().strip(".")
-        if not host or not re.match(r"^[a-z0-9.\-]+$", host):
+        if not host or len(host) > 253 or not re.fullmatch(r"[a-z0-9.-]+", host):
             return _error("Invalid domain name")
         timeout = _bounded_int(timeout_seconds, 10, 1, 30)
 
         def query(server: str, request: str) -> str:
-            with socket.create_connection((server, 43), timeout=timeout) as sock:
+            with _create_pinned_socket(server, 43, timeout, allow_private=False) as sock:
                 sock.sendall((request + "\r\n").encode("utf-8"))
                 chunks = []
                 total = 0
                 while total < 256000:
-                    data = sock.recv(8192)
+                    data = sock.recv(min(8192, 256000 - total))
                     if not data:
                         break
                     chunks.append(data)
@@ -3799,18 +5252,22 @@ def port_check(host: str, ports: str = "80,443", timeout_seconds: int = 3) -> st
         if "://" in target:
             target = urllib.parse.urlsplit(target).hostname or ""
         target = target.strip("[]")
-        if not target:
-            return _error("host must be a non-empty string")
+        if not target or len(target) > 253:
+            return _error("host must be a hostname or IP address no longer than 253 characters")
         if not ALLOW_PRIVATE_NETWORKS and _host_is_private(target):
             return _error("Scanning private, loopback or unresolvable hosts is blocked")
+        ports_spec = str(ports or "")
+        if len(ports_spec) > 1000:
+            return _error("ports is too long (maximum 1,000 characters)")
         wanted = []
-        for chunk in re.split(r"[,\s]+", str(ports or "")):
-            if not chunk:
+        for chunk in re.split(r"[,\s]+", ports_spec):
+            if not chunk or len(wanted) >= 64:
                 continue
             if "-" in chunk:
                 low, _, high = chunk.partition("-")
                 with contextlib.suppress(ValueError):
-                    wanted.extend(range(int(low), min(int(high), int(low) + 64) + 1))
+                    start_port, end_port = int(low), int(high)
+                    wanted.extend(range(start_port, min(end_port, start_port + 63) + 1))
             else:
                 with contextlib.suppress(ValueError):
                     wanted.append(int(chunk))
@@ -3822,7 +5279,7 @@ def port_check(host: str, ports: str = "80,443", timeout_seconds: int = 3) -> st
         def probe(port: int) -> Dict[str, Any]:
             started = time.time()
             try:
-                with socket.create_connection((target, port), timeout=timeout):
+                with _create_pinned_socket(target, port, timeout):
                     return {"port": port, "open": True,
                             "latency_ms": round((time.time() - started) * 1000, 2)}
             except Exception as exc:
@@ -3844,6 +5301,8 @@ def parse_html_document(html: str, base_url: str = "", max_chars: int = 64000) -
     try:
         max_chars = _bounded_int(max_chars, 64000, 256, MAX_TEXT_CHARS)
         details = _extract_html_details(html, base_url)
+        details["total_text_length"] = len(details["text"])
+        details["text_truncated"] = len(details["text"]) > max_chars
         details["text"] = details["text"][:max_chars]
         details["ok"] = True
         return _json_result(details)
@@ -3852,15 +5311,63 @@ def parse_html_document(html: str, base_url: str = "", max_chars: int = 64000) -
 
 
 def extract_structured_data(html: str, base_url: str = "") -> str:
-    """Pull JSON-LD, microdata-ish meta and OpenGraph/Twitter cards out of HTML."""
+    """Pull bounded JSON-LD, microdata-ish meta and OpenGraph/Twitter cards out of HTML."""
+    class JSONLDParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.values: List[Any] = []
+            self.parts: List[str] = []
+            self.script_chars = 0
+            self.total_chars = 0
+            self.capturing = False
+            self.truncated = False
+
+        def handle_starttag(self, tag, attrs):
+            if tag.lower() != "script" or self.capturing:
+                return
+            attributes = {str(key).lower(): (value or "") for key, value in attrs}
+            media_type = attributes.get("type", "").split(";", 1)[0].strip().lower()
+            if media_type != "application/ld+json":
+                return
+            if len(self.values) >= 100 or self.total_chars >= MAX_TEXT_CHARS * 8:
+                self.truncated = True
+                return
+            self.capturing = True
+            self.parts = []
+            self.script_chars = 0
+
+        def handle_data(self, data):
+            if not self.capturing:
+                return
+            per_script_left = max(0, MAX_TEXT_CHARS * 4 - self.script_chars)
+            total_left = max(0, MAX_TEXT_CHARS * 8 - self.total_chars - self.script_chars)
+            remaining = min(per_script_left, total_left)
+            if remaining:
+                self.parts.append(data[:remaining])
+                self.script_chars += min(len(data), remaining)
+            if len(data) > remaining:
+                self.truncated = True
+
+        def handle_endtag(self, tag):
+            if tag.lower() != "script" or not self.capturing:
+                return
+            raw = html_module.unescape("".join(self.parts)).strip()
+            self.total_chars += self.script_chars
+            try:
+                self.values.append(json.loads(raw))
+            except (json.JSONDecodeError, RecursionError, ValueError):
+                pass
+            self.parts = []
+            self.capturing = False
+
     try:
-        details = _extract_html_details(html, base_url)
-        json_ld = []
-        for match in re.finditer(r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-                                 str(html or ""), re.I | re.S):
-            raw = html_module.unescape(match.group(1)).strip()
-            with contextlib.suppress(json.JSONDecodeError):
-                json_ld.append(json.loads(raw))
+        source_full = str(html or "")
+        source = source_full[:MAX_HTML_BYTES]
+        details = _extract_html_details(source, base_url)
+        parser = JSONLDParser()
+        parser.feed(source)
+        parser.close()
+        json_ld_truncated = len(source_full) > MAX_HTML_BYTES or parser.truncated or parser.capturing
         meta = details["meta_tags"]
         return _ok({
             "title": details["title"],
@@ -3868,8 +5375,9 @@ def extract_structured_data(html: str, base_url: str = "") -> str:
             "description": details["description"],
             "open_graph": {k: v for k, v in meta.items() if k.startswith("og:")},
             "twitter_card": {k: v for k, v in meta.items() if k.startswith("twitter:")},
-            "json_ld": json_ld,
-            "json_ld_types": [d.get("@type") for d in json_ld if isinstance(d, dict)],
+            "json_ld": parser.values,
+            "json_ld_types": [d.get("@type") for d in parser.values if isinstance(d, dict)],
+            "json_ld_truncated": json_ld_truncated or details.get("input_truncated", False),
         })
     except Exception as exc:
         return _error(f"extract_structured_data failed: {exc}")
@@ -3878,38 +5386,67 @@ def extract_structured_data(html: str, base_url: str = "") -> str:
 def parse_html_tables(html: str, max_tables: int = 20, max_rows: int = 200) -> str:
     """Convert HTML <table> elements into header/row structures."""
     class TableParser(HTMLParser):
-        def __init__(self):
+        def __init__(self, table_limit, row_limit):
             super().__init__(convert_charrefs=True)
             self.tables: List[List[List[str]]] = []
             self.table: Optional[List[List[str]]] = None
             self.row: Optional[List[str]] = None
             self.cell: Optional[List[str]] = None
+            self.cell_chars = 0
+            self.table_limit = table_limit
+            self.row_limit = row_limit
+            self.total_rows = 0
+            self.total_cells = 0
+            self.truncated = False
             self.in_cell = False
 
         def handle_starttag(self, tag, attrs):
             tag = tag.lower()
             if tag == "table":
-                self.table = []
+                if len(self.tables) < self.table_limit:
+                    self.table = []
+                else:
+                    self.table = None
+                    self.truncated = True
             elif self.table is not None and tag == "tr":
-                self.row = []
+                if self.total_rows < 20000:
+                    self.row = []
+                    self.total_rows += 1
+                else:
+                    self.row = None
+                    self.truncated = True
             elif self.table is not None and tag in ("td", "th") and self.row is not None:
-                self.cell = []
-                self.in_cell = True
+                if self.total_cells < 100000:
+                    self.cell = []
+                    self.cell_chars = 0
+                    self.in_cell = True
+                    self.total_cells += 1
+                else:
+                    self.cell = None
+                    self.in_cell = False
+                    self.truncated = True
 
         def handle_data(self, data):
-            if self.in_cell and self.cell is not None:
+            if self.in_cell and self.cell is not None and self.cell_chars < 2000:
                 value = re.sub(r"\s+", " ", data).strip()
                 if value:
-                    self.cell.append(value)
+                    piece = value[:2000 - self.cell_chars]
+                    self.cell.append(piece)
+                    self.cell_chars += len(piece)
 
         def handle_endtag(self, tag):
             tag = tag.lower()
             if tag in ("td", "th") and self.in_cell and self.row is not None:
-                self.row.append(" ".join(self.cell or []))
+                if len(self.row) < 100:
+                    self.row.append(" ".join(self.cell or [])[:2000])
+                else:
+                    self.truncated = True
                 self.cell, self.in_cell = None, False
             elif tag == "tr" and self.table is not None and self.row is not None:
-                if self.row:
+                if self.row and len(self.table) < self.row_limit:
                     self.table.append(self.row)
+                elif self.row:
+                    self.truncated = True
                 self.row = None
             elif tag == "table" and self.table is not None:
                 if self.table:
@@ -3917,11 +5454,14 @@ def parse_html_tables(html: str, max_tables: int = 20, max_rows: int = 200) -> s
                 self.table = None
 
     try:
-        parser = TableParser()
-        parser.feed(str(html or "")[:MAX_HTTP_BYTES])
-        parser.close()
-        tables = parser.tables[:_bounded_int(max_tables, 20, 1, 100)]
+        table_limit = _bounded_int(max_tables, 20, 1, 100)
         row_limit = _bounded_int(max_rows, 200, 1, 5000)
+        parser = TableParser(table_limit, row_limit)
+        html_source = str(html or "")
+        input_truncated = len(html_source) > MAX_HTML_BYTES
+        parser.feed(html_source[:MAX_HTML_BYTES])
+        parser.close()
+        tables = parser.tables[:table_limit]
         out = []
         for table in tables:
             rows = table[:row_limit]
@@ -3930,46 +5470,61 @@ def parse_html_tables(html: str, max_tables: int = 20, max_rows: int = 200) -> s
             records = [dict(zip(headers, row)) for row in data_rows] if headers else []
             out.append({"headers": headers, "rows": data_rows, "row_count": len(data_rows),
                         "records": records[:row_limit]})
-        return _ok({"table_count": len(out), "tables": out})
+        return _ok({"table_count": len(out), "truncated": parser.truncated or input_truncated,
+                    "tables": out})
     except Exception as exc:
         return _error(f"parse_html_tables failed: {exc}")
 
 
 def extract_media_links(html: str, base_url: str = "", max_results: int = 500) -> str:
     """Collect image/audio/video/source URLs (src, data-src, srcset, poster) from HTML."""
+    limit = _bounded_int(max_results, 500, 1, MCP_MAX_LINKS)
+
     class MediaParser(HTMLParser):
         def __init__(self):
             super().__init__(convert_charrefs=True)
             self.items: List[Dict[str, str]] = []
+            self.truncated = False
+
+        def _add(self, item):
+            if len(self.items) < limit:
+                self.items.append(item)
+            else:
+                self.truncated = True
 
         def handle_starttag(self, tag, attrs):
             attrs_dict = {str(k).lower(): (v or "") for k, v in attrs}
             tag = tag.lower()
-            for key in ("src", "data-src", "data-original", "poster", "href" if tag == "source" else "src"):
+            candidate_attrs = ("src", "data-src", "data-original", "poster")
+            if tag == "source":
+                candidate_attrs += ("href",)
+            for key in candidate_attrs:
                 value = attrs_dict.get(key)
                 if value:
-                    self.items.append({"type": tag, "attribute": key, "url": value,
-                                       "alt": attrs_dict.get("alt", "")})
+                    self._add({"type": tag, "attribute": key, "url": value[:2048],
+                               "alt": attrs_dict.get("alt", "")[:500]})
             srcset = attrs_dict.get("srcset")
             if srcset:
                 for candidate in srcset.split(","):
                     url = candidate.strip().split(" ")[0]
                     if url:
-                        self.items.append({"type": tag, "attribute": "srcset", "url": url,
-                                           "alt": attrs_dict.get("alt", "")})
+                        self._add({"type": tag, "attribute": "srcset", "url": url[:2048],
+                                   "alt": attrs_dict.get("alt", "")[:500]})
 
         def handle_startendtag(self, tag, attrs):
             self.handle_starttag(tag, attrs)
 
     try:
         parser = MediaParser()
-        parser.feed(str(html or "")[:MAX_HTTP_BYTES])
+        html_source = str(html or "")
+        input_truncated = len(html_source) > MAX_HTML_BYTES
+        parser.feed(html_source[:MAX_HTML_BYTES])
         parser.close()
-        limit = _bounded_int(max_results, 500, 1, MCP_MAX_LINKS)
         out, seen = [], set()
         for item in parser.items:
-            absolute = urllib.parse.urljoin(base_url, item["url"])
-            if urllib.parse.urlsplit(absolute).scheme not in ("http", "https"):
+            try:
+                absolute = _validated_http_url(urllib.parse.urljoin(base_url, item["url"]))
+            except ValueError:
                 continue
             key = (item["type"], absolute)
             if key in seen:
@@ -3979,7 +5534,8 @@ def extract_media_links(html: str, base_url: str = "", max_results: int = 500) -
                         "extension": os.path.splitext(urllib.parse.urlsplit(absolute).path)[1].lower()})
             if len(out) >= limit:
                 break
-        return _ok({"count": len(out), "media": out})
+        return _ok({"count": len(out), "truncated": parser.truncated or input_truncated,
+                    "media": out})
     except Exception as exc:
         return _error(f"extract_media_links failed: {exc}")
 
@@ -3993,21 +5549,41 @@ def parse_robots_txt(text: str = "", user_agent: str = "*", url: str = "") -> st
             base = _assert_safe_remote(url)
             parts = urllib.parse.urlsplit(base)
             robots_url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, "/robots.txt", "", ""))
-            content = _fetch_url(robots_url)
-            source = robots_url
+            fetched = _http_fetch_retrying(robots_url, max_bytes=min(MAX_HTTP_BYTES, 1024 * 1024))
+            if fetched["truncated"]:
+                return _error("robots.txt exceeds the 1 MiB parsing limit")
+            content = fetched["text"]
+            source = fetched["url"]
         if not content.strip():
             return _error("Provide robots.txt content via text= or a site url=")
+        content_truncated = len(content) > 1024 * 1024
+        content = content[:1024 * 1024]
         groups: List[Dict[str, Any]] = []
         current: Optional[Dict[str, Any]] = None
         sitemaps: List[str] = []
-        for raw in content.splitlines():
-            line = raw.split("#", 1)[0].strip()
+        lines_seen = 0
+        lines_truncated = False
+        for raw in io.StringIO(content):
+            lines_seen += 1
+            if lines_seen > 5000:
+                lines_truncated = True
+                break
+            line = raw[:4096].split("#", 1)[0].strip()
             if not line or ":" not in line:
                 continue
             key, value = [x.strip() for x in line.split(":", 1)]
+            key, value = key[:64], value[:512]
             low = key.lower()
             if low == "sitemap":
-                sitemaps.append(value)
+                candidate = urllib.parse.urljoin(source, value) if source != "inline" else value
+                try:
+                    candidate = _validated_http_url(candidate)
+                except ValueError:
+                    continue
+                if len(sitemaps) < 100:
+                    sitemaps.append(candidate)
+                else:
+                    content_truncated = True
                 continue
             if low == "user-agent":
                 if current is None or current.get("directives"):
@@ -4016,7 +5592,8 @@ def parse_robots_txt(text: str = "", user_agent: str = "*", url: str = "") -> st
                 current["agents"].append(value)
             elif current is not None:
                 current["directives"].append({"directive": low, "value": value})
-        ua = str(user_agent or "*").lower()
+        user_agent = str(user_agent or "*")[:500]
+        ua = user_agent.lower()
         selected, matched_agents = [], []
         for group in groups:
             if any(a == "*" or a.lower() in ua or ua in a.lower() for a in group["agents"]):
@@ -4027,7 +5604,8 @@ def parse_robots_txt(text: str = "", user_agent: str = "*", url: str = "") -> st
                     "disallow": [d["value"] for d in selected if d["directive"] == "disallow"],
                     "allow": [d["value"] for d in selected if d["directive"] == "allow"],
                     "crawl_delay": next((d["value"] for d in selected if d["directive"] == "crawl-delay"), None),
-                    "sitemaps": sitemaps, "directives": selected})
+                    "sitemaps": sitemaps, "truncated": content_truncated or lines_truncated,
+                    "directives": selected})
     except Exception as exc:
         return _error(f"parse_robots_txt failed: {exc}")
 
@@ -4038,6 +5616,7 @@ def discover_feed_links(html: str = "", base_url: str = "", url: str = "") -> st
         def __init__(self):
             super().__init__(convert_charrefs=True)
             self.items: List[Dict[str, str]] = []
+            self.truncated = False
 
         def handle_starttag(self, tag, attrs):
             if tag.lower() != "link":
@@ -4047,25 +5626,41 @@ def discover_feed_links(html: str = "", base_url: str = "", url: str = "") -> st
             typ = a.get("type", "").lower()
             if "alternate" in rel and any(x in typ for x in ("rss", "atom", "json", "feed")):
                 if a.get("href"):
-                    self.items.append({"type": typ, "title": a.get("title", ""), "url": a["href"]})
+                    if len(self.items) < 100:
+                        self.items.append({"type": typ[:200], "title": a.get("title", "")[:500],
+                                           "url": a["href"][:2048]})
+                    else:
+                        self.truncated = True
 
         def handle_startendtag(self, tag, attrs):
             self.handle_starttag(tag, attrs)
 
     try:
         content = str(html or "")
+        fetch_truncated = False
         if not content.strip() and url:
-            result = _http_fetch_retrying(url, timeout=HTTP_TIMEOUT)
+            result = _http_fetch_retrying(url, timeout=HTTP_TIMEOUT,
+                                          max_bytes=min(MAX_HTTP_BYTES, MAX_HTML_BYTES))
             content = result["text"]
+            fetch_truncated = result["truncated"]
             base_url = base_url or result["url"]
         if not content.strip():
             return _error("Provide page markup via html= or a url= to fetch")
+        if base_url:
+            try:
+                base_url = _validated_http_url(str(base_url))
+            except ValueError:
+                base_url = ""
         parser = FeedParser()
-        parser.feed(content[:MAX_HTTP_BYTES])
+        parser.feed(content[:MAX_HTML_BYTES])
         parser.close()
         seen, feeds = set(), []
         for item in parser.items:
             absolute = urllib.parse.urljoin(base_url, item["url"])
+            try:
+                absolute = _validated_http_url(absolute)
+            except ValueError:
+                continue
             if absolute in seen:
                 continue
             seen.add(absolute)
@@ -4078,7 +5673,10 @@ def discover_feed_links(html: str = "", base_url: str = "", url: str = "") -> st
                     feeds.append({"type": "guess", "title": "conventional location", "url": candidate,
                                   "verified": False})
                     seen.add(candidate)
-        return _ok({"count": len(feeds), "feeds": feeds[:100]})
+        return _ok({"count": len(feeds[:100]),
+                    "truncated": (parser.truncated or len(feeds) > 100
+                                  or len(content) > MAX_HTML_BYTES or fetch_truncated),
+                    "feeds": feeds[:100]})
     except Exception as exc:
         return _error(f"discover_feed_links failed: {exc}")
 
@@ -4108,8 +5706,90 @@ def json_parse_validate(json_string: str, pretty: bool = False) -> str:
     return _json_result(info)
 
 
+def _parse_json_path(expression: str) -> List[Tuple[str, Any]]:
+    """Parse a small, strict JSON path grammar without silently skipping bad syntax."""
+    if len(expression) > 1024:
+        raise ValueError("path exceeds 1024 characters")
+    path = expression
+    index = 0
+    if path.startswith("$"):
+        index = 1
+        if index < len(path) and path[index] not in ".[":
+            raise ValueError("'$' must be followed by '.' or '['")
+    if index < len(path) and path[index] == ".":
+        index += 1
+    tokens: List[Tuple[str, Any]] = []
+    need_segment = True
+    while index < len(path):
+        char = path[index]
+        if char == ".":
+            if need_segment:
+                raise ValueError(f"empty path segment at position {index}")
+            need_segment = True
+            index += 1
+            if index >= len(path):
+                raise ValueError("path cannot end with '.'")
+            continue
+        if char == "[":
+            end = index + 1
+            in_string = False
+            escaped = False
+            while end < len(path):
+                current_char = path[end]
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif current_char == "\\":
+                        escaped = True
+                    elif current_char == '"':
+                        in_string = False
+                elif current_char == '"':
+                    in_string = True
+                elif current_char == "]":
+                    break
+                elif current_char == "[":
+                    raise ValueError(f"nested '[' at position {end}")
+                end += 1
+            if end >= len(path):
+                raise ValueError(f"unclosed '[' at position {index}")
+            content = path[index + 1:end]
+            if re.fullmatch(r"(?:0|[1-9][0-9]*)", content):
+                tokens.append(("index", int(content)))
+            elif content.startswith('"'):
+                try:
+                    key = json.loads(content)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"invalid quoted key at position {index}: {exc.msg}") from exc
+                if not isinstance(key, str):
+                    raise ValueError("bracketed object keys must be strings")
+                tokens.append(("key", key))
+            else:
+                raise ValueError(f"expected a non-negative index or JSON string key at position {index}")
+            index = end + 1
+            need_segment = False
+            continue
+        if char == "]":
+            raise ValueError(f"unexpected ']' at position {index}")
+        if not need_segment:
+            raise ValueError(f"expected '.' or '[' at position {index}")
+        end = index
+        while end < len(path) and path[end] not in ".[ ]":
+            if path[end] == "]":
+                break
+            end += 1
+        segment = path[index:end]
+        if not segment or any(ch.isspace() for ch in segment):
+            raise ValueError(f"invalid path segment at position {index}")
+        tokens.append(("segment", segment))
+        index = end
+        need_segment = False
+    if need_segment:
+        raise ValueError("path cannot end with an empty segment")
+    return tokens
+
+
 def json_query(json_string: str, path: str = "", default: str = "") -> str:
-    """Query JSON with a dotted path such as `items.0.name` or `users[2].email`."""
+    """Query JSON using dotted keys, numeric indices, or bracketed indices/quoted keys."""
     try:
         data = json.loads(json_string) if isinstance(json_string, str) else json_string
     except Exception as exc:
@@ -4117,19 +5797,27 @@ def json_query(json_string: str, path: str = "", default: str = "") -> str:
     expression = str(path or "").strip()
     if not expression or expression in (".", "$"):
         return _ok({"path": expression, "value": data})
-    tokens = re.findall(r"[^.\[\]]+|\[\d+\]", expression)
+    try:
+        tokens = _parse_json_path(expression)
+    except ValueError as exc:
+        return _error(f"Invalid JSON path: {exc}")
+
     current: Any = data
     walked: List[str] = []
-    for token in tokens:
-        key = token.strip("[]") if token.startswith("[") else token
+    for kind, value in tokens:
+        token = f"[{value}]" if kind == "index" else str(value)
         walked.append(token)
         try:
             if isinstance(current, dict):
+                key = str(value) if kind == "index" else value
                 if key not in current:
                     raise KeyError(key)
                 current = current[key]
             elif isinstance(current, (list, tuple)):
-                current = current[int(key)]
+                if kind == "key":
+                    raise TypeError("quoted object key cannot index an array")
+                array_index = value if kind == "index" else int(value)
+                current = current[array_index]
             else:
                 raise TypeError(f"cannot index {type(current).__name__}")
         except Exception as exc:
@@ -4140,34 +5828,220 @@ def json_query(json_string: str, path: str = "", default: str = "") -> str:
     return _ok({"path": expression, "type": type(current).__name__, "value": current})
 
 
+def _regex_has_nested_repeats(pattern: str) -> bool:
+    """Conservatively flag nested/ambiguous repeats and repeated identical atoms."""
+    # Three or more adjacent repetitions of the same simple atom can backtrack
+    # combinatorially even without parentheses (for example, a*a*a*a*b).
+    index = 0
+    last_atom = None
+    repeat_run = 0
+    while index < len(pattern):
+        start = index
+        char = pattern[index]
+        if char == "\\" and index + 1 < len(pattern):
+            index += 2
+        elif char == "[":
+            index += 1
+            escaped = False
+            while index < len(pattern):
+                current = pattern[index]
+                index += 1
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == "]":
+                    break
+        elif char in "()|":
+            last_atom, repeat_run = None, 0
+            index += 1
+            continue
+        else:
+            index += 1
+        atom = pattern[start:index]
+        if index < len(pattern) and pattern[index] in "*+?":
+            index += 1
+            if atom == last_atom:
+                repeat_run += 1
+            else:
+                last_atom, repeat_run = atom, 1
+            if repeat_run >= 3:
+                return True
+            if index < len(pattern) and pattern[index] == "?":
+                index += 1
+        elif index < len(pattern) and pattern[index] == "{":
+            quantifier = re.match(r"\{[0-9]+,\d*\}", pattern[index:])
+            if quantifier:
+                index += len(quantifier.group(0))
+                if atom == last_atom:
+                    repeat_run += 1
+                else:
+                    last_atom, repeat_run = atom, 1
+                if repeat_run >= 3:
+                    return True
+            else:
+                last_atom, repeat_run = None, 0
+        else:
+            last_atom, repeat_run = None, 0
+
+    stack = [{"quantifier": False, "alternation": False}]
+    in_class = False
+    escaped = False
+    last_group = None
+    previous = ""
+    for char in pattern:
+        if escaped:
+            escaped = False
+            last_group = None
+            previous = char
+            continue
+        if char == "\\":
+            escaped = True
+            previous = char
+            continue
+        if in_class:
+            if char == "]":
+                in_class = False
+            last_group = None
+            previous = char
+            continue
+        if char == "[":
+            in_class = True
+            last_group = None
+        elif char == "(":
+            stack.append({"quantifier": False, "alternation": False})
+            last_group = None
+        elif char == "|":
+            stack[-1]["alternation"] = True
+            last_group = None
+        elif char == ")" and len(stack) > 1:
+            last_group = stack.pop()
+            stack[-1]["quantifier"] |= last_group["quantifier"]
+            stack[-1]["alternation"] |= last_group["alternation"]
+        elif char in "*+?{" and not (char == "?" and previous == "("):
+            if last_group and (last_group["quantifier"] or last_group["alternation"]):
+                return True
+            stack[-1]["quantifier"] = True
+            last_group = None
+        else:
+            last_group = None
+        previous = char
+    return False
+
+
+_REGEX_WORKER = r'''\
+import io, itertools, json, re, sys
+request = json.loads(sys.stdin.read())
+try:
+    flags = 0
+    for flag in request["flags"]:
+        flags |= {"i": re.I, "m": re.M, "s": re.S, "x": re.X, "a": re.A, "u": re.U}[flag]
+    compiled = re.compile(request["pattern"], flags)
+    if request.get("line_mode"):
+        output = []
+        used = 0
+        truncated = False
+        output_limited = False
+        for line_number, line in enumerate(io.StringIO(request["text"]), 1):
+            if not compiled.search(line):
+                continue
+            if len(output) >= request["limit"]:
+                truncated = True
+                break
+            item = {"line_number": line_number,
+                    "content": line.strip()[:request.get("context_chars", 240)]}
+            serialized = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+            if used + len(serialized) > 300000:
+                truncated = output_limited = True
+                break
+            used += len(serialized)
+            output.append(item)
+        print(json.dumps({"count": len(output), "matches": output,
+                          "truncated": truncated, "output_limited": output_limited}, ensure_ascii=False))
+    else:
+        found = list(itertools.islice(compiled.finditer(request["text"]), request["limit"] + 1))
+        output = []
+        used = 0
+        output_limited = False
+        for match in found[:request["limit"]]:
+            item = {
+                "match": match.group(0)[:2000],
+                "start": match.start(),
+                "end": match.end(),
+                "groups": [None if value is None else value[:500] for value in match.groups()[:50]],
+                "named_groups": {key: None if value is None else value[:500]
+                                 for key, value in list(match.groupdict().items())[:50]},
+                "groups_truncated": len(match.groups()) > 50 or len(match.groupdict()) > 50,
+            }
+            serialized = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+            if used + len(serialized) > 300000:
+                output_limited = True
+                break
+            used += len(serialized)
+            output.append(item)
+        print(json.dumps({"count": len(output), "matches": output,
+                          "truncated": len(found) > request["limit"] or output_limited,
+                          "output_limited": output_limited}, ensure_ascii=False))
+except re.error as exc:
+    print(json.dumps({"error": str(exc)}))
+'''
+
+
+def _regex_worker_search(pattern: str, text: str, flags: str, limit: int,
+                         line_mode: bool = False, context_chars: int = 240,
+                         timeout: float = 2.0) -> Dict[str, Any]:
+    """Evaluate regex work out-of-process with CPU, memory, time and output limits."""
+    clean_env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "PYTHONHASHSEED": "0",
+                 "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}
+    request = {"pattern": pattern, "text": text, "flags": flags, "limit": limit,
+               "line_mode": line_mode, "context_chars": context_chars}
+    proc = _run_subprocess(
+        [sys.executable or "python3", "-I", "-S", "-c", _REGEX_WORKER],
+        timeout=timeout, cwd=tempfile.gettempdir(), env=clean_env,
+        cpu_seconds=max(1, int(timeout)), address_space_mb=256,
+        file_size_mb=1, max_output_bytes=500000,
+        stdin_text=json.dumps(request, ensure_ascii=False),
+    )
+    if proc["exit_code"] != 0:
+        raise RuntimeError(f"Regex worker exited abnormally ({proc['exit_code']}): {proc['stderr'][-1000:]}")
+    try:
+        result = json.loads(proc["stdout"])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Regex worker returned an invalid or oversized result") from exc
+    if not isinstance(result, dict):
+        raise RuntimeError("Regex worker returned a non-object result")
+    return result
+
+
 def regex_search(pattern: str, text: str, flags: str = "", max_matches: int = 200) -> str:
-    """Run a regex over text and return matches, groups and positions."""
+    """Run a regex in a resource-limited worker and return matches, groups and spans."""
     try:
         if not isinstance(pattern, str) or not pattern:
             return _error("pattern must be a non-empty string")
         if len(pattern) > 2000:
             return _error("pattern is too long (max 2000 chars)")
-        flag_value = 0
-        for char in str(flags or "").lower():
-            flag_value |= {"i": re.I, "m": re.M, "s": re.S, "x": re.X, "a": re.A, "u": re.U}.get(char, 0)
-        try:
-            compiled = re.compile(pattern, flag_value)
-        except re.error as exc:
-            return _error(f"Invalid regular expression: {exc}")
+        flag_map = {"i": re.I, "m": re.M, "s": re.S, "x": re.X, "a": re.A, "u": re.U}
+        normalized_flags = str(flags or "").lower()
+        for char in normalized_flags:
+            if char not in flag_map:
+                return _error(f"Unsupported regex flag '{char}'", supported=sorted(flag_map))
+        if _regex_has_nested_repeats(pattern):
+            return _error("Pattern contains nested/ambiguous repetitions that may cause excessive backtracking")
+        content = str(text or "")
+        if len(content) > MAX_TEXT_CHARS:
+            return _error(f"text exceeds the {MAX_TEXT_CHARS} character search limit")
         limit = _bounded_int(max_matches, 200, 1, 5000)
-        matches = []
-        for match in itertools.islice(compiled.finditer(str(text or "")), limit):
-            matches.append({
-                "match": match.group(0)[:2000],
-                "start": match.start(),
-                "end": match.end(),
-                "groups": [g if g is None else g[:1000] for g in match.groups()],
-                "named_groups": {k: (v if v is None else v[:1000]) for k, v in match.groupdict().items()},
-            })
-        return _ok({"pattern": pattern, "flags": flags, "count": len(matches),
-                    "truncated": len(matches) >= limit, "matches": matches})
+        result = _regex_worker_search(pattern, content, normalized_flags, limit, timeout=2)
+        if result.get("error"):
+            return _error(f"Invalid regular expression: {result['error']}")
+        return _ok({"pattern": pattern, "flags": normalized_flags,
+                    "count": result.get("count", 0), "truncated": result.get("truncated", False),
+                    "output_limited": result.get("output_limited", False),
+                    "matches": result.get("matches", [])})
+    except subprocess.TimeoutExpired:
+        return _error("Regex evaluation exceeded its 2 second time limit")
     except Exception as exc:
-        return _error(str(exc))
+        return _error(f"regex_search failed: {exc}")
 
 
 def base64_encode_decode(text: str, mode: str = "encode", url_safe: bool = False) -> str:
@@ -4177,12 +6051,23 @@ def base64_encode_decode(text: str, mode: str = "encode", url_safe: bool = False
         url_safe = _to_bool(url_safe, False)
         if mode.startswith("enc"):
             raw = str(text).encode("utf-8")
+            if len(raw) > MAX_TEXT_CHARS * 4:
+                return _error("text exceeds the configured base64 conversion limit")
             encoded = (base64.urlsafe_b64encode if url_safe else base64.b64encode)(raw).decode("ascii")
+            if len(encoded) > MAX_TEXT_CHARS * 4:
+                return _error("encoded output exceeds the configured base64 conversion limit")
             return _ok({"mode": "encode", "result": encoded, "input_bytes": len(raw)})
+        if not (mode.startswith("dec") or mode == "decode"):
+            return _error("mode must be 'encode' or 'decode'")
         payload = str(text).strip()
+        if len(payload) > MAX_TEXT_CHARS * 4:
+            return _error("base64 input exceeds the configured conversion limit")
         payload += "=" * (-len(payload) % 4)
-        decoder = base64.urlsafe_b64decode if (url_safe or "-" in payload or "_" in payload) else base64.b64decode
-        raw = decoder(payload.encode("ascii"))
+        raw = base64.b64decode(payload.encode("ascii"),
+                                altchars=b"-_" if (url_safe or "-" in payload or "_" in payload) else None,
+                                validate=True)
+        if len(raw) > MAX_TEXT_CHARS * 2:
+            return _error("decoded output exceeds the configured base64 conversion limit")
         try:
             decoded = raw.decode("utf-8")
             binary = False
@@ -4200,10 +6085,18 @@ def url_encode_decode(text: str, mode: str = "encode", component: bool = True) -
     """Percent-encode or decode a URL or query component."""
     try:
         mode = str(mode or "encode").lower().strip()
+        text = str(text)
+        if len(text.encode("utf-8")) > MAX_TEXT_CHARS * 4:
+            return _error("text exceeds the configured URL conversion limit")
         if mode.startswith("enc"):
             safe = "" if _to_bool(component, True) else "/:?#[]@!$&'()*+,;="
-            return _ok({"mode": "encode", "result": urllib.parse.quote(str(text), safe=safe)})
-        return _ok({"mode": "decode", "result": urllib.parse.unquote_plus(str(text))})
+            encoded = urllib.parse.quote(text, safe=safe)
+            if len(encoded) > MAX_TEXT_CHARS * 4:
+                return _error("encoded output exceeds the configured URL conversion limit")
+            return _ok({"mode": "encode", "result": encoded})
+        if mode.startswith("dec") or mode == "decode":
+            return _ok({"mode": "decode", "result": urllib.parse.unquote_plus(text)})
+        return _error("mode must be 'encode' or 'decode'")
     except Exception as exc:
         return _error(f"url_encode_decode failed: {exc}")
 
@@ -4233,6 +6126,8 @@ def uuid_generate(version: int = 4, count: int = 1, namespace_name: str = "") ->
     """Generate UUIDs (v1, v4, or v5 with a DNS namespace name)."""
     try:
         version = _bounded_int(version, 4, 1, 5)
+        if version not in (1, 4, 5):
+            return _error("version must be one of 1, 4 or 5", supported=[1, 4, 5])
         count = _bounded_int(count, 1, 1, 100)
         values = []
         for _ in range(count):
@@ -4255,6 +6150,9 @@ def random_string(length: int = 32, charset: str = "alphanumeric", count: int = 
         import secrets
         length = _bounded_int(length, 32, 1, 4096)
         count = _bounded_int(count, 1, 1, 100)
+        charset = str(charset or "alphanumeric")
+        if len(charset) > 4096:
+            return _error("custom charset exceeds 4,096 characters")
         alphabets = {
             "alphanumeric": string.ascii_letters + string.digits,
             "alpha": string.ascii_letters,
@@ -4279,18 +6177,22 @@ def current_datetime(timezone_offset_hours: float = 0.0, format: str = "") -> st
     """Current date/time in UTC, local time and epoch seconds."""
     try:
         now_utc = _dt.datetime.now(_dt.timezone.utc)
-        offset = _dt.timezone(_dt.timedelta(hours=max(-14.0, min(float(timezone_offset_hours or 0), 14.0))))
+        requested_offset = float(timezone_offset_hours or 0)
+        if not math.isfinite(requested_offset):
+            return _error("timezone_offset_hours must be a finite number")
+        offset_hours = max(-14.0, min(requested_offset, 14.0))
+        offset = _dt.timezone(_dt.timedelta(hours=offset_hours))
         shifted = now_utc.astimezone(offset)
         payload = {
-            "epoch_seconds": time.time(),
-            "epoch_ms": int(time.time() * 1000),
+            "epoch_seconds": now_utc.timestamp(),
+            "epoch_ms": int(now_utc.timestamp() * 1000),
             "utc_iso": now_utc.isoformat(),
             "local_iso": _dt.datetime.now().astimezone().isoformat(),
             "offset_iso": shifted.isoformat(),
             "utc_date": now_utc.strftime("%Y-%m-%d"),
             "weekday": now_utc.strftime("%A"),
             "week_number": now_utc.isocalendar()[1],
-            "timezone_offset_hours": float(timezone_offset_hours or 0),
+            "timezone_offset_hours": offset_hours,
         }
         if format:
             with contextlib.suppress(Exception):
@@ -4336,7 +6238,9 @@ def timestamp_convert(value: str, to_format: str = "iso") -> str:
             "age_seconds": round(time.time() - dt_value.timestamp(), 3),
         }
         fmt = str(to_format or "iso").lower()
-        result["result"] = result.get(fmt, result["iso"])
+        if fmt not in {"iso", "epoch_seconds", "epoch_ms", "utc", "human"}:
+            return _error("to_format must be one of iso, epoch_seconds, epoch_ms, utc or human")
+        result["result"] = result[fmt]
         return _ok(result)
     except Exception as exc:
         return _error(f"timestamp_convert failed: {exc}")
@@ -4345,16 +6249,24 @@ def timestamp_convert(value: str, to_format: str = "iso") -> str:
 def jwt_decode(token: str) -> str:
     """Decode a JWT's header and payload (signature is NOT verified)."""
     try:
-        parts = str(token or "").strip().split(".")
-        if len(parts) < 2:
-            return _error("Not a JWT: expected at least header.payload")
+        token_text = str(token or "").strip()
+        if len(token_text) > MAX_TEXT_CHARS * 4:
+            return _error("JWT exceeds the configured decode limit")
+        if token_text.count(".") != 2:
+            return _error("Not a JWT: expected exactly three header.payload.signature segments")
+        parts = token_text.split(".", 2)
 
         def decode_part(segment: str) -> Any:
+            if not re.fullmatch(r"[A-Za-z0-9_-]*={0,2}", segment) or "=" in segment.rstrip("="):
+                raise ValueError("JWT segment is not valid base64url")
             padded = segment + "=" * (-len(segment) % 4)
-            return json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+            raw = base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True)
+            return json.loads(raw.decode("utf-8"))
 
         header = decode_part(parts[0])
         payload = decode_part(parts[1])
+        if not isinstance(header, dict) or not isinstance(payload, dict):
+            return _error("JWT header and payload must be JSON objects")
         info: Dict[str, Any] = {"header": header, "payload": payload,
                                 "signature_present": len(parts) > 2 and bool(parts[2]),
                                 "signature_verified": False}
@@ -4376,20 +6288,36 @@ def csv_to_json(csv_text: str = "", filepath: str = "", delimiter: str = ",",
     try:
         text = str(csv_text or "")
         if filepath:
-            with open(_safe_path(filepath, must_exist=True), "r", encoding="utf-8", errors="replace") as f:
-                text = f.read()
+            source_path = _safe_path(filepath, must_exist=True)
+            request_limit = _bounded_int(MCP_MAX_REQUEST_BYTES, 2 * 1024 * 1024,
+                                         1024, 32 * 1024 * 1024)
+            if os.path.getsize(source_path) > request_limit:
+                return _error(f"CSV file exceeds the {request_limit} byte input limit")
+            with open(source_path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read(request_limit + 1)
+        request_limit = _bounded_int(MCP_MAX_REQUEST_BYTES, 2 * 1024 * 1024,
+                                     1024, 32 * 1024 * 1024)
+        if len(text.encode("utf-8")) > request_limit:
+            return _error(f"CSV input exceeds the {request_limit} byte limit")
         if not text.strip():
             return _error("Provide csv_text= or filepath=")
-        limit = _bounded_int(max_rows, 5000, 1, 100000)
+        limit = _bounded_int(max_rows, 5000, 1, 10000)
         sep = (delimiter or ",")[:1]
         if sep == "\\":
             sep = "\t"
         with contextlib.suppress(Exception):
             sep = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|").delimiter if not delimiter else sep
+        if text.count(sep) > 10000:
+            return _error("CSV contains too many fields to parse safely (maximum 10,000 delimiters)")
         reader = csv.DictReader(io.StringIO(text), delimiter=sep)
-        rows = [dict(row) for row in itertools.islice(reader, limit)]
+        fieldnames = reader.fieldnames or []
+        if len(fieldnames) > 1000:
+            return _error("CSV contains too many columns (maximum 1,000)")
+        sampled = [dict(row) for row in itertools.islice(reader, limit + 1)]
+        truncated = len(sampled) > limit
+        rows = sampled[:limit]
         return _ok({"delimiter": sep, "columns": reader.fieldnames or [], "row_count": len(rows),
-                    "truncated": len(rows) >= limit, "rows": rows})
+                    "truncated": truncated, "rows": rows})
     except Exception as exc:
         return _error(f"csv_to_json failed: {exc}")
 
@@ -4405,54 +6333,115 @@ def json_to_csv(json_string: str, delimiter: str = ",", filepath: str = "") -> s
                     break
         if not isinstance(data, list) or not data:
             return _error("Expected a non-empty JSON array of objects")
+        if len(data) > 10000:
+            return _error("JSON array exceeds the 10,000 row conversion limit")
         rows = [row if isinstance(row, dict) else {"value": row} for row in data]
         columns: List[str] = []
+        column_set = set()
         for row in rows:
             for key in row:
-                if key not in columns:
+                if key not in column_set:
+                    column_set.add(key)
                     columns.append(key)
+                    if len(columns) > 1000:
+                        return _error("JSON rows exceed the 1,000 column conversion limit")
         buffer = io.StringIO()
         writer = csv.DictWriter(buffer, fieldnames=columns, delimiter=(delimiter or ",")[:1],
                                 extrasaction="ignore")
         writer.writeheader()
+        output_limit = _bounded_int(MCP_MAX_REQUEST_BYTES, 2 * 1024 * 1024,
+                                    1024, 32 * 1024 * 1024)
         for row in rows:
             writer.writerow({k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
                              for k, v in row.items()})
+            if buffer.tell() > output_limit:
+                return _error(f"CSV output exceeds the {output_limit} character limit")
         csv_text = buffer.getvalue()
+        if len(csv_text.encode("utf-8")) > output_limit:
+            return _error(f"CSV output exceeds the {output_limit} byte limit")
         saved = ""
         if filepath:
             saved = _safe_path(filepath)
             _atomic_write(saved, csv_text)
         return _ok({"columns": columns, "row_count": len(rows), "saved_to": saved,
+                    "truncated": len(csv_text) > MAX_TEXT_CHARS,
                     "csv": csv_text[:MAX_TEXT_CHARS]})
     except Exception as exc:
         return _error(f"json_to_csv failed: {exc}")
 
 
+def _validate_yaml_tree(value: Any, max_nodes: int = 20000,
+                        max_chars: int = 1024 * 1024, max_depth: int = 64) -> None:
+    """Reject cyclic or excessively expanded YAML aliases before JSON serialization."""
+    stack = [(value, 0, False)]
+    active = set()
+    nodes = 0
+    chars = 0
+    while stack:
+        current, depth, exiting = stack.pop()
+        if exiting:
+            active.discard(id(current))
+            continue
+        nodes += 1
+        if nodes > max_nodes:
+            raise ValueError(f"YAML document exceeds the {max_nodes} node expansion limit")
+        if depth > max_depth:
+            raise ValueError(f"YAML document exceeds the {max_depth} level nesting limit")
+        if isinstance(current, (dict, list, tuple)):
+            identity = id(current)
+            if identity in active:
+                raise ValueError("Cyclic YAML aliases cannot be converted to JSON")
+            active.add(identity)
+            stack.append((current, depth, True))
+            if len(current) > max_nodes:
+                raise ValueError(f"YAML collection exceeds the {max_nodes} item limit")
+            if isinstance(current, dict):
+                for key, item in current.items():
+                    stack.append((key, depth + 1, False))
+                    stack.append((item, depth + 1, False))
+            else:
+                stack.extend((item, depth + 1, False) for item in current)
+        else:
+            chars += len(current) if isinstance(current, str) else len(str(current))
+            if chars > max_chars:
+                raise ValueError(f"YAML scalar data exceeds the {max_chars} character limit")
+
+
 def yaml_json_convert(text: str, direction: str = "yaml_to_json") -> str:
-    """Convert YAML to JSON or JSON to YAML (requires PyYAML)."""
+    """Convert bounded YAML to JSON or JSON to YAML (requires PyYAML)."""
     try:
         if not HAS_YAML:
             return _error("PyYAML is not installed (pip install pyyaml)")
         direction = str(direction or "yaml_to_json").lower()
         if direction.startswith("yaml"):
             data = _yaml.safe_load(str(text))
-            return _ok({"direction": "yaml_to_json", "data": data,
-                        "json": json.dumps(data, indent=2, ensure_ascii=False, default=_json_default)})
+            _validate_yaml_tree(data)
+            json_text = json.dumps(data, indent=2, ensure_ascii=False, default=_json_default)
+            if len(json_text.encode("utf-8")) > 2 * 1024 * 1024:
+                return _error("JSON output exceeds the 2 MiB conversion limit")
+            return _ok({"direction": "yaml_to_json", "data": data, "json": json_text})
         data = json.loads(text) if isinstance(text, str) else text
-        return _ok({"direction": "json_to_yaml",
-                    "yaml": _yaml.safe_dump(data, sort_keys=False, allow_unicode=True)})
+        yaml_text = _yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+        if len(yaml_text.encode("utf-8")) > 2 * 1024 * 1024:
+            return _error("YAML output exceeds the 2 MiB conversion limit")
+        return _ok({"direction": "json_to_yaml", "yaml": yaml_text})
     except Exception as exc:
         return _error(f"yaml_json_convert failed: {exc}")
 
 
 def text_diff_compare(text1: str, text2: str, context_lines: int = 3, mode: str = "unified") -> str:
-    """Diff two strings (unified, context, or HTML-free ndiff) with a similarity score."""
+    """Diff bounded strings (unified, context, or HTML-free ndiff) with a similarity score."""
     try:
-        lines1 = str(text1 or "").splitlines(keepends=True)
-        lines2 = str(text2 or "").splitlines(keepends=True)
+        left, right = str(text1 or ""), str(text2 or "")
+        diff_input_limit = min(MAX_TEXT_CHARS * 4, 256 * 1024)
+        if len(left) + len(right) > diff_input_limit:
+            return _error(f"Combined diff input exceeds {diff_input_limit} characters")
+        lines1 = left.splitlines(keepends=True)
+        lines2 = right.splitlines(keepends=True)
         context = _bounded_int(context_lines, 3, 0, 50)
         mode = str(mode or "unified").lower()
+        if mode not in {"unified", "context", "ndiff"}:
+            return _error("mode must be 'unified', 'context' or 'ndiff'")
         if mode == "ndiff":
             diff = list(difflib.ndiff(lines1, lines2))
         elif mode == "context":
@@ -4461,10 +6450,12 @@ def text_diff_compare(text1: str, text2: str, context_lines: int = 3, mode: str 
             diff = list(difflib.unified_diff(lines1, lines2, "text1", "text2", n=context))
         added = sum(1 for d in diff if d.startswith("+") and not d.startswith("+++"))
         removed = sum(1 for d in diff if d.startswith("-") and not d.startswith("---"))
-        ratio = difflib.SequenceMatcher(None, str(text1 or ""), str(text2 or "")).ratio()
-        return _ok({"mode": mode, "identical": text1 == text2, "similarity": round(ratio, 4),
+        ratio = difflib.SequenceMatcher(None, left, right).ratio()
+        diff_text = "".join(diff)
+        return _ok({"mode": mode, "identical": left == right, "similarity": round(ratio, 4),
                     "lines_added": added, "lines_removed": removed,
-                    "diff_lines_count": len(diff), "diff": "".join(diff)[:MAX_TEXT_CHARS]})
+                    "diff_lines_count": len(diff), "truncated": len(diff_text) > MAX_TEXT_CHARS,
+                    "diff": diff_text[:MAX_TEXT_CHARS]})
     except Exception as exc:
         return _error(f"text_diff_compare failed: {exc}")
 
@@ -4473,6 +6464,8 @@ def text_stats(text: str, top_words: int = 15) -> str:
     """Word/character counts, reading time, and keyword frequency for a text."""
     try:
         content = str(text or "")
+        if len(content) > 1024 * 1024:
+            return _error("text exceeds the 1 MiB analysis limit")
         if not content.strip():
             return _error("text must be a non-empty string")
         words = re.findall(r"[A-Za-z0-9'\-]+", content)
@@ -4508,6 +6501,8 @@ def text_summarize(text: str, max_sentences: int = 5, query: str = "") -> str:
     """Extractive summary of a text, optionally biased toward a query."""
     try:
         content = str(text or "")
+        if len(content) > 1024 * 1024:
+            return _error("text exceeds the 1 MiB summarization limit")
         if len(content.strip()) < 40:
             return _error("text is too short to summarise")
         sentences = _bounded_int(max_sentences, 5, 1, 30)
@@ -4523,7 +6518,10 @@ def parse_url(url: str) -> str:
     """Break a URL into its components and decode its query string."""
     try:
         parsed = urllib.parse.urlsplit(str(url))
-        query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True, max_num_fields=2000)
+        query_dict: Dict[str, List[str]] = {}
+        for key, value in query_pairs:
+            query_dict.setdefault(key, []).append(value)
         return _ok({
             "url": url,
             "scheme": parsed.scheme,
@@ -4533,7 +6531,7 @@ def parse_url(url: str) -> str:
             "path": parsed.path,
             "path_segments": [s for s in parsed.path.split("/") if s],
             "query": parsed.query,
-            "query_dict": urllib.parse.parse_qs(parsed.query),
+            "query_dict": query_dict,
             "query_pairs": query_pairs,
             "fragment": parsed.fragment,
             "normalized": _normalize_url_for_dedupe(str(url)),
@@ -4547,8 +6545,25 @@ def parse_url(url: str) -> str:
 # Git Tools
 # ---------------------------------------------------------------------------
 def _git(args: List[str], cwd: str, timeout: int = 15) -> subprocess.CompletedProcess:
-    return subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True,
-                          timeout=timeout, shell=False)
+    """Run read-only Git inspection with config, paging, external tools and output bounded."""
+    git_args = list(args)
+    if git_args and git_args[0] == "diff":
+        git_args[1:1] = ["--no-ext-diff", "--no-textconv"]
+    env = {"PATH": os.getenv("PATH", "/usr/bin:/bin"), "HOME": SANDBOX_ROOT,
+           "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+           "GIT_TERMINAL_PROMPT": "0", "GIT_PAGER": "cat", "PAGER": "cat",
+           "GIT_OPTIONAL_LOCKS": "0"}
+    command = ["git", "--no-pager", "-c", "core.fsmonitor=false",
+               "-c", "core.pager=cat"] + git_args
+    result = _run_subprocess(command, timeout=timeout, cwd=cwd, env=env,
+                             cpu_seconds=timeout + 5, max_output_bytes=1_000_000,
+                             stdout_mode="head")
+    completed = subprocess.CompletedProcess(command, result["exit_code"],
+                                            result["stdout"], result["stderr"])
+    completed.stdout_truncated = result["stdout_truncated"]
+    completed.stderr_truncated = result["stderr_truncated"]
+    return completed
 
 
 def git_status(directory: str = ".") -> str:
@@ -4564,8 +6579,8 @@ def git_status(directory: str = ".") -> str:
         branch = lines[0][3:] if lines and lines[0].startswith("##") else ""
         entries = [{"status": line[:2].strip(), "path": line[3:]} for line in lines[1:]]
         return _ok({"directory": target, "branch": branch, "dirty": bool(entries),
-                    "change_count": len(entries), "changes": entries,
-                    "status": [f"{e['status']} {e['path']}" for e in entries]})
+                    "change_count": len(entries), "truncated": getattr(res, "stdout_truncated", False),
+                    "changes": entries, "status": [f"{e['status']} {e['path']}" for e in entries]})
     except Exception as exc:
         return _error(str(exc))
 
@@ -4585,7 +6600,8 @@ def git_diff(directory: str = ".", staged: bool = False, max_chars: int = 20000)
         stat = _git(args + ["--stat"], target, timeout=30).stdout
         limit = _bounded_int(max_chars, 20000, 500, MAX_TEXT_CHARS)
         return _ok({"directory": target, "staged": _to_bool(staged, False),
-                    "stat": stat.strip()[:5000], "truncated": len(res.stdout) > limit,
+                    "stat": stat.strip()[:5000],
+                    "truncated": getattr(res, "stdout_truncated", False) or len(res.stdout) > limit,
                     "diff": res.stdout[:limit]})
     except Exception as exc:
         return _error(f"git_diff failed: {exc}")
@@ -4614,7 +6630,8 @@ def git_log(directory: str = ".", max_entries: int = 20, path_filter: str = "") 
             if len(fields) >= 6:
                 commits.append({"hash": fields[0], "short": fields[1], "author": fields[2],
                                 "email": fields[3], "date": fields[4], "subject": fields[5]})
-        return _ok({"directory": target, "count": len(commits), "commits": commits})
+        return _ok({"directory": target, "count": len(commits),
+                    "truncated": getattr(res, "stdout_truncated", False), "commits": commits})
     except Exception as exc:
         return _error(f"git_log failed: {exc}")
 
@@ -4631,6 +6648,9 @@ def get_environment_variable(name: str = "", reveal_secrets: bool = False) -> st
     """Read environment variables; secret-looking values are redacted by default."""
     try:
         reveal = _to_bool(reveal_secrets, False) and ENABLE_DANGEROUS
+        name = str(name or "").strip()
+        if len(name) > 255:
+            return _error("Environment variable name exceeds the 255 character limit")
         if name:
             if not reveal and _is_secret_env(name):
                 value = os.getenv(name)
@@ -4652,19 +6672,27 @@ def get_environment_variable(name: str = "", reveal_secrets: bool = False) -> st
 
 
 def set_environment_variable(name: str, value: str) -> str:
-    """Set an environment variable for this server process (protected names blocked)."""
+    """Set a non-sensitive process variable only when dangerous tools are enabled."""
     try:
+        if not ENABLE_DANGEROUS:
+            return _error("Environment mutation is disabled. Set MCP_ENABLE_DANGEROUS=true to enable it.")
         key = str(name or "").strip()
-        if not key or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+        if len(key) > 255 or not key or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
             return _error("name must be a valid environment variable identifier")
-        if key.upper() in _PROTECTED_ENV:
-            return _error(f"'{key}' is protected: changing it could enable code execution",
-                          protected=sorted(_PROTECTED_ENV))
-        if key.upper().startswith("MCP_"):
+        upper = key.upper()
+        if upper in _PROTECTED_ENV or upper.startswith(_PROTECTED_ENV_PREFIXES):
+            return _error(f"'{key}' is protected: changing it could alter subprocess or network behavior",
+                          protected=sorted(_PROTECTED_ENV), protected_prefixes=list(_PROTECTED_ENV_PREFIXES))
+        if upper.startswith("MCP_"):
             return _error("MCP_* server configuration variables cannot be changed at runtime")
-        os.environ[key] = str(value)
+        text = str(value)
+        if "\x00" in text:
+            return _error("environment variable values cannot contain null bytes")
+        if len(text.encode("utf-8")) > min(MCP_MAX_REQUEST_BYTES, 100000):
+            return _error("environment variable value exceeds the 100,000 byte process limit")
+        os.environ[key] = text
         return _ok({"status": "success", "name": key,
-                    "value": "<redacted>" if _is_secret_env(key) else str(value)})
+                    "value": "<redacted>" if _is_secret_env(key) else text})
     except Exception as exc:
         return _error(str(exc))
 
@@ -4773,9 +6801,10 @@ def cache_stats() -> str:
             entries = len(_response_cache)
             now = time.time()
             ttl_remaining = sorted(round(expires - now, 1) for expires, _ in _response_cache.values())
-            approx_bytes = sum(len(repr(value)) for _, value in _response_cache.values())
+            approx_bytes = _cache_size_bytes
         lookups = counters["hits"] + counters["misses"]
-        return _ok({"entries": entries, "max_entries": CACHE_MAX_ENTRIES, **counters,
+        return _ok({"entries": entries, "max_entries": CACHE_MAX_ENTRIES,
+                    "max_bytes": CACHE_MAX_BYTES, **counters,
                     "hit_rate": round(counters["hits"] / lookups, 4) if lookups else None,
                     "approx_bytes": approx_bytes,
                     "ttl_remaining_seconds": ttl_remaining[:50],
@@ -5077,7 +7106,8 @@ TOOL_SCHEMAS: Dict[str, Dict[str, str]] = {
                   "ignore": "str=.git,__pycache__,node_modules,.venv", "max_entries": "int=1000"},
     "disk_usage": {"path": "str=.", "top_n": "int=15"},
     "compress_decompress_archive": {"archive_path": "str", "action": "str=extract",
-                                    "target_directory": "str=.", "format": "str="},
+                                    "target_directory": "str=.", "format": "str=",
+                                    "max_entries": "int=5000", "max_unpacked_bytes": "int=268435456"},
     "archive_list": {"archive_path": "str", "max_entries": "int=500"},
     "apply_patch": {"filepath": "str", "patch": "str", "mode": "str=auto"},
     # --- execution ---
@@ -5206,17 +7236,14 @@ def _build_mcp_input_schema(tschema: dict) -> dict:
 
 
 def _coerce_args(tool_name: str, args: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
-    """Validate/coerce client arguments against TOOL_SCHEMAS before invoking a tool.
-
-    MCP clients frequently send "true"/"5" strings; v3.8 passed them straight through
-    (and blew up with a TypeError on unknown keys). Now they are coerced, and unknown
-    keys are reported instead of crashing the handler.
-    """
+    """Validate and coerce one JSON object against the registered tool schema."""
     schema = TOOL_SCHEMAS.get(tool_name, {})
     cleaned: Dict[str, Any] = {}
     problems: List[str] = []
-    for key, value in (args or {}).items():
-        if key not in schema:
+    if not isinstance(args, dict):
+        return cleaned, ["arguments must be a JSON object"]
+    for key, value in args.items():
+        if not isinstance(key, str) or key not in schema:
             close = difflib.get_close_matches(str(key), list(schema), n=1, cutoff=0.6)
             problems.append(f"unknown parameter '{key}'" + (f" (did you mean '{close[0]}'?)" if close else ""))
             continue
@@ -5226,17 +7253,40 @@ def _coerce_args(tool_name: str, args: Dict[str, Any]) -> Tuple[Dict[str, Any], 
             continue
         try:
             if param_type == "int":
-                cleaned[key] = int(float(value)) if not isinstance(value, bool) else int(value)
+                if isinstance(value, bool):
+                    cleaned[key] = int(value)
+                else:
+                    number = float(value)
+                    if not math.isfinite(number) or not number.is_integer():
+                        raise ValueError
+                    cleaned[key] = int(number)
             elif param_type == "number":
-                cleaned[key] = float(value)
+                number = float(value)
+                if not math.isfinite(number):
+                    raise ValueError
+                cleaned[key] = number
             elif param_type == "bool":
-                cleaned[key] = _to_bool(value, False)
+                if isinstance(value, bool):
+                    cleaned[key] = value
+                elif isinstance(value, (int, float)):
+                    if not math.isfinite(float(value)) or value not in (0, 1):
+                        raise ValueError
+                    cleaned[key] = bool(value)
+                else:
+                    text = str(value).strip().lower()
+                    if text not in _TRUTHY | _FALSY:
+                        raise ValueError
+                    cleaned[key] = text in _TRUTHY
             else:
-                cleaned[key] = value if isinstance(value, str) else json.dumps(value, default=_json_default) \
-                    if isinstance(value, (dict, list)) else str(value)
-        except (TypeError, ValueError):
+                if isinstance(value, str):
+                    cleaned[key] = value
+                elif isinstance(value, (dict, list)):
+                    cleaned[key] = json.dumps(value, default=_json_default)
+                else:
+                    cleaned[key] = str(value)
+        except (TypeError, ValueError, OverflowError):
             problems.append(f"parameter '{key}' must be of type {param_type}")
-    missing = [k for k, v in schema.items() if "=" not in str(v) and k not in cleaned]
+    missing = [k for k, spec in schema.items() if "=" not in str(spec) and k not in cleaned]
     for key in missing:
         problems.append(f"missing required parameter '{key}'")
     return cleaned, problems
@@ -5244,32 +7294,51 @@ def _coerce_args(tool_name: str, args: Dict[str, Any]) -> Tuple[Dict[str, Any], 
 
 def call_tool(name: str, args: Optional[Dict[str, Any]] = None) -> str:
     """Invoke a registered tool by name with validation, coercion and telemetry."""
+    if not isinstance(name, str):
+        return _error("tool name must be a string")
     func = TOOL_MAP.get(name)
     if func is None:
-        close = difflib.get_close_matches(str(name), list(TOOL_MAP), n=5, cutoff=0.4)
+        close = difflib.get_close_matches(name, list(TOOL_MAP), n=5, cutoff=0.4)
         return _error(f"unknown tool '{name}'", did_you_mean=close)
-    cleaned, problems = _coerce_args(name, args or {})
-    if problems:
-        return _error("invalid arguments: " + "; ".join(problems[:6]),
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        _record_tool(name, False, 0.0, "arguments must be a JSON object")
+        return _error("invalid arguments: arguments must be a JSON object",
                       tool=name, expected=TOOL_SCHEMAS.get(name, {}))
-    started = time.time()
+    try:
+        args_size = len(json.dumps(args, ensure_ascii=False, default=_json_default).encode("utf-8"))
+    except (TypeError, ValueError, RecursionError, UnicodeError) as exc:
+        _record_tool(name, False, 0.0, str(exc))
+        return _error(f"invalid arguments: {exc}", tool=name)
+    if args_size > MCP_MAX_REQUEST_BYTES:
+        _record_tool(name, False, 0.0, "arguments exceed configured request size limit")
+        return _error(f"invalid arguments: arguments exceed {MCP_MAX_REQUEST_BYTES} bytes",
+                      tool=name)
+    cleaned, problems = _coerce_args(name, args)
+    if problems:
+        message = "; ".join(problems[:6])
+        _record_tool(name, False, 0.0, message)
+        return _error("invalid arguments: " + message,
+                      tool=name, expected=TOOL_SCHEMAS.get(name, {}))
+    started = time.perf_counter()
     try:
         result = func(**cleaned)
     except TypeError as exc:
-        _record_tool(name, False, time.time() - started, str(exc))
+        _record_tool(name, False, time.perf_counter() - started, str(exc))
         return _error(f"invalid arguments for '{name}': {exc}", expected=TOOL_SCHEMAS.get(name, {}))
     except Exception as exc:
         log.exception("Tool %s raised", name)
-        _record_tool(name, False, time.time() - started, str(exc))
+        _record_tool(name, False, time.perf_counter() - started, str(exc))
         return _error(f"{type(exc).__name__}: {exc}", tool=name)
-    duration = time.time() - started
+    result_text = result if isinstance(result, str) else _json_result(result)
     failed = False
-    if isinstance(result, str):
-        with contextlib.suppress(Exception):
-            parsed = json.loads(result)
-            failed = isinstance(parsed, dict) and bool(parsed.get("error"))
-    _record_tool(name, not failed, duration, None)
-    return result if isinstance(result, str) else _json_result(result)
+    with contextlib.suppress(Exception):
+        parsed = json.loads(result_text)
+        failed = isinstance(parsed, dict) and (bool(parsed.get("error")) or parsed.get("ok") is False)
+    _record_tool(name, not failed, time.perf_counter() - started,
+                 "tool returned ok=false" if failed else None)
+    return result_text
 
 
 # ---------------------------------------------------------------------------
@@ -5279,16 +7348,23 @@ PROTOCOL_VERSION = "2024-11-05"
 
 
 class Handler(BaseHTTPRequestHandler):
-    MAX_BODY_BYTES = MCP_MAX_REQUEST_BYTES
+    MAX_BODY_BYTES = _bounded_int(MCP_MAX_REQUEST_BYTES, 2 * 1024 * 1024,
+                                  1024, 32 * 1024 * 1024)
     server_version = f"{SERVER_NAME}/{SERVER_VERSION}"
     sys_version = ""
     protocol_version = "HTTP/1.1"
+
+    def setup(self):
+        super().setup()
+        # Bound slow/idle clients so an incomplete request cannot hold a handler
+        # thread indefinitely.
+        self.connection.settimeout(15)
 
     # -- helpers ------------------------------------------------------------
     def _set_cors(self):
         self.send_header("Access-Control-Allow-Origin", CORS_ORIGIN)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, Mcp-Session-Id")
         self.send_header("Access-Control-Max-Age", "86400")
 
     def _json(self, code: int, obj: Any):
@@ -5297,6 +7373,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Content-Type-Options", "nosniff")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self._set_cors()
         self.end_headers()
         with contextlib.suppress(Exception):
@@ -5309,7 +7387,7 @@ class Handler(BaseHTTPRequestHandler):
             log.error("REQUIRE_AUTH is enabled but no API token is configured - denying request")
             return False
         auth = self.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
+        if auth.lower().startswith("bearer "):
             token = auth.split(" ", 1)[1].strip()
             if token and hmac.compare_digest(token, API_TOKEN):
                 return True
@@ -5317,7 +7395,11 @@ class Handler(BaseHTTPRequestHandler):
         if header_token and hmac.compare_digest(header_token, API_TOKEN):
             return True
         if ALLOW_TOKEN_IN_QUERY:
-            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            try:
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query,
+                                              max_num_fields=100)
+            except ValueError:
+                return False
             supplied = (query.get("token") or [""])[0]
             if supplied and hmac.compare_digest(supplied, API_TOKEN):
                 return True
@@ -5329,12 +7411,20 @@ class Handler(BaseHTTPRequestHandler):
         self._json(401, {"error": "unauthorized - send 'Authorization: Bearer <token>'"})
 
     def _read_body(self) -> Optional[bytes]:
+        # BaseHTTPRequestHandler does not decode chunked request bodies. Reject
+        # them explicitly rather than leaving unread bytes on a keep-alive socket.
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            self._json(501, {"error": "Transfer-Encoding request bodies are not supported"})
+            return None
         try:
             length = int(self.headers.get("Content-Length", 0) or 0)
         except (TypeError, ValueError):
+            self.close_connection = True
             self._json(400, {"error": "invalid Content-Length"})
             return None
         if length < 0 or length > self.MAX_BODY_BYTES:
+            self.close_connection = True
             self._json(413, {"error": f"request body exceeds limit of {self.MAX_BODY_BYTES} bytes"})
             return None
         if not length:
@@ -5346,6 +7436,10 @@ class Handler(BaseHTTPRequestHandler):
                 break
             chunks.append(chunk)
             remaining -= len(chunk)
+        if remaining:
+            self.close_connection = True
+            self._json(400, {"error": "incomplete request body"})
+            return None
         return b"".join(chunks) or b"{}"
 
     @staticmethod
@@ -5505,7 +7599,8 @@ class Handler(BaseHTTPRequestHandler):
             result_obj = json.loads(result_text)
         except Exception:
             result_obj = {"result": result_text}
-        is_error = isinstance(result_obj, dict) and bool(result_obj.get("error"))
+        is_error = (isinstance(result_obj, dict)
+                    and (bool(result_obj.get("error")) or result_obj.get("ok") is False))
         _bump("failed_calls" if is_error else "successful_calls")
 
         if is_rpc:
