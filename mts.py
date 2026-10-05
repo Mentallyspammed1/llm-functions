@@ -709,7 +709,9 @@ class _SafeHTTPSConnection(_PinnedConnectionMixin, http.client.HTTPSConnection):
         if self._tunnel_host:
             self._tunnel()
         server_hostname = self._tunnel_host or self.host
-        self.sock = self._context.wrap_socket(self.sock, server_hostname=server_hostname)
+        ctx = getattr(self, "_context", None)
+        if ctx is not None:
+            self.sock = ctx.wrap_socket(self.sock, server_hostname=server_hostname)
 
 
 class _SafeHTTPHandler(urllib.request.HTTPHandler):
@@ -719,8 +721,10 @@ class _SafeHTTPHandler(urllib.request.HTTPHandler):
 
 class _SafeHTTPSHandler(urllib.request.HTTPSHandler):
     def https_open(self, req):
-        return self.do_open(_SafeHTTPSConnection, req, context=self._context,
-                            check_hostname=self._check_hostname)
+        return self.do_open(_SafeHTTPSConnection, req)
+
+
+
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -1714,7 +1718,10 @@ def _engine_mojeek(query: str, count: int, page: int, safe: bool, time_range: st
     if time_range:
         params["since"] = {"day": "d", "week": "w", "month": "m", "year": "y"}[time_range]
     body = _http_get_text("https://www.mojeek.com/search?" + urllib.parse.urlencode(params),
-                          headers={"User-Agent": BROWSER_UA}, timeout=15)
+                          headers={"User-Agent": BROWSER_UA,
+                                   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                                   "Accept-Language": "en-US,en;q=0.9"}, timeout=15)
+
     out: List[Dict[str, Any]] = []
     for block in re.split(r"<li[^>]*>", body, flags=re.I)[1:]:
         chunk = re.split(r"</li>", block, maxsplit=1, flags=re.I)[0]
@@ -1873,7 +1880,8 @@ SEARCH_ENGINES: Dict[str, Callable[..., List[Dict[str, Any]]]] = {
 }
 
 # Engines that need no credentials, ordered by general result quality.
-_FREE_ENGINES = ["duckduckgo", "bing", "duckduckgo_lite", "mojeek"]
+_FREE_ENGINES = ["duckduckgo", "bing", "duckduckgo_lite", "wikipedia"]
+
 _ENGINE_WEIGHTS = {"tavily": 1.35, "brave": 1.3, "google_cse": 1.3, "serpapi": 1.25,
                    "searxng": 1.15, "bing": 1.1, "duckduckgo": 1.0, "duckduckgo_lite": 0.9,
                    "mojeek": 0.8, "wikipedia": 0.7}
