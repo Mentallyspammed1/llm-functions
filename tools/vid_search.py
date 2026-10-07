@@ -376,6 +376,14 @@ ENGINE_MAP: dict[str, dict[str, Any]] = {
         "title_selector": "a.MediaCard_content__kA4yf, img",
         "title_attribute": "alt",
         "img_selector": "img",
+        # Cloudflare is friendlier to requests that look like in-site navigation.
+        "extra_headers": {
+            "Referer": "https://www.pexels.com/",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+        },
     },
     "yahoo_video": {
         "url": "https://video.search.yahoo.com",
@@ -404,8 +412,14 @@ ENGINE_MAP: dict[str, dict[str, Any]] = {
         "link_selector": "a.mc_vtvc_link",
         "title_selector": "div.mc_vtvc_title",
         "img_selector": "img.rms_img, img",
-        "time_selector": "span.duration, .mc_vtvc_meta_row",
+        "time_selector": "span.duration, .mc_bc_rc, .mc_vtvc_meta_row",
         "cookies": {"SRCHHPGUSR": "ADLT=OFF"},
+        # mmeta JSON attr on the card carries the real video URL (murl),
+        # thumbnail (turl), and page URL (pgurl) — far better than the
+        # bing.com/videos/riverview redirect href.
+        "meta_attribute": "mmeta",
+        "meta_link_key": "murl",
+        "meta_img_key": "turl",
     },
     "xnxx": {
         "url": "https://www.xnxx.com",
@@ -661,10 +675,34 @@ def slugify(text: str) -> str:
     return text[:100] or "untitled"
 
 
+def _slug_to_title(path: str) -> str:
+    """Derive a human title from a URL slug like 'sunlight-seen-through-leaves-10395606'."""
+    slug = path.rstrip("/").rsplit("/", 1)[-1]
+    slug = re.sub(r"-\d+$", "", slug)
+    slug = slug.replace("_", "-").replace("+", "-")
+    words = slug.split("-")
+    words = [w for w in words if w]
+    if not words:
+        return ""
+    title = " ".join(words)
+    return title[:1].upper() + title[1:] if title else ""
+
+
 def extract_item(
     item: BeautifulSoup, cfg: dict, base_url: str
 ) -> Optional[dict[str, Any]]:
     try:
+        # ── Structured metadata attribute (e.g. Bing mmeta JSON) ────────────
+        meta: dict[str, Any] = {}
+        meta_attr = cfg.get("meta_attribute", "")
+        if meta_attr and item.has_attr(meta_attr):
+            try:
+                parsed = json.loads(item[meta_attr])
+                if isinstance(parsed, dict):
+                    meta = parsed
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+
         title = ""
         title_sel = cfg.get("title_selector", "")
         if title_sel:
@@ -690,9 +728,6 @@ def extract_item(
                     if t:
                         title = t
                         break
-        if not title:
-            title = "Untitled"
-        title = html.unescape(title)
 
         link = "#"
         link_sel = cfg.get("link_selector", "")
@@ -707,12 +742,33 @@ def extract_item(
                         if link != "#":
                             break
 
+        # Prefer the real media URL from structured metadata over internal
+        # redirect links (Bing riverview links are useless to consumers).
+        meta_link_key = cfg.get("meta_link_key", "")
+        if meta_link_key and meta.get(meta_link_key):
+            candidate = str(meta[meta_link_key]).strip()
+            if candidate.startswith("http"):
+                link = candidate
+
+        # Fallback: derive title from the URL slug (Pexels cards often have
+        # empty img alt attributes but descriptive slugs).
+        if not title and link and link != "#":
+            title = _slug_to_title(urlparse(link).path)
+        if not title:
+            title = "Untitled"
+        title = html.unescape(title)
+
         if link == "#" or len(title) < 2:
             return None
 
         img_url = None
+        meta_img_key = cfg.get("meta_img_key", "")
+        if meta_img_key and meta.get(meta_img_key):
+            candidate = str(meta[meta_img_key]).strip()
+            if candidate.startswith("http"):
+                img_url = candidate
         img_sel = cfg.get("img_selector", "")
-        if img_sel:
+        if not img_url and img_sel:
             selectors = [s.strip() for s in img_sel.split(",") if s.strip()]
             for sel in selectors:
                 el = item.select_one(sel)
@@ -801,6 +857,8 @@ def execute_scrape(
     url = urljoin(base_url, search_path)
 
     session.headers.update(get_headers(custom_ua))
+    if cfg.get("extra_headers"):
+        session.headers.update(cfg["extra_headers"])
 
     # Apply per-engine rate limiting
     _engine_rate_wait(engine)
