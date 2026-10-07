@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# execute_command.py — Pyrmethus Command Executor v2.3.0-ASCENDED
+# execute_command.py — Pyrmethus Command Executor v2.4.0-ASCENDED
 # argc/aichat compatible · Termux · Secure shell command execution · Native Caching
 #
 # @describe Execute arbitrary shell command and return full output with complete runtime metadata.
@@ -14,14 +14,19 @@
 # @option --working-dir <PATH>           Working directory for the command (default: current dir)
 # @option --env <KEY=VALUE>              Extra environment variable (repeatable)
 # @option --shell <SHELL>                Shell to use: bash/sh/zsh (default: bash)
+# @option --stdin <STRING>               Optional stdin content to pipe to command
+# @option --retry <INT>                  Number of retries on failure (default: 0)
+# @option --retry-delay <DURATION>       Delay between retries (default: 1s)
 # @flag   --use-cache                    Enable result caching for identical command operations
 # @flag   --no-color                     Disable ANSI colour output
 # @flag   --strip-ansi                   Strip ANSI codes from command output before returning
 # @flag   --verbose                      Show extra debug info (PATH, shell, env vars)
+# @flag   --dry-run                      Show what would be executed without running
 #
 # @env LLM_OUTPUT=/dev/stdout            Output path for LLM integration
 # @env LLM_TOOL_CACHE_TTL=1h             Optional cache TTL override when --use-cache is enabled
 # @env EXECUTE_COMMAND_UI_LINES=20       Maximum lines shown in the interactive stderr preview
+# @env EXECUTE_COMMAND_MAX_OUTPUT_BYTES  Maximum output bytes to capture (default: 20MB)
 # ==============================================================================
 
 from __future__ import annotations
@@ -41,12 +46,13 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Iterator, Optional, Union
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 __all__ = [
     "ToolCache",
     "ToolError",
@@ -77,13 +83,21 @@ EXIT_PERMISSION_DENIED = 126
 EXIT_INVALID_INPUT = 127
 EXIT_INTERRUPTED = 130
 
-try:
-    MAX_OUTPUT_BYTES = int(
-        os.environ.get("EXECUTE_COMMAND_MAX_OUTPUT_BYTES", 20 * 1024 * 1024)
-    )
-except (TypeError, ValueError):
-    MAX_OUTPUT_BYTES = 20 * 1024 * 1024
-MAX_OUTPUT_BYTES = max(0, MAX_OUTPUT_BYTES)
+_DEFAULT_MAX_OUTPUT_BYTES = 20 * 1024 * 1024
+
+
+def _positive_int_env(name: str, default: int, minimum: int = 0) -> int:
+    """Parse a positive int env var with fallback."""
+    try:
+        value = int(os.environ.get(name, default))
+        return max(minimum, value)
+    except (TypeError, ValueError):
+        return default
+
+
+MAX_OUTPUT_BYTES = _positive_int_env(
+    "EXECUTE_COMMAND_MAX_OUTPUT_BYTES", _DEFAULT_MAX_OUTPUT_BYTES
+)
 
 
 class ToolError(Exception):
@@ -124,7 +138,7 @@ class ToolJSONEncoder(json.JSONEncoder):
         if isinstance(obj, bytes):
             return obj.decode("utf-8", errors="replace")
         if isinstance(obj, (set, frozenset)):
-            return list(obj)
+            return sorted(obj, key=str)
         if hasattr(obj, "to_dict") and callable(obj.to_dict):
             return obj.to_dict()
         try:
@@ -168,30 +182,36 @@ BOX_RT = "┤"
 
 _COLOR_OVERRIDE: Optional[bool] = None
 
+# Combined ANSI regex (compiled once, reused)
 _ANSI_RE = re.compile(
     r"(?:"
-    r"\x1b\[[0-?]*[ -/]*[@-~]"          # CSI sequences
+    r"\x1b\[[0-?]*[ -/]*[@-~]"           # CSI sequences
     r"|"
-    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)" # OSC sequences
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC sequences
     r"|"
-    r"\x1b[@-Z]"                         # Single-char controls
+    r"\x1b[@-Z]"                          # Single-char controls
     r"|"
-    r"\x1b\\"                            # ST
+    r"\x1b\\"                             # ST
     r")"
 )
 
 
 def _strip_ansi(text: str) -> str:
     """Remove all ANSI escape sequences from text."""
+    if not text or "\x1b" not in text:
+        return text
     return _ANSI_RE.sub("", text)
 
 
 def _is_tty() -> bool:
     """Return True if stderr is attached to an interactive, non-dumb terminal."""
-    return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
-        "dumb",
-        "",
-    )
+    try:
+        return sys.stderr.isatty() and os.environ.get("TERM", "").lower() not in (
+            "dumb",
+            "",
+        )
+    except (AttributeError, ValueError):
+        return False
 
 
 def _env_truthy(name: str) -> bool:
@@ -221,7 +241,10 @@ def _cprint(text: str, end: str = "\n", file: Any = None) -> None:
     target = file or sys.stderr
     if not _color_enabled():
         text = _strip_ansi(text)
-    print(text, end=end, flush=True, file=target)
+    try:
+        print(text, end=end, flush=True, file=target)
+    except (BrokenPipeError, OSError):
+        pass
 
 
 def get_width() -> int:
@@ -229,8 +252,20 @@ def get_width() -> int:
     try:
         cols = os.get_terminal_size(sys.stderr.fileno()).columns
         return max(40, min(cols, 120))
-    except (OSError, AttributeError):
+    except (OSError, AttributeError, ValueError):
         return 80
+
+
+@contextmanager
+def _color_context(no_color: bool) -> Iterator[None]:
+    """Context manager to temporarily override color settings."""
+    global _COLOR_OVERRIDE
+    previous = _COLOR_OVERRIDE
+    _COLOR_OVERRIDE = False if no_color else None
+    try:
+        yield
+    finally:
+        _COLOR_OVERRIDE = previous
 
 
 # ==============================================================================
@@ -281,7 +316,7 @@ def _parse_env_vars(
         return parsed
 
     for item in env_vars:
-        if "=" not in item:
+        if not item or "=" not in item:
             if warnings is not None:
                 warnings.append(
                     f"Ignoring invalid --env value: {item!r} (expected KEY=VALUE)."
@@ -290,14 +325,13 @@ def _parse_env_vars(
 
         key, val = item.split("=", 1)
         key = key.strip()
-        val = val.strip()
 
         if not _ENV_KEY_RE.match(key):
             if warnings is not None:
                 warnings.append(f"Ignoring invalid environment variable name: {key!r}.")
             continue
 
-        parsed[key] = val
+        parsed[key] = val  # Preserve value whitespace intentionally
 
     return parsed
 
@@ -306,15 +340,19 @@ def sanitize_path() -> None:
     """Remove llm-functions/bin entries from PATH to prevent recursive shadowing."""
     raw = os.environ.get("PATH", "")
     parts = []
+    seen = set()
     for p in raw.split(os.pathsep):
         if not p:
             continue
         norm = os.path.normpath(p)
+        if norm in seen:
+            continue
         if (
             norm.endswith(os.path.join("llm-functions", "bin"))
             or os.path.basename(norm) == "llm-functions-bin"
         ):
             continue
+        seen.add(norm)
         parts.append(p)
     os.environ["PATH"] = os.pathsep.join(parts)
 
@@ -327,7 +365,7 @@ def sanitize_path() -> None:
 class ToolCache:
     """JSON-backed caching utility with TTL support for expensive operations."""
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, cache_dir: Optional[Path] = None) -> None:
         if cache_dir:
@@ -375,7 +413,7 @@ class ToolCache:
             if payload.get("schema") != self.SCHEMA_VERSION:
                 return None
             return payload.get("value")
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError):
             return None
 
     def set(self, key_data: str, value: Any) -> None:
@@ -396,50 +434,27 @@ class ToolCache:
             with open(tmp_file, "w", encoding="utf-8") as fp:
                 json.dump(payload, fp, ensure_ascii=False, cls=ToolJSONEncoder)
             tmp_file.replace(cache_file)
-        except Exception:
+        except (OSError, TypeError, ValueError):
             try:
                 tmp_file.unlink()
-            except Exception:
+            except OSError:
                 pass
 
-
-class GracefulShutdown:
-    """Signal handler for graceful cancellation of process group operations."""
-
-    def __init__(self, callback: Optional[Any] = None) -> None:
-        self.interrupted = False
-        self.signum: Optional[int] = None
-        self._callback = callback
-        self._old: dict[int, Any] = {}
-
-        for sig_name in ("SIGINT", "SIGTERM"):
-            sig = getattr(signal, sig_name, None)
-            if sig is None:
-                continue
-            try:
-                self._old[sig] = signal.signal(sig, self._handle_signal)
-            except (ValueError, OSError):
-                pass
-
-    def _handle_signal(self, signum: int, frame: Any) -> None:
-        self.interrupted = True
-        self.signum = signum
-        if self._callback is not None:
-            try:
-                self._callback(signum)
-            except Exception:
-                pass
-
-    def restore(self) -> None:
-        """Restore previous signal handlers."""
-        for sig, old_handler in self._old.items():
-            try:
-                signal.signal(sig, old_handler)
-            except (ValueError, OSError):
-                pass
-
-    def should_stop(self) -> bool:
-        return self.interrupted
+    def clear(self) -> int:
+        """Remove all cache entries. Returns count of removed files."""
+        if self._disabled:
+            return 0
+        count = 0
+        try:
+            for f in self.cache_dir.glob("*.json"):
+                try:
+                    f.unlink()
+                    count += 1
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        return count
 
 
 # ==============================================================================
@@ -448,33 +463,13 @@ class GracefulShutdown:
 
 _DURATION_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]*)$")
 _UNIT_MULTIPLIERS: dict[str, float] = {
-    "": 1.0,
-    "s": 1.0,
-    "sec": 1.0,
-    "secs": 1.0,
-    "second": 1.0,
-    "seconds": 1.0,
-    "ms": 0.001,
-    "msec": 0.001,
-    "msecs": 0.001,
-    "millisecond": 0.001,
-    "milliseconds": 0.001,
-    "m": 60.0,
-    "min": 60.0,
-    "mins": 60.0,
-    "minute": 60.0,
-    "minutes": 60.0,
-    "h": 3600.0,
-    "hr": 3600.0,
-    "hrs": 3600.0,
-    "hour": 3600.0,
-    "hours": 3600.0,
-    "d": 86400.0,
-    "day": 86400.0,
-    "days": 86400.0,
-    "w": 604800.0,
-    "week": 604800.0,
-    "weeks": 604800.0,
+    "": 1.0, "s": 1.0, "sec": 1.0, "secs": 1.0, "second": 1.0, "seconds": 1.0,
+    "ms": 0.001, "msec": 0.001, "msecs": 0.001, "millisecond": 0.001, "milliseconds": 0.001,
+    "us": 1e-6, "usec": 1e-6, "microsecond": 1e-6, "microseconds": 1e-6,
+    "m": 60.0, "min": 60.0, "mins": 60.0, "minute": 60.0, "minutes": 60.0,
+    "h": 3600.0, "hr": 3600.0, "hrs": 3600.0, "hour": 3600.0, "hours": 3600.0,
+    "d": 86400.0, "day": 86400.0, "days": 86400.0,
+    "w": 604800.0, "week": 604800.0, "weeks": 604800.0,
 }
 
 
@@ -482,6 +477,8 @@ def parse_duration(raw: Any, default: Optional[float] = None) -> Optional[float]
     """Parse a duration value into seconds, raising ValueError on invalid input."""
     if raw is None:
         return default
+    if isinstance(raw, bool):  # Guard against bool being int subclass
+        raise ValueError(f"Invalid duration: {raw!r}")
     if isinstance(raw, (int, float)):
         value = float(raw)
         if not math.isfinite(value):
@@ -517,19 +514,23 @@ def duration_to_seconds(raw: Union[str, int, float, None]) -> float:
     try:
         parsed = parse_duration(raw, default=0.0)
         return float(parsed if parsed is not None else 0.0)
-    except Exception:
+    except (ValueError, TypeError):
         return 0.0
 
 
 def seconds_to_human(sec: float) -> str:
     """Return compact human-readable duration representation."""
+    if sec < 0.001:
+        return f"{sec * 1_000_000:.0f}µs"
     if sec < 1.0:
         return f"{sec * 1000:.0f}ms"
     if sec < 60:
         return f"{sec:.1f}s"
     if sec < 3600:
         return f"{sec / 60:.1f}m"
-    return f"{sec / 3600:.2f}h"
+    if sec < 86400:
+        return f"{sec / 3600:.2f}h"
+    return f"{sec / 86400:.2f}d"
 
 
 # ==============================================================================
@@ -549,7 +550,7 @@ def _find_binary(name: str) -> str:
         try:
             if Path(c).is_file() and os.access(c, os.X_OK):
                 return c
-        except Exception:
+        except OSError:
             pass
     return shutil.which(name) or name
 
@@ -558,7 +559,7 @@ def _ceil_seconds(value: float) -> int:
     """Return a safe positive integer second count for network timeout flags."""
     try:
         return max(1, int(math.ceil(float(value))))
-    except Exception:
+    except (ValueError, TypeError):
         return 1
 
 
@@ -648,7 +649,7 @@ def _split_shell_operators(cmd: str) -> list[tuple[str, bool]]:
                     op = "||"
                 else:
                     op = "|"
-            elif ch == ";" or ch == "\n":
+            elif ch in (";", "\n"):
                 op = ch
 
             if op is not None:
@@ -736,6 +737,10 @@ def inject_curl_timeouts(cmd: str, connect_timeout: float, max_time: float) -> s
     if not cmd:
         return cmd
 
+    # Fast-path: skip parsing if neither tool is referenced
+    if "curl" not in cmd and "wget" not in cmd:
+        return cmd
+
     segments = _split_shell_operators(cmd)
     modified: list[str] = []
     for text, is_operator in segments:
@@ -748,24 +753,21 @@ def inject_curl_timeouts(cmd: str, connect_timeout: float, max_time: float) -> s
     return "".join(modified)
 
 
-_ICON_PATTERNS: list[tuple[str, str]] = [
-    (r"^(git|hg|svn)(\s|$)", "📦"),
-    (r"^(npm|yarn|pnpm|apt|apt-get|yum|dnf|pacman|brew|pip|uv|bun|deno)(\s|$)", "📦"),
-    (r"^(curl|wget|http|aria2c)(\s|$)", "🌐"),
-    (r"^(python[0-9.]*|node|ruby|perl|php|lua|rustc|zig|go)(\s|$)", "🐍"),
-    (r"^(docker|kubectl|helm|podman|k3s|terraform|ansible)(\s|$)", "🐳"),
-    (
-        r"^(ls|ll|la|dir|pwd|mkdir|rm|cp|mv|touch|cat|grep|rg|fd|bat|eza|find|awk|sed|tr|sort|uniq|wc|jq|yq)(\s|$)",
-        "📁",
-    ),
-    (r"^(ffmpeg|ffprobe|convert|magick|sox)(\s|$)", "🎬"),
-    (r"^(ffuf|gobuster|nmap|nikto|sqlmap|hydra)(\s|$)", "🔍"),
-    (r"^(ssh|scp|rsync|sftp|ftp)(\s|$)", "🔐"),
-    (r"^(systemctl|service|journalctl|launchctl)(\s|$)", "⚙️ "),
-    (r"^(make|cmake|ninja|gcc|g\+\+|clang|cargo)(\s|$)", "🔨"),
-    (r"^(tar|zip|unzip|gzip|bzip2|xz|7z)(\s|$)", "🗜️ "),
-    (r"^(mysql|psql|sqlite3|mongo|redis-cli)(\s|$)", "🗄️ "),
-    (r"^(vi|vim|nvim|nano|emacs|code)(\s|$)", "✏️ "),
+_ICON_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^(git|hg|svn)(\s|$)"), "📦"),
+    (re.compile(r"^(npm|yarn|pnpm|apt|apt-get|yum|dnf|pacman|brew|pip|uv|bun|deno)(\s|$)"), "📦"),
+    (re.compile(r"^(curl|wget|http|aria2c)(\s|$)"), "🌐"),
+    (re.compile(r"^(python[0-9.]*|node|ruby|perl|php|lua|rustc|zig|go)(\s|$)"), "🐍"),
+    (re.compile(r"^(docker|kubectl|helm|podman|k3s|terraform|ansible)(\s|$)"), "🐳"),
+    (re.compile(r"^(ls|ll|la|dir|pwd|mkdir|rm|cp|mv|touch|cat|grep|rg|fd|bat|eza|find|awk|sed|tr|sort|uniq|wc|jq|yq)(\s|$)"), "📁"),
+    (re.compile(r"^(ffmpeg|ffprobe|convert|magick|sox)(\s|$)"), "🎬"),
+    (re.compile(r"^(ffuf|gobuster|nmap|nikto|sqlmap|hydra)(\s|$)"), "🔍"),
+    (re.compile(r"^(ssh|scp|rsync|sftp|ftp)(\s|$)"), "🔐"),
+    (re.compile(r"^(systemctl|service|journalctl|launchctl)(\s|$)"), "⚙️ "),
+    (re.compile(r"^(make|cmake|ninja|gcc|g\+\+|clang|cargo)(\s|$)"), "🔨"),
+    (re.compile(r"^(tar|zip|unzip|gzip|bzip2|xz|7z)(\s|$)"), "🗜️ "),
+    (re.compile(r"^(mysql|psql|sqlite3|mongo|redis-cli)(\s|$)"), "🗄️ "),
+    (re.compile(r"^(vi|vim|nvim|nano|emacs|code)(\s|$)"), "✏️ "),
 ]
 
 
@@ -773,7 +775,7 @@ def get_cmd_icon(cmd: str) -> str:
     """Return an emoji icon representing the leading command."""
     stripped = cmd.lstrip()
     for pattern, icon in _ICON_PATTERNS:
-        if re.match(pattern, stripped):
+        if pattern.match(stripped):
             return icon
     return "⚡"
 
@@ -804,7 +806,7 @@ _EXIT_CODES: dict[int, str] = {
     134: "Aborted (SIGABRT)",
     135: "Bus error (SIGBUS)",
     136: "Floating point exception (SIGFPE)",
-    137: "Killed (SIGKILL)",
+    137: "Killed (SIGKILL) — often OOM killer",
     138: "User defined signal 1 (SIGUSR1)",
     139: "Segmentation fault (SIGSEGV)",
     140: "User defined signal 2 (SIGUSR2)",
@@ -848,7 +850,9 @@ _SHADOW_HINTS: list[tuple[str, str]] = [
 
 def detect_shadowing_hint(output: str) -> Optional[str]:
     """Detect tool shadowing based on standard output strings."""
-    text = _strip_ansi(output or "").lower()
+    if not output:
+        return None
+    text = _strip_ansi(output).lower()
     for trigger, hint in _SHADOW_HINTS:
         if trigger in text:
             return hint
@@ -865,16 +869,13 @@ def _border(width: int) -> str:
 
 
 def _truncate(text: str, max_len: int) -> str:
+    if max_len <= 1:
+        return text[:max_len]
     return text if len(text) <= max_len else text[: max_len - 1] + "…"
 
 
 def _ui_max_lines() -> int:
-    raw = os.environ.get("EXECUTE_COMMAND_UI_LINES", "20")
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        value = 20
-    return max(0, min(value, 1000))
+    return _positive_int_env("EXECUTE_COMMAND_UI_LINES", 20, minimum=0)
 
 
 def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> None:
@@ -882,17 +883,16 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
     if not _is_tty():
         return
 
-    global _COLOR_OVERRIDE
-    previous_override = _COLOR_OVERRIDE
-    _COLOR_OVERRIDE = False if no_color else None
-
-    try:
+    with _color_context(no_color):
         success = bool(data.get("success", False))
         exit_code = int(data.get("exit_code", EXIT_ERROR))
         cmd = str(data.get("command") or "")
         duration_ms = data.get("duration_ms", 0.0)
         output = str(data.get("output") or "")
         hint = data.get("hint")
+        cached = bool(data.get("cached", False))
+        retries = int(data.get("retries_attempted", 0))
+
         warnings = data.get("warnings")
         if isinstance(warnings, str):
             warnings = [warnings]
@@ -914,17 +914,27 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
             f"{status_color}{BOLD}{status_symbol} {status_text}{RESET} "
             f"{NEON_YELLOW}›{RESET} {BOLD}{display_cmd}{RESET}"
         )
-        _cprint(
+
+        # Duration line with optional retry info
+        duration_str = seconds_to_human(duration_ms / 1000.0)
+        stats_line = (
             f"{NEON_PURPLE}{BOX_V}{RESET} "
-            f"{NEON_CYAN}Duration:{RESET} {NEON_LIME}{duration_ms}ms{RESET}  "
+            f"{NEON_CYAN}Duration:{RESET} {NEON_LIME}{duration_str}{RESET}  "
             f"{NEON_CYAN}Exit:{RESET} {status_color}{exit_code}{RESET}  "
-            f"{NEON_CYAN}Cached:{RESET} {NEON_YELLOW}{data.get('cached', False)}{RESET}"
+            f"{NEON_CYAN}Cached:{RESET} {NEON_YELLOW}{cached}{RESET}"
         )
+        if retries > 0:
+            stats_line += f"  {NEON_CYAN}Retries:{RESET} {NEON_ORANGE}{retries}{RESET}"
+        _cprint(stats_line)
 
         if warnings:
             _cprint(f"{NEON_PURPLE}{BOX_LT}{border_str}{BOX_RT}{RESET}")
             for warning in warnings[:5]:
                 _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {NEON_ORANGE}{warning}{RESET}")
+            if len(warnings) > 5:
+                _cprint(
+                    f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}… {len(warnings) - 5} more warnings{RESET}"
+                )
 
         _cprint(f"{NEON_PURPLE}{BOX_LT}{border_str}{BOX_RT}{RESET}")
 
@@ -939,11 +949,15 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
                     f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}… {len(lines)} output lines hidden by EXECUTE_COMMAND_UI_LINES{RESET}"
                 )
             elif len(lines) > limit:
-                for line in lines[:limit]:
+                # Show first portion and last portion for context
+                head_lines = max(1, limit - 3)
+                for line in lines[:head_lines]:
                     _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {line}")
                 _cprint(
-                    f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}… {len(lines) - limit} more lines{RESET}"
+                    f"{NEON_PURPLE}{BOX_V}{RESET} {DIM}… {len(lines) - head_lines - 3} lines omitted …{RESET}"
                 )
+                for line in lines[-3:]:
+                    _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {line}")
             else:
                 for line in lines:
                     _cprint(f"{NEON_PURPLE}{BOX_V}{RESET} {line}")
@@ -959,8 +973,6 @@ def print_human_readable_ui(data: dict[str, Any], no_color: bool = False) -> Non
             )
 
         _cprint(f"{NEON_PURPLE}{BOX_BL}{border_str}{BOX_BR}{RESET}")
-    finally:
-        _COLOR_OVERRIDE = previous_override
 
 
 # ==============================================================================
@@ -976,8 +988,9 @@ def _configure_logging(verbose: bool) -> None:
         logger.setLevel(logging.DEBUG)
         if not logger.handlers:
             handler = logging.StreamHandler(sys.stderr)
-            handler.setFormatter(logging.Formatter("[DEBUG] %(message)s"))
+            handler.setFormatter(logging.Formatter("[DEBUG %(asctime)s] %(message)s", "%H:%M:%S"))
             logger.addHandler(handler)
+            logger.propagate = False
     else:
         logger.setLevel(logging.WARNING)
 
@@ -990,7 +1003,7 @@ def _termux_bin() -> str:
 
 def _shell_candidates(shell: str) -> list[str]:
     key = (shell or "").lower()
-    if key in {"bash", "sh", "zsh"}:
+    if key in {"bash", "sh", "zsh", "dash", "ksh", "fish"}:
         return [
             os.path.join(_termux_bin(), key),
             f"/bin/{key}",
@@ -1051,16 +1064,16 @@ def _signal_process_group(process: Optional[subprocess.Popen], sig: Optional[int
     try:
         if sig == getattr(signal, "SIGTERM", None):
             process.terminate()
-        elif sig == getattr(signal, "SIGKILL", None) or sig == 9:
+        elif sig in (getattr(signal, "SIGKILL", None), 9):
             process.kill()
         elif hasattr(process, "send_signal"):
             process.send_signal(sig)
         else:
             process.kill()
-    except Exception:
+    except (ProcessLookupError, OSError):
         try:
             process.kill()
-        except Exception:
+        except (ProcessLookupError, OSError):
             pass
 
 
@@ -1074,7 +1087,7 @@ def _kill_process_group(process: Optional[subprocess.Popen]) -> None:
     else:
         try:
             process.kill()
-        except Exception:
+        except (ProcessLookupError, OSError):
             pass
 
 
@@ -1091,7 +1104,7 @@ def _terminate_process_group(process: Optional[subprocess.Popen]) -> None:
     _signal_process_group(process, sigterm)
     try:
         process.wait(timeout=0.4)
-    except Exception:
+    except subprocess.TimeoutExpired:
         _kill_process_group(process)
 
 
@@ -1131,6 +1144,7 @@ def run_command_full(
     cwd: Optional[str] = None,
     extra_env: Optional[dict[str, str]] = None,
     strip_ansi: bool = False,
+    stdin_input: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Execute cmd via requested shell and return full low-level execution metadata.
@@ -1178,7 +1192,7 @@ def run_command_full(
             popen_kwargs: dict[str, Any] = {
                 "stdout": out_file,
                 "stderr": subprocess.STDOUT,
-                "stdin": subprocess.DEVNULL,
+                "stdin": subprocess.PIPE if stdin_input is not None else subprocess.DEVNULL,
                 "cwd": cwd or None,
                 "env": env,
             }
@@ -1193,11 +1207,22 @@ def run_command_full(
             except PermissionError as exc:
                 output = f"[Permission denied executing shell: {shell_cmd[0]}: {exc}]\n"
                 exit_code = EXIT_PERMISSION_DENIED
+            except OSError as exc:
+                output = f"[Executor OS error: {exc}]\n"
+                exit_code = EXIT_ERROR
             except Exception as exc:
                 output = f"[Executor failure: {exc}]\n"
                 exit_code = EXIT_ERROR
 
             if process is not None:
+                # Write stdin if provided
+                if stdin_input is not None and process.stdin is not None:
+                    try:
+                        process.stdin.write(stdin_input.encode("utf-8", errors="replace"))
+                        process.stdin.close()
+                    except (BrokenPipeError, OSError) as exc:
+                        warnings.append(f"Failed to write stdin: {exc}")
+
                 try:
                     process.wait(timeout=timeout_val)
                 except subprocess.TimeoutExpired:
@@ -1205,30 +1230,34 @@ def run_command_full(
                     _terminate_process_group(process)
                     try:
                         process.wait(timeout=2.0)
-                    except Exception:
+                    except subprocess.TimeoutExpired:
                         _kill_process_group(process)
                         try:
                             process.wait(timeout=2.0)
-                        except Exception:
+                        except subprocess.TimeoutExpired:
                             pass
                 except KeyboardInterrupt:
                     received_signal = getattr(signal, "SIGINT", 2)
                     _kill_process_group(process)
                     try:
                         process.wait(timeout=2.0)
-                    except Exception:
+                    except subprocess.TimeoutExpired:
                         pass
                 finally:
                     if process.poll() is None:
                         _kill_process_group(process)
                         try:
                             process.wait(timeout=1.0)
-                        except Exception:
+                        except subprocess.TimeoutExpired:
                             pass
 
                     returncode = process.returncode
-                    out_file.seek(0)
-                    raw_bytes = out_file.read(MAX_OUTPUT_BYTES + 1)
+                    try:
+                        out_file.seek(0)
+                        raw_bytes = out_file.read(MAX_OUTPUT_BYTES + 1)
+                    except OSError as exc:
+                        raw_bytes = f"[Failed reading output buffer: {exc}]\n".encode("utf-8")
+
                     truncated = len(raw_bytes) > MAX_OUTPUT_BYTES
                     if truncated:
                         raw_bytes = (
@@ -1269,7 +1298,7 @@ def run_command_full(
         output = _strip_ansi(output)
 
     if output:
-        lines_count = len(output.splitlines())
+        lines_count = output.count("\n") + (0 if output.endswith("\n") else 1)
         if strip_ansi or bytes_count == 0:
             bytes_count = len(output.encode("utf-8", errors="ignore"))
     else:
@@ -1284,6 +1313,7 @@ def run_command_full(
         "bytes_count": bytes_count,
         "lines_count": lines_count,
         "shell_cmd": shell_cmd,
+        "timed_out": timed_out,
     }
 
 
@@ -1345,6 +1375,7 @@ def _error_result(
         "timeout_sec": None,
         "connect_timeout_sec": None,
         "max_time_sec": None,
+        "retries_attempted": 0,
         "warnings": warnings or [],
         "started_at": now,
         "finished_at": now,
@@ -1360,10 +1391,14 @@ def execute_tool(
     working_dir: Optional[str] = None,
     env: Optional[list[str]] = None,
     shell: str = "bash",
+    stdin: Optional[str] = None,
+    retry: int = 0,
+    retry_delay: Optional[str] = None,
     use_cache: bool = False,
     no_color: bool = False,
     strip_ansi: bool = False,
     verbose: bool = False,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """
     Core master tool execution context shared between API run() and CLI.
@@ -1393,10 +1428,11 @@ def execute_tool(
         )
 
     if verbose:
-        logger.debug(f"Executing command: {raw_command}")
+        logger.debug(f"Executing command: {raw_command!r}")
 
     sanitize_path()
 
+    # Parse and validate all duration values
     try:
         timeout_sec = parse_duration(timeout, default=None)
     except ValueError as exc:
@@ -1420,6 +1456,13 @@ def execute_tool(
         warnings.append(f"{exc}; using default max-time.")
         mt_sec = None
 
+    try:
+        retry_delay_sec = parse_duration(retry_delay, default=1.0) or 1.0
+    except ValueError as exc:
+        warnings.append(f"{exc}; using 1s retry delay.")
+        retry_delay_sec = 1.0
+
+    # Validate ranges
     if timeout_sec is not None and (not math.isfinite(timeout_sec) or timeout_sec <= 0):
         warnings.append("Timeout value is zero or negative; running without timeout.")
         timeout_sec = None
@@ -1434,6 +1477,17 @@ def execute_tool(
         else:
             mt_sec = 30.0
 
+    # Validate retry count
+    try:
+        retry_count = max(0, int(retry))
+    except (TypeError, ValueError):
+        warnings.append(f"Invalid retry value {retry!r}; using 0.")
+        retry_count = 0
+    if retry_count > 10:
+        warnings.append(f"Retry count {retry_count} capped at 10.")
+        retry_count = 10
+
+    # Parse cache TTL
     cache_ttl = 3600.0
     try:
         ttl_raw = os.environ.get(
@@ -1442,15 +1496,13 @@ def execute_tool(
         parsed_ttl = parse_duration(ttl_raw, default=3600.0)
         if parsed_ttl is not None and math.isfinite(parsed_ttl) and parsed_ttl > 0:
             cache_ttl = parsed_ttl
-        else:
-            cache_ttl = 3600.0
     except ValueError:
         warnings.append("Invalid cache TTL override; using 1h.")
-        cache_ttl = 3600.0
 
     extra_env = _parse_env_vars(env, warnings)
     cmd = inject_curl_timeouts(raw_command, ct_sec, mt_sec)
 
+    # Resolve working directory
     cwd: Optional[str] = None
     if working_dir:
         base_dir = get_builtin_var("__cwd__") or os.getcwd()
@@ -1462,11 +1514,41 @@ def execute_tool(
                 warnings.append(
                     f"Working directory {working_dir!r} not found; using {os.getcwd()}."
                 )
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             warnings.append(f"Could not resolve working directory {working_dir!r}: {exc}")
 
     effective_cwd = cwd or os.getcwd()
 
+    # Dry-run: return preview without executing
+    if dry_run:
+        finished_at = datetime.now().astimezone().isoformat()
+        return {
+            "success": True,
+            "command": cmd,
+            "raw_command": raw_command,
+            "output": f"[DRY RUN] Would execute: {cmd}\n[DRY RUN] Shell: {shell}\n[DRY RUN] CWD: {effective_cwd}\n",
+            "exit_code": EXIT_SUCCESS,
+            "duration_ms": 0.0,
+            "lines_count": 3,
+            "bytes_count": 0,
+            "truncated": False,
+            "hint": None,
+            "cached": False,
+            "dry_run": True,
+            "shell": shell,
+            "shell_command": None,
+            "cwd": effective_cwd,
+            "timeout_sec": timeout_sec,
+            "connect_timeout_sec": ct_sec,
+            "max_time_sec": mt_sec,
+            "retries_attempted": 0,
+            "warnings": warnings,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "context": get_execution_context(),
+        }
+
+    # Build cache key
     cache = ToolCache()
     cache_key_data = json.dumps(
         {
@@ -1476,6 +1558,7 @@ def execute_tool(
             "timeout": timeout_sec,
             "strip_ansi": strip_ansi,
             "env": extra_env,
+            "stdin": stdin,
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -1503,15 +1586,37 @@ def execute_tool(
             cached_result["warnings"] = cached_warnings
             return cached_result
 
-    full = run_command_full(
-        cmd=cmd,
-        timeout_sec=timeout_sec,
-        shell=shell,
-        cwd=cwd,
-        extra_env=extra_env,
-        strip_ansi=strip_ansi,
-    )
+    # Execute with retry loop
+    full: dict[str, Any] = {}
+    retries_attempted = 0
+    for attempt in range(retry_count + 1):
+        if attempt > 0:
+            if verbose:
+                logger.debug(f"Retry attempt {attempt}/{retry_count} after {retry_delay_sec}s")
+            warnings.append(f"Retry attempt {attempt}/{retry_count}")
+            try:
+                time.sleep(retry_delay_sec)
+            except KeyboardInterrupt:
+                warnings.append("Retry loop interrupted.")
+                break
+            retries_attempted = attempt
 
+        full = run_command_full(
+            cmd=cmd,
+            timeout_sec=timeout_sec,
+            shell=shell,
+            cwd=cwd,
+            extra_env=extra_env,
+            strip_ansi=strip_ansi,
+            stdin_input=stdin,
+        )
+
+        exit_code = int(full.get("exit_code", EXIT_ERROR))
+        # Don't retry on interrupts or invalid input
+        if exit_code == EXIT_SUCCESS or exit_code in (EXIT_INTERRUPTED, EXIT_INVALID_INPUT):
+            break
+
+    # Merge warnings from run_command_full
     run_warnings = full.get("warnings", [])
     if isinstance(run_warnings, str):
         run_warnings = [run_warnings]
@@ -1525,8 +1630,8 @@ def execute_tool(
     finished_at = datetime.now().astimezone().isoformat()
 
     hint = detect_shadowing_hint(output)
-    lines_count = int(
-        full.get("lines_count", len(output.splitlines()) if output else 0)
+    lines_count = int(full.get("lines_count", 0)) or (
+        output.count("\n") + (0 if not output or output.endswith("\n") else 1)
     )
     bytes_count = int(
         full.get("bytes_count", len(output.encode("utf-8", errors="ignore")))
@@ -1539,9 +1644,11 @@ def execute_tool(
         "output": output,
         "exit_code": exit_code,
         "duration_ms": duration_ms,
+        "duration_human": seconds_to_human(duration_ms / 1000.0),
         "lines_count": lines_count,
         "bytes_count": bytes_count,
         "truncated": bool(full.get("truncated", False)),
+        "timed_out": bool(full.get("timed_out", False)),
         "hint": hint,
         "cached": False,
         "shell": shell,
@@ -1550,6 +1657,7 @@ def execute_tool(
         "timeout_sec": timeout_sec,
         "connect_timeout_sec": ct_sec,
         "max_time_sec": mt_sec,
+        "retries_attempted": retries_attempted,
         "warnings": all_warnings,
         "started_at": started_at,
         "finished_at": finished_at,
@@ -1558,7 +1666,7 @@ def execute_tool(
 
     if verbose:
         logger.debug(
-            f"Finished command with exit_code={exit_code} duration_ms={duration_ms}"
+            f"Finished command with exit_code={exit_code} duration_ms={duration_ms} retries={retries_attempted}"
         )
 
     if use_cache and result["success"]:
@@ -1582,7 +1690,7 @@ def _safe_stream_write(stream: Any, payload: str) -> None:
     except OSError as exc:
         try:
             sys.stderr.write(f"Failed writing output stream: {exc}\n")
-        except Exception:
+        except (OSError, ValueError):
             pass
 
 
@@ -1594,7 +1702,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
         json_payload = (
             json.dumps(data, indent=2, ensure_ascii=False, cls=ToolJSONEncoder) + "\n"
         )
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         json_payload = (
             json.dumps(
                 {
@@ -1631,7 +1739,7 @@ def write_llm_output(data: dict[str, Any]) -> None:
     except OSError as err:
         try:
             sys.stderr.write(f"Failed writing to LLM_OUTPUT '{out_path}': {err}\n")
-        except Exception:
+        except (OSError, ValueError):
             pass
         _safe_stream_write(sys.stdout, json_payload)
 
@@ -1649,10 +1757,14 @@ def run(
     working_dir: Optional[str] = None,
     env: Optional[list[str]] = None,
     shell: str = "bash",
+    stdin: Optional[str] = None,
+    retry: int = 0,
+    retry_delay: Optional[str] = None,
     use_cache: bool = False,
     no_color: bool = False,
     strip_ansi: bool = False,
     verbose: bool = False,
+    dry_run: bool = False,
 ) -> None:
     """Execute the shell command with specified parameters.
 
@@ -1664,10 +1776,14 @@ def run(
         working_dir: Working directory context
         env: Extra environment variables in KEY=VALUE format (repeatable)
         shell: Shell binary to execute command (bash/sh/zsh)
+        stdin: Optional stdin content to pipe to command
+        retry: Number of retries on failure (0-10)
+        retry_delay: Delay between retries
         use_cache: Enable result caching
         no_color: Disable ANSI color output
         strip_ansi: Strip ANSI sequences from process output
         verbose: Enable detailed debug logging
+        dry_run: Preview command without executing
     """
     try:
         res = execute_tool(
@@ -1678,10 +1794,14 @@ def run(
             working_dir=working_dir,
             env=env,
             shell=shell,
+            stdin=stdin,
+            retry=retry,
+            retry_delay=retry_delay,
             use_cache=use_cache,
             no_color=no_color,
             strip_ansi=strip_ansi,
             verbose=verbose,
+            dry_run=dry_run,
         )
     except Exception as exc:
         res = _error_result(
@@ -1754,6 +1874,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Shell interpreter to use (default: bash)",
     )
     parser.add_argument(
+        "--stdin",
+        metavar="STRING",
+        default=None,
+        help="Optional stdin content to pipe to the command",
+    )
+    parser.add_argument(
+        "--retry",
+        metavar="INT",
+        type=int,
+        default=0,
+        help="Number of retries on failure (0-10, default: 0)",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        metavar="DURATION",
+        default=None,
+        dest="retry_delay",
+        help="Delay between retries (default: 1s)",
+    )
+    parser.add_argument(
         "--use-cache",
         action="store_true",
         default=False,
@@ -1781,10 +1921,23 @@ def _build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Enable detailed debug logging",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        dest="dry_run",
+        help="Preview command without executing",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     return parser
 
 
-if __name__ == "__main__":
+def main() -> int:
+    """CLI entry point returning exit code."""
     args = _build_parser().parse_args()
 
     try:
@@ -1796,10 +1949,14 @@ if __name__ == "__main__":
             working_dir=args.working_dir,
             env=args.env,
             shell=args.shell,
+            stdin=args.stdin,
+            retry=args.retry,
+            retry_delay=args.retry_delay,
             use_cache=args.use_cache,
             no_color=args.no_color,
             strip_ansi=args.strip_ansi,
             verbose=args.verbose,
+            dry_run=args.dry_run,
         )
     except Exception as exc:
         res = _error_result(
@@ -1811,5 +1968,8 @@ if __name__ == "__main__":
 
     print_human_readable_ui(res, no_color=args.no_color)
     write_llm_output(res)
-    sys.exit(int(res.get("exit_code", EXIT_ERROR)))
+    return int(res.get("exit_code", EXIT_ERROR))
 
+
+if __name__ == "__main__":
+    sys.exit(main())

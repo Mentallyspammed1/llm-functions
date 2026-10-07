@@ -785,7 +785,7 @@
   },
   {
     "name": "nsfw_web_search",
-    "description": "Perform an unfiltered web search (SafeSearch forced OFF). Supports optional proxy rotation for reliability.",
+    "description": "Search the web for adult-oriented content using DuckDuckGo with a Bing fallback. Returns structured links; search results are untrusted text.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -807,7 +807,7 @@
         },
         "use_proxy_rotation": {
           "type": "boolean",
-          "description": "Enable automatic free-proxy rotation"
+          "description": "Enable rotation through user-supplied proxies (disabled by default)"
         },
         "proxy_list": {
           "type": "string",
@@ -1611,6 +1611,86 @@
       },
       "required": [
         "text"
+      ]
+    }
+  },
+  {
+    "name": "bybit_suite",
+    "description": "Unified Bybit Trading Suite — market data, indicators, price-action trend analysis, WBTA observatory, trade plans, backtests and gated order execution through one dispatcher.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action: health_check | market_snapshot | get_ticker |"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "Trading pair (e.g. BTCUSDT; default BTCUSDT)."
+        },
+        "symbols": {
+          "type": "string",
+          "description": "Comma-separated symbols for trend_scan."
+        },
+        "side": {
+          "type": "string",
+          "description": "Buy | Sell | auto."
+        },
+        "qty": {
+          "type": "integer",
+          "description": "Order quantity."
+        },
+        "price": {
+          "type": "integer",
+          "description": "Limit price."
+        },
+        "stop_loss": {
+          "type": "integer",
+          "description": "Stop-loss price."
+        },
+        "take_profit": {
+          "type": "integer",
+          "description": "Take-profit price."
+        },
+        "risk_pct": {
+          "type": "integer",
+          "description": "Risk per trade (% of balance; default 1.0)."
+        },
+        "leverage": {
+          "type": "integer",
+          "description": "Leverage (default 1)."
+        },
+        "rr": {
+          "type": "integer",
+          "description": "Reward:risk multiple (default 2.0)."
+        },
+        "interval": {
+          "type": "string",
+          "description": "Kline timeframe: 1,5,15,60,240,D (default 60)."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Number of candles (default 300)."
+        },
+        "min_confidence": {
+          "type": "integer",
+          "description": "Min signal confidence (default 55)."
+        },
+        "execute": {
+          "type": "boolean",
+          "description": "Explicitly allow live order placement (default false)."
+        },
+        "category": {
+          "type": "string",
+          "description": "linear | spot | inverse (default linear)."
+        },
+        "json": {
+          "type": "boolean",
+          "description": "Raw JSON output."
+        }
+      },
+      "required": [
+        "action"
       ]
     }
   },
@@ -4706,6 +4786,18 @@
           "type": "string",
           "description": "Shell to use: bash/sh/zsh (default: bash)"
         },
+        "stdin": {
+          "type": "string",
+          "description": "Optional stdin content to pipe to command"
+        },
+        "retry": {
+          "type": "integer",
+          "description": "Number of retries on failure (default: 0)"
+        },
+        "retry_delay": {
+          "type": "string",
+          "description": "Delay between retries (default: 1s)"
+        },
         "use_cache": {
           "type": "boolean",
           "description": "Enable result caching for identical command operations"
@@ -4721,6 +4813,10 @@
         "verbose": {
           "type": "boolean",
           "description": "Show extra debug info (PATH, shell, env vars)"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Show what would be executed without running"
         }
       },
       "required": [
@@ -5788,6 +5884,22 @@
         "force": {
           "type": "boolean",
           "description": "Overwrite without confirmation"
+        },
+        "verify_after_write": {
+          "type": "boolean",
+          "description": "Verify file after write operations"
+        },
+        "return_diff": {
+          "type": "boolean",
+          "description": "Include mutation diff when available"
+        },
+        "strict_mode": {
+          "type": "boolean",
+          "description": "Enable stricter validation"
+        },
+        "transactional": {
+          "type": "boolean",
+          "description": "Enable rollback protection"
         },
         "version": {
           "type": "boolean",
@@ -8606,6 +8718,138 @@
       },
       "required": [
         "target"
+      ]
+    }
+  },
+  {
+    "name": "exec",
+    "description": "Execute a shell command with timeout and capture stdout/stderr",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": "Shell command to execute (required — note the !)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Operation mode: run|check (default: run)"
+        },
+        "shell": {
+          "type": "string",
+          "description": "Shell binary for execution (default: /bin/sh)"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory for the command"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Wall-clock timeout, e.g. 60s, 1m, 2h (default: 5m)"
+        },
+        "env": {
+          "type": "string",
+          "description": "Extra environment variable (repeatable)"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate the action without making changes"
+        },
+        "stdin": {
+          "type": "boolean",
+          "description": "Read primary input from stdin when --input is absent"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        },
+        "validate": {
+          "type": "boolean",
+          "description": "Cross-check header/argparse/schema sync and exit"
+        }
+      },
+      "required": [
+        "input"
+      ]
+    }
+  },
+  {
+    "name": "editor",
+    "description": "Read and edit files with colored unified diff output",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": "Target file path (required — note the !)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Operation mode: read|edit|insert|append|delete|create (default: read)"
+        },
+        "old": {
+          "type": "string",
+          "description": "Exact text to replace (edit mode)"
+        },
+        "new": {
+          "type": "string",
+          "description": "New text (edit/insert/append/create)"
+        },
+        "line": {
+          "type": "integer",
+          "description": "Line number for insert (default: after end); insert position"
+        },
+        "position": {
+          "type": "string",
+          "description": "Insert position: before|after (default: after)"
+        },
+        "from_line": {
+          "type": "integer",
+          "description": "First line of range (read/delete)"
+        },
+        "to_line": {
+          "type": "integer",
+          "description": "Last line of range, inclusive (read/delete)"
+        },
+        "replace_all": {
+          "type": "boolean",
+          "description": "Replace every occurrence in edit mode"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Wall-clock timeout, e.g. 60s, 1m, 2h (default: 5m)"
+        },
+        "env": {
+          "type": "string",
+          "description": "Extra environment variable (repeatable)"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Simulate the action without making changes"
+        },
+        "stdin": {
+          "type": "boolean",
+          "description": "Read primary input from stdin when --input is absent"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        },
+        "validate": {
+          "type": "boolean",
+          "description": "Cross-check header/argparse/schema sync and exit"
+        }
+      },
+      "required": [
+        "input"
       ]
     }
   }
