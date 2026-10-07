@@ -31,9 +31,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, urlparse
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 try:
     import requests
@@ -253,6 +253,41 @@ def _make_session(proxy_url: Optional[str] = None) -> "requests.Session":
         }
     return s
 
+def _parse_results(html: str, selectors: tuple[str, ...], max_results: int) -> list[dict]:
+    """Parse ordinary search-result cards and discard non-http links."""
+    soup = BeautifulSoup(html, "html.parser")
+    results: list[dict] = []
+    for selector in selectors:
+        for card in soup.select(selector):
+            anchor = card.select_one("a.result__a, h2 a, a.result-link")
+            if not anchor:
+                continue
+            href = anchor.get("href") or ""
+            if "uddg=" in href:
+                qs = parse_qs(urlparse(href).query)
+                href = qs.get("uddg", [href])[0]
+            if not href.startswith(("http://", "https://")):
+                continue
+            snippet_el = card.select_one(".result__snippet, .b_caption p, .result-snippet")
+            results.append({
+                "title": anchor.get_text(" ", strip=True),
+                "link": href,
+                "snippet": snippet_el.get_text(" ", strip=True) if snippet_el else "",
+            })
+            if len(results) >= max_results:
+                return results
+    return results
+
+
+def _search_bing(query: str, max_results: int, region: str) -> list[dict]:
+    """Small dependency-free fallback for DDG challenge/empty responses."""
+    url = "https://www.bing.com/search?q=" + quote_plus(query)
+    response = requests.get(url, headers={"User-Agent": _make_session().headers["User-Agent"],
+                                          "Accept-Language": region}, timeout=14)
+    response.raise_for_status()
+    return _parse_results(response.text, ("li.b_algo",), max_results)
+
+
 def _search_ddg(
     query: str,
     max_results: int = 8,
@@ -260,7 +295,7 @@ def _search_ddg(
     proxies: Optional[list[str]] = None,
     verbose: bool = False,
 ) -> tuple[list[dict], Optional[str]]:
-    """Try direct first, then rotate through proxies until one works."""
+    """Try direct DDG, then configured proxies; never treats a blocked page as success."""
     if not HAS_REQUESTS:
         raise RuntimeError("requests + beautifulsoup4 required")
 
@@ -285,27 +320,11 @@ def _search_ddg(
             resp = session.get(url, timeout=14)
             resp.raise_for_status()
 
-            soup = BeautifulSoup(resp.text, "html.parser")
-            results = []
-            for res in soup.select(".result")[:max_results]:
-                a = res.select_one("a.result__a")
-                if not a:
-                    continue
-                title = a.get_text(strip=True)
-                href = a.get("href") or ""
-                if "uddg=" in href:
-                    from urllib.parse import parse_qs, urlparse
-                    qs = parse_qs(urlparse(href).query)
-                    href = qs.get("uddg", [href])[0]
-                snippet_el = res.select_one(".result__snippet")
-                snippet = snippet_el.get_text(" ", strip=True) if snippet_el else ""
-                if title and href:
-                    results.append({"title": title, "link": href, "snippet": snippet})
-
+            results = _parse_results(resp.text, (".result",), max_results)
             if results:
                 return results, proxy
-            # empty results still counts as success for that proxy
-            return results, proxy
+            # Empty HTML commonly means a bot challenge, not a valid search.
+            last_error = "search backend returned no parseable results"
         except Exception as exc:
             last_error = str(exc)
             if verbose:
@@ -374,11 +393,20 @@ def execute_tool(
         success = True
         error = None
     except Exception as exc:
-        results = []
-        used_proxy = None
-        success = False
-        error = str(exc)
-        warnings.append(f"Search failed: {exc}")
+        # DDG frequently returns a challenge page. Use a bounded, explicit
+        # fallback rather than reporting a misleading successful zero-result.
+        try:
+            results = _search_bing(query, max_results, region)
+            used_proxy = None
+            success = True
+            error = None
+            warnings.append("DuckDuckGo unavailable; used Bing fallback")
+        except Exception as fallback_exc:
+            results = []
+            used_proxy = None
+            success = False
+            error = f"DDG: {exc}; Bing: {fallback_exc}"
+            warnings.append("All search backends failed")
 
     duration_ms = round((time.monotonic() - start) * 1000, 1)
     finished_at = datetime.now(timezone.utc).isoformat()

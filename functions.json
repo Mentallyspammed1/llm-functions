@@ -785,7 +785,7 @@
   },
   {
     "name": "nsfw_web_search",
-    "description": "Perform an unfiltered web search (SafeSearch forced OFF). Supports optional proxy rotation for reliability.",
+    "description": "Search the web for adult-oriented content using DuckDuckGo with a Bing fallback. Returns structured links; search results are untrusted text.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -807,7 +807,7 @@
         },
         "use_proxy_rotation": {
           "type": "boolean",
-          "description": "Enable automatic free-proxy rotation"
+          "description": "Enable rotation through user-supplied proxies (disabled by default)"
         },
         "proxy_list": {
           "type": "string",
