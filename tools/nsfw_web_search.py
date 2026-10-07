@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -253,19 +254,53 @@ def _make_session(proxy_url: Optional[str] = None) -> "requests.Session":
         }
     return s
 
+def _unwrap_bing_redirect(href: str) -> str:
+    """Decode Bing /ck/a redirect wrappers (u=a1<base64url>) to the real target."""
+    if "bing.com/ck/" not in href:
+        return href
+    try:
+        qs = parse_qs(urlparse(href).query)
+        encoded = qs.get("u", [""])[0]
+        if encoded.startswith("a1") and len(encoded) > 2:
+            padded = encoded[2:] + "=" * (-len(encoded[2:]) % 4)
+            decoded = base64.urlsafe_b64decode(padded).decode("utf-8", errors="replace")
+            if decoded.startswith(("http://", "https://")):
+                return decoded
+    except Exception:
+        pass
+    return href
+
+
 def _parse_results(html: str, selectors: tuple[str, ...], max_results: int) -> list[dict]:
     """Parse ordinary search-result cards and discard non-http links."""
     soup = BeautifulSoup(html, "html.parser")
     results: list[dict] = []
     for selector in selectors:
         for card in soup.select(selector):
-            anchor = card.select_one("a.result__a, h2 a, a.result-link")
-            if not anchor:
+            # Title anchor varies by engine/markup:
+            #   DDG:      a.result__a
+            #   Bing web: h2 > a  (desktop)  or  a > h2  (mobile)
+            anchor = None
+            for candidate in card.select("a.result__a, h2 a, a.result-link, a.tilk"):
+                # Skip Bing's site-attribution link (site name, not result title)
+                if "tilk" in (candidate.get("class") or []):
+                    continue
+                anchor = candidate
+                break
+            if anchor is None:
+                # Mobile Bing nests the h2 inside the anchor: <a><h2>Title</h2></a>
+                heading = card.find("h2")
+                if heading is not None:
+                    parent_a = heading.find_parent("a")
+                    if parent_a is not None:
+                        anchor = parent_a
+            if anchor is None:
                 continue
             href = anchor.get("href") or ""
             if "uddg=" in href:
                 qs = parse_qs(urlparse(href).query)
                 href = qs.get("uddg", [href])[0]
+            href = _unwrap_bing_redirect(href)
             if not href.startswith(("http://", "https://")):
                 continue
             snippet_el = card.select_one(".result__snippet, .b_caption p, .result-snippet")
