@@ -53,6 +53,7 @@ import contextlib
 from contextlib import suppress
 import csv
 import datetime
+import gzip
 import hashlib
 import html
 import ipaddress
@@ -72,6 +73,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from pathlib import Path
@@ -871,6 +873,24 @@ def _fetch(
             )
             with opener.open(req, timeout=timeout) as resp:
                 data = resp.read()
+                encoding = (resp.headers.get("Content-Encoding") or "").strip().lower()
+
+            # urllib does NOT auto-decompress; we advertise gzip/deflate/br,
+            # so decode the payload before returning it (fixes 0-result searches).
+            if data and encoding in ("gzip", "x-gzip"):
+                with suppress(Exception):
+                    data = gzip.decompress(data)
+            elif data and encoding == "deflate":
+                with suppress(Exception):
+                    try:
+                        data = zlib.decompress(data)
+                    except zlib.error:
+                        data = zlib.decompress(data, -zlib.MAX_WBITS)
+            elif data and encoding == "br":
+                with suppress(Exception):
+                    import brotli  # optional; falls back to raw bytes
+
+                    data = brotli.decompress(data)
 
             _debug(f"[VOA][{backend}] {len(data):,} B ← {url[:70]}")
 
