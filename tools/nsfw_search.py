@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.0.2
+# osint_vsearch_engine.py — Pyrmethus Master OSINT & Media Intelligence Platform v4.1.0
 # Unified Header Analysis · Multi-Backend OSINT Image Search · Video Scraper Engine
 #
 # @describe Unified OSINT, Media Intelligence, and Video Search Platform (Pyrmethus Edition)
@@ -184,7 +184,7 @@ except ImportError:
 # CONSTANTS & CONFIGURATION
 # ==============================================================================
 
-__version__ = "4.0.2"
+__version__ = "4.1.0"
 
 EXIT_SUCCESS = 0
 EXIT_ERROR = 1
@@ -1114,14 +1114,55 @@ def _format_headers_pretty(result: dict) -> str:
 # OSINT SEARCH BACKENDS (UPGRADED FOR RELIABLE RESULTS)
 # ==============================================================================
 
+_JUNK_IMAGE_HOSTS = (
+    "yastatic.net",
+    "yastat.net",
+    "avatars.mds.yandex.net",
+    "mc.yandex.ru",
+    "an.yandex.ru",
+    "yandex.net/ads",
+    "bing.com/th?",
+    "bing.net/th?",
+    "th.bing.com",
+    "akamaihd.net",
+    "cdn.jsdelivr.net",
+    "googleusercontent.com/gadgets",
+    "gstatic.com",
+    "google-analytics.com",
+    "googletagmanager.com",
+    "doubleclick.net",
+    "facebook.com/tr",
+    "pixel.",
+    "beacon.",
+    "analytics.",
+    "/favicon",
+    "logo.",
+    "sprite",
+    "icon",
+    "badge",
+    "banner",
+    "captcha",
+    "blank.gif",
+    "1x1",
+    "spacer",
+)
+
+
+def _is_junk_image_url(url: str) -> bool:
+    """Filter tracker pixels, favicons, logos, sprites and CDN junk."""
+    low = url.lower()
+    return any(j in low for j in _JUNK_IMAGE_HOSTS)
+
+
 _YANDEX_PATS = [
-    re.compile(r'&quot;origUrl&quot;\s*:\s*&quot;(https?://[^&"]+?)&quot;', re.I),
-    re.compile(
-        r'"origUrl"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I
-    ),
-    re.compile(
-        r'"img_href"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I
-    ),
+    # URL-encoded img_url= params inside " blobs (primary SSR payload)
+    re.compile(r'img_url=(https?%3A%2F%2F[^&"]+?)(?:&|&|")', re.I),
+    # HTML-escaped JSON: "origUrl":"..."
+    re.compile(r'"origUrl"\s*:\s*"(https?://[^&"]+?)"', re.I),
+    # Plain JSON variants
+    re.compile(r'"origUrl"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I),
+    re.compile(r'"img_href"\s*:\s*"(https?://[^"]+?\.(?:jpe?g|png|gif|webp|avif))"', re.I),
+    # Raw image URLs (last resort; filtered downstream)
     re.compile(
         r'https?://[^\s"\'<>]+?\.(?:jpe?g|png|gif|webp|avif)(?:\?[^\s"\'<>]*)?', re.I
     ),
@@ -1168,9 +1209,20 @@ def _backend_yandex(
         found = 0
         for pat in _YANDEX_PATS:
             for m in pat.finditer(body):
-                u = html.unescape(urllib.parse.unquote(m.group(1) if pat.groups else m.group(0)))
+                u = html.unescape(m.group(1) if pat.groups else m.group(0))
+                # Unquote until stable — Yandex sometimes double/triple-encodes
+                for _ in range(5):
+                    dec = urllib.parse.unquote(u)
+                    if dec == u:
+                        break
+                    u = dec
                 canonical = _canonical_url(u)
-                if u.startswith("http") and canonical not in seen:
+                if (
+                    u.startswith("http")
+                    and canonical not in seen
+                    and _has_image_ext(u)
+                    and not _is_junk_image_url(u)
+                ):
                     seen.add(canonical)
                     results.append(_make_image_result("yandex", u, u, len(results)))
                     found += 1
@@ -1185,12 +1237,13 @@ def _backend_yandex(
 
 
 _BING_PATS = [
-    re.compile(r'&quot;murl&quot;:&quot;(https?://[^&\" ]+?)&quot;', re.I),
-    re.compile(r'\"murl\"\s*:\s*\"(https?://[^"]+)\"', re.I),
-    re.compile(r'data-src=\" (https?://[^"]+?\.(?:jpe?g|png|gif|webp))\"', re.I),
-    re.compile(r'src=\" (https?://[^"]+?\.(?:jpe?g|png|gif|webp))\"', re.I),
-    re.compile(r'data-original-src=\" (https?://[^"]+?\.(?:jpe?g|png|gif|webp))\"', re.I),
-    re.compile(r'murl\": \"(https?://[^"]+)\"', re.I),
+    # class="iusc" m="{json}" — Bing's primary image metadata blob
+    re.compile(r'class="iusc"[^>]*?\sm="([^"]+)"', re.I),
+    re.compile(r'\sm="({[^"]*?murl[^"]*?})"', re.I),
+    # Legacy escaped-JSON variants
+    re.compile(r'"murl"\s*:\s*"(https?://[^&\\" ]+?)"', re.I),
+    re.compile(r'\\"murl\\"\s*:\s*\\"(https?://[^"\'\\]+?)\\"', re.I),
+    re.compile(r'"murl"\s*:\s*"(https?://[^"]+?)"', re.I),
 ]
 
 
@@ -1240,11 +1293,32 @@ def _backend_bing(
         found = 0
         for pat in _BING_PATS:
             for m in pat.finditer(html_str):
-                u = html.unescape(urllib.parse.unquote(m.group(1)))
+                blob = m.group(1)
+                u = ""
+                page_u = ""
+                title = ""
+                # Try JSON blob first (iusc m="...")
+                if blob.lstrip().startswith("{"):
+                    try:
+                        meta = json.loads(html.unescape(blob))
+                        u = meta.get("murl") or meta.get("turl") or ""
+                        page_u = meta.get("purl") or u
+                        title = meta.get("t") or ""
+                    except (json.JSONDecodeError, AttributeError):
+                        u = ""
+                if not u:
+                    u = html.unescape(urllib.parse.unquote(blob))
                 canonical = _canonical_url(u)
-                if u.startswith("http") and canonical not in seen and _has_image_ext(u):
+                if (
+                    u.startswith("http")
+                    and canonical not in seen
+                    and _has_image_ext(u)
+                    and not _is_junk_image_url(u)
+                ):
                     seen.add(canonical)
-                    results.append(_make_image_result("bing", u, u, len(results)))
+                    results.append(
+                        _make_image_result("bing", u, page_u or u, len(results), title=title)
+                    )
                     found += 1
                     if len(results) >= limit:
                         break
@@ -1263,9 +1337,23 @@ def _backend_bing(
                 html_str = raw.decode("utf-8", errors="replace")
                 for pat in _BING_PATS:
                     for m in pat.finditer(html_str):
-                        u = html.unescape(urllib.parse.unquote(m.group(1)))
+                        blob = m.group(1)
+                        u = ""
+                        if blob.lstrip().startswith("{"):
+                            try:
+                                meta = json.loads(html.unescape(blob))
+                                u = meta.get("murl") or meta.get("turl") or ""
+                            except (json.JSONDecodeError, AttributeError):
+                                u = ""
+                        if not u:
+                            u = html.unescape(urllib.parse.unquote(blob))
                         canonical = _canonical_url(u)
-                        if u.startswith("http") and canonical not in seen and _has_image_ext(u):
+                        if (
+                            u.startswith("http")
+                            and canonical not in seen
+                            and _has_image_ext(u)
+                            and not _is_junk_image_url(u)
+                        ):
                             seen.add(canonical)
                             results.append(_make_image_result("bing", u, u, len(results)))
                             found += 1
@@ -1406,6 +1494,11 @@ def _backend_rule34(
             backend="rule34",
             use_cache=use_cache,
         )
+        # API now returns {"error": "Missing authentication..."} — detect and
+        # fall back to HTML scraping of the thumbnail grid instead.
+        if isinstance(data, dict) and data.get("error"):
+            _warn(f"[rule34] API auth required: {str(data.get('error'))[:60]} — falling back to HTML scrape")
+            return _backend_rule34_html(query, limit, start_page, max_pages, use_cache)
         if not data or not isinstance(data, list):
             break
         for item in data:
@@ -1433,6 +1526,76 @@ def _backend_rule34(
     return results[:limit], "rule34"
 
 
+def _backend_rule34_html(
+    query: str,
+    limit: int,
+    start_page: int = 1,
+    max_pages: int = 1,
+    use_cache: bool = True,
+) -> Tuple[List[dict], str]:
+    """HTML-scrape fallback for rule34 (API requires auth since 2024)."""
+    results: List[dict] = []
+    seen: set = set()
+    pid = max(0, start_page - 1)
+    fetched_pages = 0
+
+    while len(results) < limit and fetched_pages < max_pages:
+        params = {
+            "page": "post",
+            "s": "list",
+            "tags": query,
+            "pid": str(pid),
+        }
+        raw = _fetch(
+            "https://rule34.xxx/index.php?" + urllib.parse.urlencode(params),
+            headers={"Referer": "https://rule34.xxx/"},
+            backend="rule34",
+            use_cache=use_cache,
+        )
+        if raw is None:
+            break
+        body = raw.decode("utf-8", errors="replace")
+
+        # Thumbnail grid: <img ... src="...thumbs/..." ... > inside
+        # links to view pages. Extract sample/full URLs from thumb paths.
+        found = 0
+        for m in re.finditer(
+            r'<img[^>]+src="(https?://[^"]+?/thumbnails/[^"]+/thumbnail_[^"]+?\.(?:jpg|png|gif|webp))"',
+            body,
+            re.I,
+        ):
+            thumb = html.unescape(m.group(1))
+            # thumbnail path -> sample path:
+            #   .../thumbnails/ab/cd/thumbnail_hash.jpg -> .../samples/ab/cd/sample_hash.jpg
+            sample = re.sub(
+                r"/thumbnails/([^/]+)/([^/]+)/thumbnail_",
+                r"/samples/\1/\2/sample_",
+                thumb,
+            )
+            canonical = _canonical_url(sample)
+            if sample.startswith("http") and canonical not in seen:
+                seen.add(canonical)
+                results.append(
+                    _make_image_result(
+                        "rule34",
+                        sample,
+                        thumb,
+                        len(results),
+                        title=f"Rule34 sample {len(results)+1}",
+                        score=1.0,
+                    )
+                )
+                found += 1
+                if len(results) >= limit:
+                    break
+        if found == 0:
+            break
+        pid += 1
+        fetched_pages += 1
+
+    return results[:limit], "rule34_html"
+
+
 def _backend_danbooru(
     query: str,
     limit: int,
@@ -1452,7 +1615,12 @@ def _backend_danbooru(
         params = {"tags": clean_query, "limit": str(per), "page": str(page)}
         data = _fetch_json(
             "https://danbooru.donmai.us/posts.json?" + urllib.parse.urlencode(params),
-            headers={"Referer": "https://danbooru.donmai.us/"},
+            # Danbooru 403s browser UAs on API endpoints; a custom
+            # identifying UA is required (and polite per their API docs).
+            headers={
+                "User-Agent": f"PyrmethusOSINT/{__version__} (research tool)",
+                "Referer": "https://danbooru.donmai.us/",
+            },
             backend="danbooru",
             use_cache=use_cache,
         )

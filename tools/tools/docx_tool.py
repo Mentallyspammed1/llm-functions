@@ -1,4 +1,11 @@
-the master template.
+#!/usr/bin/env python3
+# ==============================================================================
+# docx_tool.py — Pyrmethus AIChat / llm-functions DOCX Document Master Tool v4.0.0
+# ==============================================================================
+"""
+DOCX Document Master Tool — a comprehensive, dependency-free toolkit for
+reading, converting, creating, editing, and inspecting .docx documents.
+Built as the master template.
 
 It is implemented with zero external dependencies using Python's standard
 library (zipfile and xml.etree.ElementTree) for OpenXML parsing and generation.
@@ -23,10 +30,7 @@ It supports 9 complete operations:
 8.  append: Append Markdown/paragraphs/headings to existing .docx files.
 9.  extract-media: Safely extract embedded images/media files to an output
     directory (with Zip Slip traversal protection).
-
-#!/usr/bin/env python3
-# ==============================================================================
-# docx_tool.py — Pyrmethus AIChat / llm-functions DOCX Document Master Tool v4.0.0
+"""
 # AIChat/llm-functions compatible · Typed Python run() API · Colorized CLI · Safe Caching
 #
 # @describe Inspect, read, convert to markdown, search, replace, create, and append Microsoft Word (.docx) documents safely with zero external dependencies.
@@ -2268,15 +2272,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-Key Highlights
-
-1.  Zero External Dependencies: Works out-of-the-box using standard library
-    zipfile and xml.etree.ElementTree.
-2.  Markdown Conversions: Reads headings, lists, bold/italics, and tables
-    directly into Markdown format so LLMs can reason over document structure
-    with zero loss of semantic layout.
-3.  Document Creation & Append: Converts Markdown strings into valid OpenXML
-    Word XML structures (<w:p>, <w:tbl>, <w:rPr>).
-4.  Context & Path Security: Full support for AIChat's __cwd__ agent variable
-    and Zip Slip path traversal security assertions.

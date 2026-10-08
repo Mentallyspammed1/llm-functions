@@ -410,7 +410,7 @@ def inspect_disk(mount_point: str = "/") -> dict[str, Any]:
     try:
         usage = shutil.disk_usage(target_path)
     except Exception:
-        target_path = str(Path.home()
+        target_path = str(Path.home())
         try:
             usage = shutil.disk_usage(target_path)
         except Exception as exc:
@@ -566,20 +566,20 @@ def _build_multipart_payload(fields: dict[str, Any], file_field_name: str, file_
     for name, value in fields.items():
         if value is None or value == "":
             continue
-        body.extend(f"--{boundary}\r\n".encode("utf-8")
-        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8")
-        body.extend(f"{value}\r\n".encode("utf-8")
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        body.extend(f"{value}\r\n".encode("utf-8"))
 
-    mime_type, _ = mimetypes.guess_type(str(file_path)
-    body.extend(f"--{boundary}\r\n".encode("utf-8")
-    body.extend(f'Content-Disposition: form-data; name="{file_field_name}"; filename="{file_path.name}"\r\n'.encode("utf-8")
-    body.extend(f"Content-Type: {mime_type or 'application/octet-stream'}\r\n\r\n".encode("utf-8")
+    mime_type, _ = mimetypes.guess_type(str(file_path))
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(f'Content-Disposition: form-data; name="{file_field_name}"; filename="{file_path.name}"\r\n'.encode("utf-8"))
+    body.extend(f"Content-Type: {mime_type or 'application/octet-stream'}\r\n\r\n".encode("utf-8"))
 
     with open(file_path, "rb") as fp:
-        body.extend(fp.read()
+        body.extend(fp.read())
     body.extend(b"\r\n")
 
-    body.extend(f"--{boundary}--\r\n".encode("utf-8")
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
     return bytes(body), f"multipart/form-data; boundary={boundary}"
 
 
@@ -754,5 +754,24 @@ def execute_tool(
                 media_type=media_type,
                 parse_mode=parse_mode,
                 silent=silent,
+                disable_preview=disable_preview,
+            )
+            timings_ms["notify"] = round((time.monotonic() - t0) * 1000, 2)
 
-)) 
+        if action_norm == "all":
+            results["timings_ms"] = timings_ms
+            results["actions_completed"] = [
+                k for k in ("cpu", "memory", "disk", "uptime", "packages") if k in results
+            ]
+            if "notify" in results:
+                results["actions_completed"].append("notify")
+
+        return results
+
+    except ToolError:
+        raise
+    except KeyboardInterrupt:
+        raise ToolError("Interrupted by user signal.", exit_code=EXIT_INTERRUPTED)
+    except Exception as exc:
+        raise ToolError(f"Unexpected failure during '{action_norm}': {exc}", exit_code=EXIT_ERROR)
+

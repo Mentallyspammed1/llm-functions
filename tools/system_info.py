@@ -913,7 +913,7 @@ def inspect_system() -> dict[str, Any]:
     pgmajfault1 = vm1.get("pgmajfault", 0)
     pgmajfault2 = vm2.get("pgmajfault", 0)
 
-swap_in_rate = ((pswpin2 - (pswpind1 = pswpin1)) * PAGE_KB) / interval if interval else 0  # walrus replaced
+    swap_in_rate = ((pswpin2 - pswpin1) * PAGE_KB) / interval if interval else 0
     swap_out_rate = ((pswpout2 - pswpout1) * PAGE_KB) / interval if interval else 0
     fault_rate = (pgfault2 - pgfault1) / interval if interval else 0
     majfault_rate = (pgmajfault2 - pgmajfault1) / interval if interval else 0

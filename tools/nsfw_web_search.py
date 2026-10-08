@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# nsfw_web_search.py — Unfiltered NSFW Web Search Tool v1.1.0-ASCENDED
+# nsfw_web_search.py — Unfiltered NSFW Web Search Tool v1.3.0-ASCENDED
 # argc/aichat compatible · Termux-ready · Dual-output + Proxy Rotation
 #
 # @describe Perform an unfiltered web search (SafeSearch forced OFF). Supports optional proxy rotation for reliability.
@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qs, quote_plus, urlparse
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 try:
     import requests
@@ -271,56 +271,130 @@ def _unwrap_bing_redirect(href: str) -> str:
     return href
 
 
+_SNIPPET_SELECTORS = (
+    ".result__snippet",
+    ".b_caption p",
+    ".result-snippet",
+    "p[class*='description']",
+    ".w-gl__description",
+    "p.description",
+)
+
+
+def _extract_card(card) -> Optional[dict]:
+    """Extract {title, link, snippet} from one result card (multi-engine).
+
+    Handles DDG (.result__a), Bing (anchor outside <h2>, URL in <cite>),
+    Startpage (a[class*=title] with /clev tracking wrappers) and generic
+    engines whose cards contain any direct http anchor.
+    """
+
+    def _clean_href(anchor) -> str:
+        href = anchor.get("href") or ""
+        if "uddg=" in href:
+            qs = parse_qs(urlparse(href).query)
+            href = qs.get("uddg", [href])[0]
+        return href
+
+    def _snippet() -> str:
+        el = card.select_one(", ".join(_SNIPPET_SELECTORS))
+        return el.get_text(" ", strip=True) if el else ""
+
+    # 1) Preferred semantic anchors — first direct-http match wins.
+    for sel in ("a.result__a", "h2 a", "h3 a", "a.result-link", "a[class*='title']"):
+        for anchor in card.select(sel):
+            href = _clean_href(anchor)
+            if href.startswith(("http://", "https://")):
+                return {
+                    "title": anchor.get_text(" ", strip=True) or href,
+                    "link": href,
+                    "snippet": _snippet(),
+                }
+
+    # 2) Any direct http(s) anchor inside the card (Bing-style DOM).
+    for anchor in card.select("a[href^='http']"):
+        href = _clean_href(anchor)
+        if href.startswith(("http://", "https://")):
+            heading = card.find(["h2", "h3"])
+            title = heading.get_text(" ", strip=True) if heading else ""
+            return {
+                "title": title or anchor.get_text(" ", strip=True) or href,
+                "link": href,
+                "snippet": _snippet(),
+            }
+
+    # 3) Bing <cite> fallback when no usable anchor exists.
+    cite = card.find("cite")
+    if cite:
+        cand = cite.get_text(" ", strip=True)
+        if cand.startswith(("http://", "https://")):
+            heading = card.find(["h2", "h3"])
+            return {
+                "title": heading.get_text(" ", strip=True) if heading else cand,
+                "link": cand,
+                "snippet": _snippet(),
+            }
+    return None
+
+
 def _parse_results(html: str, selectors: tuple[str, ...], max_results: int) -> list[dict]:
     """Parse ordinary search-result cards and discard non-http links."""
     soup = BeautifulSoup(html, "html.parser")
     results: list[dict] = []
+    seen: set = set()
     for selector in selectors:
         for card in soup.select(selector):
-            # Title anchor varies by engine/markup:
-            #   DDG:      a.result__a
-            #   Bing web: h2 > a  (desktop)  or  a > h2  (mobile)
-            anchor = None
-            for candidate in card.select("a.result__a, h2 a, a.result-link, a.tilk"):
-                # Skip Bing's site-attribution link (site name, not result title)
-                if "tilk" in (candidate.get("class") or []):
-                    continue
-                anchor = candidate
-                break
-            if anchor is None:
-                # Mobile Bing nests the h2 inside the anchor: <a><h2>Title</h2></a>
-                heading = card.find("h2")
-                if heading is not None:
-                    parent_a = heading.find_parent("a")
-                    if parent_a is not None:
-                        anchor = parent_a
-            if anchor is None:
+            item = _extract_card(card)
+            if not item or item["link"] in seen:
                 continue
-            href = anchor.get("href") or ""
-            if "uddg=" in href:
-                qs = parse_qs(urlparse(href).query)
-                href = qs.get("uddg", [href])[0]
-            href = _unwrap_bing_redirect(href)
-            if not href.startswith(("http://", "https://")):
-                continue
-            snippet_el = card.select_one(".result__snippet, .b_caption p, .result-snippet")
-            results.append({
-                "title": anchor.get_text(" ", strip=True),
-                "link": href,
-                "snippet": snippet_el.get_text(" ", strip=True) if snippet_el else "",
-            })
+            seen.add(item["link"])
+            results.append(item)
             if len(results) >= max_results:
                 return results
     return results
 
-
 def _search_bing(query: str, max_results: int, region: str) -> list[dict]:
-    """Small dependency-free fallback for DDG challenge/empty responses."""
-    url = "https://www.bing.com/search?q=" + quote_plus(query)
-    response = requests.get(url, headers={"User-Agent": _make_session().headers["User-Agent"],
-                                          "Accept-Language": region}, timeout=14)
+    """Bing fallback (SafeSearch off via adlt=off) for DDG challenge pages."""
+    url = (
+        "https://www.bing.com/search?q=" + quote_plus(query)
+        + "&adlt=off&count=" + str(max(10, int(max_results)))
+    )
+    session = _make_session()
+    response = session.get(url, timeout=14)
     response.raise_for_status()
     return _parse_results(response.text, ("li.b_algo",), max_results)
+
+
+def _search_startpage(query: str, max_results: int) -> list[dict]:
+    """Startpage fallback — proxies Google results, rarely bot-blocked."""
+    url = "https://www.startpage.com/sp/search?query=" + quote_plus(query)
+    session = _make_session()
+    resp = session.get(url, timeout=16)
+    resp.raise_for_status()
+    return _parse_results(resp.text, ("div.result",), max_results)
+
+_STOPWORDS = {
+    "the", "a", "an", "of", "for", "and", "or", "in", "on", "to", "is",
+    "best", "new", "good", "top", "site", "sites", "list", "reddit",
+    "recommendations", "2024", "2025", "2026",
+}
+
+
+def _results_relevant(query: str, results: list[dict]) -> bool:
+    """Heuristic: at least one significant query term must appear in the
+    combined title+snippet of the top results. Catches Bing-style
+    sanitization where adult queries return generic 'best' results."""
+    terms = {
+        w for w in re.split(r"\W+", query.lower())
+        if len(w) > 2 and w not in _STOPWORDS
+    }
+    if not terms:
+        return True  # nothing significant to validate against
+    blob = " ".join(
+        (r.get("title", "") + " " + r.get("snippet", "")).lower()
+        for r in results[:5]
+    )
+    return any(t in blob for t in terms)
 
 
 def _search_ddg(
@@ -420,28 +494,61 @@ def execute_tool(
             hit["warnings"] = hit.get("warnings", []) + ["Served from cache"]
             return hit
 
+    backend_used: Optional[str] = None
+    results: list[dict] = []
+    used_proxy = None
+    error = None
+
+    # Backend chain: Startpage -> DDG -> Bing.
+    # Startpage proxies Google, is rarely bot-blocked, and does not
+    # sanitize adult queries. DDG frequently serves a bot-challenge page
+    # (HTTP 202). Bing works but sanitizes adult queries into generic
+    # results — relevance-checked so sanitized junk falls through.
     try:
-        results, used_proxy = _search_ddg(
-            query, max_results=max_results, region=region,
-            proxies=proxies, verbose=verbose
-        )
-        success = True
-        error = None
+        results = _search_startpage(query, max_results)
+        backend_used = "startpage"
     except Exception as exc:
-        # DDG frequently returns a challenge page. Use a bounded, explicit
-        # fallback rather than reporting a misleading successful zero-result.
+        error = f"Startpage: {exc}"
+        if verbose:
+            _cprint(f"{NEON_ORANGE}Startpage failed, trying DDG{RESET}")
+
+    if not results or not _results_relevant(query, results):
+        if results and verbose:
+            _cprint(f"{NEON_ORANGE}Startpage results irrelevant (sanitized?), trying DDG{RESET}")
         try:
-            results = _search_bing(query, max_results, region)
-            used_proxy = None
-            success = True
-            error = None
-            warnings.append("DuckDuckGo unavailable; used Bing fallback")
-        except Exception as fallback_exc:
-            results = []
-            used_proxy = None
-            success = False
-            error = f"DDG: {exc}; Bing: {fallback_exc}"
-            warnings.append("All search backends failed")
+            ddg_results, used_proxy = _search_ddg(
+                query, max_results=max_results, region=region,
+                proxies=proxies, verbose=verbose
+            )
+            if ddg_results and _results_relevant(query, ddg_results):
+                results = ddg_results
+                backend_used = "duckduckgo"
+                warnings.append("Used DuckDuckGo backend")
+            elif ddg_results and not results:
+                results = ddg_results
+                backend_used = "duckduckgo"
+        except Exception as exc:
+            error = (error + "; " if error else "") + f"DDG: {exc}"
+            if verbose:
+                _cprint(f"{NEON_ORANGE}DDG failed, trying Bing{RESET}")
+
+    if not results or not _results_relevant(query, results):
+        try:
+            bing_results = _search_bing(query, max_results, region)
+            if bing_results and _results_relevant(query, bing_results):
+                results = bing_results
+                backend_used = "bing"
+                warnings.append("Used Bing fallback")
+            elif bing_results and not results:
+                results = bing_results
+                backend_used = "bing"
+                warnings.append("Used Bing fallback (relevance unverified)")
+        except Exception as exc:
+            error = (error + "; " if error else "") + f"Bing: {exc}"
+
+    success = bool(results)
+    if not success:
+        warnings.append("All search backends failed")
 
     duration_ms = round((time.monotonic() - start) * 1000, 1)
     finished_at = datetime.now(timezone.utc).isoformat()
@@ -451,6 +558,7 @@ def execute_tool(
         "query": query,
         "max_results": max_results,
         "region": region,
+        "backend_used": backend_used,
         "results": results,
         "result_count": len(results),
         "duration_ms": duration_ms,
@@ -462,7 +570,7 @@ def execute_tool(
         "finished_at": finished_at,
         "tool": "nsfw_web_search",
         "version": __version__,
-        "note": "SafeSearch forced OFF (kp=-2). Proxy rotation available for reliability.",
+        "note": "SafeSearch OFF. Backend chain: Startpage -> DDG (kp=-2) -> Bing (adlt=off), with relevance validation.",
     }
 
     if use_cache and success and results:
