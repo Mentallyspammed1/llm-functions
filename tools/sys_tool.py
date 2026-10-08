@@ -475,7 +475,6 @@ def inspect_packages(query: Optional[str] = None, limit: int = 50) -> dict[str, 
                 capture_output=True,
                 text=True,
                 timeout=8,
-                stderr=subprocess.DEVNULL,
             )
             if res.returncode == 0:
                 for line in res.stdout.splitlines():
@@ -489,7 +488,6 @@ def inspect_packages(query: Optional[str] = None, limit: int = 50) -> dict[str, 
                 capture_output=True,
                 text=True,
                 timeout=8,
-                stderr=subprocess.DEVNULL,
             )
             if res.returncode == 0:
                 for line in res.stdout.splitlines():
@@ -503,7 +501,6 @@ def inspect_packages(query: Optional[str] = None, limit: int = 50) -> dict[str, 
                 capture_output=True,
                 text=True,
                 timeout=8,
-                stderr=subprocess.DEVNULL,
             )
             if res.returncode == 0:
                 for line in res.stdout.splitlines():
@@ -517,7 +514,6 @@ def inspect_packages(query: Optional[str] = None, limit: int = 50) -> dict[str, 
                 capture_output=True,
                 text=True,
                 timeout=8,
-                stderr=subprocess.DEVNULL,
             )
             if res.returncode == 0:
                 for line in res.stdout.splitlines():
