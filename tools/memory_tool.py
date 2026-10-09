@@ -444,7 +444,10 @@ def _read_jsonl(file_path: Path) -> list[dict[str, Any]]:
                 if not line_str:
                     continue
                 try:
-                    entries.append(json.loads(line_str))
+                    parsed = json.loads(line_str)
+                    # Guard against corrupted stores: only dict entries are valid
+                    if isinstance(parsed, dict):
+                        entries.append(parsed)
                 except json.JSONDecodeError:
                     continue
     except OSError:
