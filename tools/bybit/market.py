@@ -33,20 +33,70 @@ class MarketDataMixin:
         interval: str = "60",
         limit: int = 50,
         category: str = "linear",
+        end: Optional[int] = None,
+        paginate: bool = True,
     ) -> dict:
-        """Retrieves historical kline (candlestick) data."""
-        return self._request(
-            "GET",
-            "/v5/market/kline",
-            {
+        """Retrieves historical kline (candlestick) data.
+
+        Bybit caps a single response at 1000 candles. Asking for more used to
+        silently return 1000, which quietly starved long backtests, so larger
+        requests are now paged backwards with the `end` cursor until `limit`
+        candles are collected (or history runs out).
+        """
+        limit = max(1, int(limit))
+        if limit <= 1000 or not paginate:
+            params = {
                 "category": category,
                 "symbol": symbol.upper(),
                 "interval": interval,
-                "limit": limit,
-            },
-            signed=False,
-            category="market",
-        )
+                "limit": min(limit, 1000),
+            }
+            if end is not None:
+                params["end"] = int(end)
+            return self._request(
+                "GET", "/v5/market/kline", params,
+                signed=False, category="market",
+            )
+
+        collected: list = []
+        cursor = end
+        pages = 0
+        last_res: dict = {}
+        while len(collected) < limit and pages < 30:
+            pages += 1
+            params = {
+                "category": category,
+                "symbol": symbol.upper(),
+                "interval": interval,
+                "limit": 1000,
+            }
+            if cursor is not None:
+                params["end"] = int(cursor)
+            res = self._request(
+                "GET", "/v5/market/kline", params,
+                signed=False, category="market",
+            )
+            last_res = res
+            if isinstance(res, dict) and res.get("status") == "error":
+                if collected:
+                    break  # keep what we have; report it rather than lose it
+                return res
+            batch = res.get("list", []) if isinstance(res, dict) else []
+            if not batch:
+                break
+            collected.extend(batch)
+            oldest = int(float(batch[-1][0]))
+            if cursor is not None and oldest >= cursor:
+                break  # no progress — stop instead of looping forever
+            cursor = oldest - 1
+            if len(batch) < 1000:
+                break  # reached the start of available history
+
+        out = dict(last_res) if isinstance(last_res, dict) else {}
+        out["list"] = collected[:limit]
+        out["pages"] = pages
+        out["truncated"] = len(out["list"]) < limit
+        return out
 
     def get_instruments_info(
         self, category: str = "linear", symbol: Optional[str] = None
@@ -1302,14 +1352,12 @@ class MarketDataMixin:
             if lows[i] < lows[i - 1] and lows[i] < lows[i + 1]
         ]
 
-        historical_points = swing_highs + swing_lows + [pivot, r1, s1]
-
         def get_confluence(levels, historical_points, tolerance=0.005):
             confluent = []
             for lvl in levels:
                 score = 0
                 for pt in historical_points:
-                    if abs(lvl - pt) / pt < tolerance:
+                    if pt and abs(lvl - pt) / pt < tolerance:
                         score += 1
                 confluent.append({"price": round(lvl, 5), "score": score})
             return sorted(confluent, key=lambda x: x["score"], reverse=True)
@@ -1385,12 +1433,22 @@ class MarketDataMixin:
         return {"status": "ok", "profile": res}
 
     def check_liquidity_sweep_and_wait(self, symbol: str) -> bool:
-        """Monitors for liquidity sweeps (wicks)."""
+        """Detects a liquidity sweep (stop run) on the latest 5m candle.
+
+        A sweep is a wick at least 3x the body on *either* side. The previous
+        version only ever measured the lower wick, so bearish sweeps (upper
+        wick) were silently invisible even though the high was read.
+        """
         k = self._get_klines_safely(symbol, "5", 1)
         if not k:
             return False
         o, h, l, c = float(k[0][1]), float(k[0][2]), float(k[0][3]), float(k[0][4])
-        if abs(c - o) > 0 and (min(o, c) - l) > abs(c - o) * 3:
+        body = abs(c - o)
+        if body <= 0:
+            return False
+        lower_wick = min(o, c) - l
+        upper_wick = h - max(o, c)
+        if lower_wick > body * 3 or upper_wick > body * 3:
             time.sleep(1.5)
             return True
         return False

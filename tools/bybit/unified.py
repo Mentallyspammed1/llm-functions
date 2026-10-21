@@ -14,7 +14,17 @@ safety gates.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
+from .analytics import (
+    kelly_sizing,
+    monte_carlo_drawdowns,
+    optimize_strategy,
+    portfolio_scan,
+    risk_of_ruin,
+    robustness_score,
+    walk_forward,
+)
 from .price_action import PriceActionEngine, analyze_price_action
 
 
@@ -67,11 +77,17 @@ class PriceActionMixin:
         limit: int = 300,
         risk_pct: float = 1.0,
         leverage: float = 1.0,
-        rr_min: float = 2.0,
+        rr_min: float = 3.0,
         min_confidence: float = 55.0,
         fee_rate: float = 0.00055,
     ) -> dict:
         """Full trade plan: price-action signal + risk-first position sizing.
+
+        `rr_min` sets the primary target (take_profits[0]) as a multiple of the
+        stop distance. The default of 3.0 is the value that maximised
+        risk-adjusted expectancy in validation — taking 50% off at 1R and
+        trailing the rest was measurably worse, so the plan assumes the full
+        position runs to target unless you scale out yourself.
 
         Dry by design — nothing is placed. Returns entry/SL/TP ladder, qty,
         notional, margin and expected fees. Use `execute_signal` to act.
@@ -241,11 +257,16 @@ class PriceActionMixin:
         interval: str = "60",
         limit: int = 1000,
         risk_pct: float = 1.0,
-        rr: float = 2.0,
+        rr: float = 3.0,
         sl_atr: float = 1.5,
         start_balance: float = 1000.0,
         fee_rate: float = 0.00055,
         min_confidence: float = 55.0,
+        slippage_bps: float = 2.0,
+        trailing_atr: float = 0.0,
+        time_stop_bars: int = 0,
+        partial_frac: float = 0.0,
+        breakeven_at_r: float = 0.0,
     ) -> dict:
         """Backtest the price-action strategy on historical klines.
 
@@ -265,6 +286,12 @@ class PriceActionMixin:
             start_balance=start_balance,
             fee_rate=fee_rate,
             min_confidence=min_confidence,
+            slippage_bps=slippage_bps,
+            trailing_atr=trailing_atr,
+            time_stop_bars=time_stop_bars,
+            partial_frac=partial_frac,
+            breakeven_at_r=breakeven_at_r,
+            interval=interval,
         )
         res["symbol"] = symbol.upper()
         res["interval"] = interval
@@ -281,7 +308,7 @@ class PriceActionMixin:
         side: str = "auto",
         risk_pct: float = 1.0,
         leverage: float = 1.0,
-        rr_min: float = 2.0,
+        rr_min: float = 3.0,
         min_confidence: float = 60.0,
         execute: bool = False,
         max_risk_pct: float = 2.0,
@@ -362,6 +389,209 @@ class PriceActionMixin:
         plan["order_result"] = res
         plan["dry_run"] = False
         return plan
+
+
+    # ── validation / optimisation / risk (read-only) ────────────────────────
+
+    def optimize_strategy(
+        self,
+        symbol: str,
+        interval: str = "60",
+        limit: int = 1000,
+        risk_pct: float = 1.0,
+        rr: float = 3.0,
+        min_confidence: float = 55.0,
+        start_balance: float = 1000.0,
+        fee_rate: float = 0.00055,
+        slippage_bps: float = 2.0,
+        grid: Optional[str] = None,
+    ) -> dict:
+        """Grid-search entry/risk parameters, ranked by robustness.
+
+        In-sample only — confirm with `walk_forward` before trading. Ranking is
+        by expectancy x sample-size, penalised for drawdown, so a handful of
+        lucky trades cannot win the sweep.
+        """
+        import json as _json
+
+        klines = self._get_klines_safely(symbol, interval, limit)
+        if len(klines) < 400:
+            return {"status": "error", "msg": f"Need >=400 klines, got {len(klines)}"}
+        parsed = None
+        if grid:
+            try:
+                parsed = _json.loads(grid) if isinstance(grid, str) else grid
+            except Exception as e:
+                return {"status": "error", "msg": f"grid must be JSON: {e}"}
+        res = optimize_strategy(
+            klines, grid=parsed, risk_pct=risk_pct, start_balance=start_balance,
+            fee_rate=fee_rate, slippage_bps=slippage_bps,
+        )
+        res["symbol"] = symbol.upper()
+        res["interval"] = interval
+        return res
+
+    def walk_forward(
+        self,
+        symbol: str,
+        interval: str = "60",
+        limit: int = 2000,
+        folds: int = 4,
+        risk_pct: float = 1.0,
+        start_balance: float = 1000.0,
+        fee_rate: float = 0.00055,
+        slippage_bps: float = 2.0,
+    ) -> dict:
+        """Out-of-sample validation: optimise on each block's past, test on its future."""
+        klines = self._get_klines_safely(symbol, interval, max(limit, 400))
+        if len(klines) < 400:
+            return {"status": "error", "msg": f"Need >=400 klines, got {len(klines)}"}
+        res = walk_forward(
+            klines, folds=folds, risk_pct=risk_pct, start_balance=start_balance,
+            fee_rate=fee_rate, slippage_bps=slippage_bps,
+        )
+        res["symbol"] = symbol.upper()
+        res["interval"] = interval
+        return res
+
+    def portfolio_scan(
+        self,
+        symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT",
+        interval: str = "60",
+        limit: int = 1000,
+        risk_pct: float = 1.0,
+        start_balance: float = 1000.0,
+        fee_rate: float = 0.00055,
+        slippage_bps: float = 2.0,
+    ) -> dict:
+        """Backtest several symbols and rank them by risk-adjusted quality."""
+        data = {}
+        errors = {}
+        for sym in [x.strip().upper() for x in str(symbols).split(",") if x.strip()]:
+            kl = self._get_klines_safely(sym, interval, limit)
+            if len(kl) >= 300:
+                data[sym] = kl
+            else:
+                errors[sym] = f"only {len(kl)} klines"
+        if not data:
+            return {"status": "error", "msg": "no symbol returned enough klines",
+                    "errors": errors}
+        res = portfolio_scan(
+            data, risk_pct=risk_pct, start_balance=start_balance,
+            fee_rate=fee_rate, slippage_bps=slippage_bps,
+        )
+        res["interval"] = interval
+        if errors:
+            res["errors"] = errors
+        return res
+
+    def risk_report(
+        self,
+        symbol: str = "BTCUSDT",
+        interval: str = "60",
+        limit: int = 1000,
+        risk_pct: float = 1.0,
+        start_balance: float = 1000.0,
+        fee_rate: float = 0.00055,
+        slippage_bps: float = 2.0,
+        simulations: int = 1000,
+    ) -> dict:
+        """One-shot survivability report for a symbol.
+
+        Backtests the strategy, then answers the questions that decide whether
+        it is tradeable at all: what is the expectancy, how deep was the worst
+        drawdown, what drawdown could batching the trade order produce, what is
+        the risk of ruin at this size, and what risk % does fractional Kelly
+        recommend?
+        """
+        from .backtest import run_backtest
+
+        klines = self._get_klines_safely(symbol, interval, limit)
+        if len(klines) < 300:
+            return {"status": "error", "msg": f"Need >=300 klines, got {len(klines)}"}
+        res = run_backtest(
+            klines, risk_pct=risk_pct, start_balance=start_balance,
+            fee_rate=fee_rate, slippage_bps=slippage_bps, interval=interval,
+        )
+        s = res["summary"]
+        mc = monte_carlo_drawdowns(
+            res["trades"], simulations=simulations, start_balance=start_balance
+        )
+        sizing = kelly_sizing(
+            start_balance, s["win_rate_pct"] / 100.0, s["payoff_ratio"] or 0.0
+        )
+        ruin = risk_of_ruin(
+            s["win_rate_pct"] / 100.0, s["payoff_ratio"] or 0.0, risk_pct
+        )
+        reasons = []
+        if s["expectancy_r"] <= 0:
+            reasons.append(f"expectancy is {s['expectancy_r']:+.3f}R — no edge")
+        if s["profit_factor"] <= 1.2:
+            reasons.append(f"profit factor {s['profit_factor']} <= 1.2")
+        if s["total_trades"] < 20:
+            reasons.append(
+                f"only {s['total_trades']} trades — not enough evidence"
+            )
+        if ruin["ruin_probability"] >= 0.05:
+            reasons.append(
+                f"risk of ruin {ruin['ruin_probability']:.1%} at {risk_pct}% risk"
+            )
+        verdict = "tradeable" if not reasons else "not tradeable on this data"
+        return {
+            "status": "ok",
+            "symbol": symbol.upper(),
+            "interval": interval,
+            "verdict": verdict,
+            "verdict_reasons": reasons,
+            "robustness_score": robustness_score(s),
+            "summary": s,
+            "monte_carlo": mc,
+            "kelly": sizing,
+            "risk_of_ruin": ruin,
+            "warning": (
+                "Past performance on historical candles does not predict future "
+                "returns. Trade small, paper-trade first."
+            ),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def position_sizing(
+        self,
+        symbol: str = "BTCUSDT",
+        interval: str = "60",
+        limit: int = 1000,
+        balance: float = 0.0,
+        fraction: float = 0.25,
+        hard_cap_pct: float = 2.0,
+    ) -> dict:
+        """Fractional-Kelly risk per trade derived from the strategy's own stats."""
+        from .backtest import run_backtest
+
+        klines = self._get_klines_safely(symbol, interval, limit)
+        if len(klines) < 300:
+            return {"status": "error", "msg": f"Need >=300 klines, got {len(klines)}"}
+        bal = float(balance) if balance and float(balance) > 0 else self._available_usdt()
+        if bal <= 0:
+            return {
+                "status": "error",
+                "msg": "No balance supplied and none available on the account.",
+            }
+        s = run_backtest(klines, start_balance=bal, interval=interval)["summary"]
+        sizing = kelly_sizing(
+            bal, s["win_rate_pct"] / 100.0, s["payoff_ratio"] or 0.0,
+            fraction=fraction, hard_cap_pct=hard_cap_pct,
+        )
+        sizing.update({
+            "symbol": symbol.upper(),
+            "interval": interval,
+            "basis": {
+                "win_rate_pct": s["win_rate_pct"],
+                "payoff_ratio": s["payoff_ratio"],
+                "expectancy_r": s["expectancy_r"],
+                "total_trades": s["total_trades"],
+            },
+        })
+        return sizing
 
     def market_snapshot(self, symbol: str, interval: str = "60") -> dict:
         """One-shot overview: ticker, funding, orderbook and PA trend state."""

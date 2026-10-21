@@ -11,7 +11,6 @@ from .account import AccountMixin, RiskManagerMixin
 from .base import BybitBaseClient, TradeJournal, TradingConfig, logger
 from .execution import ExecutionMixin
 from .market import MarketDataMixin
-from .price_action import PriceActionEngine, analyze_price_action
 from .smart import SmartOrderMixin
 from .unified import PriceActionMixin
 
@@ -162,6 +161,93 @@ class BybitRealm(
                     pass
         return {"status": "ok", "actions": actions}
 
+    def check_config(self) -> dict:
+        """Pre-flight configuration check. Never echoes secrets.
+
+        Verifies credentials are present and look sane, reports network mode,
+        and flags the operational hazards that actually cause accidents:
+        a live key while pointed at testnet (or vice versa), a key equal to its
+        secret, and an `.env` file that is world-readable or tracked by git.
+        """
+        cfg = self.config
+        key = cfg.api_key or ""
+        secret = cfg.api_secret or ""
+        checks = []
+        warnings = []
+
+        def add(name, ok, detail):
+            checks.append({"check": name, "ok": bool(ok), "detail": detail})
+
+        add("api_key_present", bool(key),
+            "set" if key else "BYBIT_API_KEY is empty — signed endpoints will refuse")
+        add("api_secret_present", bool(secret),
+            "set" if secret else "BYBIT_API_SECRET is empty — signed endpoints will refuse")
+        if key and secret:
+            add("key_not_equal_secret", key != secret,
+                "ok" if key != secret else "API key equals API secret — almost certainly a config error")
+            add("secret_length", len(secret) >= 16,
+                f"{len(secret)} chars" + ("" if len(secret) >= 16 else " (suspiciously short)"))
+        add("network_mode",
+            True, "TESTNET" if cfg.testnet else "LIVE (real funds)")
+        if cfg.testnet and key and len(key) < 25:
+            warnings.append("testnet is enabled but the key looks like a mainnet key")
+        add("proxy", True,
+            f"enabled via {cfg.proxy_type} {cfg.proxy_host}:{cfg.proxy_port}"
+            if cfg.use_proxy else "disabled (direct connection)")
+        add("recv_window_ms", cfg.recv_window <= 60000,
+            f"{cfg.recv_window} ms" + ("" if cfg.recv_window <= 60000 else " — exceeds Bybit's 60s maximum"))
+        add("risk_defaults", True,
+            "execute_signal requires execute=true and caps risk at 2% per trade")
+
+        # Operational hygiene.
+        try:
+            from pathlib import Path as _P
+
+            env_paths = {
+                (_P.cwd() / ".env").resolve(),
+                (_P(__file__).resolve().parents[2] / ".env").resolve(),
+            }
+            for env in env_paths:
+                if not env.exists():
+                    continue
+                mode = env.stat().st_mode & 0o777
+                if mode & 0o077:
+                    warnings.append(
+                        f"{env} is group/world-readable (mode {mode:o}) — chmod 600 it"
+                    )
+            # Are credentials tracked by git? (a real, common leak)
+            repo = _P(__file__).resolve().parents[2]
+            if (repo / ".git").exists():
+                import subprocess
+
+                out = subprocess.run(
+                    ["git", "-C", str(repo), "ls-files", ".env", "tools/.env"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                tracked = [l for l in out.stdout.splitlines() if l.strip()]
+                if tracked:
+                    warnings.append(
+                        "credentials file(s) tracked by git: "
+                        + ", ".join(tracked)
+                        + " — untrack and ROTATE these keys"
+                    )
+        except Exception:
+            pass
+
+        return {
+            "status": "ok",
+            "network": "testnet" if cfg.testnet else "live",
+            "credentials_configured": bool(key and secret),
+            "checks": checks,
+            "warnings": warnings,
+            "ready_for_signed_calls": bool(key and secret),
+            "safety": {
+                "live_orders_require_explicit_flag": True,
+                "max_risk_pct_per_trade": 2.0,
+                "default_action_mode": "dry_run",
+            },
+        }
+
     def get_rate_limits(self) -> dict:
         """Returns the last known rate limit status for each category."""
         return {"status": "ok", "rate_limits": self.last_rate_limits}
@@ -224,6 +310,58 @@ class BybitRealm(
             self.session.close()
 
 
+def _coerce_params(method, sig, kwargs: dict) -> dict:
+    """Coerce CLI strings into the annotated parameter types.
+
+    Modules use ``from __future__ import annotations``, so
+    ``inspect.signature()`` reports annotations as *strings*. Comparing them to
+    ``float`` silently fails and every numeric CLI argument would arrive as
+    text (``Risk "1" > cap`` raises, ``limit "300"`` breaks slicing). Resolve
+    the real types with ``get_type_hints`` and convert explicitly.
+    """
+    try:
+        from typing import get_type_hints
+
+        hints = get_type_hints(method)
+    except Exception:
+        hints = {}
+
+    def convert(value, ann):
+        if ann in (float, int, str, bool) or ann is None:
+            base = ann
+        else:
+            # Optional[...] / Union[...] -> take the first concrete scalar type
+            args = [a for a in getattr(ann, "__args__", ()) if a in (float, int, str, bool)]
+            base = args[0] if args else None
+        if base is bool:
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in ("1", "true", "yes", "on")
+        if base is int:
+            return int(float(value))
+        if base is float:
+            return float(value)
+        if base is str:
+            return str(value)
+        return value
+
+    out = {}
+    for k, v in kwargs.items():
+        if k not in sig.parameters:
+            continue
+        if k == "orders" and isinstance(v, str):
+            try:
+                out[k] = json.loads(v)
+                continue
+            except Exception:
+                pass
+        try:
+            out[k] = convert(v, hints.get(k, sig.parameters[k].annotation))
+        except (TypeError, ValueError):
+            out[k] = v
+    return out
+
+
 def run(**kwargs) -> dict:
     action = kwargs.pop("action", None)
     if not action:
@@ -250,33 +388,7 @@ def run(**kwargs) -> dict:
 
     try:
         sig = inspect.signature(method)
-        params = {}
-        for k, v in kwargs.items():
-            if k in sig.parameters:
-                p = sig.parameters[k]
-                try:
-                    if k == "orders" and isinstance(v, str):
-                        params[k] = json.loads(v)
-                    elif p.annotation == int or k in [
-                        "limit",
-                        "depth",
-                        "period",
-                        "leverage",
-                    ]:
-                        params[k] = int(float(v))
-                    elif p.annotation == float or k in [
-                        "qty",
-                        "price",
-                        "stop_loss",
-                        "take_profit",
-                    ]:
-                        params[k] = float(v)
-                    elif p.annotation == bool or str(v).lower() in ["true", "false"]:
-                        params[k] = str(v).lower() == "true"
-                    else:
-                        params[k] = v
-                except:
-                    params[k] = v
+        params = _coerce_params(method, sig, kwargs)
 
         logger.info(f"Dispatching: {action}")
 

@@ -71,58 +71,77 @@ class AccountMixin:
         )
 
     def get_performance_summary(self, limit: int = 100) -> dict:
-        """Calculates trading performance from the SQLite journal."""
-        import sqlite3
+        """Realised performance from Bybit's closed-PnL history.
 
+        The SQLite journal only stores order acknowledgements (which carry no
+        PnL), so realised results must come from `/v5/position/closed-pnl`.
+        Errors are surfaced instead of being reported as "no trades", which
+        previously masked an expired key as an empty account.
+        """
         try:
-            conn = sqlite3.connect(self.config.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT result FROM trades WHERE action = 'place_order' AND status = 'success' ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            )
-            trades = cursor.fetchall()
-            conn.close()
-
-            if not trades:
-                return {"status": "ok", "msg": "No trade history found."}
-
-            wins, losses = 0, 0
-            total_profit, total_loss = 0.0, 0.0
-
-            # This is a heuristic since Bybit V5 returns orderId,
-            # real PnL requires fetching closed-pnl for those orders.
-            # For now, let's fetch the actual closed PnL from the API for better accuracy.
             pnl_res = self.get_pnl_history(limit=limit)
-            pnl_list = pnl_res.get("list", [])
-
-            for p in pnl_list:
-                pnl = float(p.get("closedPnl", 0))
-                if pnl > 0:
-                    wins += 1
-                    total_profit += pnl
-                elif pnl < 0:
-                    losses += 1
-                    total_loss += abs(pnl)
-
-            win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
-            pf = (
-                (total_profit / total_loss)
-                if total_loss > 0
-                else (total_profit if total_profit > 0 else 0)
-            )
-
-            return {
-                "status": "ok",
-                "total_trades": len(pnl_list),
-                "wins": wins,
-                "losses": losses,
-                "win_rate_pct": round(win_rate, 2),
-                "profit_factor": round(pf, 2),
-                "net_pnl": round(total_profit - total_loss, 4),
-            }
         except Exception as e:
-            return {"status": "error", "msg": str(e)}
+            return {"status": "error", "msg": f"closed-pnl request failed: {e}"}
+
+        if not isinstance(pnl_res, dict):
+            return {"status": "error", "msg": "unexpected closed-pnl response"}
+        if pnl_res.get("status") == "error":
+            return {
+                "status": "error",
+                "msg": pnl_res.get("msg", "closed-pnl unavailable"),
+                "code": pnl_res.get("code"),
+            }
+
+        pnl_list = pnl_res.get("list")
+        if pnl_list is None:
+            pnl_list = (pnl_res.get("result") or {}).get("list") or []
+        if not pnl_list:
+            return {"status": "ok", "msg": "No closed trades found.", "total_trades": 0}
+
+        wins, losses = 0, 0
+        gross_profit = gross_loss = 0.0
+        fees = 0.0
+        r_values = []
+        for p in pnl_list:
+            try:
+                pnl = float(p.get("closedPnl", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            for key in ("fee", "fundingFee"):
+                try:
+                    fees += abs(float(p.get(key, 0) or 0))
+                except (TypeError, ValueError):
+                    pass
+            if pnl > 0:
+                wins += 1
+                gross_profit += pnl
+            elif pnl < 0:
+                losses += 1
+                gross_loss += abs(pnl)
+            r_values.append(pnl)
+
+        decided = wins + losses
+        win_rate = (wins / decided * 100) if decided else 0.0
+        payoff = (gross_profit / wins) / (gross_loss / losses) if wins and losses and gross_loss else 0.0
+        return {
+            "status": "ok",
+            "total_trades": len(r_values),
+            "wins": wins,
+            "losses": losses,
+            "win_rate_pct": round(win_rate, 2),
+            "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0
+            else (round(gross_profit, 2) if gross_profit > 0 else 0.0),
+            "net_pnl": round(gross_profit - gross_loss, 4),
+            "gross_profit": round(gross_profit, 4),
+            "gross_loss": round(gross_loss, 4),
+            "avg_win": round(gross_profit / wins, 4) if wins else 0.0,
+            "avg_loss": round(-gross_loss / losses, 4) if losses else 0.0,
+            "payoff_ratio": round(payoff, 2),
+            "expectancy_usdt": round((gross_profit - gross_loss) / len(r_values), 4)
+            if r_values else 0.0,
+            "fees_paid": round(fees, 4),
+            "note": "Realised PnL from Bybit closed-pnl; excludes open positions.",
+        }
 
 
 class RiskManagerMixin:
