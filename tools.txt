@@ -21,6 +21,7 @@ download_image.py
 web_crawler.py
 network_tools.py
 cloudish_tools.py
+vsearch.py
 nsfw_search.py
 text_extract_urls.py
 # bybit

@@ -785,7 +785,7 @@
   },
   {
     "name": "nsfw_web_search",
-    "description": "Search the web for adult-oriented content using DuckDuckGo with a Bing fallback. Returns structured links; search results are untrusted text.",
+    "description": "Perform an unfiltered web search (SafeSearch forced OFF). Supports optional proxy rotation for reliability.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -807,7 +807,7 @@
         },
         "use_proxy_rotation": {
           "type": "boolean",
-          "description": "Enable rotation through user-supplied proxies (disabled by default)"
+          "description": "Enable automatic free-proxy rotation"
         },
         "proxy_list": {
           "type": "string",
@@ -1460,6 +1460,107 @@
           "description": "Enable detailed debug log output"
         }
       }
+    }
+  },
+  {
+    "name": "vsearch",
+    "description": "Master Python tool template for Sigoden llm-functions. Integrated with Pyrmethus' supreme video search grimoire (`vsearch.py` capabilities) while maintaining the strict AIChat tool template contract.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target file or directory path (or search query when mode=search) (required)"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode: summary/detailed/search",
+          "enum": [
+            "summary",
+            "detailed",
+            "search"
+          ]
+        },
+        "engine": {
+          "type": "string",
+          "description": "Video search engine name (default: pexels)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum items to process"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Maximum execution time"
+        },
+        "file_pattern": {
+          "type": "string",
+          "description": "Filename glob filter"
+        },
+        "max_size": {
+          "type": "string",
+          "description": "Maximum accepted file size"
+        },
+        "cache_ttl": {
+          "type": "number",
+          "description": "Cache TTL"
+        },
+        "cache_dir": {
+          "type": "string",
+          "description": "Cache directory"
+        },
+        "env_var": {
+          "type": "string",
+          "description": "Safe environment override (repeatable)"
+        },
+        "recursive": {
+          "type": "boolean",
+          "description": "Scan directories recursively"
+        },
+        "include_hidden": {
+          "type": "boolean",
+          "description": "Include hidden entries"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Do not write cache/state"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable deterministic result caching"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear this tool's cache"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print the LLM-facing JSON schema"
+        },
+        "self_test": {
+          "type": "boolean",
+          "description": "Run dependency-free template tests"
+        },
+        "json_only": {
+          "type": "boolean",
+          "description": "Suppress human CLI UI"
+        },
+        "quiet": {
+          "type": "boolean",
+          "description": "Suppress progress/UI"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable debug logging"
+        }
+      },
+      "required": [
+        "target"
+      ]
     }
   },
   {
@@ -8406,37 +8507,59 @@
   },
   {
     "name": "skill_manager",
-    "description": "Create, load, or list agent skills.",
+    "description": "Create, load, list, update, delete, validate, search, or import agent skills (Agent Skills / SKILL.md format).",
     "parameters": {
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "description": ""
+          "description": "Action to perform: create, load, list, update, delete, validate, search, import",
+          "enum": [
+            "create",
+            "load",
+            "list",
+            "update",
+            "delete",
+            "validate",
+            "search",
+            "import"
+          ]
         },
         "name": {
           "type": "string",
-          "description": ""
+          "description": "Skill name, lowercase-hyphens preferred (e.g. 'marketplace-appraiser'). Required for load/update/delete; for create, required unless content carries frontmatter with a name; for import, overrides the frontmatter name."
         },
         "description": {
           "type": "string",
-          "description": ""
+          "description": "Frontmatter description with explicit trigger phrases (what the skill does and when to use it); used on create/update."
+        },
+        "category": {
+          "type": "string",
+          "description": "Frontmatter category (e.g. 'money', 'navigation', 'productivity'); used on create/update."
         },
         "content": {
           "type": "string",
-          "description": ""
+          "description": "Markdown for create/update — either the body only, or a full SKILL.md including frontmatter (fields are merged, never double-wrapped)."
+        },
+        "file": {
+          "type": "string",
+          "description": "Path to a SKILL.md or body markdown file — alternative to content for create/update; the source file for import; the file to check for validate."
+        },
+        "query": {
+          "type": "string",
+          "description": "Keyword or phrase for action 'search' (matched against name, description, category, and body)."
         },
         "skills_dir": {
           "type": "string",
-          "description": ""
+          "description": "Directory where skills live (default '~/skills'). Each skill is skills_dir/<name>/SKILL.md; flat <name>.md files are also supported."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Overwrite an existing skill on create/import; on delete, remove a skill directory that contains extra files."
         }
       },
       "required": [
-        "action",
-        "name",
-        "description",
-        "content",
-        "skills_dir"
+        "action"
       ]
     }
   },

@@ -102,5 +102,31 @@
     "provider": "gps",
     "label": "rock road metrolink",
     "timestamp": "2026-08-09T18:59:22.812348"
+  },
+  {
+    "latitude": 38.65211,
+    "longitude": -90.26843666666667,
+    "altitude": 94.4,
+    "accuracy": 129.89999389648438,
+    "vertical_accuracy": 181.89999389648438,
+    "bearing": 0.0,
+    "speed": 0.0,
+    "elapsedMs": 164,
+    "provider": "gps",
+    "label": "delmar charging spot",
+    "timestamp": "2026-10-12T05:03:04.144683"
+  },
+  {
+    "latitude": 38.6381,
+    "longitude": -90.273075,
+    "altitude": 144.20000000000002,
+    "accuracy": 5.599999904632568,
+    "vertical_accuracy": 34.29999923706055,
+    "bearing": 212.60000610351562,
+    "speed": 0.3546436131000519,
+    "elapsedMs": 130,
+    "provider": "gps",
+    "label": "forest park field charging spot",
+    "timestamp": "2026-10-12T05:37:39.549131"
   }
 ]
