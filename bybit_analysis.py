@@ -200,7 +200,7 @@ def main():
     parser.add_argument("--limit", type=int, default=100, help="Limit")
     parser.add_argument("--side", default="Buy", help="Buy or Sell")
     parser.add_argument("--qty", type=float, default=None, help="Quantity")
-    parser.add_argument("--risk_pct", type=float, default=1.0, help="Risk %")
+    parser.add_argument("--risk_pct", type=float, default=1.0, help="Risk per trade as a percentage of balance (e.g. 1.0)")
     args = parser.parse_args()
 
     print(json.dumps(run(**vars(args)), indent=2))

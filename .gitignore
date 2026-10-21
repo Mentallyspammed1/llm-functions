@@ -31,3 +31,10 @@ aicha5/bridge/node_modules/.cache/
 # Bybit suite runtime artifacts
 /bybit_trades.db
 /trading_signals.json
+
+# Credentials — NEVER commit these (template lives in .env.example)
+.env
+.env.*
+*.env
+!*.env.example
+!env.example
