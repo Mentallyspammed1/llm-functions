@@ -865,8 +865,10 @@ class MarketDataMixin:
         return "UP" if x > closes[-1] else "DOWN"
 
     def get_orderbook_analysis(self, symbol: str, depth: int = 50) -> dict:
-        """Analyzes orderbook imbalance (OBI)."""
+        """Analyzes orderbook imbalance (OBI) and depth volume profile."""
         bids, asks = self._orderbook_levels(self.get_orderbook(symbol, limit=depth))
+        bids = bids[:depth]
+        asks = asks[:depth]
         bv = sum(q for _, q in bids)
         av = sum(q for _, q in asks)
         return {
@@ -876,6 +878,58 @@ class MarketDataMixin:
             "ask_vol": round(av, 2),
             "best_bid": bids[0][0] if bids else None,
             "best_ask": asks[0][0] if asks else None,
+            "volume_profile": {
+                "bid_tiers": [{"price": p, "qty": q} for p, q in bids],
+                "ask_tiers": [{"price": p, "qty": q} for p, q in asks],
+            },
+        }
+
+    def get_volume_at_price(
+        self, symbol: str, depth: int = 50, category: str = "linear"
+    ) -> dict:
+        """Returns bid and ask volume levels from the orderbook."""
+        bids, asks = self._orderbook_levels(
+            self.get_orderbook(symbol, limit=depth, category=category)
+        )
+        return {
+            "status": "ok",
+            "bids": [{"price": p, "qty": q} for p, q in bids],
+            "asks": [{"price": p, "qty": q} for p, q in asks],
+        }
+
+    def scan_scalping_opportunities(
+        self, symbol: str, interval: str = "5"
+    ) -> dict:
+        """Scans multi-indicator confluence for scalping signals."""
+        rsi = float(self.calculate_rsi(symbol, interval).get("rsi", 50))
+        ema = float(self.calculate_ema(symbol, interval).get("ema", 0))
+        bb = self.calculate_bollinger_bands(symbol, interval)
+        lower_bb = float(bb.get("lower", 0))
+        upper_bb = float(bb.get("upper", float("inf")))
+        vwap = float(self.calculate_vwap(symbol, interval).get("vwap", 0))
+        stoch = float(self.calculate_stochastic(symbol, interval).get("k", 50))
+        tkr = self.get_ticker(symbol).get("list", [{}])[0]
+        price = float(tkr.get("lastPrice", 0))
+
+        signal = "NEUTRAL"
+        if price < lower_bb and rsi < 35 and price > vwap and stoch < 20:
+            signal = "BUY_REVERSION"
+        elif price > upper_bb and rsi > 65 and price < vwap and stoch > 80:
+            signal = "SELL_REVERSION"
+        elif price > ema and rsi > 55:
+            signal = "BUY_MOMENTUM"
+        elif price < ema and rsi < 45:
+            signal = "SELL_MOMENTUM"
+
+        return {
+            "status": "ok",
+            "symbol": symbol.upper(),
+            "price": price,
+            "rsi": rsi,
+            "ema": ema,
+            "vwap": vwap,
+            "stoch_k": stoch,
+            "signal": signal,
         }
 
     def analyze_symbol(self, symbol: str) -> dict:

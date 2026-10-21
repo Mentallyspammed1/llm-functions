@@ -36,13 +36,19 @@ class TradingConfig:
 
     # ── Network Settings ──────────────────────────────────────────────────
     use_proxy: bool = field(
-        default_factory=lambda: os.getenv("PROXY_ENABLED", "false").lower() == "true"
+        default_factory=lambda: any(
+            os.getenv(k, "").lower() in ("true", "1", "yes")
+            for k in ("PROXY_ENABLED", "TOR_ENABLED", "USE_TOR", "BYBIT_USE_TOR")
+        )
     )
+    use_tor: Optional[bool] = None
     proxy_host: str = field(
         default_factory=lambda: os.getenv("PROXY_HOST", "127.0.0.1")
     )
     proxy_port: int = field(
-        default_factory=lambda: int(os.getenv("PROXY_PORT", "9050"))
+        default_factory=lambda: int(
+            os.getenv("PROXY_PORT", os.getenv("TOR_SOCKS_PORT", "9050"))
+        )
     )
     proxy_type: str = field(default_factory=lambda: os.getenv("PROXY_TYPE", "socks5h"))
     use_pysocks: bool = field(
@@ -53,13 +59,17 @@ class TradingConfig:
         default_factory=lambda: int(os.getenv("REQUEST_TIMEOUT", "15"))
     )
     max_retries: int = field(default_factory=lambda: int(os.getenv("MAX_RETRIES", "3")))
-    recv_window: int = 5000
+    recv_window: int = 20000
     journal_path: str = field(
         default_factory=lambda: os.getenv("JOURNAL_PATH", "bybit_journal.json")
     )
     db_path: str = field(
         default_factory=lambda: os.getenv("DB_PATH", "bybit_trades.db")
     )
+
+    def __post_init__(self):
+        if self.use_tor is not None:
+            self.use_proxy = bool(self.use_tor)
 
     @property
     def base_url(self) -> str:
@@ -186,7 +196,7 @@ class BybitBaseClient:
         self._symbol_cache: Dict[str, dict] = {}
         self.time_offset = 0
         self.last_rate_limits = {}
-        if os.getenv("BYBIT_SYNC_TIME", "true").lower() == "true":
+        if os.getenv("BYBIT_SYNC_TIME", "false").lower() == "true":
             try:
                 self.sync_server_time()
             except Exception:
@@ -223,15 +233,8 @@ class BybitBaseClient:
             }
         self._limiter.acquire(category)
 
-        ts = str(int(time.time() * 1000) + self.time_offset)
         url = self.config.base_url + endpoint
-        headers = {
-            "X-BAPI-API-KEY": self.config.api_key,
-            "X-BAPI-TIMESTAMP": ts,
-            "X-BAPI-RECV-WINDOW": str(self.config.recv_window),
-            "Content-Type": "application/json",
-        }
-
+        req_params = params
         payload = ""
         if signed:
             if method == "GET":
@@ -248,7 +251,7 @@ class BybitBaseClient:
                 )
                 if payload:
                     url += f"?{payload}"
-                params = None
+                req_params = None
             elif json_data:
                 clean_data = {}
                 for k, v in json_data.items():
@@ -258,7 +261,18 @@ class BybitBaseClient:
                         clean_data[k] = v
                 json_data = clean_data
                 payload = json.dumps(json_data, sort_keys=True, separators=(",", ":"))
-            headers["X-BAPI-SIGN"] = self._sign(payload, ts)
+
+        def _build_headers() -> dict:
+            ts = str(int(time.time() * 1000) + self.time_offset)
+            hdrs = {
+                "X-BAPI-API-KEY": self.config.api_key,
+                "X-BAPI-TIMESTAMP": ts,
+                "X-BAPI-RECV-WINDOW": str(self.config.recv_window),
+                "Content-Type": "application/json",
+            }
+            if signed:
+                hdrs["X-BAPI-SIGN"] = self._sign(payload, ts)
+            return hdrs
 
         # Multi-tier dispatching
         if not self.config.use_proxy:
@@ -277,20 +291,35 @@ class BybitBaseClient:
         for tier in tiers:
             for attempt in range(1, self.config.max_retries + 1):
                 try:
-                    resp_data = tier(method, url, headers, params, json_data)
+                    headers = _build_headers()
+                    resp_data = tier(method, url, headers, req_params, json_data)
                     if (
                         isinstance(resp_data, dict)
                         and resp_data.get("status") == "error"
                     ):
-                        if resp_data.get("code") == 10006:  # Rate limit
-                            time.sleep(attempt * 2.0)
+                        err_code = resp_data.get("code")
+                        if err_code == 10006:  # Rate limit
+                            time.sleep(attempt * 1.0)
                             continue
+                        if err_code == 10002 and endpoint != "/v5/market/time":
+                            try:
+                                self.sync_server_time()
+                                headers = _build_headers()
+                                resp_data = tier(method, url, headers, req_params, json_data)
+                                if not (isinstance(resp_data, dict) and resp_data.get("status") == "error"):
+                                    return resp_data
+                            except Exception:
+                                pass
+                        # HTTP 403/5xx on a proxy tier should try next tier
+                        if err_code in (403, 502, 503, 504) and len(tiers) > 1:
+                            last_err = resp_data.get("msg", f"HTTP {err_code}")
+                            break
                         return resp_data
                     return resp_data
                 except Exception as e:
                     last_err = str(e)
                     logger.debug(f"Tier {tier.__name__} attempt {attempt} failed: {e}")
-                    time.sleep(0.5 * (2 ** (attempt - 1)))
+                    time.sleep(0.2 * (2 ** (attempt - 1)))
             logger.warning(f"Tier {tier.__name__} exhausted")
 
         return {

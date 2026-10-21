@@ -92,3 +92,48 @@ class SmartOrderMixin:
             take_profit=take_profit,
             category=category,
         )
+
+    def place_smart_trade(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        price: float,
+        tp_pct: float = 1.0,
+        sl_pct: float = 1.0,
+        category: str = "linear",
+    ) -> dict:
+        """Places a regime-filtered limit order with percentage-based TP/SL."""
+        reg_res = self.get_market_regime(symbol)
+        regime = reg_res.get("regime", "RANGING") if isinstance(reg_res, dict) else "RANGING"
+        side_cap = side.capitalize()
+        if side_cap == "Buy" and regime == "TRENDING_DOWN":
+            return {
+                "status": "error",
+                "msg": f"Refusing Buy order in {regime} market regime for {symbol}",
+                "regime": regime,
+            }
+        if side_cap == "Sell" and regime == "TRENDING_UP":
+            return {
+                "status": "error",
+                "msg": f"Refusing Sell order in {regime} market regime for {symbol}",
+                "regime": regime,
+            }
+
+        if side_cap == "Buy":
+            tp = round(float(price) * (1.0 + float(tp_pct) / 100.0), 8)
+            sl = round(float(price) * (1.0 - float(sl_pct) / 100.0), 8)
+        else:
+            tp = round(float(price) * (1.0 - float(tp_pct) / 100.0), 8)
+            sl = round(float(price) * (1.0 + float(sl_pct) / 100.0), 8)
+
+        return self.place_order(
+            symbol=symbol,
+            side=side_cap,
+            qty=qty,
+            order_type="Limit",
+            price=price,
+            take_profit=tp,
+            stop_loss=sl,
+            category=category,
+        )

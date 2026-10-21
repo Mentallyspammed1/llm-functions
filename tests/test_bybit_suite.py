@@ -274,5 +274,202 @@ class TestDispatcher(unittest.TestCase):
         self.assertEqual(res["status"], "error")
 
 
+class TestMicroProfitAndBybitLiveHardening(unittest.TestCase):
+    def test_micro_profit_xrp_and_link_directional_sl_and_affordable_sizing(self):
+        from tools import micro_profit
+
+        # XRPUSDT with 0.1106 USDT balance and 100x requested leverage (clamped to 75x)
+        xrp = micro_profit.calculate_micro_profit(
+            symbol="XRPUSDT",
+            side="buy",
+            balance=0.1106,
+            leverage=100,
+            target_profit=0.05,
+            max_risk=0.025,
+            bids=[[1.3320, 5000], [1.3319, 8000]],
+            asks=[[1.3321, 4500], [1.3322, 6000]],
+        )
+        self.assertEqual(xrp["status"], "success")
+        self.assertEqual(xrp["leverage_used"], 75.0)
+        self.assertEqual(xrp["trading_qty"], 4.0)
+        self.assertLessEqual(xrp["margin_required_usdt"], 0.1106)
+        self.assertLess(xrp["stop_loss_price"], xrp["entry_price"])
+        self.assertGreater(xrp["stop_loss_price"], xrp["liquidation_price"])
+        self.assertGreater(xrp["target_exit_price"], xrp["entry_price"])
+        self.assertIn("maker_plan", xrp)
+        self.assertGreater(xrp["maker_plan"]["fee_savings_vs_taker_usdt"], 0)
+
+        # LINKUSDT with 0.1106 USDT balance at 75x
+        link = micro_profit.calculate_micro_profit(
+            symbol="LINKUSDT",
+            side="buy",
+            balance=0.1106,
+            leverage=75,
+            target_profit=0.05,
+            max_risk=0.025,
+            bids=[[12.331, 400], [12.330, 800]],
+            asks=[[12.332, 350], [12.333, 600]],
+        )
+        self.assertEqual(link["status"], "success")
+        self.assertEqual(link["trading_qty"], 0.5)
+        self.assertLess(link["stop_loss_price"], link["entry_price"])
+        self.assertGreater(link["target_exit_price"], link["entry_price"])
+
+        # Short side directional SL guarantee
+        short_plan = micro_profit.calculate_micro_profit(
+            symbol="XRPUSDT",
+            side="sell",
+            qty=8.0,
+            balance=0.25,
+            leverage=75,
+            target_profit=0.05,
+            max_risk=0.01,
+            bids=[[1.3320, 5000]],
+            asks=[[1.3321, 4500]],
+        )
+        self.assertGreater(short_plan["stop_loss_price"], short_plan["entry_price"])
+        self.assertLess(short_plan["target_exit_price"], short_plan["entry_price"])
+
+    def test_bybit_live_api_error_fast_fail_and_auto_resize_on_110007(self):
+        from unittest.mock import MagicMock
+        from tools import bybit_live
+
+        cfg = bybit_live.TradingConfig(
+            api_key="test_key",
+            api_secret="test_secret",
+            use_tor=True,
+        )
+        bot = bybit_live.BybitToolDispatcher(cfg)
+        bot._time_synced = True
+
+        # 1. Verify TorManager does NOT fall back to _tier_direct on BybitAPIError
+        bot.tor._socks_alive = True
+        bot.tor._socks_probe_ts = 9e12
+        direct_called = []
+        bot.tor._tier_socks = MagicMock(
+            side_effect=bybit_live.BybitAPIError(
+                110007, "ab not enough for new order", endpoint="/v5/order/create"
+            )
+        )
+        bot.tor._tier_direct = MagicMock(
+            side_effect=lambda *a, **kw: direct_called.append(True)
+        )
+
+        with self.assertRaises(bybit_live.BybitAPIError) as ctx:
+            bot.api_request("POST", "/v5/order/create", json_data={"symbol": "XRPUSDT"})
+        self.assertEqual(ctx.exception.ret_code, 110007)
+        self.assertEqual(len(direct_called), 0)
+        # Circuit breaker must remain CLOSED on business API errors
+        self.assertEqual(bot.circuit.state, bybit_live.CircuitState.CLOSED)
+
+        # 2. Verify place_order translates LimitMaker -> Limit + PostOnly and auto-resizes on 110007
+        bot._instr_cache["XRPUSDT"] = bybit_live.InstrumentInfo(
+            symbol="XRPUSDT",
+            category=bybit_live.Category.LINEAR,
+            lot_size=bybit_live.LotSizeFilter(1.0, 1.0, 100000.0, 5.0),
+            price_flt=bybit_live.PriceFilter(0.0001, 0.0001, 1000.0),
+            max_leverage=75.0,
+        )
+        bot.get_wallet_balance = MagicMock(
+            return_value={"list": [{"totalAvailableBalance": "0.1106", "coin": []}]}
+        )
+        bot.get_ticker = MagicMock(
+            return_value={"bid1Price": "1.3320", "ask1Price": "1.3321", "lastPrice": "1.3321"}
+        )
+        bot.get_positions = MagicMock(return_value=[{"leverage": "75"}])
+
+        calls = []
+
+        def fake_api_request(method, endpoint, params=None, json_data=None, signed=True):
+            calls.append((method, endpoint, dict(json_data or {})))
+            if endpoint == "/v5/order/create" and json_data.get("qty") == "8.0":
+                raise bybit_live.BybitAPIError(110007, "ab not enough for new order")
+            return {"retCode": 0, "retMsg": "OK", "result": {"orderId": "ord-123"}}
+
+        bot.api_request = fake_api_request
+        res = bot.place_order(
+            symbol="XRPUSDT",
+            side=bybit_live.OrderSide.BUY,
+            qty=8.0,
+            order_type=bybit_live.OrderType.LIMIT_MAKER,
+        )
+        self.assertEqual(res["retCode"], 0)
+        self.assertEqual(res["auto_resized_from"], 8.0)
+        self.assertLess(res["executed_qty"], 8.0)
+        self.assertGreaterEqual(res["executed_qty"] * 1.3320, 5.0)
+        # First call must have translated LimitMaker -> Limit + PostOnly with bid1Price
+        first_payload = calls[0][2]
+        self.assertEqual(first_payload["orderType"], bybit_live.OrderType.LIMIT)
+        self.assertEqual(first_payload["timeInForce"], bybit_live.TimeInForce.POST_ONLY)
+
+    def test_bybit_live_dust_sweep_and_set_leverage_clamping(self):
+        from tools import bybit_live
+
+        cfg = bybit_live.TradingConfig(
+            api_key="test_key",
+            api_secret="test_secret",
+            use_tor=False,
+        )
+        bot = bybit_live.BybitToolDispatcher(cfg)
+        bot._time_synced = True
+        bot._instr_cache["XRPUSDT"] = bybit_live.InstrumentInfo(
+            symbol="XRPUSDT",
+            category=bybit_live.Category.LINEAR,
+            lot_size=bybit_live.LotSizeFilter(1.0, 1.0, 100000.0, 5.0),
+            price_flt=bybit_live.PriceFilter(0.0001, 0.0001, 1000.0),
+            max_leverage=75.0,
+        )
+
+        recorded = []
+
+        def fake_api(method, endpoint, params=None, json_data=None, signed=True):
+            recorded.append((method, endpoint, params, json_data))
+            if endpoint == "/v5/position/set-leverage":
+                return {"retCode": 0, "retMsg": "OK", "result": json_data}
+            if endpoint == "/v5/asset/transfer/query-account-coins-balance":
+                return {"retCode": 0, "result": {"balance": [{"coin": "USDT", "transferBalance": "0.02"}]}}
+            if endpoint == "/v5/asset/transfer/inter-transfer":
+                return {"retCode": 0, "result": {"transferId": "tr-1"}}
+            if endpoint == "/v5/asset/covert/small-balance-list":
+                return {
+                    "retCode": 0,
+                    "result": {
+                        "smallAssetCoins": [
+                            {"fromCoin": "SOL", "supportConvert": 1, "availableBalance": "0.001"},
+                            {"fromCoin": "USDT", "supportConvert": 1, "availableBalance": "0.11"},
+                        ]
+                    },
+                }
+            if endpoint == "/v5/asset/covert/get-quote":
+                return {"retCode": 0, "result": {"quoteId": "q-999"}}
+            if endpoint == "/v5/asset/covert/small-balance-execute":
+                return {"retCode": 0, "result": {"status": "SUCCESS"}}
+            return {"retCode": 0, "result": {}}
+
+        bot.api_request = fake_api
+        lev_res = bot.set_leverage("XRPUSDT", leverage=100)
+        self.assertEqual(lev_res["result"]["buyLeverage"], "75")
+        self.assertEqual(lev_res["result"]["sellLeverage"], "75")
+
+        sweep = bot.sweep_dust(to_coin="USDT")
+        self.assertEqual(sweep["status"], "ok")
+        self.assertEqual(sweep["converted_coins"], ["SOL"])
+        self.assertEqual(sweep["quote_id"], "q-999")
+        self.assertEqual(len(sweep["transferred_from_fund"]), 1)
+
+    def test_smart_order_directional_sl(self):
+        from tools import bybit_smart_order
+
+        sl_buy = bybit_smart_order.calculate_exit_price_for_net_loss(
+            1.3321, 8.0, "Buy", 0.005, 0.00055, 0.00055
+        )
+        self.assertLess(sl_buy, 1.3321)
+        sl_sell = bybit_smart_order.calculate_exit_price_for_net_loss(
+            1.3321, 8.0, "Sell", 0.005, 0.00055, 0.00055
+        )
+        self.assertGreater(sl_sell, 1.3321)
+
+
+
 if __name__ == "__main__":
     unittest.main()
