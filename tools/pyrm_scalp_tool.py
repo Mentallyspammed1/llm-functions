@@ -1114,11 +1114,20 @@ def process_symbol(
             )
             return
 
+        # Cap qty to max affordable quantity for current balance + leverage + fee reserve
+        cost_per_unit = entry_price * ((1.0 / max(leverage, 1)) + 2.0 * _TAKER_FEE + 0.0005)
+        max_aff_qty = quantize_qty((balance * 0.94) / max(cost_per_unit, 1e-12), qty_step, ROUND_DOWN)
+        if max_aff_qty > 0 and qty > max_aff_qty and (max_aff_qty * entry_price) >= min_notional:
+            qty = max_aff_qty
+
         required_margin = (qty * entry_price) / max(leverage, 1)
 
-        # Per-symbol hard cap vs equity
-        if required_margin > balance * 0.70:
-            _skip(f"margin ${required_margin:.2f} > 70% equity ${balance * 0.70:.2f}")
+        # Per-symbol hard cap vs equity (allow up to 94% on micro accounts < $5)
+        margin_cap_ratio = 0.94 if balance < 5.0 else 0.70
+        if required_margin > balance * margin_cap_ratio:
+            _skip(
+                f"margin ${required_margin:.4f} > {int(margin_cap_ratio * 100)}% equity ${balance * margin_cap_ratio:.4f}"
+            )
             return
 
         # Cross-thread margin budget (prevents over-commit)

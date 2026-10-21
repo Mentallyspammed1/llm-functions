@@ -124,3 +124,86 @@ def api_request(
     signed: bool = False,
 ) -> Dict[str, Any]:
     return make_bybit_request(endpoint, method, params)
+
+
+def _direction(side: str) -> float:
+    return 1.0 if str(side).strip().lower() in ("buy", "long", "b", "l") else -1.0
+
+
+def _fees_in_usdt(
+    fee_rate: float, entry_price: float, exit_price: float, size: float
+) -> float:
+    return abs(fee_rate) * size * (float(entry_price) + float(exit_price))
+
+
+def calculate_pnl(
+    entry_price: float,
+    exit_price: float,
+    size: float,
+    side: str,
+    fees: float = 0.0,
+    leverage: float = 1.0,
+) -> dict:
+    entry = float(entry_price)
+    exit_ = float(exit_price)
+    qty = float(size)
+    d = _direction(side)
+    gross = (exit_ - entry) * qty * d
+    if 0 < float(fees) < 0.01:
+        fee_usdt = _fees_in_usdt(float(fees), entry, exit_, qty)
+    else:
+        fee_usdt = float(fees)
+    net = gross - fee_usdt
+    margin = (entry * qty) / max(float(leverage) or 1.0, 1.0)
+    return {
+        "gross_pnl": round(gross, 6),
+        "fees": round(fee_usdt, 6),
+        "net_pnl": round(net, 6),
+        "roe_pct": round(net / margin * 100, 4) if margin else 0.0,
+        "side": side,
+        "leverage": float(leverage),
+    }
+
+
+def calculate_exit_price(
+    entry_price: float,
+    target_pnl: float,
+    size: float,
+    side: str,
+    fees: float = 0.0,
+) -> float:
+    entry = float(entry_price)
+    qty = float(size)
+    d = _direction(side)
+    target = float(target_pnl)
+    if qty <= 0:
+        raise ValueError("size must be positive")
+    if 0 < float(fees) < 0.01:
+        rate = float(fees)
+        num = target + qty * d * entry + rate * qty * entry
+        den = qty * d - rate * qty
+    else:
+        num = (target + float(fees)) + qty * d * entry
+        den = qty * d
+    if abs(den) < 1e-15:
+        raise ValueError("denominator is zero; cannot solve for exit price")
+    return round(num / den, 8)
+
+
+def format_qty_to_step(qty: float, qty_step: Any) -> str:
+    step = float(qty_step or 0)
+    if step <= 0:
+        return str(qty)
+    prec = len(str(step).split(".")[-1]) if "." in str(step) else 0
+    stepped = (float(qty) // step) * step
+    return f"{stepped:.{prec}f}"
+
+
+def format_price_to_tick(price: float, tick_size: Any) -> str:
+    tick = float(tick_size or 0)
+    if tick <= 0:
+        return str(price)
+    prec = len(str(tick).split(".")[-1]) if "." in str(tick) else 0
+    rounded = round(float(price) / tick) * tick
+    return f"{rounded:.{prec}f}"
+

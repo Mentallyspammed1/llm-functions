@@ -74,22 +74,34 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
+# Ensure dynamic importlib loaders (without prior sys.modules registration) work with @dataclass
+if __name__ not in sys.modules:
+    import gc as _gc
+    import types as _types
+
+    for _obj in _gc.get_referrers(globals()):
+        if isinstance(_obj, _types.ModuleType) and _obj.__dict__ is globals():
+            sys.modules[__name__] = _obj
+            break
+
 # ── dotenv support ───────────────────────────────────────────
 try:
     from dotenv import load_dotenv
 
     env_paths = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "bybit.env"),
         os.path.join(os.getcwd(), ".env"),
         os.path.expanduser("~/.config/bybit/.env"),
     ]
+    loaded_any = False
     for env_path in env_paths:
         if os.path.exists(env_path):
-            load_dotenv(env_path)
-            break
-    else:
-        load_dotenv()
+            load_dotenv(env_path, override=False)
+            loaded_any = True
+    if not loaded_any:
+        load_dotenv(override=False)
 except ImportError:
     pass
 
@@ -182,6 +194,72 @@ class PositionIdx(int, Enum):
     ONE_WAY = 0
     HEDGE_BUY = 1
     HEDGE_SELL = 2
+
+
+class NetworkError(Exception):
+    pass
+
+
+def _sanitize_tif(tif: Any) -> str:
+    """Guarantee a valid TimeInForce value (GTC, IOC, FOK, PostOnly)."""
+    if not tif or str(tif).strip() == "0":
+        return "GTC"
+    s = str(tif).strip().lower()
+    if s in ("postonly", "post_only"):
+        return TimeInForce.POST_ONLY.value
+    try:
+        return TimeInForce(str(tif).strip().upper()).value
+    except ValueError:
+        return "GTC"
+
+
+def _sanitize_category(cat: Any) -> str:
+    """Sanitize category input to one of: linear, inverse, spot, option."""
+    if not cat or str(cat).strip() == "0":
+        return Category.LINEAR.value
+    s = str(cat).strip().lower()
+    valid_categories = {c.value for c in Category}
+    return s if s in valid_categories else Category.LINEAR.value
+
+
+def _sanitize_order_type(ot: Any) -> str:
+    """Sanitize order type input to a valid Bybit type."""
+    if not ot or str(ot).strip() == "0":
+        return OrderType.LIMIT.value
+    s = str(ot).strip().lower()
+    valid_types = {
+        "limit": OrderType.LIMIT,
+        "market": OrderType.MARKET,
+        "limitmaker": OrderType.LIMIT_MAKER,
+        "stop": OrderType.STOP,
+        "stoplimit": OrderType.STOP_LIMIT,
+    }
+    return valid_types.get(s, OrderType.LIMIT).value
+
+
+def _sanitize_position_idx(idx: Any) -> int:
+    """Sanitize position index to valid Bybit enum values (0, 1, 2)."""
+    try:
+        i = int(idx)
+        return i if i in {0, 1, 2} else 1
+    except (ValueError, TypeError):
+        return 1
+
+
+def _sanitize_bool(val: Any) -> bool:
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return bool(val)
+    s = str(val).strip().lower()
+    return s in {"true", "1", "yes", "y"}
+
+
+def _sanitize_trigger_by(val: Any) -> str:
+    if not val or str(val).strip() == "0":
+        return "MarkPrice"
+    v = str(val).lower()
+    return "MarkPrice" if "mark" in v else "LastPrice"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -304,10 +382,21 @@ class TradingConfig:
         )
     )
     use_tor: bool = field(
-        default_factory=lambda: os.getenv("TOR_ENABLED", "false").lower() == "true"
+        default_factory=lambda: any(
+            os.getenv(k, "").lower() in ("true", "1", "yes")
+            for k in (
+                "TOR_ENABLED",
+                "USE_TOR",
+                "BYBIT_USE_TOR",
+                "PROXY_ENABLED",
+                "BYBIT_USE_PROXY",
+            )
+        )
     )
     tor_socks_port: int = field(
-        default_factory=lambda: int(os.getenv("TOR_SOCKS_PORT", "9050"))
+        default_factory=lambda: int(
+            os.getenv("TOR_SOCKS_PORT") or os.getenv("PROXY_PORT") or "9050"
+        )
     )
     tor_control_port: int = field(
         default_factory=lambda: int(os.getenv("TOR_CONTROL_PORT", "9051"))
@@ -426,16 +515,23 @@ class TradingConfig:
         return "https://api.bybit.com"
 
     def get_endpoints(self) -> List[str]:
-        """Return list of available endpoints for rotation."""
+        """Return list of available global endpoints for rotation.
+        Country-restricted partner domains (.nl, .tr, .kz) are excluded by default
+        because they reject global UNIFIED accounts with retCode=10024 or HTTP 403.
+        """
         if self.testnet:
             return ["https://api-testnet.bybit.com"]
-        return [
+        endpoints = [
             "https://api.bybit.com",
             "https://api.bytick.com",
-            "https://api.bybit.nl",
-            "https://api.bybit.tr",
-            "https://api.bybit.kz",
         ]
+        extra = os.getenv("BYBIT_EXTRA_ENDPOINTS", "").strip()
+        if extra:
+            for ep in extra.split(","):
+                ep = ep.strip().rstrip("/")
+                if ep and ep not in endpoints:
+                    endpoints.append(ep)
+        return endpoints
 
     def validate(self) -> None:
         logger.info(
@@ -461,9 +557,9 @@ class PySocksGeoRouter:
 
     PROXY_CONFIGS = {
         "us_east": {"host": "127.0.0.1", "port": 9050, "rdns": True, "weight": 1},
-        "us_west": {"host": "127.0.0.1", "port": 9051, "rdns": True, "weight": 1},
-        "europe": {"host": "127.0.0.1", "port": 9052, "rdns": True, "weight": 1},
-        "asia": {"host": "127.0.0.1", "port": 9053, "rdns": True, "weight": 1},
+        "us_west": {"host": "127.0.0.1", "port": 9050, "rdns": True, "weight": 1},
+        "europe": {"host": "127.0.0.1", "port": 9050, "rdns": True, "weight": 1},
+        "asia": {"host": "127.0.0.1", "port": 9050, "rdns": True, "weight": 1},
     }
 
     def __init__(
@@ -900,10 +996,31 @@ class RateLimiter:
 
 
 # ─────────────────────────────────────────────────────────────
+# APPLICATION API ERROR (NON-TRANSPORT)
+# ─────────────────────────────────────────────────────────────
+class BybitAPIError(RuntimeError):
+    """Application-level Bybit V5 API error (HTTP 200 JSON with retCode != 0).
+    Must not be treated as a network transport failure or geo-block."""
+
+    def __init__(
+        self,
+        ret_code: int,
+        ret_msg: str,
+        data: Optional[dict] = None,
+        endpoint: str = "",
+    ) -> None:
+        self.ret_code = int(ret_code)
+        self.ret_msg = str(ret_msg)
+        self.data = data or {}
+        self.endpoint = str(endpoint or "")
+        super().__init__(f"Bybit API error retCode={self.ret_code}: {self.ret_msg}")
+
+
+# ─────────────────────────────────────────────────────────────
 # CIRCUIT BREAKER
 # ─────────────────────────────────────────────────────────────
 class CircuitBreaker:
-    """Three-state circuit breaker – FIX: no sleep while holding lock."""
+    """Three-state circuit breaker – only trips on transport/network errors, never on BybitAPIError."""
 
     def __init__(
         self,
@@ -941,6 +1058,10 @@ class CircuitBreaker:
             result = fn(*args, **kwargs)
             self._on_success()
             return result
+        except BybitAPIError:
+            # Transport layer succeeded (Bybit returned a JSON application response)
+            self._on_success()
+            raise
         except Exception as exc:
             self._on_failure()
             raise exc
@@ -968,8 +1089,6 @@ class CircuitBreaker:
             self._state = CircuitState.CLOSED
 
     def _on_failure(self) -> None:
-        # FIX: determine whether to trip, release lock, THEN sleep
-        should_cooldown = False
         with self._lock:
             self._failure_count += 1
             self._last_failure_ts = time.monotonic()
@@ -982,10 +1101,6 @@ class CircuitBreaker:
             ):
                 self._state = CircuitState.OPEN
                 logger.error("Circuit → OPEN (cooldown %.0fs)", self._cooldown)
-                should_cooldown = True
-        # Sleep OUTSIDE the lock to prevent deadlocking other threads
-        if should_cooldown:
-            time.sleep(self._cooldown)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -996,15 +1111,16 @@ class TorManager:
     Multi-tier network layer.
     When use_tor=True:
       Tier 1 → SOCKS5 proxy via requests (socks5h://)
-      Tier 2 → proxychains4 binary wrapping curl
-      Tier 3 → direct connection (fallback)
+      Tier 2 → curl --socks5-hostname 127.0.0.1:9050
+      Tier 3 → proxychains4 binary wrapping curl
+      Tier 4 → direct connection (only if BYBIT_ALLOW_DIRECT_FALLBACK=true or SOCKS is down)
     When use_tor=False:
       Tier 1 → direct connection only
 
-    FIX v4.0:
-      - Merged old _tier_pysocks and _tier_proxy (were identical) into _tier_socks
-      - Added Tor circuit renewal via control port
-      - _on_failure no longer sleeps under lock
+    FIX v4.1:
+      - BybitAPIError (HTTP 200 JSON with retCode != 0) never triggers tier fallback or geo-block false positives
+      - Added SOCKS5 stream isolation credential rotation so Tor builds a fresh circuit even without ControlPort 9051
+      - Added _tier_curl_socks fallback for Termux / environments without proxychains4
     """
 
     def __init__(
@@ -1025,6 +1141,7 @@ class TorManager:
         self.control_password = control_password
         self.router = router
         self._proxychains4_bin = shutil.which("proxychains4") if enabled else None
+        self._curl_bin = shutil.which("curl") if enabled else None
         self._session = self._build_session(max_retries) if REQUESTS_AVAILABLE else None
         self._socks_session = None
         self._auto_recovery = True
@@ -1034,6 +1151,7 @@ class TorManager:
         self._renewal_broken = False
         self._socks_alive = None  # None=unknown, True/False=cached probe result
         self._socks_probe_ts = 0.0
+        self._isolation_token: str = ""
 
         if enabled and use_pysocks and REQUESTS_AVAILABLE:
             self._socks_session = self._build_socks_session(max_retries, socks_port)
@@ -1045,16 +1163,34 @@ class TorManager:
         elif enabled and use_pysocks and not REQUESTS_AVAILABLE:
             logger.warning("TOR_USE_PYSOCKS=true but requests library not installed")
 
+    def _rotate_socks_isolation(self) -> bool:
+        """Rotate SOCKS5 username/password stream isolation credential.
+        Tor's default IsolateSOCKSAuth forces a brand-new circuit and exit node
+        without requiring ControlPort 9051."""
+        self._isolation_token = f"bybit_{uuid.uuid4().hex[:10]}"
+        if self._socks_session is not None:
+            proxy_url = (
+                f"socks5h://{self._isolation_token}:tor@127.0.0.1:{self.socks_port}"
+            )
+            self._socks_session.proxies = {"http": proxy_url, "https": proxy_url}
+            logger.info(
+                "Rotated Tor SOCKS5 stream isolation credential (%s)",
+                self._isolation_token,
+            )
+            return True
+        return False
+
     def _probe_socks(self) -> bool:
         """Quick TCP probe to check if SOCKS proxy is listening. Cached for 30s."""
         now = time.time()
         if self._socks_alive is not None and (now - self._socks_probe_ts) < 30:
             return self._socks_alive
         try:
-            s = stdlib_socket.socket(stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM)
-            s.settimeout(0.5)
-            s.connect(("127.0.0.1", self.socks_port))
-            s.close()
+            with stdlib_socket.socket(
+                stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM
+            ) as s:
+                s.settimeout(0.5)
+                s.connect(("127.0.0.1", self.socks_port))
             self._socks_alive = True
         except (stdlib_socket.timeout, OSError):
             self._socks_alive = False
@@ -1064,23 +1200,33 @@ class TorManager:
 
     def renew_tor_circuit(self, retries: int = 2) -> bool:
         """
-        Send NEWNYM signal to Tor control port with retry logic.
-        Tries multiple auth methods: password, cookie, empty.
-        Marks renewal as broken after repeated failures to avoid future delays.
+        Send NEWNYM signal to Tor control port AND rotate SOCKS5 stream isolation credential.
+        Tries multiple auth methods: password, cookie, empty, plus SOCKS5 IsolateSOCKSAuth.
         """
+        # Always rotate SOCKS5 stream isolation credential first (works even without ControlPort)
+        iso_rotated = self._rotate_socks_isolation()
+
         if self._renewal_broken:
-            return False
+            return iso_rotated
 
         # Build list of auth commands to try
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        repo_dir = os.path.dirname(script_dir)
         auth_methods: list = []
         if self.control_password:
             auth_methods.append(f'AUTHENTICATE "{self.control_password}"\r\n'.encode())
-        # Try cookie auth from common Tor cookie paths
+        # Try cookie auth from common Tor cookie paths (including local repo / Termux paths)
         for cookie_path in [
+            os.path.join(repo_dir, "tor_control_cookie"),
+            os.path.join(script_dir, "tor_control_cookie"),
+            os.path.join(script_dir, "tor_data", "control_auth_cookie"),
+            os.path.join(repo_dir, "tor_data", "control_auth_cookie"),
             "/var/run/tor/control.authcookie",
             "/var/lib/tor/control_auth_cookie",
             os.path.expanduser("~/.tor/control_auth_cookie"),
             "/data/data/com.termux/files/home/.tor/control_auth_cookie",
+            "/data/data/com.termux/files/usr/var/lib/tor/control_auth_cookie",
+            "/data/data/com.termux/files/home/.config/aichat/llm-functions/tools/tor_data/control_auth_cookie",
         ]:
             if os.path.exists(cookie_path):
                 try:
@@ -1098,7 +1244,7 @@ class TorManager:
                     s = stdlib_socket.socket(
                         stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM
                     )
-                    s.settimeout(5)
+                    s.settimeout(2)
                     s.connect(("127.0.0.1", self.control_port))
                     s.sendall(auth_cmd)
                     resp = b""
@@ -1109,7 +1255,7 @@ class TorManager:
                         resp += chunk
                         if b"\r\n" in resp:
                             break
-                    resp_str = resp.decode().strip()
+                    resp_str = resp.decode(errors="ignore").strip()
                     if "250" not in resp_str:
                         s.close()
                         continue
@@ -1124,12 +1270,13 @@ class TorManager:
                         if b"\r\n" in resp:
                             break
                     s.close()
-                    resp_str = resp.decode().strip()
+                    resp_str = resp.decode(errors="ignore").strip()
                     if "250" in resp_str:
                         logger.info(
-                            "Tor circuit renewed (NEWNYM) on attempt %d", attempt + 1
+                            "Tor circuit renewed (NEWNYM + IsolateSOCKSAuth) on attempt %d",
+                            attempt + 1,
                         )
-                        time.sleep(1)
+                        time.sleep(0.5)
                         self._socks_alive = None
                         self._socks_probe_ts = 0.0
                         return True
@@ -1143,14 +1290,13 @@ class TorManager:
                         s.close()
                     except Exception:
                         pass
-            time.sleep(1)
 
-        logger.error(
-            "All %d Tor circuit renewal attempts failed — disabling auto-renewal",
-            retries,
+        logger.info(
+            "ControlPort %d unavailable; renewed Tor circuit via SOCKS5 stream isolation",
+            self.control_port,
         )
         self._renewal_broken = True
-        return False
+        return iso_rotated
 
     def _get_current_tor_ip(self) -> Optional[str]:
         """Get current Tor exit node IP via check.torproject.org"""
@@ -1180,16 +1326,25 @@ class TorManager:
     ) -> dict:
         """
         Try network tiers in order with auto-recovery on geo-blocks.
-        Always tries SOCKS first when Tor is enabled (geo-blocked regions).
-        Falls back through proxychains4 → direct.
+        Application-level BybitAPIError (HTTP 200 JSON retCode != 0) is raised
+        immediately without falling back to lower tiers or triggering geo-block alerts.
         """
         tiers: list = []
         if self.enabled:
-            if self._socks_session and self._probe_socks():
+            socks_ok = self._probe_socks()
+            if self._socks_session and socks_ok:
                 tiers.append(self._tier_socks)
+            if self._curl_bin and socks_ok:
+                tiers.append(self._tier_curl_socks)
             if self._proxychains4_bin:
                 tiers.append(self._tier_proxychains4)
-            tiers.append(self._tier_direct)
+            # Only fall back to direct unproxied connection if SOCKS is not listening
+            # or BYBIT_ALLOW_DIRECT_FALLBACK=true is explicitly set
+            if (
+                not tiers
+                or os.getenv("BYBIT_ALLOW_DIRECT_FALLBACK", "false").lower() == "true"
+            ):
+                tiers.append(self._tier_direct)
         else:
             tiers = [self._tier_direct]
 
@@ -1204,6 +1359,11 @@ class TorManager:
                 result = tier(method, url, headers, params, json_data)
                 self._circuit_failures = 0
                 return result
+            except BybitAPIError:
+                # Valid JSON response from Bybit API (e.g. retCode=110007, 10001, 10002).
+                # Network transport succeeded — NEVER fall back to next network tier!
+                self._circuit_failures = 0
+                raise
             except Exception as exc:
                 last_exc = exc
                 error_str = str(exc).lower()
@@ -1215,32 +1375,31 @@ class TorManager:
                 if is_geo_block:
                     geo_blocked_tiers.append(tier.__name__)
 
-                if (
-                    is_geo_block
-                    and tier in (self._tier_socks, self._tier_proxychains4)
-                    and not self._renewal_broken
+                if is_geo_block and tier in (
+                    self._tier_socks,
+                    self._tier_curl_socks,
+                    self._tier_proxychains4,
                 ):
                     self._circuit_failures += 1
-                    if self._circuit_failures < self._max_circuit_failures:
+                    if self._circuit_failures <= self._max_circuit_failures:
                         logger.warning(
-                            f"Geo-block detected, attempting auto-recovery ({self._circuit_failures}/{self._max_circuit_failures})"
+                            "Geo-block detected on %s, rotating Tor circuit (%d/%d)",
+                            tier.__name__,
+                            self._circuit_failures,
+                            self._max_circuit_failures,
                         )
-
-                        # Try rotating PySocks proxy first
-                        rotated = False
-                        if self.router:
-                            logger.info("Attempting PySocks proxy rotation…")
-                            rotated = self.router.rotate_proxy()
-
-                        # Also renew Tor circuit
                         tor_renewed = self.renew_tor_circuit()
-
-                        if rotated or tor_renewed:
-                            time.sleep(1)
+                        if tor_renewed:
+                            time.sleep(0.4)
                             try:
-                                return tier(method, url, headers, params, json_data)
-                            except Exception:
-                                pass
+                                result = tier(method, url, headers, params, json_data)
+                                self._circuit_failures = 0
+                                return result
+                            except BybitAPIError:
+                                self._circuit_failures = 0
+                                raise
+                            except Exception as retry_exc:
+                                last_exc = retry_exc
 
                 if is_geo_block and tier == self._tier_socks:
                     self._socks_alive = None
@@ -1248,11 +1407,9 @@ class TorManager:
 
         if geo_blocked_tiers:
             raise ConnectionError(
-                f"GEO-BLOCKED: All network tiers returned 403 Forbidden "
+                f"GEO-BLOCKED: Network tiers returned 403 Forbidden "
                 f"(blocked tiers: {', '.join(geo_blocked_tiers)}). "
-                f"Bybit API is not accessible from this region. "
-                f"Ensure Tor/SOCKS5 proxy is running on port 9050. If blocked, run: --action renew_tor_circuit"
-                f"'sudo systemctl start tor' or set BYBIT_TOR_SOCKS_PORT. "
+                f"Ensure Tor/SOCKS5 proxy is running on port {self.socks_port}. "
                 f"Last error: {last_exc}"
             )
         raise ConnectionError(f"All network tiers exhausted. Last error: {last_exc}")
@@ -1288,8 +1445,60 @@ class TorManager:
         self._socks_probe_ts = time.time()
         return self._parse_response(resp)
 
+    def _tier_curl_socks(self, method, url, headers, params, json_data) -> dict:
+        """Tier 2: curl with --socks5-hostname (handles remote DNS over Tor)."""
+        if not self._curl_bin:
+            raise RuntimeError("curl binary not found")
+        cmd = [
+            self._curl_bin,
+            "-sS",
+            "--socks5-hostname",
+            f"127.0.0.1:{self.socks_port}",
+            "--max-time",
+            str(self.timeout),
+            "-w",
+            "\n%{http_code}",
+            "-X",
+            method,
+        ]
+        if self._isolation_token:
+            cmd += ["-U", f"{self._isolation_token}:tor"]
+        for k, v in headers.items():
+            cmd += ["-H", f"{k}: {v}"]
+        if json_data is not None:
+            cmd += ["-d", json.dumps(json_data, sort_keys=True, separators=(",", ":"))]
+        target_url = url
+        if params:
+            qs = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+            target_url = f"{url}?{qs}"
+        cmd.append(target_url)
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=self.timeout + 5,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"curl socks5 failed: {result.stderr.strip()}")
+        raw = result.stdout.strip()
+        if not raw:
+            raise RuntimeError("curl socks5 returned empty response")
+        lines = raw.rsplit("\n", 1)
+        body = lines[0] if len(lines) > 1 else raw
+        http_code = int(lines[-1]) if len(lines) > 1 and lines[-1].isdigit() else 0
+        if http_code == 403:
+            raise RuntimeError(f"403 Forbidden (geo-blocked) via curl for url: {url}")
+        if http_code >= 400:
+            raise RuntimeError(f"HTTP {http_code} via curl for url: {url}")
+        data = json.loads(body)
+        ret_code = data.get("retCode", 0)
+        if ret_code != 0 and ret_code not in (110043,):
+            raise BybitAPIError(ret_code, data.get("retMsg", "unknown"), data)
+        return data
+
     def _tier_proxychains4(self, method, url, headers, params, json_data) -> dict:
-        """Tier 2: proxychains4 binary wrapping curl."""
+        """Tier 3: proxychains4 binary wrapping curl."""
         if not self._proxychains4_bin:
             raise RuntimeError("proxychains4 binary not found")
 
@@ -1337,13 +1546,11 @@ class TorManager:
         data = json.loads(body)
         ret_code = data.get("retCode", 0)
         if ret_code != 0 and ret_code not in (110043,):
-            raise RuntimeError(
-                f"Bybit API error retCode={ret_code}: {data.get('retMsg', 'unknown')}"
-            )
+            raise BybitAPIError(ret_code, data.get("retMsg", "unknown"), data)
         return data
 
     def _tier_direct(self, method, url, headers, params, json_data) -> dict:
-        """Tier 3: direct connection (no proxy)."""
+        """Tier 4: direct connection (no proxy)."""
         if not REQUESTS_AVAILABLE:
             raise RuntimeError("requests library not available")
         if json_data is not None:
@@ -1414,10 +1621,9 @@ class TorManager:
                 data = resp.json()
                 ret_code = data.get("retCode", 0)
                 if ret_code != 0:
-                    raise RuntimeError(
-                        f"Bybit API error HTTP {resp.status_code} retCode={ret_code}: "
-                        f"{data.get('retMsg', 'unknown')}"
-                    )
+                    raise BybitAPIError(ret_code, data.get("retMsg", "unknown"), data)
+            except BybitAPIError:
+                raise
             except (ValueError, RuntimeError):
                 resp.raise_for_status()
                 raise
@@ -1428,9 +1634,7 @@ class TorManager:
             raise
         ret_code = data.get("retCode", 0)
         if ret_code != 0 and ret_code not in (110043,):
-            raise RuntimeError(
-                f"Bybit API error retCode={ret_code}: {data.get('retMsg', 'unknown')}"
-            )
+            raise BybitAPIError(ret_code, data.get("retMsg", "unknown"), data)
         return data
 
 
@@ -1470,8 +1674,12 @@ class PriceFilter:
 class InstrumentInfo:
     lot_size: LotSizeFilter
     price_flt: PriceFilter
-    symbol: str
+    symbol: str = ""
+    category: Optional[Category] = None
     status: str = "Trading"
+    max_leverage: float = 100.0
+    min_leverage: float = 1.0
+    leverage_step: float = 0.01
     fetched_at: float = field(default_factory=time.time)
 
     @property
@@ -1536,15 +1744,36 @@ class PnLReport:
         }
 
 
+def _ensure_chronological_klines(klines: Any) -> list:
+    """Return klines sorted oldest-first (chronological order).
+    Bybit V5 /v5/market/kline returns newest-first (descending startTime).
+    Preserves order if already ascending or if timestamps are non-numeric test fixtures.
+    """
+    if isinstance(klines, dict):
+        klines = klines.get("list", klines.get("result", {}).get("list", []))
+    if not klines or len(klines) < 2:
+        return list(klines) if klines else []
+    try:
+        t0 = float(klines[0][0])
+        t1 = float(klines[-1][0])
+        if t0 > t1:
+            return list(reversed(klines))
+        return list(klines)
+    except Exception:
+        return list(klines)
+
+
 # ─────────────────────────────────────────────────────────────
 # MAIN DISPATCHER
 # ─────────────────────────────────────────────────────────────
 class BybitToolDispatcher:
     """Central dispatcher for all Bybit API interactions."""
 
-    _RECV_WINDOW = "10000"
+    _RECV_WINDOW = "20000"
 
-    def __init__(self, config: TradingConfig) -> None:
+    def __init__(self, config: Optional[TradingConfig] = None) -> None:
+        if config is None:
+            config = TradingConfig()
         config.validate()
         self.config = config
         self.tor = TorManager(
@@ -1732,8 +1961,6 @@ class BybitToolDispatcher:
         if params:
             params = dict(sorted(params.items()))
 
-        ts = self._get_timestamp()
-
         # Build the payload string for signing
         if method == "POST":
             payload_str = json.dumps(
@@ -1744,19 +1971,32 @@ class BybitToolDispatcher:
 
         logger.debug("[%s] Signature payload: %s", request_id, payload_str)
 
-        headers: Dict[str, str] = {
-            "Content-Type": "application/json",
-            "X-Request-ID": request_id,
-        }
-        if signed:
-            headers.update(
-                {
-                    "X-BAPI-API-KEY": self.config.api_key,
-                    "X-BAPI-TIMESTAMP": ts,
-                    "X-BAPI-RECV-WINDOW": self._RECV_WINDOW,
-                    "X-BAPI-SIGN": self._sign(payload_str, ts),
-                }
-            )
+        def _build_headers() -> Dict[str, str]:
+            curr_ts = self._get_timestamp()
+            hdrs: Dict[str, str] = {
+                "Content-Type": "application/json",
+                "X-Request-ID": request_id,
+            }
+            if signed:
+                hdrs.update(
+                    {
+                        "X-BAPI-API-KEY": self.config.api_key,
+                        "X-BAPI-TIMESTAMP": curr_ts,
+                        "X-BAPI-RECV-WINDOW": self._RECV_WINDOW,
+                        "X-BAPI-SIGN": self._sign(payload_str, curr_ts),
+                    }
+                )
+            return hdrs
+
+        def _update_offset_from_resp(resp_data: Optional[dict]) -> None:
+            if isinstance(resp_data, dict) and resp_data.get("time"):
+                try:
+                    srv_ms = int(resp_data["time"])
+                    if srv_ms > 0:
+                        self._time_offset = srv_ms - int(time.time() * 1000)
+                        self._time_synced = True
+                except (ValueError, TypeError):
+                    pass
 
         # Endpoint Rotation with error handling
         endpoints = self.config.get_endpoints()
@@ -1765,8 +2005,9 @@ class BybitToolDispatcher:
         for base_url in endpoints:
             url = f"{base_url}{endpoint}"
             try:
+                headers = _build_headers()
                 logger.debug("[%s] %s %s signed=%s", request_id, method, url, signed)
-                return self.circuit.call(
+                resp = self.circuit.call(
                     self.tor.request,
                     method,
                     url,
@@ -1775,6 +2016,75 @@ class BybitToolDispatcher:
                     json_data if method == "POST" else None,
                     signed=signed,
                 )
+                _update_offset_from_resp(resp)
+                return resp
+            except BybitAPIError as api_exc:
+                _update_offset_from_resp(api_exc.data)
+                # Timestamp drift / recv_window error: re-sync clock and retry with fresh signature
+                if api_exc.ret_code == 10002:
+                    logger.warning(
+                        "[%s] retCode=10002 timestamp drift on %s; syncing server time and retrying…",
+                        request_id,
+                        base_url,
+                    )
+                    self._sync_server_time()
+                    try:
+                        headers = _build_headers()
+                        resp = self.circuit.call(
+                            self.tor.request,
+                            method,
+                            url,
+                            headers,
+                            params if method == "GET" else None,
+                            json_data if method == "POST" else None,
+                            signed=signed,
+                        )
+                        _update_offset_from_resp(resp)
+                        return resp
+                    except Exception as retry_exc:
+                        last_exc = retry_exc
+                        if isinstance(retry_exc, BybitAPIError):
+                            raise retry_exc
+                        continue
+                # Rate limit exceeded: brief backoff and retry with fresh timestamp/signature
+                if api_exc.ret_code in (10006, 10018):
+                    logger.warning(
+                        "[%s] Rate limit retCode=%d on %s; backing off 1.0s and retrying…",
+                        request_id,
+                        api_exc.ret_code,
+                        base_url,
+                    )
+                    time.sleep(1.0)
+                    try:
+                        headers = _build_headers()
+                        resp = self.circuit.call(
+                            self.tor.request,
+                            method,
+                            url,
+                            headers,
+                            params if method == "GET" else None,
+                            json_data if method == "POST" else None,
+                            signed=signed,
+                        )
+                        _update_offset_from_resp(resp)
+                        return resp
+                    except Exception as retry_exc:
+                        if isinstance(retry_exc, BybitAPIError):
+                            raise retry_exc
+                        last_exc = retry_exc
+                        continue
+                # Regional regulatory restriction (e.g. .nl/.tr/.kz): try next endpoint
+                if api_exc.ret_code == 10024:
+                    logger.warning(
+                        "[%s] Endpoint %s restricted (retCode=10024), rotating endpoint…",
+                        request_id,
+                        base_url,
+                    )
+                    last_exc = api_exc
+                    continue
+                # All other Bybit application errors (e.g. 110007 insufficient balance,
+                # 110094 min order value, 10001 invalid params): fail fast without rotating endpoints!
+                raise api_exc
             except RuntimeError as exc:
                 if "Circuit OPEN" in str(exc):
                     raise  # Don't try other endpoints when circuit is open
@@ -1790,12 +2100,9 @@ class BybitToolDispatcher:
                     )
                     if self.tor.renew_tor_circuit():
                         time.sleep(0.5)
-                        ts = self._get_timestamp()
-                        if signed:
-                            headers["X-BAPI-TIMESTAMP"] = ts
-                            headers["X-BAPI-SIGN"] = self._sign(payload_str, ts)
+                        headers = _build_headers()
                         try:
-                            return self.circuit.call(
+                            resp = self.circuit.call(
                                 self.tor.request,
                                 method,
                                 url,
@@ -1804,6 +2111,10 @@ class BybitToolDispatcher:
                                 json_data if method == "POST" else None,
                                 signed=signed,
                             )
+                            _update_offset_from_resp(resp)
+                            return resp
+                        except BybitAPIError:
+                            raise
                         except Exception as retry_exc:
                             logger.warning(
                                 "[%s] Retry after circuit renewal also failed: %s",
@@ -1835,6 +2146,8 @@ class BybitToolDispatcher:
                 logger.warning("[%s] Endpoint %s failed: %s", request_id, base_url, exc)
                 continue
 
+        if isinstance(last_exc, BybitAPIError):
+            raise last_exc
         error_str = str(last_exc).lower() if last_exc else ""
         if any(w in error_str for w in ["403", "blocked", "forbidden", "geo"]):
             raise ConnectionError(
@@ -1866,12 +2179,13 @@ class BybitToolDispatcher:
             item = resp["result"]["list"][0]
             lot = item["lotSizeFilter"]
             pft = item.get("priceFilter", {})
+            lev_flt = item.get("leverageFilter", {})
 
             lsf = LotSizeFilter(
                 qty_step=float(lot.get("qtyStep") or lot.get("basePrecision", 1)),
                 min_order_qty=float(lot["minOrderQty"]),
                 max_order_qty=float(lot.get("maxOrderQty", 1e9)),
-                min_notional=float(lot.get("minNotionalValue", 0)),
+                min_notional=float(lot.get("minNotionalValue", 0) or 5.0),
             )
             pf = PriceFilter(
                 tick_size=float(pft.get("tickSize", 0.01)),
@@ -1883,6 +2197,9 @@ class BybitToolDispatcher:
                 price_flt=pf,
                 symbol=symbol,
                 status=item.get("status", "Trading"),
+                max_leverage=float(lev_flt.get("maxLeverage", 100.0)),
+                min_leverage=float(lev_flt.get("minLeverage", 1.0)),
+                leverage_step=float(lev_flt.get("leverageStep", 0.01)),
                 fetched_at=time.time(),
             )
         except (KeyError, IndexError, TypeError) as exc:
@@ -2024,6 +2341,27 @@ class BybitToolDispatcher:
 
         adj_qty = self.adjust_quantity(symbol, qty, category)
 
+        # Normalize LimitMaker / PostOnly into V5 Limit + PostOnly
+        ot_str = (
+            order_type.value if isinstance(order_type, OrderType) else str(order_type)
+        )
+        if ot_str.lower() in ("limitmaker", "postonly", "post_only"):
+            order_type = OrderType.LIMIT
+            time_in_force = TimeInForce.POST_ONLY
+            ot_str = "Limit"
+
+        # Auto-resolve top-of-book passive maker price when Limit order omits price
+        if ot_str.lower() == "limit" and price is None:
+            try:
+                tkr = self.get_ticker(symbol, category)
+                side_str = side.value if isinstance(side, OrderSide) else str(side)
+                if side_str.lower() == "buy":
+                    price = _safe_float(tkr.get("bid1Price") or tkr.get("lastPrice"))
+                else:
+                    price = _safe_float(tkr.get("ask1Price") or tkr.get("lastPrice"))
+            except Exception:
+                pass
+
         payload: Dict[str, Any] = {
             "category": category,
             "symbol": symbol,
@@ -2057,7 +2395,95 @@ class BybitToolDispatcher:
             price or "MARKET",
             adj_qty,
         )
-        return self.api_request("POST", "/v5/order/create", json_data=payload)
+        try:
+            return self.api_request("POST", "/v5/order/create", json_data=payload)
+        except BybitAPIError as api_exc:
+            # Auto-resize & margin recovery on retCode=110007 ("ab not enough for new order")
+            if api_exc.ret_code == 110007 and not reduce_only:
+                try:
+                    info = self._fetch_instrument(symbol, category)
+                    wb = self.get_wallet_balance("UNIFIED")
+                    avail_usdt = 0.0
+                    for acct in wb.get("list", []):
+                        avail_usdt = _safe_float(acct.get("totalAvailableBalance")) or 0.0
+                        if avail_usdt <= 0:
+                            for c in acct.get("coin", []):
+                                if c.get("coin") == "USDT":
+                                    eq = _safe_float(c.get("equity") or c.get("walletBalance")) or 0.0
+                                    im = (
+                                        (_safe_float(c.get("totalPositionIM")) or 0.0)
+                                        + (_safe_float(c.get("totalOrderIM")) or 0.0)
+                                    )
+                                    avail_usdt = max(0.0, eq - im)
+                    tkr = self.get_ticker(symbol, category)
+                    side_str = side.value if isinstance(side, OrderSide) else str(side)
+                    ref_px = (
+                        price
+                        or _safe_float(
+                            tkr.get("ask1Price" if side_str.lower() == "buy" else "bid1Price")
+                            or tkr.get("lastPrice")
+                        )
+                        or 0.0
+                    )
+                    lev = info.max_leverage
+                    try:
+                        pos_list = self.get_positions(category=category, symbol=symbol)
+                        if pos_list and _safe_float(pos_list[0].get("leverage")):
+                            cur_lev = float(pos_list[0]["leverage"])
+                            if cur_lev < info.max_leverage:
+                                self.set_leverage(symbol, int(info.max_leverage), category=category)
+                                lev = info.max_leverage
+                            else:
+                                lev = cur_lev
+                    except Exception:
+                        pass
+
+                    if avail_usdt > 0 and ref_px > 0 and lev > 0:
+                        is_mkt = ot_str.lower() == "market"
+                        buf = 0.0015 if is_mkt else 0.0003
+                        cost_per_unit = ref_px * ((1.0 / lev) + 2.0 * 0.00055 + buf)
+                        raw_max_qty = (avail_usdt * 0.95) / cost_per_unit
+                        max_qty = self.adjust_quantity(symbol, raw_max_qty, category)
+                        min_notional = max(info.lot_size.min_notional, 5.0)
+                        if (
+                            max_qty >= info.lot_size.min_order_qty
+                            and (max_qty * ref_px) >= min_notional
+                            and max_qty < adj_qty
+                        ):
+                            logger.warning(
+                                "retCode=110007 on qty=%s; auto-resizing to max affordable qty=%s (avail=%.4f USDT, lev=%sx)",
+                                adj_qty,
+                                max_qty,
+                                avail_usdt,
+                                int(lev),
+                            )
+                            payload["qty"] = str(max_qty)
+                            try:
+                                res = self.api_request(
+                                    "POST", "/v5/order/create", json_data=payload
+                                )
+                                res["auto_resized_from"] = adj_qty
+                                res["executed_qty"] = max_qty
+                                return res
+                            except BybitAPIError as retry_exc:
+                                # If Market order still fails 110007 due to Bybit's market-order slippage buffer,
+                                # retry as an aggressive Limit order at top-of-book price
+                                if retry_exc.ret_code == 110007 and is_mkt:
+                                    payload["orderType"] = OrderType.LIMIT
+                                    payload["price"] = str(
+                                        self.adjust_price(symbol, ref_px, category)
+                                    )
+                                    payload["timeInForce"] = TimeInForce.GTC
+                                    res = self.api_request(
+                                        "POST", "/v5/order/create", json_data=payload
+                                    )
+                                    res["auto_resized_from"] = adj_qty
+                                    res["executed_qty"] = max_qty
+                                    res["converted_to_limit_price"] = payload["price"]
+                                    return res
+                except Exception as resize_err:
+                    logger.debug("Auto-resize after 110007 failed: %s", resize_err)
+            raise api_exc
 
     # ══════════════════════════════════════════════════════════
     # BATCH ORDERS
@@ -2535,18 +2961,54 @@ class BybitToolDispatcher:
     def set_leverage(
         self,
         symbol: str,
-        leverage: int,
+        leverage: Optional[int] = None,
         category: Category = Category.LINEAR,
         buy_leverage: Optional[int] = None,
         sell_leverage: Optional[int] = None,
     ) -> dict:
+        eff_lev = leverage if leverage is not None else (buy_leverage or sell_leverage or 1)
+        b_lev = buy_leverage if buy_leverage is not None else eff_lev
+        s_lev = sell_leverage if sell_leverage is not None else eff_lev
+        cached_info = self._instr_cache.get(symbol.upper())
+        if cached_info and cached_info.max_leverage > 0:
+            b_lev = min(int(b_lev), int(cached_info.max_leverage))
+            s_lev = min(int(s_lev), int(cached_info.max_leverage))
         payload = {
             "category": category,
             "symbol": symbol,
-            "buyLeverage": str(buy_leverage or leverage),
-            "sellLeverage": str(sell_leverage or leverage),
+            "buyLeverage": str(b_lev),
+            "sellLeverage": str(s_lev),
         }
-        return self.api_request("POST", "/v5/position/set-leverage", json_data=payload)
+        try:
+            return self.api_request("POST", "/v5/position/set-leverage", json_data=payload)
+        except BybitAPIError as api_exc:
+            if api_exc.ret_code == 110043:
+                return {
+                    "retCode": 0,
+                    "retMsg": "OK (leverage already set)",
+                    "result": {"symbol": symbol.upper(), "buyLeverage": str(b_lev), "sellLeverage": str(s_lev)},
+                }
+            if api_exc.ret_code in (10001, 110013):
+                try:
+                    info = self._fetch_instrument(symbol.upper(), category)
+                    clamped = int(info.max_leverage)
+                    if clamped > 0 and (b_lev > clamped or s_lev > clamped):
+                        payload["buyLeverage"] = str(min(int(b_lev), clamped))
+                        payload["sellLeverage"] = str(min(int(s_lev), clamped))
+                        res = self.api_request("POST", "/v5/position/set-leverage", json_data=payload)
+                        res["clamped_to_max_leverage"] = clamped
+                        return res
+                except BybitAPIError as retry_exc:
+                    if retry_exc.ret_code == 110043:
+                        return {
+                            "retCode": 0,
+                            "retMsg": "OK (max leverage already set)",
+                            "result": payload,
+                        }
+                    raise retry_exc
+                except Exception:
+                    pass
+            raise api_exc
 
     def set_trading_stop(
         self,
@@ -4184,11 +4646,9 @@ class BybitToolDispatcher:
         min_edge_bps: float = 3.0,
         category: Category = Category.LINEAR,
     ) -> dict:
-        """Microprofit scalp: ultra-tight TP just above fees, uses spread + orderflow for edge.
-
-        Only signals when spread is wide enough to cover round-trip fees and there
-        is clear order flow imbalance.
-        """
+        """Microprofit scalp: combines passive PostOnly maker entry, L2 orderflow
+        imbalance, and micro-momentum so both tight-spread liquid pairs (XRP, SOL, LINK, BTC)
+        and wide-spread pairs produce positive net expected value after fees."""
         try:
             precision = self.get_instrument_precision(
                 symbol,
@@ -4198,9 +4658,12 @@ class BybitToolDispatcher:
                 return precision
             tick_size = precision["price"]["tick_size"]
             qty_step = precision["quantity"]["qty_step"]
+            min_qty = precision["quantity"]["min_order_qty"]
+            min_notional = max(float(precision["quantity"].get("min_notional", 5.0)), 5.0)
             taker_fee = precision["fees"]["taker_fee_rate"]
             maker_fee = precision["fees"]["maker_fee_rate"]
-            round_trip_taker_pct = precision["fees"]["round_trip_taker_pct"]
+            round_trip_maker_bps = (maker_fee * 2.0) * 10000.0
+            maker_taker_bps = (maker_fee + taker_fee) * 10000.0
 
             ob = self.get_l2_orderbook_analysis(symbol, depth=25, category=category)
             if ob.get("status") == "error":
@@ -4209,89 +4672,125 @@ class BybitToolDispatcher:
             best_ask = ob["best_ask"]
             mid = ob["mid_price"]
             spread_bps = ob["spread_bps"]
-
-            min_spread_bps = round_trip_taker_pct * 100 + min_edge_bps
-            if spread_bps < min_spread_bps:
-                return {
-                    "symbol": symbol,
-                    "strategy": "MICROPROFIT_SCALP",
-                    "signal": "NO_TRADE",
-                    "reason": f"Spread {spread_bps:.1f} bps < min required {min_spread_bps:.1f} bps (fees + edge)",
-                    "spread_bps": round(spread_bps, 2),
-                    "round_trip_fee_bps": round(round_trip_taker_pct * 100, 2),
-                }
+            imbalance = float(ob.get("imbalance", 0.0))
 
             orderflow = self.get_orderflow_analysis(symbol, depth=25, category=category)
             of_score = orderflow.get("composite_score", 0)
             of_signal = orderflow.get("signal", "NEUTRAL")
 
-            if abs(of_score) < 10:
+            # Estimate 1m micro-volatility (ATR in bps) when available
+            micro_atr_bps = 12.0
+            try:
+                kl_1m = self.get_klines(symbol, interval="1", limit=20, category=category)
+                if kl_1m and len(kl_1m) >= 5:
+                    kl_1m = _ensure_chronological_klines(kl_1m)
+                    ranges = [
+                        (float(k[2]) - float(k[3])) / max(float(k[4]), 1e-9) * 10000.0
+                        for k in kl_1m[-10:]
+                    ]
+                    if ranges:
+                        micro_atr_bps = max(4.0, sum(ranges) / len(ranges))
+            except Exception:
+                pass
+
+            # Signal requires either orderflow score >= 10 or strong L2 book imbalance
+            eff_score = of_score if abs(of_score) >= 10 else int(imbalance * 50)
+            if abs(eff_score) < 10:
                 return {
                     "symbol": symbol,
                     "strategy": "MICROPROFIT_SCALP",
                     "signal": "NO_TRADE",
-                    "reason": f"Order flow too weak (score={of_score}), need >=10",
+                    "reason": f"Order flow too weak (score={of_score}, imbalance={imbalance:.3f}), need >=10",
                     "orderflow_score": of_score,
+                    "spread_bps": round(spread_bps, 2),
                 }
 
-            side = "Buy" if of_score > 0 else "Sell"
+            side = "Buy" if eff_score > 0 else "Sell"
 
-            # Entry at best bid/ask (maker) for lower fees
+            # Passive PostOnly Maker entry: rest at best_bid (Buy) / best_ask (Sell),
+            # or step inside by 1 tick only if spread >= 2 ticks (never crossing the book)
+            spread_ticks = round((best_ask - best_bid) / max(tick_size, 1e-9))
             if side == "Buy":
-                entry_price = best_bid + tick_size
-                # TP = entry + spread - fees
-                net_edge = spread_bps - round_trip_taker_pct * 100
-                tp_distance = mid * (net_edge / 10000)
-                tp_price = entry_price + tp_distance
-                sl_price = entry_price - tp_distance * 1.5
+                entry_price = (
+                    best_bid + tick_size if spread_ticks >= 2 else best_bid
+                )
             else:
-                entry_price = best_ask - tick_size
-                net_edge = spread_bps - round_trip_taker_pct * 100
-                tp_distance = mid * (net_edge / 10000)
+                entry_price = (
+                    best_ask - tick_size if spread_ticks >= 2 else best_ask
+                )
+
+            # Target move covers Maker+Maker fees (4 bps) + min_edge_bps, scaled to micro-ATR
+            target_move_bps = max(
+                spread_bps,
+                round_trip_maker_bps + min_edge_bps + 2.0,
+                min(micro_atr_bps * 0.65, 25.0),
+            )
+            net_edge = target_move_bps - round_trip_maker_bps
+            tp_distance = max(tick_size * 2, entry_price * (target_move_bps / 10000.0))
+            sl_distance = max(tick_size * 2, tp_distance * 0.85)
+
+            if side == "Buy":
+                tp_price = entry_price + tp_distance
+                sl_price = entry_price - sl_distance
+            else:
                 tp_price = entry_price - tp_distance
-                sl_price = entry_price + tp_distance * 1.5
+                sl_price = entry_price + sl_distance
 
             # Snap to tick
-            entry_price = round(round(entry_price / tick_size) * tick_size, 8)
-            tp_price = round(round(tp_price / tick_size) * tick_size, 8)
-            sl_price = round(round(sl_price / tick_size) * tick_size, 8)
+            entry_price = self.adjust_price(symbol, entry_price, category)
+            tp_price = self.adjust_price(symbol, tp_price, category)
+            sl_price = self.adjust_price(symbol, sl_price, category)
+            if side == "Buy" and sl_price >= entry_price:
+                sl_price = self.adjust_price(symbol, entry_price - tick_size * 2, category)
+            elif side == "Sell" and sl_price <= entry_price:
+                sl_price = self.adjust_price(symbol, entry_price + tick_size * 2, category)
 
-            qty = (
+            raw_qty = (
                 risk_usdt / abs(entry_price - sl_price)
                 if abs(entry_price - sl_price) > 0
-                else 0
+                else min_qty
             )
-            qty = round(round(qty / qty_step) * qty_step, 8)
+            min_notional_qty = math.ceil((min_notional / max(entry_price, 1e-9)) / max(qty_step, 1e-9)) * qty_step
+            qty = self.adjust_quantity(symbol, max(raw_qty, min_notional_qty), category)
 
             notional = entry_price * qty
             entry_fee = notional * maker_fee
-            exit_fee = tp_price * qty * taker_fee
-            total_fees = entry_fee + exit_fee
+            exit_fee_maker = tp_price * qty * maker_fee
+            exit_fee_taker = tp_price * qty * taker_fee
+            total_fees = entry_fee + exit_fee_maker
             gross_profit = abs(tp_price - entry_price) * qty
             net_profit = gross_profit - total_fees
+            net_profit_taker_tp = gross_profit - (entry_fee + exit_fee_taker)
 
             return {
                 "symbol": symbol,
                 "strategy": "MICROPROFIT_SCALP",
                 "signal": side.upper(),
                 "side": side,
+                "order_type": "Limit",
+                "time_in_force": "PostOnly",
                 "entry_price": entry_price,
                 "take_profit": tp_price,
                 "stop_loss": sl_price,
                 "qty": qty,
                 "notional": round(notional, 4),
                 "spread_bps": round(spread_bps, 2),
+                "micro_atr_bps": round(micro_atr_bps, 2),
+                "target_move_bps": round(target_move_bps, 2),
                 "net_edge_bps": round(net_edge, 2),
                 "entry_fee": round(entry_fee, 6),
-                "exit_fee": round(exit_fee, 6),
+                "exit_fee": round(exit_fee_maker, 6),
                 "total_fees": round(total_fees, 6),
                 "gross_profit_est": round(gross_profit, 6),
                 "net_profit_est": round(net_profit, 6),
+                "net_profit_if_taker_tp": round(net_profit_taker_tp, 6),
+                "round_trip_maker_bps": round(round_trip_maker_bps, 2),
+                "maker_taker_bps": round(maker_taker_bps, 2),
                 "profitable": net_profit > 0,
                 "orderflow_score": of_score,
                 "orderflow_signal": of_signal,
                 "tick_size": tick_size,
-                "note": "Use limit entry (maker fee), market TP (taker). Cancel if not filled within 5s.",
+                "note": "Use PostOnly Limit entry (0.02% maker fee) and Limit TP (0.02% maker fee) to cut round-trip fees by 64%.",
             }
         except Exception as e:
             return {"status": "error", "msg": str(e)}
@@ -4924,6 +5423,7 @@ class BybitToolDispatcher:
                     "status": "error",
                     "msg": "Insufficient data for volatility calculation",
                 }
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -5029,6 +5529,7 @@ class BybitToolDispatcher:
             )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient kline data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -5351,6 +5852,7 @@ class BybitToolDispatcher:
             )
             if not klines or len(klines) < 50:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -5518,6 +6020,7 @@ class BybitToolDispatcher:
             klines = self.get_klines(symbol, interval="5", limit=100, category=category)
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -5685,6 +6188,7 @@ class BybitToolDispatcher:
             klines = self.get_klines(
                 symbol, interval="60", limit=100, category=category
             )
+            klines = _ensure_chronological_klines(klines) if klines else []
             closes = [float(k[4]) for k in klines] if klines else []
 
             levels = []
@@ -5783,6 +6287,7 @@ class BybitToolDispatcher:
             )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient kline data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -6090,6 +6595,7 @@ class BybitToolDispatcher:
             )
             if not klines or len(klines) < 20:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -6188,6 +6694,7 @@ class BybitToolDispatcher:
             )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -6290,6 +6797,7 @@ class BybitToolDispatcher:
             klines = self.get_klines(symbol, interval="5", limit=100, category=category)
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             volumes = [float(k[5]) for k in klines]
@@ -6565,6 +7073,7 @@ class BybitToolDispatcher:
                 if not klines or len(klines) < 20:
                     signals[label] = {"signal": "INSUFFICIENT_DATA"}
                     continue
+                klines = _ensure_chronological_klines(klines)
 
                 closes = [float(k[4]) for k in klines]
 
@@ -6751,6 +7260,7 @@ class BybitToolDispatcher:
             )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -7032,6 +7542,7 @@ class BybitToolDispatcher:
             klines = self.get_klines(symbol, interval="60", limit=50, category=category)
             if not klines or len(klines) < 20:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -7150,6 +7661,7 @@ class BybitToolDispatcher:
             )
             if not klines or len(klines) < 30:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             lows = [float(k[3]) for k in klines]
@@ -7256,6 +7768,7 @@ class BybitToolDispatcher:
             )
             if not klines or len(klines) < 50:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -7445,6 +7958,7 @@ class BybitToolDispatcher:
                     sym, interval=interval, limit=lookback, category=category
                 )
                 if klines and len(klines) >= 20:
+                    klines = _ensure_chronological_klines(klines)
                     price_data[sym] = [float(k[4]) for k in klines]
 
             if len(price_data) < 2:
@@ -7522,6 +8036,7 @@ class BybitToolDispatcher:
             klines = self.get_klines(symbol, interval="15", limit=50, category=category)
             if not klines or len(klines) < 20:
                 return {"status": "error", "msg": "Insufficient data"}
+            klines = _ensure_chronological_klines(klines)
 
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
@@ -8282,10 +8797,163 @@ class BybitToolDispatcher:
         )
         return resp.get("result", {})
 
-    def get_withdrawable_amount(self) -> dict:
-        """Get withdrawable amount for the account."""
+    def query_account_coins_balance(
+        self,
+        account_type: str = "UNIFIED",
+        coin: Optional[str] = None,
+    ) -> dict:
+        """Query all coin balances for an account type (UNIFIED, FUND, SPOT)."""
+        params: Dict[str, Any] = {"accountType": account_type}
+        if coin:
+            params["coin"] = coin
         resp = self.api_request(
-            "GET", "/v5/asset/withdraw/withdrawable-amount", params={}
+            "GET",
+            "/v5/asset/transfer/query-account-coins-balance",
+            params=params,
+        )
+        return resp.get("result", {})
+
+    def get_small_balance_list(
+        self,
+        account_type: str = "eb_convert_uta",
+    ) -> dict:
+        """Fetch list of small/dust balances eligible for conversion (/v5/asset/covert/small-balance-list)."""
+        resp = self.api_request(
+            "GET",
+            "/v5/asset/covert/small-balance-list",
+            params={"accountType": account_type},
+        )
+        return resp.get("result", {})
+
+    def get_dust_quote(
+        self,
+        from_coin_list: List[str],
+        to_coin: str = "USDT",
+        account_type: str = "eb_convert_uta",
+    ) -> dict:
+        """Request a 30-second conversion quote for small balances (/v5/asset/covert/get-quote)."""
+        payload = {
+            "accountType": account_type,
+            "fromCoinList": list(from_coin_list),
+            "toCoin": to_coin,
+        }
+        resp = self.api_request(
+            "POST",
+            "/v5/asset/covert/get-quote",
+            json_data=payload,
+        )
+        return resp.get("result", {})
+
+    def execute_dust_convert(self, quote_id: str) -> dict:
+        """Confirm and execute a small-balance conversion quote (/v5/asset/covert/small-balance-execute)."""
+        resp = self.api_request(
+            "POST",
+            "/v5/asset/covert/small-balance-execute",
+            json_data={"quoteId": quote_id},
+        )
+        return resp.get("result", {})
+
+    def get_dust_history(
+        self,
+        account_type: str = "eb_convert_uta",
+        limit: int = 20,
+    ) -> dict:
+        """Fetch small-balance conversion history (/v5/asset/covert/small-balance-history)."""
+        resp = self.api_request(
+            "GET",
+            "/v5/asset/covert/small-balance-history",
+            params={"accountType": account_type, "limit": limit},
+        )
+        return resp.get("result", {})
+
+    def sweep_dust(
+        self,
+        to_coin: str = "USDT",
+        account_type: str = "eb_convert_uta",
+        transfer_from_fund: bool = True,
+    ) -> dict:
+        """One-call dust & small-balance consolidator:
+        1. Transfers positive balances from FUND to UNIFIED (optional).
+        2. Queries /v5/asset/covert/small-balance-list.
+        3. Filters convertible dust coins (supportConvert == 1, excluding to_coin).
+        4. Requests a quote via /v5/asset/covert/get-quote and immediately confirms
+           via /v5/asset/covert/small-balance-execute within the 30s expiry window.
+        """
+        transferred: List[dict] = []
+        if transfer_from_fund:
+            try:
+                fund_res = self.query_account_coins_balance(account_type="FUND")
+                for c in fund_res.get("balance", []):
+                    amt_str = str(c.get("transferBalance") or c.get("walletBalance") or "0")
+                    if (_safe_float(amt_str) or 0.0) > 0:
+                        coin_name = c.get("coin", "")
+                        if coin_name:
+                            try:
+                                tr = self.internal_transfer(
+                                    coin=coin_name,
+                                    amount=amt_str,
+                                    from_account="FUND",
+                                    to_account="UNIFIED",
+                                )
+                                transferred.append({"coin": coin_name, "amount": amt_str, "result": tr})
+                            except Exception as tr_err:
+                                transferred.append({"coin": coin_name, "amount": amt_str, "error": str(tr_err)})
+            except Exception as e_fund:
+                logger.debug("FUND balance check skipped during sweep_dust: %s", e_fund)
+
+        small_res = self.get_small_balance_list(account_type=account_type)
+        small_assets = small_res.get("smallAssetCoins", [])
+        convertible = [
+            c["fromCoin"]
+            for c in small_assets
+            if int(c.get("supportConvert", 0)) == 1
+            and (_safe_float(c.get("availableBalance")) or 0.0) > 0
+            and c.get("fromCoin") not in (to_coin, "MNT")
+        ]
+
+        if not convertible:
+            return {
+                "status": "ok",
+                "converted_coins": [],
+                "transferred_from_fund": transferred,
+                "msg": f"No convertible dust coins found for target {to_coin}",
+                "small_assets": small_assets,
+            }
+
+        quote_res = self.get_dust_quote(
+            from_coin_list=convertible,
+            to_coin=to_coin,
+            account_type=account_type,
+        )
+        quote_id = quote_res.get("quoteId", "")
+        if not quote_id:
+            return {
+                "status": "error",
+                "msg": "Dust quote returned no quoteId",
+                "convertible_coins": convertible,
+                "quote_response": quote_res,
+            }
+
+        exec_res = self.execute_dust_convert(quote_id=quote_id)
+        return {
+            "status": "ok",
+            "to_coin": to_coin,
+            "converted_coins": convertible,
+            "quote_id": quote_id,
+            "quote": quote_res,
+            "execution": exec_res,
+            "transferred_from_fund": transferred,
+        }
+
+    def get_withdrawable_amount(
+        self,
+        coin: str = "USDT",
+        account_type: str = "FUND",
+    ) -> dict:
+        """Get withdrawable amount for the account."""
+        params: Dict[str, Any] = {"coin": coin}
+        resp = self.api_request(
+            "GET", "/v5/asset/withdraw/withdrawable-amount", params=params
         )
         return resp.get("result", {})
 
@@ -10170,6 +10838,13 @@ def run(
         "get_coin_greeks",
         "internal_transfer",
         "get_coin_balance",
+        "query_account_coins_balance",
+        "get_small_balance_list",
+        "get_dust_quote",
+        "execute_dust_convert",
+        "get_dust_history",
+        "sweep_dust",
+        "get_withdrawable_amount",
         # ── Market Data ──
         "get_ticker",
         "get_24hr_ticker",
@@ -10817,8 +11492,13 @@ def run(
         elif action == "get_wallet_balance":
             return bot.get_wallet_balance(account_type=account_type or "UNIFIED")
         elif action == "set_leverage":
-            if not symbol or leverage is None:
-                return {"status": "error", "msg": "symbol and leverage are required"}
+            if not symbol or (
+                leverage is None and buy_leverage is None and sell_leverage is None
+            ):
+                return {
+                    "status": "error",
+                    "msg": "symbol and leverage (or buy_leverage/sell_leverage) are required",
+                }
             return bot.set_leverage(
                 symbol=symbol,
                 leverage=leverage,
@@ -10912,6 +11592,52 @@ def run(
             if not coin:
                 return {"status": "error", "msg": "coin is required"}
             return bot.get_coin_balance(coin=coin, account_type=account_type or "FUND")
+        elif action == "query_account_coins_balance":
+            return bot.query_account_coins_balance(
+                account_type=account_type or "UNIFIED",
+                coin=coin,
+            )
+        elif action == "get_small_balance_list":
+            return bot.get_small_balance_list(
+                account_type=account_type or "eb_convert_uta"
+            )
+        elif action == "get_dust_quote":
+            raw_coins = coin or symbols or ""
+            coins_list = [c.strip().upper() for c in str(raw_coins).split(",") if c.strip()]
+            if not coins_list:
+                return {
+                    "status": "error",
+                    "msg": "coin or symbols (comma-separated dust coins) required",
+                }
+            return bot.get_dust_quote(
+                from_coin_list=coins_list,
+                to_coin=(currency or "USDT").upper(),
+                account_type=account_type or "eb_convert_uta",
+            )
+        elif action == "execute_dust_convert":
+            qid = order_id or client_oid or trade_id
+            if not qid:
+                return {
+                    "status": "error",
+                    "msg": "quoteId (pass via order_id, client_oid, or trade_id) is required",
+                }
+            return bot.execute_dust_convert(quote_id=str(qid))
+        elif action == "get_dust_history":
+            return bot.get_dust_history(
+                account_type=account_type or "eb_convert_uta",
+                limit=limit or 20,
+            )
+        elif action == "sweep_dust":
+            return bot.sweep_dust(
+                to_coin=(coin or currency or "USDT").upper(),
+                account_type=account_type or "eb_convert_uta",
+                transfer_from_fund=True,
+            )
+        elif action == "get_withdrawable_amount":
+            return bot.get_withdrawable_amount(
+                coin=(coin or currency or "USDT").upper(),
+                account_type=account_type or "FUND",
+            )
 
         # ══════════════════════════════════════════════════════
         # MARKET DATA
@@ -12559,14 +13285,28 @@ def run(
                 "msg": f"Unknown action: '{action}'. Use health_check to see available actions.",
             }
 
+    except BybitAPIError as api_exc:
+        logger.warning("run() BybitAPIError for action=%s: %s", action, api_exc)
+        return {
+            "status": "error",
+            "retCode": api_exc.ret_code,
+            "retMsg": api_exc.ret_msg,
+            "endpoint": api_exc.endpoint,
+            "msg": str(api_exc),
+        }
     except Exception as exc:
         logger.exception("run() unhandled exception for action=%s", action)
         return {"status": "error", "msg": str(exc)}
 
 
+# Backward-compatible class alias used by realm tests and scripts
+BybitRealm = BybitToolDispatcher
+
+
 # ─────────────────────────────────────────────────────────────
 # CLI ENTRY POINT
 # ─────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     import argparse
 

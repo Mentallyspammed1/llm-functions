@@ -414,23 +414,59 @@ class ExecutionMixin:
         return {"required_exit": round(exit_p, 4)}
 
     def panic_close(self, category: str = "linear") -> dict:
-        """Closes all positions at market."""
+        """Cancels all active orders and closes all open positions at market."""
+        self.cancel_all_orders(category=category)
         pos = self.get_positions(category=category).get("list", [])
         res = []
         for p in pos:
-            if float(p["size"]) > 0:
+            if float(p.get("size", 0)) > 0:
                 side = "Sell" if p["side"] == "Buy" else "Buy"
                 res.append(
                     self.place_order(
-                        p["symbol"],
-                        side,
-                        p["size"],
-                        "Market",
-                        reduce_only=True,
+                        symbol=p["symbol"],
+                        side=side,
+                        qty=float(p["size"]),
+                        order_type="Market",
                         category=category,
                     )
                 )
-        return {"results": res}
+        return {"status": "ok", "results": res}
+
+    def set_tp_sl(
+        self,
+        symbol: str,
+        tp: float = None,
+        sl: float = None,
+        category: str = "linear",
+    ) -> dict:
+        """Sets take profit and/or stop loss on an open position."""
+        res = self.set_trading_stop(
+            symbol=symbol, take_profit=tp, stop_loss=sl, category=category
+        )
+        if isinstance(res, dict) and "status" not in res:
+            res = {"status": "ok", **res}
+        return res
+
+    def bulk_update_tp_sl(
+        self,
+        tp: float = None,
+        sl: float = None,
+        category: str = "linear",
+    ) -> dict:
+        """Updates TP/SL across all active positions."""
+        pos_list = self.get_positions(category=category).get("list", [])
+        results = []
+        for p in pos_list:
+            if float(p.get("size", 0)) > 0:
+                results.append(
+                    self.set_trading_stop(
+                        symbol=p["symbol"],
+                        take_profit=tp,
+                        stop_loss=sl,
+                        category=category,
+                    )
+                )
+        return {"status": "ok", "updated": len(results), "results": results}
 
     def generate_twap_orders(self, symbol, side, total_qty, duration_min, intervals=10):
         return {"qty": total_qty / intervals, "delay": (duration_min * 60) / intervals}

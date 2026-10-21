@@ -336,16 +336,21 @@ def calculate_exit_price_for_net_loss(
     e_fee: float = 0.0,
     x_fee: float = 0.0,
 ) -> float:
-    """Stop price for maximum net loss risk_usdt (positive magnitude)."""
+    """Stop price for maximum net loss risk_usdt (positive magnitude).
+
+    Always returns a directionally valid stop loss (< entry_price for Buy,
+    > entry_price for Sell). If round-trip fees exceed risk_usdt, treats
+    risk_usdt as the allowed gross adverse price excursion.
+    """
     if qty <= 0:
         return entry_price
+    fee_budget = entry_price * qty * (e_fee + x_fee)
+    eff_price_risk = max(risk_usdt - fee_budget, max(risk_usdt * 0.5, entry_price * qty * 0.0005))
     if side.lower() == "buy":
-        denom = 1.0 - x_fee
-        if denom <= 0:
-            return entry_price
-        return (entry_price * (1.0 + e_fee) - risk_usdt / qty) / denom
-    denom = 1.0 + x_fee
-    return (risk_usdt / qty + entry_price * (1.0 - e_fee)) / denom
+        sl = entry_price - (eff_price_risk / qty)
+        return min(sl, entry_price * 0.9995)
+    sl = entry_price + (eff_price_risk / qty)
+    return max(sl, entry_price * 1.0005)
 
 
 def calculate_pnl_by_exit_price(
@@ -1203,6 +1208,23 @@ def execute_smart_order(
                 risk_entry, actual_qty, side, risk_amount, e_fee, x_fee_sl
             )
 
+    # Cap to maximum affordable quantity based on available wallet balance + leverage + fee reserve
+    eff_lev = float(leverage_i or max_leverage or 10.0)
+    if balance > 0 and eff_lev > 0 and not reduce_only:
+        buf = 0.0015 if not is_limit else 0.0003
+        cost_per_unit = calc_price * ((1.0 / eff_lev) + e_fee + x_fee_sl + buf)
+        max_aff_qty = float(
+            format_precision((balance * 0.96) / cost_per_unit, qty_step, ROUND_DOWN) or 0
+        )
+        if max_aff_qty > 0 and actual_qty > max_aff_qty and (max_aff_qty * calc_price) >= max(min_notional, 5.0):
+            warnings.append(
+                f"Qty capped from {actual_qty} to {max_aff_qty} to fit available balance ${balance:.4f} at {eff_lev:g}x leverage."
+            )
+            actual_qty = max_aff_qty
+            qty_str = format_precision(actual_qty, qty_step, ROUND_DOWN)
+            actual_qty = float(qty_str) if qty_str else 0.0
+            notional = actual_qty * calc_price
+
     # Re-validate SL side after any re-anchor
     if side == "Buy" and stop_loss >= calc_price:
         return {
@@ -1395,6 +1417,28 @@ def execute_smart_order(
         return result_payload
 
     data = _safe_api("POST", "/v5/order/create", params=params, signed=True)
+    if data.get("retCode") == 110007 and not reduce_only and balance > 0 and eff_lev > 0:
+        # Auto-downsize and/or convert Market to top-of-book Limit on 110007
+        buf = 0.0018 if not is_limit else 0.0004
+        cost_per_unit = calc_price * ((1.0 / eff_lev) + e_fee + x_fee_sl + buf)
+        retry_qty = float(
+            format_precision((balance * 0.94) / cost_per_unit, qty_step, ROUND_DOWN) or 0
+        )
+        if retry_qty >= (min_qty or 0) and (retry_qty * calc_price) >= max(min_notional, 5.0):
+            params["qty"] = format_precision(retry_qty, qty_step, ROUND_DOWN)
+            if not is_limit:
+                params["orderType"] = "Limit"
+                params["price"] = format_precision(calc_price, tick_size, ROUND_HALF_UP)
+                params["timeInForce"] = "GTC"
+            warnings.append(
+                f"Auto-resized qty to {params['qty']} after retCode=110007."
+            )
+            data = _safe_api("POST", "/v5/order/create", params=params, signed=True)
+            if data.get("retCode") == 0:
+                actual_qty = float(params["qty"])
+                result_payload["qty"] = actual_qty
+                result_payload["notional_usdt"] = round(actual_qty * calc_price, 4)
+
     if data.get("retCode") == 0:
         result_payload.update(
             {

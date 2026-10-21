@@ -120,6 +120,7 @@ _RETRY_STATUSES = frozenset(
 # Bybit retCodes that are transient and may succeed on retry
 _RETRYABLE_RET_CODES = frozenset(
     {
+        10002,
         10006,
         10018,
         130006,
@@ -136,13 +137,14 @@ _RETRYABLE_RET_CODES = frozenset(
 _PERMANENT_RET_CODES = frozenset(
     {
         10001,
-        10002,
         10003,
         10004,
         10005,
         10007,
         10010,
         10017,
+        110007,
+        110094,
     }
 )
 
@@ -201,11 +203,15 @@ def get_config(force_refresh: bool = False) -> dict[str, Any]:
         )
         base_url = _BASE_URL_TESTNET if testnet else _BASE_URL_MAINNET
 
-        use_proxy = (
-            os.environ.get("BYBIT_USE_TOR", "false").lower() in ("1", "true", "yes")
-            or os.environ.get("PROXY_ENABLED", "false").lower() in ("1", "true", "yes")
-            or os.environ.get("BYBIT_USE_PROXY", "false").lower()
-            in ("1", "true", "yes")
+        use_proxy = any(
+            os.environ.get(k, "false").lower() in ("1", "true", "yes")
+            for k in (
+                "BYBIT_USE_TOR",
+                "TOR_ENABLED",
+                "USE_TOR",
+                "PROXY_ENABLED",
+                "BYBIT_USE_PROXY",
+            )
         )
 
         proxies: dict[str, str] | None = None
@@ -708,22 +714,9 @@ def api_request(
         body_str = json.dumps(params or {}, separators=(",", ":"), ensure_ascii=False)
         path_url = endpoint
 
-    headers: dict[str, str] = {"X-BAPI-SIGN-TYPE": str(sign_type)}
+    base_headers: dict[str, str] = {"X-BAPI-SIGN-TYPE": str(sign_type)}
     if method != "GET":
-        headers["Content-Type"] = "application/json"
-
-    if signed:
-        ts = _timestamp_ms(cfg)
-        payload = body_str if method != "GET" else query_str
-        sig = _sign(cfg, ts, payload or "")
-        headers.update(
-            {
-                "X-BAPI-API-KEY": cfg["api_key"],
-                "X-BAPI-SIGN": sig,
-                "X-BAPI-TIMESTAMP": ts,
-                "X-BAPI-RECV-WINDOW": str(cfg["recv_window"]),
-            }
-        )
+        base_headers["Content-Type"] = "application/json"
 
     sess = _get_session()
     proxies = cfg["proxies"]
@@ -736,6 +729,19 @@ def api_request(
         base_urls.append(cfg["backup_base_url"])
 
     for attempt in range(retries + 1):
+        headers = dict(base_headers)
+        if signed:
+            ts = _timestamp_ms(cfg)
+            payload = body_str if method != "GET" else query_str
+            sig = _sign(cfg, ts, payload or "")
+            headers.update(
+                {
+                    "X-BAPI-API-KEY": cfg["api_key"],
+                    "X-BAPI-SIGN": sig,
+                    "X-BAPI-TIMESTAMP": ts,
+                    "X-BAPI-RECV-WINDOW": str(cfg["recv_window"]),
+                }
+            )
         domain_idx = 0 if attempt == 0 else (attempt % len(base_urls))
         target_base = base_urls[domain_idx]
         full_url = f"{target_base}{path_url}"
