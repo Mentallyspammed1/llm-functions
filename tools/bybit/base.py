@@ -7,7 +7,6 @@ import os
 import shutil
 import sqlite3
 import subprocess
-import sys
 import threading
 import time
 import uuid
