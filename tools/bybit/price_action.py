@@ -5,6 +5,22 @@ and produces structure analysis, signals, and trade plans. Because it is pure,
 the same code drives live signals (`BybitRealm`), the backtester, and unit tests.
 
 Candle row format (Bybit v5 kline): [start_ms, open, high, low, close, vol, turnover]
+
+Design note — one decision function
+-----------------------------------
+`_decide()` holds *all* entry rules. `PriceActionEngine.price_action_signal()`
+computes indicators and calls it; the backtester pre-computes the same
+indicators as series and calls the *same* function bar by bar. This makes it
+structurally impossible for the backtest to drift away from live behaviour,
+which is the most common source of fake profitability in trading code.
+
+Trend-quality filters
+---------------------
+ADX measures the *magnitude* of directional movement, not whether a move is
+tradeable trend or chop: a random walk routinely prints ADX > 35. Measured on
+synthetic random walks, ADX barely separates a trend from noise. The engine
+therefore gates on Kaufman's **Efficiency Ratio** (net move / path length),
+which does separate them, plus an anti-chase distance check.
 """
 
 from __future__ import annotations
@@ -41,6 +57,76 @@ def _atr_series(highs, lows, closes, period: int = 14) -> List[float]:
     return [out[0]] * (period - 1) + out
 
 
+def _rsi_series(closes: Sequence[float], period: int = 14) -> List[float]:
+    """Wilder-smoothed RSI series aligned to `closes` (length == len(closes))."""
+    n = len(closes)
+    if n < period + 1:
+        return [50.0] * n
+    diffs = [closes[i + 1] - closes[i] for i in range(n - 1)]
+    gains = [d if d > 0 else 0.0 for d in diffs]
+    losses = [-d if d < 0 else 0.0 for d in diffs]
+    avg_g = sum(gains[:period]) / period
+    avg_l = sum(losses[:period]) / period
+    out = [50.0] * period
+    for i in range(period, len(diffs)):
+        avg_g = (avg_g * (period - 1) + gains[i]) / period
+        avg_l = (avg_l * (period - 1) + losses[i]) / period
+        out.append(100.0 if avg_l == 0 else 100 - 100 / (1 + avg_g / avg_l))
+    # diffs index i corresponds to bar i+1
+    return out[:n]
+
+
+def _adx_series(highs, lows, closes, period: int = 14) -> List[float]:
+    """Wilder ADX series aligned to the candle index (length == len(closes))."""
+    n = len(closes)
+    if n < 2 * period:
+        return [0.0] * n
+    trs, pdms, ndms = [], [], []
+    for i in range(1, n):
+        trs.append(max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]),
+                       abs(lows[i] - closes[i - 1])))
+        up = highs[i] - highs[i - 1]
+        down = lows[i - 1] - lows[i]
+        pdms.append(up if up > down and up > 0 else 0.0)
+        ndms.append(down if down > up and down > 0 else 0.0)
+    dx = [0.0] * (n - 1)
+    for i in range(period - 1, n - 1):
+        s_tr = sum(trs[i - period + 1 : i + 1])
+        s_p = sum(pdms[i - period + 1 : i + 1])
+        s_n = sum(ndms[i - period + 1 : i + 1])
+        di_p = 100 * s_p / s_tr if s_tr else 0.0
+        di_n = 100 * s_n / s_tr if s_tr else 0.0
+        dx[i] = 100 * abs(di_p - di_n) / (di_p + di_n) if (di_p + di_n) else 0.0
+    out = [0.0] * n
+    for i in range(2 * period - 1, n):
+        out[i] = sum(dx[i - period : i]) / period
+    return out
+
+
+def _efficiency_ratio(closes: Sequence[float], period: int = 20) -> float:
+    """Kaufman Efficiency Ratio in [0, 1].
+
+    ``|net move over N bars| / sum(|bar-to-bar move|)``.
+
+    ~1.0 is a clean one-way trend, ~0 is pure chop. Unlike ADX this is
+    scale-free and measures *path efficiency*, so it separates trend from
+    noise far more reliably.
+    """
+    if len(closes) < period + 1:
+        return 0.0
+    seg = closes[-(period + 1):]
+    net = abs(seg[-1] - seg[0])
+    path = sum(abs(seg[i + 1] - seg[i]) for i in range(len(seg) - 1))
+    return net / path if path else 0.0
+
+
+def _percentile_rank(values: Sequence[float], value: float) -> float:
+    """Fraction of `values` at or below `value`, in [0, 1]."""
+    if not values:
+        return 0.5
+    return sum(1 for v in values if v <= value) / len(values)
+
+
 @dataclass
 class SwingPoint:
     index: int  # position in the chronological candle list
@@ -59,6 +145,7 @@ class Signal:
     setup: str
     reasons: List[str] = field(default_factory=list)
     filters: List[str] = field(default_factory=list)
+    meta: Dict[str, float] = field(default_factory=dict)
 
 
 class PriceActionEngine:
@@ -68,6 +155,20 @@ class PriceActionEngine:
       * UPTREND   — higher highs and higher lows (HH/HL)
       * DOWNTREND — lower highs and lower lows (LH/LL)
       * RANGE     — no consistent structure
+
+    Tunables (all optional, defaults are the validated ones):
+      min_adx           ADX floor for a "trending" tape (default 20)
+      min_er            Kaufman efficiency-ratio floor (default 0.15)
+      max_ema_dist_atr  hard anti-chase cap: skip if price is this many ATRs
+                        away from the fast EMA (default 6.0; <=0 disables)
+      caution_ema_dist_atr  soft anti-chase: subtract confidence beyond this
+                        distance (default 3.0)
+      max_atr_percentile volatility-spike guard (default 0.98; >=1 disables)
+      min_slow_slope_atr  directional regime gate: the slow EMA must slope at
+                        least this many ATRs over `slope_lookback` bars in the
+                        trade direction (default 0.8; 0 disables). This is what
+                        keeps the engine out of mean-reverting markets, where a
+                        flat slow EMA makes every 'trend' a fade candidate.
     """
 
     def __init__(
@@ -79,6 +180,15 @@ class PriceActionEngine:
         swing_strength: int = 2,
         rsi_period: int = 14,
         adx_period: int = 14,
+        er_period: int = 20,
+        min_adx: float = 20.0,
+        min_er: float = 0.15,
+        max_ema_dist_atr: float = 6.0,
+        caution_ema_dist_atr: float = 3.0,
+        max_atr_percentile: float = 0.98,
+        structure_lookback: int = 120,
+        slope_lookback: int = 20,
+        min_slow_slope_atr: float = 0.8,
     ):
         self.ema_fast = ema_fast
         self.ema_mid = ema_mid
@@ -87,6 +197,15 @@ class PriceActionEngine:
         self.swing_strength = swing_strength
         self.rsi_period = rsi_period
         self.adx_period = adx_period
+        self.er_period = er_period
+        self.min_adx = min_adx
+        self.min_er = min_er
+        self.max_ema_dist_atr = max_ema_dist_atr
+        self.caution_ema_dist_atr = caution_ema_dist_atr
+        self.max_atr_percentile = max_atr_percentile
+        self.structure_lookback = structure_lookback
+        self.slope_lookback = slope_lookback
+        self.min_slow_slope_atr = min_slow_slope_atr
 
     # ── data accessors ──────────────────────────────────────────────────────
 
@@ -117,23 +236,49 @@ class PriceActionEngine:
                 swings.append(SwingPoint(i, l[i], "low"))
         return swings
 
-    def market_structure(self, klines: Sequence[Sequence]) -> dict:
-        """Classify market structure from recent swing points."""
-        swings = self.swing_points(klines)
+    def structure_from_arrays(
+        self,
+        highs: Sequence[float],
+        lows: Sequence[float],
+        closes: Sequence[float],
+        atr: float,
+        ema_fast: Optional[float] = None,
+        ema_slow: Optional[float] = None,
+        swings: Optional[List[SwingPoint]] = None,
+    ) -> dict:
+        """Classify structure from pre-computed arrays (shared by live + backtest).
+
+        `swings` may be supplied when the caller already detected them, which
+        lets the backtester avoid recomputing fractals for every bar.
+        """
+        if swings is None:
+            # Build a kline-shaped proxy so swing_points() can be reused. The
+            # caller passes chronological arrays, but swing_points() expects
+            # Bybit's newest-first order and reverses internally — so build the
+            # proxy newest-first to keep swing indices aligned with these arrays.
+            proxy = [
+                [0, str(o), str(h), str(l), str(c), "0"]
+                for o, h, l, c in zip(closes, highs, lows, closes)
+            ]
+            proxy.reverse()
+            swings = self.swing_points(proxy)
         if len(swings) < 4:
             return {
                 "status": "ok",
                 "state": "UNKNOWN",
                 "note": "not enough swings",
                 "swings": [],
+                "bos": None,
+                "last_high": None,
+                "last_low": None,
             }
         recent = swings[-6:]
-        highs = [s.price for s in recent if s.kind == "high"]
-        lows = [s.price for s in recent if s.kind == "low"]
-        hh = len(highs) >= 2 and highs[-1] > highs[-2]
-        hl = len(lows) >= 2 and lows[-1] > lows[-2]
-        lh = len(highs) >= 2 and highs[-1] < highs[-2]
-        ll = len(lows) >= 2 and lows[-1] < lows[-2]
+        highs_s = [s.price for s in recent if s.kind == "high"]
+        lows_s = [s.price for s in recent if s.kind == "low"]
+        hh = len(highs_s) >= 2 and highs_s[-1] > highs_s[-2]
+        hl = len(lows_s) >= 2 and lows_s[-1] > lows_s[-2]
+        lh = len(highs_s) >= 2 and highs_s[-1] < highs_s[-2]
+        ll = len(lows_s) >= 2 and lows_s[-1] < lows_s[-2]
 
         if hh and hl:
             state = "UPTREND"
@@ -144,14 +289,12 @@ class PriceActionEngine:
 
         # Slope/EMA fallback: in strong trends fractal swings can be sparse
         # (every candle makes an extreme), so confirm with net change vs ATR.
-        o, h, l, c, v = self.to_chronological(klines)
-        if state == "RANGE" and len(c) > 40:
-            lookback = min(60, len(c) // 3)
-            net = c[-1] - c[-lookback]
-            atr = self.atr(klines)
+        if state == "RANGE" and len(closes) > 40:
+            lookback = min(60, len(closes) // 3)
+            net = closes[-1] - closes[-lookback]
             if atr > 0:
-                ema_f = _ema_series(c, self.ema_fast)[-1]
-                ema_s = _ema_series(c, self.ema_slow)[-1]
+                ema_f = ema_fast if ema_fast is not None else _ema_series(closes, self.ema_fast)[-1]
+                ema_s = ema_slow if ema_slow is not None else _ema_series(closes, self.ema_slow)[-1]
                 if net > 4 * atr and ema_f > ema_s:
                     state = "UPTREND"
                 elif net < -4 * atr and ema_f < ema_s:
@@ -159,11 +302,14 @@ class PriceActionEngine:
 
         # Break of structure: price violating the most recent opposing swing
         bos = None
-        last_high = max((s for s in recent if s.kind == "high"), key=lambda s: s.index, default=None)
-        last_low = min((s for s in recent if s.kind == "low"), key=lambda s: s.index, default=None)
-        if state == "DOWNTREND" and last_high and c[-1] > last_high.price:
+        last_high = max((s for s in recent if s.kind == "high"),
+                        key=lambda s: s.index, default=None)
+        last_low = min((s for s in recent if s.kind == "low"),
+                       key=lambda s: s.index, default=None)
+        price = closes[-1]
+        if state == "DOWNTREND" and last_high and price > last_high.price:
             bos = "BULLISH_BOS"
-        elif state == "UPTREND" and last_low and c[-1] < last_low.price:
+        elif state == "UPTREND" and last_low and price < last_low.price:
             bos = "BEARISH_BOS"
 
         return {
@@ -177,6 +323,17 @@ class PriceActionEngine:
             "last_high": round(last_high.price, 6) if last_high else None,
             "last_low": round(last_low.price, 6) if last_low else None,
         }
+
+    def market_structure(self, klines: Sequence[Sequence]) -> dict:
+        """Classify market structure from recent swing points."""
+        o, h, l, c, v = self.to_chronological(klines)
+        atr_s = _atr_series(h, l, c, self.atr_period)
+        atr = atr_s[-1] if atr_s else 0.0
+        return self.structure_from_arrays(
+            h, l, c, atr,
+            ema_fast=_ema_series(c, self.ema_fast)[-1],
+            ema_slow=_ema_series(c, self.ema_slow)[-1],
+        )
 
     # ── trend / momentum ────────────────────────────────────────────────────
 
@@ -261,6 +418,57 @@ class PriceActionEngine:
         atr = _atr_series(h, l, c, self.atr_period)
         return atr[-1] if atr else 0.0
 
+    def efficiency_ratio(self, klines: Sequence[Sequence], period: Optional[int] = None) -> float:
+        """Kaufman efficiency ratio of the close series (0 = chop, 1 = clean trend)."""
+        o, h, l, c, v = self.to_chronological(klines)
+        return _efficiency_ratio(c, period or self.er_period)
+
+    def atr_percentile(self, klines: Sequence[Sequence], window: int = 100) -> float:
+        """Where current ATR sits in its own recent distribution (0..1)."""
+        o, h, l, c, v = self.to_chronological(klines)
+        series = _atr_series(h, l, c, self.atr_period)
+        if len(series) < 5:
+            return 0.5
+        recent = series[-window:]
+        return _percentile_rank(recent, recent[-1])
+
+    def regime(self, klines: Sequence[Sequence]) -> dict:
+        """Classify the tape into a tradeable regime.
+
+        Returns ``{"regime": TREND_UP|TREND_DOWN|CHOP|VOLATILE, "tradeable": bool}``.
+        This is the filter that keeps the engine out of chop.
+        """
+        o, h, l, c, v = self.to_chronological(klines)
+        if len(c) < 60:
+            return {"regime": "UNKNOWN", "tradeable": False}
+        er = _efficiency_ratio(c, self.er_period)
+        atr_s = _atr_series(h, l, c, self.atr_period)
+        atr = atr_s[-1] if atr_s else 0.0
+        pctl = _percentile_rank(atr_s[-100:], atr) if atr_s else 0.5
+        struct = self.structure_from_arrays(
+            h, l, c, atr,
+            ema_fast=_ema_series(c, self.ema_fast)[-1],
+            ema_slow=_ema_series(c, self.ema_slow)[-1],
+        )
+        state = struct.get("state")
+        if pctl >= self.max_atr_percentile:
+            regime = "VOLATILE"
+        elif er >= max(self.min_er, 0.30) and state == "UPTREND":
+            regime = "TREND_UP"
+        elif er >= max(self.min_er, 0.30) and state == "DOWNTREND":
+            regime = "TREND_DOWN"
+        elif er < self.min_er:
+            regime = "CHOP"
+        else:
+            regime = "RANGE"
+        return {
+            "regime": regime,
+            "tradeable": regime in ("TREND_UP", "TREND_DOWN"),
+            "efficiency_ratio": round(er, 3),
+            "atr_percentile": round(pctl, 3),
+            "structure": state,
+        }
+
     # ── levels ──────────────────────────────────────────────────────────────
 
     def support_resistance_zones(
@@ -318,35 +526,35 @@ class PriceActionEngine:
             return "BEARISH_REJECTION"
         return None
 
-    # ── composite signal ────────────────────────────────────────────────────
+    # ── the one decision function ───────────────────────────────────────────
 
-    def price_action_signal(
+    def decide_signal(
         self,
-        klines: Sequence[Sequence],
+        *,
+        price: float,
+        atr: float,
+        rsi_val: float,
+        adx_val: float,
+        ema_alignment: str,
+        ema_fast_val: float,
+        struct_state: str,
+        bos: Optional[str] = None,
+        last_high: Optional[float] = None,
+        last_low: Optional[float] = None,
+        rejection: Optional[str] = None,
+        er: Optional[float] = None,
+        atr_pctl: Optional[float] = None,
+        slow_slope_atr: Optional[float] = None,
         min_confidence: float = 55.0,
         rr_min: float = 2.0,
         sl_atr_mult: float = 1.5,
     ) -> Signal:
-        """Composite price-action trade signal.
+        """Turn indicator values into a Signal.
 
-        Combines:
-          1. Market structure (HH/HL vs LH/LL)
-          2. EMA stack alignment
-          3. Momentum filters (RSI extremes, ADX strength)
-          4. Optional pullback + rejection-candle trigger
-        Returns a Signal with entry/SL/TP ladder and confidence.
+        This is the *only* place entry rules live. `price_action_signal()` and
+        the backtester both call it, so live and simulated behaviour cannot
+        diverge.
         """
-        structure = self.market_structure(klines)
-        emas = self.ema_stack(klines)
-        atr = self.atr(klines) or 0
-        o, h, l, c, v = self.to_chronological(klines)
-        price = c[-1] if c else 0.0
-        rsi_val = self.rsi(klines)
-        adx_res = self.adx(klines)
-        adx_val = adx_res.get("adx", 0.0)
-        rejection = self.rejection_candle(klines)
-        zones = self.support_resistance_zones(klines)
-
         if not price or atr <= 0:
             return Signal("WAIT", 0, price, price, [], 0, "NO_DATA",
                           ["insufficient data"],
@@ -362,10 +570,6 @@ class PriceActionEngine:
         tps: List[float] = []
         rr = 0.0
 
-        struct_state = structure.get("state")
-        ema_align = emas.get("alignment")
-        bos = structure.get("bos")
-
         # Direction bias from structure + EMA stack
         bull_points = 0
         if struct_state == "UPTREND":
@@ -374,10 +578,10 @@ class PriceActionEngine:
         elif struct_state == "DOWNTREND":
             bull_points -= 2
             reasons.append("structure DOWNTREND (LH/LL)")
-        if ema_align == "BULLISH":
+        if ema_alignment == "BULLISH":
             bull_points += 2
             reasons.append("EMA stack bullish aligned")
-        elif ema_align == "BEARISH":
+        elif ema_alignment == "BEARISH":
             bull_points -= 2
             reasons.append("EMA stack bearish aligned")
         if bos == "BULLISH_BOS":
@@ -387,11 +591,60 @@ class PriceActionEngine:
             bull_points -= 1
             reasons.append("bearish break of structure")
 
-        # Momentum filters (veto conditions)
-        if adx_val >= 20:
-            reasons.append(f"ADX {adx_val} confirms trending market")
+        # ── regime gates ───────────────────────────────────────────────────
+        if adx_val >= self.min_adx:
+            reasons.append(f"ADX {adx_val:.1f} confirms directional movement")
         else:
-            filters.append(f"ADX {adx_val:.1f} < 20 — weak trend")
+            filters.append(f"ADX {adx_val:.1f} < {self.min_adx:.0f} — no directional move")
+
+        # Efficiency ratio is the real trend-vs-chop filter (ADX alone is not:
+        # random walks print high ADX). Only veto when it is clearly chop.
+        if er is not None:
+            if er < self.min_er:
+                filters.append(
+                    f"efficiency ratio {er:.2f} < {self.min_er:.2f} — choppy tape"
+                )
+            elif er >= 0.35:
+                reasons.append(f"clean trend (efficiency {er:.2f})")
+
+        # Volatility-spike guard: extreme ATR readings mean stops are unreliable.
+        if atr_pctl is not None and atr_pctl >= self.max_atr_percentile:
+            filters.append(
+                f"ATR at {atr_pctl * 100:.0f}th percentile — volatility spike, stand down"
+            )
+
+        # Directional regime gate: a flat slow EMA means mean-reverting tape,
+        # where trend entries are systematically faded. Measured on synthetic
+        # regimes, EMA200 slope/ATR over 20 bars separates them cleanly:
+        # trend ~3.9, choppy no-drift ~0.8, mean-reverting ~0.3.
+        slope_val = slow_slope_atr
+        if slope_val is not None and self.min_slow_slope_atr > 0:
+            if slope_val >= self.min_slow_slope_atr:
+                reasons.append(f"slow EMA rising {slope_val:.1f} ATR — trend regime")
+            elif slope_val <= -self.min_slow_slope_atr:
+                reasons.append(f"slow EMA falling {abs(slope_val):.1f} ATR — downtrend regime")
+            else:
+                filters.append(
+                    f"slow EMA slope {slope_val:+.2f} ATR — mean-reverting tape, no trend edge"
+                )
+
+        # Anti-chase, two tiers. A hard cap only blocks genuine blow-off
+        # extension (>6 ATR): a healthy trend rides 2-4 ATR from its fast EMA,
+        # so blocking at 3 ATR rejects exactly the trends worth trading. The
+        # soft band still penalises late entries via the confidence score.
+        dist_atr = abs(price - ema_fast_val) / atr if atr else 0.0
+        if ema_fast_val:
+            soft_cap = self.caution_ema_dist_atr
+            hard_cap = self.max_ema_dist_atr
+            if hard_cap > 0 and dist_atr > hard_cap:
+                filters.append(
+                    f"price {dist_atr:.1f} ATR from EMA > {hard_cap:.0f} — blow-off extension, no entry"
+                )
+            elif soft_cap > 0 and dist_atr > soft_cap:
+                filters.append(
+                    f"price {dist_atr:.1f} ATR from EMA — late entry, prefer pullback"
+                )
+
         # RSI only vetoes when the trend itself is weak: overbought/oversold
         # readings routinely persist in strong trends (that is what momentum
         # looks like), so we never fight a healthy trend with an oscillator.
@@ -404,14 +657,44 @@ class PriceActionEngine:
         elif rsi_val <= 25:
             filters.append(f"RSI {rsi_val:.1f} cold — trim shorts, no adds")
 
-        long_ok = bull_points >= 3 and adx_val >= 20 and not (rsi_val >= 75 and adx_val < 25)
-        short_ok = bull_points <= -3 and adx_val >= 20 and not (rsi_val <= 25 and adx_val < 25)
+        hard_blocks = any(
+            f.startswith("efficiency ratio")
+            or f.startswith("ATR at")
+            or (f.startswith("price ") and "blow-off" in f)
+            for f in filters
+        )
+
+        slope_ok_long = (
+            slope_val is None
+            or self.min_slow_slope_atr <= 0
+            or slope_val >= self.min_slow_slope_atr
+        )
+        slope_ok_short = (
+            slope_val is None
+            or self.min_slow_slope_atr <= 0
+            or slope_val <= -self.min_slow_slope_atr
+        )
+
+        long_ok = (
+            bull_points >= 3
+            and adx_val >= self.min_adx
+            and not hard_blocks
+            and slope_ok_long
+            and not (rsi_val >= 75 and adx_val < 25)
+        )
+        short_ok = (
+            bull_points <= -3
+            and adx_val >= self.min_adx
+            and not hard_blocks
+            and slope_ok_short
+            and not (rsi_val <= 25 and adx_val < 25)
+        )
 
         # Trigger refinement: pullback + rejection candle adds confidence
         if long_ok:
             action, setup = "LONG", "TREND_CONTINUATION"
-            if emas.get("alignment") == "BULLISH" and emas.get(f"ema_{self.ema_fast}", 0):
-                pullback = price <= emas[f"ema_{self.ema_fast}"] * 1.005
+            if ema_alignment == "BULLISH" and ema_fast_val:
+                pullback = price <= ema_fast_val * 1.005
                 if pullback:
                     setup = "PULLBACK_TO_EMA"
                     reasons.append("pullback into EMA zone")
@@ -422,22 +705,22 @@ class PriceActionEngine:
             # R:R math stays honest; otherwise a far-away swing low produces a
             # stop so wide the TP ladder can never reach the claimed R:R.
             stop = price - atr * sl_atr_mult
-            if structure.get("last_low") and structure["last_low"] < price:
-                stop = max(structure["last_low"] - atr * 0.2, price - 3 * atr)
+            if last_low and last_low < price:
+                stop = max(last_low - atr * 0.2, price - 3 * atr)
             tps = [price + (price - stop) * r for r in (rr_min, rr_min * 1.5, rr_min * 2.5)]
             rr = rr_min
         elif short_ok:
             action, setup = "SHORT", "TREND_CONTINUATION"
-            if emas.get("alignment") == "BEARISH" and emas.get(f"ema_{self.ema_fast}", 0):
-                if price >= emas[f"ema_{self.ema_fast}"] * 0.995:
+            if ema_alignment == "BEARISH" and ema_fast_val:
+                if price >= ema_fast_val * 0.995:
                     setup = "PULLBACK_TO_EMA"
                     reasons.append("pullback into EMA zone")
             if rejection == "BEARISH_REJECTION":
                 setup = "PULLBACK_REJECTION"
                 reasons.append("bearish rejection candle at level")
             stop = price + atr * sl_atr_mult
-            if structure.get("last_high") and structure["last_high"] > price:
-                stop = min(structure["last_high"] + atr * 0.2, price + 3 * atr)
+            if last_high and last_high > price:
+                stop = min(last_high + atr * 0.2, price + 3 * atr)
             tps = [price - (stop - price) * r for r in (rr_min, rr_min * 1.5, rr_min * 2.5)]
             rr = rr_min
 
@@ -447,13 +730,33 @@ class PriceActionEngine:
                 confidence += 10
             if rejection:
                 confidence += 5
+            if er is not None and er >= 0.35:
+                confidence += 5
             if filters:
                 confidence -= 8 * len(filters)
+
+        meta = {
+            "adx": round(adx_val, 2),
+            "rsi": round(rsi_val, 2),
+            "efficiency_ratio": round(er, 3) if er is not None else None,
+            "atr_percentile": round(atr_pctl, 3) if atr_pctl is not None else None,
+            "ema_distance_atr": round(dist_atr, 2),
+            "slow_slope_atr": round(slope_val, 3) if slope_val is not None else None,
+            "bull_points": bull_points,
+        }
+
+        if action == "WAIT":
+            if confidence < min_confidence and filters:
+                filters.append(
+                    f"confidence {confidence:.0f} below threshold {min_confidence:.0f}"
+                )
+            return Signal("WAIT", round(confidence, 1), price, stop, tps, rr,
+                          setup, reasons, filters, meta)
 
         if confidence < min_confidence:
             filters.append(f"confidence {confidence:.0f} below threshold {min_confidence:.0f}")
             return Signal("WAIT", round(confidence, 1), price, stop, tps, rr,
-                          setup, reasons, filters)
+                          setup, reasons, filters, meta)
 
         return Signal(
             action=action,
@@ -465,6 +768,77 @@ class PriceActionEngine:
             setup=setup,
             reasons=reasons,
             filters=filters,
+            meta=meta,
+        )
+
+    # ── composite signal ────────────────────────────────────────────────────
+
+    def price_action_signal(
+        self,
+        klines: Sequence[Sequence],
+        min_confidence: float = 55.0,
+        rr_min: float = 2.0,
+        sl_atr_mult: float = 1.5,
+    ) -> Signal:
+        """Composite price-action trade signal.
+
+        Combines:
+          1. Market structure (HH/HL vs LH/LL)
+          2. EMA stack alignment
+          3. Trend-quality filters (ADX, efficiency ratio, anti-chase)
+          4. Optional pullback + rejection-candle trigger
+        Returns a Signal with entry/SL/TP ladder and confidence.
+        """
+        o, h, l, c, v = self.to_chronological(klines)
+        if len(c) < 30:
+            return Signal("WAIT", 0, 0.0, 0.0, [], 0, "NO_DATA",
+                          ["insufficient data"],
+                          ["insufficient candles or zero ATR"])
+
+        atr_s = _atr_series(h, l, c, self.atr_period)
+        atr = atr_s[-1] if atr_s else 0.0
+        ema_f = _ema_series(c, self.ema_fast)
+        ema_m = _ema_series(c, self.ema_mid)
+        ema_s = _ema_series(c, self.ema_slow)
+        f, m, s = ema_f[-1], ema_m[-1], ema_s[-1]
+        price = c[-1]
+        if f > m > s and price > f:
+            alignment = "BULLISH"
+        elif f < m < s and price < f:
+            alignment = "BEARISH"
+        elif price > s:
+            alignment = "MIXED_BULL"
+        else:
+            alignment = "MIXED_BEAR"
+
+        structure = self.structure_from_arrays(h, l, c, atr, ema_fast=f, ema_slow=s)
+        rsi_s = _rsi_series(c, self.rsi_period)
+        adx_s = _adx_series(h, l, c, self.adx_period)
+
+        k = max(1, self.slope_lookback)
+        if len(ema_s) > k and atr > 0:
+            slow_slope_atr = (ema_s[-1] - ema_s[-1 - k]) / atr
+        else:
+            slow_slope_atr = None
+
+        return self.decide_signal(
+            price=price,
+            atr=atr,
+            rsi_val=rsi_s[-1] if rsi_s else 50.0,
+            adx_val=adx_s[-1] if adx_s else 0.0,
+            ema_alignment=alignment,
+            ema_fast_val=f,
+            struct_state=structure.get("state"),
+            bos=structure.get("bos"),
+            last_high=structure.get("last_high"),
+            last_low=structure.get("last_low"),
+            rejection=self.rejection_candle(klines),
+            er=_efficiency_ratio(c, self.er_period),
+            atr_pctl=_percentile_rank(atr_s[-100:], atr) if atr_s else None,
+            slow_slope_atr=slow_slope_atr,
+            min_confidence=min_confidence,
+            rr_min=rr_min,
+            sl_atr_mult=sl_atr_mult,
         )
 
     # ── trade plan (risk sizing) ────────────────────────────────────────────
@@ -525,6 +899,7 @@ class PriceActionEngine:
             "target_pnl_1r": round(r_unit - fees_est, 2),
             "reasons": signal.reasons,
             "filters": signal.filters,
+            "meta": signal.meta,
         }
 
 
@@ -532,9 +907,10 @@ def analyze_price_action(
     klines: Sequence[Sequence],
     min_confidence: float = 55.0,
     rr_min: float = 2.0,
+    engine: Optional[PriceActionEngine] = None,
 ) -> dict:
     """One-shot convenience wrapper returning the full PA analysis dict."""
-    eng = PriceActionEngine()
+    eng = engine or PriceActionEngine()
     structure = eng.market_structure(klines)
     emas = eng.ema_stack(klines)
     atr = eng.atr(klines)
@@ -551,6 +927,8 @@ def analyze_price_action(
         "adx": adx,
         "zones": zones,
         "rejection_candle": eng.rejection_candle(klines),
+        "regime": eng.regime(klines),
+        "efficiency_ratio": round(eng.efficiency_ratio(klines), 3),
         "signal": {
             "action": signal.action,
             "confidence": signal.confidence,
@@ -561,5 +939,6 @@ def analyze_price_action(
             "rr": signal.rr,
             "reasons": signal.reasons,
             "filters": signal.filters,
+            "meta": signal.meta,
         },
     }

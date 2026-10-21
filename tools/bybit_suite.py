@@ -10,7 +10,9 @@
 #       batch_place_orders | panic_close | place_smart_order |
 #       price_action_analysis | build_trade_plan | trend_scan | wbta_signal |
 #       full_signal | market_snapshot | backtest_pa | execute_signal |
-#       journal_stats | list_actions | calculate_<indicator>
+#       optimize_strategy | walk_forward | portfolio_scan | risk_report |
+#       position_sizing | check_config | journal_stats | list_actions |
+#       calculate_<indicator>
 # @option --symbol <TEXT>    Trading pair (e.g. BTCUSDT; default BTCUSDT).
 # @option --symbols <TEXT>   Comma-separated symbols for trend_scan.
 # @option --side <TEXT>      Buy | Sell | auto.
@@ -24,6 +26,16 @@
 # @option --interval <TEXT>  Kline timeframe: 1,5,15,60,240,D (default 60).
 # @option --limit <NUM>      Number of candles (default 300).
 # @option --min_confidence <NUM> Min signal confidence (default 55).
+# @option --start_balance <NUM> Backtest starting balance (default 1000).
+# @option --fee_rate <NUM>   Taker fee rate per side (default 0.00055).
+# @option --slippage_bps <NUM> Adverse slippage for backtests, in bps (default 2).
+# @option --trailing_atr <NUM> ATR trailing-stop multiple, 0 = off (default 0).
+# @option --time_stop_bars <NUM> Force-exit after N bars, 0 = off (default 0).
+# @option --partial_frac <NUM> Fraction to scale out at --partial_at_r (default 0 = run the full position).
+# @option --breakeven_at_r <NUM> Move stop to entry at R, 0 = off (default 0).
+# @option --folds <NUM>      Walk-forward fold count (default 4).
+# @option --grid <TEXT>      JSON parameter grid for optimize_strategy.
+# @option --balance <NUM>    Balance for position_sizing (0 = read the account).
 # @option --execute <BOOL>   Explicitly allow live order placement (default false).
 # @option --category <TEXT>  linear | spot | inverse (default linear).
 # @flag --json              Raw JSON output.
@@ -55,6 +67,18 @@ if "tools" in sys.modules and not getattr(sys.modules["tools"], "__file__", None
 from tools.bybit.terminal import run as realm_run  # noqa: E402
 
 
+def _str2bool(value) -> bool:
+    """Parse a boolean CLI argument WITHOUT bool()'s trap.
+
+    ``bool("false")`` is ``True``, so using ``type=bool`` for ``--execute``
+    would turn ``--execute false`` into a live order. Only an explicit truthy
+    token enables execution.
+    """
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
 def run(**kwargs) -> dict:
     """Unified dispatcher — mirrors `tools.bybit.terminal.run`."""
     return realm_run(**kwargs)
@@ -79,7 +103,21 @@ def main() -> None:
     parser.add_argument("--interval", default="60")
     parser.add_argument("--limit", type=int, default=300)
     parser.add_argument("--min_confidence", type=float, default=55.0)
-    parser.add_argument("--execute", action="store_true", default=False)
+    parser.add_argument("--start_balance", type=float, default=1000.0)
+    parser.add_argument("--fee_rate", type=float, default=0.00055)
+    parser.add_argument("--slippage_bps", type=float, default=2.0)
+    parser.add_argument("--trailing_atr", type=float, default=0.0)
+    parser.add_argument("--time_stop_bars", type=int, default=0)
+    parser.add_argument("--partial_at_r", type=float, default=1.0)
+    parser.add_argument("--partial_frac", type=float, default=0.0)
+    parser.add_argument("--breakeven_at_r", type=float, default=0.0)
+    parser.add_argument("--folds", type=int, default=4)
+    parser.add_argument("--grid", default=None)
+    parser.add_argument("--balance", type=float, default=0.0)
+    parser.add_argument(
+        "--execute", type=_str2bool, nargs="?", const=True, default=False,
+        help="Place a LIVE order. Any value other than true/1/yes/on is False.",
+    )
     parser.add_argument("--category", default="linear")
     args = parser.parse_args()
 
