@@ -392,7 +392,7 @@ def run(**kwargs) -> dict:
 
         logger.info(f"Dispatching: {action}")
 
-        if asyncio.iscoroutinefunction(method):
+        if inspect.iscoroutinefunction(method):
             return asyncio.run(method(**params))
         return method(**params)
     except Exception as e:
