@@ -1777,6 +1777,46 @@
           "type": "integer",
           "description": "Min signal confidence (default 55)."
         },
+        "start_balance": {
+          "type": "integer",
+          "description": "Backtest starting balance (default 1000)."
+        },
+        "fee_rate": {
+          "type": "integer",
+          "description": "Taker fee rate per side (default 0.00055)."
+        },
+        "slippage_bps": {
+          "type": "integer",
+          "description": "Adverse slippage for backtests, in bps (default 2)."
+        },
+        "trailing_atr": {
+          "type": "integer",
+          "description": "ATR trailing-stop multiple, 0 = off (default 0)."
+        },
+        "time_stop_bars": {
+          "type": "integer",
+          "description": "Force-exit after N bars, 0 = off (default 0)."
+        },
+        "partial_frac": {
+          "type": "integer",
+          "description": "Fraction to scale out at --partial_at_r (default 0 = run the full position)."
+        },
+        "breakeven_at_r": {
+          "type": "integer",
+          "description": "Move stop to entry at R, 0 = off (default 0)."
+        },
+        "folds": {
+          "type": "integer",
+          "description": "Walk-forward fold count (default 4)."
+        },
+        "grid": {
+          "type": "string",
+          "description": "JSON parameter grid for optimize_strategy."
+        },
+        "balance": {
+          "type": "integer",
+          "description": "Balance for position_sizing (0 = read the account)."
+        },
         "execute": {
           "type": "boolean",
           "description": "Explicitly allow live order placement (default false)."
@@ -1797,107 +1837,6 @@
   },
   {
     "name": "bybit_realm",
-    "description": "Unified Entry Point — Bybit Realm v5.0",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "action": {
-          "type": "string",
-          "description": "health_check, get_wallet_balance, get_account_info, get_positions, get_position_risk, get_fee_rate, set_leverage, set_trading_stop, set_position_mode, get_executions, get_pnl_history, panic_close, bulk_update_tp_sl, get_account_summary, get_pnl_summary, update_trailing_stop, set_tp_sl, check_risk_limit, check_balance, close_position, get_open_positions_summary, send_telegram_alert, export_trade_history, calculate_rsi, calculate_sma, calculate_ema, calculate_macd, calculate_bollinger_bands, calculate_vwap, calculate_atr, calculate_stoch, scan_scalping_opportunities, place_order, amend_order, cancel_order, cancel_all_orders, get_open_orders, get_order_history, batch_place_orders, place_smart_trade, get_ticker, get_orderbook, get_klines, get_recent_trades, get_instruments_info, get_funding_rate, get_open_interest, get_volatility_index, get_orderbook_analysis, get_volume_at_price, get_market_regime, scan_symbols, get_journal, market_summary, analyze_symbol, calculate_orderflow_delta, calculate_orderbook_imbalance, calculate_liquidity_heatmap, calculate_market_depth_profile, calculate_sr_levels, calculate_target_pnl, calculate_limit_micro_profit, calculate_support_resistance_levels, calculate_fibonacci_levels, generate_market_depth_report, detect_high_confluence_levels, get_market_liquidations"
-        },
-        "symbol": {
-          "type": "string",
-          "description": "Trading pair (e.g. BTCUSDT)."
-        },
-        "side": {
-          "type": "string",
-          "description": "Buy, Sell."
-        },
-        "qty": {
-          "type": "integer",
-          "description": "quantity."
-        },
-        "price": {
-          "type": "integer",
-          "description": "price."
-        },
-        "category": {
-          "type": "string",
-          "description": "linear, spot, inverse."
-        },
-        "stop_loss": {
-          "type": "integer",
-          "description": "Stop loss price."
-        },
-        "take_profit": {
-          "type": "integer",
-          "description": "Take profit price."
-        },
-        "leverage": {
-          "type": "integer",
-          "description": "Leverage value."
-        },
-        "interval": {
-          "type": "string",
-          "description": "1, 5, 15, 60, 240, D."
-        },
-        "limit": {
-          "type": "integer",
-          "description": "Result limit."
-        },
-        "json": {
-          "type": "boolean",
-          "description": "Output raw JSON instead of pretty print."
-        }
-      },
-      "required": [
-        "action"
-      ]
-    }
-  },
-  {
-    "name": "bybit_wbta",
-    "description": "Market Trend Observatory v3.3 — Complete L2 Orderbook Microstructure, Trade Flow Analysis, Funding/OI Telemetry, 35+ Technical Indicators, and Multi-Factor Long/Short Signal Engine. Read-only telemetry tool.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "symbol": {
-          "type": "string",
-          "description": "Trading pair (e.g. BTCUSDT, ETHUSDT; default: BTCUSDT)"
-        },
-        "interval": {
-          "type": "string",
-          "description": "Kline timeframe: 1, 5, 15, 60, 240, D (default: 15)"
-        },
-        "delay": {
-          "type": "integer",
-          "description": "Refresh seconds between cycles in loop mode (default: 20)"
-        },
-        "use_tor": {
-          "type": "boolean",
-          "description": "Enable Tor SOCKS5 proxy routing"
-        },
-        "once": {
-          "type": "boolean",
-          "description": "Run a single analysis cycle and exit (default)"
-        },
-        "json_out": {
-          "type": "boolean",
-          "description": "Output raw JSON payload for LLM/system integration"
-        },
-        "no_color": {
-          "type": "boolean",
-          "description": "Disable ANSI color output"
-        },
-        "verbose": {
-          "type": "boolean",
-          "description": "Enable detailed debug logging"
-        }
-      }
-    }
-  },
-  {
-    "name": "bybit-realm",
     "description": "BYBIT REALM v4.0 – Comprehensive Bybit V5 trading tool with all endpoints, indicators, breakeven logic, L2 analysis, and profitable macros.",
     "parameters": {
       "type": "object",
@@ -1910,6 +1849,10 @@
             "reset_circuit",
             "renew_tor_circuit",
             "get_server_time",
+            "move_breakeven",
+            "lock_profit",
+            "partial_close",
+            "dca_ladder",
             "place_order",
             "amend_order",
             "cancel_order",
@@ -1940,6 +1883,13 @@
             "get_coin_greeks",
             "internal_transfer",
             "get_coin_balance",
+            "query_account_coins_balance",
+            "get_small_balance_list",
+            "get_dust_quote",
+            "execute_dust_convert",
+            "get_dust_history",
+            "sweep_dust",
+            "get_withdrawable_amount",
             "get_ticker",
             "get_24hr_ticker",
             "get_orderbook",
@@ -2506,6 +2456,22 @@
         "brick_size": {
           "type": "number",
           "description": ""
+        },
+        "percent": {
+          "type": "number",
+          "description": ""
+        },
+        "dca_steps": {
+          "type": "integer",
+          "description": ""
+        },
+        "dca_range_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "total_qty": {
+          "type": "number",
+          "description": ""
         }
       },
       "required": [
@@ -2604,7 +2570,795 @@
         "auto_add_margin",
         "tp_sl_mode",
         "collateral_switch",
-        "brick_size"
+        "brick_size",
+        "percent",
+        "dca_steps",
+        "dca_range_pct",
+        "total_qty"
+      ]
+    }
+  },
+  {
+    "name": "bybit_wbta",
+    "description": "Market Trend Observatory v3.3 — Complete L2 Orderbook Microstructure, Trade Flow Analysis, Funding/OI Telemetry, 35+ Technical Indicators, and Multi-Factor Long/Short Signal Engine. Read-only telemetry tool.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Trading pair (e.g. BTCUSDT, ETHUSDT; default: BTCUSDT)"
+        },
+        "interval": {
+          "type": "string",
+          "description": "Kline timeframe: 1, 5, 15, 60, 240, D (default: 15)"
+        },
+        "delay": {
+          "type": "integer",
+          "description": "Refresh seconds between cycles in loop mode (default: 20)"
+        },
+        "use_tor": {
+          "type": "boolean",
+          "description": "Enable Tor SOCKS5 proxy routing"
+        },
+        "once": {
+          "type": "boolean",
+          "description": "Run a single analysis cycle and exit (default)"
+        },
+        "json_out": {
+          "type": "boolean",
+          "description": "Output raw JSON payload for LLM/system integration"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug logging"
+        }
+      }
+    }
+  },
+  {
+    "name": "bybit-realm",
+    "description": "BYBIT REALM v4.0 – Comprehensive Bybit V5 trading tool with all endpoints, indicators, breakeven logic, L2 analysis, and profitable macros.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "health_check",
+            "connection_health",
+            "reset_circuit",
+            "renew_tor_circuit",
+            "get_server_time",
+            "move_breakeven",
+            "lock_profit",
+            "partial_close",
+            "dca_ladder",
+            "place_order",
+            "amend_order",
+            "cancel_order",
+            "cancel_all_orders",
+            "get_open_orders",
+            "get_order_history",
+            "batch_orders",
+            "iceberg_order",
+            "place_trailing_stop_order",
+            "calculate_trailing_stop_levels",
+            "get_trailing_stop_status",
+            "place_conditional_order",
+            "batch_amend_orders",
+            "batch_cancel_orders",
+            "get_positions",
+            "get_wallet_balance",
+            "set_leverage",
+            "set_trading_stop",
+            "get_fee_rate",
+            "get_transaction_log",
+            "get_trade_history",
+            "switch_margin_mode",
+            "switch_position_mode",
+            "get_account_info",
+            "get_api_key_info",
+            "get_borrow_history",
+            "get_collateral_info",
+            "get_coin_greeks",
+            "internal_transfer",
+            "get_coin_balance",
+            "query_account_coins_balance",
+            "get_small_balance_list",
+            "get_dust_quote",
+            "execute_dust_convert",
+            "get_dust_history",
+            "sweep_dust",
+            "get_withdrawable_amount",
+            "get_ticker",
+            "get_24hr_ticker",
+            "get_orderbook",
+            "get_klines",
+            "get_recent_trades",
+            "get_open_interest",
+            "get_liquidations",
+            "get_funding_rate",
+            "get_funding_rate_history",
+            "get_long_short_ratio",
+            "get_mark_price",
+            "get_index_price",
+            "get_price_bands",
+            "get_instruments_info",
+            "get_risk_limit",
+            "set_risk_limit",
+            "get_insurance_pool",
+            "get_delivery_price",
+            "get_historical_volatility",
+            "get_l2_orderbook_analysis",
+            "get_market_momentum",
+            "get_market_health",
+            "get_trend_analysis",
+            "calculate_bollinger_bands",
+            "calculate_macd",
+            "calculate_stoch_rsi",
+            "calculate_cci",
+            "calculate_donchian_channels",
+            "calculate_adx",
+            "calculate_fib_pivots",
+            "calculate_vwap",
+            "calculate_ichimoku_cloud",
+            "calculate_kelly_criterion",
+            "calculate_trade_pnl",
+            "calculate_profit_target",
+            "calculate_sl_tp",
+            "calculate_position_size",
+            "calculate_volatility_adjusted_size",
+            "calculate_breakeven",
+            "calculate_breakeven_with_fees",
+            "calculate_profit_after_fees",
+            "get_pnl_history",
+            "get_pnl_report",
+            "macro_dca_plan",
+            "macro_grid_plan",
+            "macro_scalp_momentum",
+            "macro_mean_reversion",
+            "macro_funding_arb",
+            "macro_twap",
+            "macro_breakout",
+            "macro_portfolio_summary",
+            "macro_smart_entry",
+            "macro_microprofit_scalp",
+            "volume_profile",
+            "volume_divergence",
+            "orderbook_heatmap",
+            "orderflow_analysis",
+            "comprehensive_trend_analysis",
+            "get_instrument_precision",
+            "validate_order_params",
+            "calculate_fee_adjusted_targets",
+            "get_min_order_value",
+            "get_position_detail",
+            "scale_position",
+            "close_position",
+            "flip_position",
+            "auto_sl_tp",
+            "move_sl_to_breakeven",
+            "get_all_positions_summary",
+            "journal_record_trade",
+            "journal_close_trade",
+            "journal_get_trades",
+            "journal_performance",
+            "journal_export",
+            "journal_import",
+            "adaptive_position_size",
+            "fixed_fractional_size",
+            "anti_martingale_size",
+            "portfolio_heat",
+            "max_position",
+            "momentum_sniper",
+            "mean_reversion_scalp",
+            "funding_arb_scan",
+            "smart_dca",
+            "liquidity_sweep",
+            "risk_reward_analysis",
+            "liquidation_price",
+            "drawdown_analysis",
+            "support_resistance",
+            "market_regime",
+            "entry_timing",
+            "scale_into",
+            "scale_out",
+            "hedge_position",
+            "multi_timeframe_signals",
+            "market_session",
+            "whale_detection",
+            "fear_greed",
+            "compound_growth",
+            "trade_checklist",
+            "auto_leverage",
+            "unrealized_pnl",
+            "divergence_signals",
+            "optimal_entry_zones",
+            "spread_analysis",
+            "correlation_analysis",
+            "smart_trailing_stop",
+            "batch_place_orders",
+            "set_tpsl_mode",
+            "add_reduce_margin",
+            "set_auto_add_margin",
+            "get_executions",
+            "confirm_risk_limit",
+            "set_collateral_coin",
+            "get_withdrawable_amount",
+            "get_historical_klines",
+            "get_premium_index_kline",
+            "calculate_rsi",
+            "calculate_ema",
+            "calculate_atr",
+            "calculate_obv",
+            "calculate_cvd",
+            "calculate_mfi",
+            "calculate_cmf",
+            "calculate_williams_r",
+            "calculate_parabolic_sar",
+            "calculate_keltner_channels",
+            "calculate_roc",
+            "calculate_trix",
+            "calculate_ultimate_oscillator",
+            "calculate_choppiness_index",
+            "calculate_aroon",
+            "calculate_dpo",
+            "calculate_hma",
+            "calculate_zlema",
+            "calculate_supertrend",
+            "calculate_elder_ray",
+            "calculate_vwma",
+            "calculate_awesome_oscillator",
+            "calculate_accumulation_distribution",
+            "calculate_heikin_ashi",
+            "calculate_renko",
+            "calculate_pivot_points",
+            "calculate_position_risk",
+            "calculate_compound_growth",
+            "calculate_linear_regression",
+            "calculate_stddev",
+            "calculate_vroc",
+            "calculate_kelly_criterion_standalone",
+            "calculate_max_position",
+            "calculate_bollinger_bandwidth"
+          ],
+          "description": ""
+        },
+        "symbol": {
+          "type": "string",
+          "description": ""
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "Buy",
+            "Sell"
+          ],
+          "description": ""
+        },
+        "qty": {
+          "type": "number",
+          "description": ""
+        },
+        "price": {
+          "type": "number",
+          "description": ""
+        },
+        "order_type": {
+          "type": "string",
+          "enum": [
+            "Limit",
+            "Market",
+            "LimitMaker"
+          ],
+          "description": ""
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "inverse",
+            "spot",
+            "option"
+          ],
+          "description": ""
+        },
+        "order_id": {
+          "type": "string",
+          "description": ""
+        },
+        "stop_loss": {
+          "type": "number",
+          "description": ""
+        },
+        "take_profit": {
+          "type": "number",
+          "description": ""
+        },
+        "trailing_stop": {
+          "type": "number",
+          "description": ""
+        },
+        "reduce_only": {
+          "type": "boolean",
+          "description": ""
+        },
+        "time_in_force": {
+          "type": "string",
+          "enum": [
+            "GTC",
+            "IOC",
+            "FOK",
+            "PostOnly"
+          ],
+          "description": ""
+        },
+        "position_idx": {
+          "type": "integer",
+          "description": ""
+        },
+        "client_oid": {
+          "type": "string",
+          "description": ""
+        },
+        "leverage": {
+          "type": "integer",
+          "description": ""
+        },
+        "buy_leverage": {
+          "type": "integer",
+          "description": ""
+        },
+        "sell_leverage": {
+          "type": "integer",
+          "description": ""
+        },
+        "account_type": {
+          "type": "string",
+          "description": ""
+        },
+        "limit": {
+          "type": "integer",
+          "description": ""
+        },
+        "interval": {
+          "type": "string",
+          "description": ""
+        },
+        "interval_time": {
+          "type": "string",
+          "description": ""
+        },
+        "strong_threshold": {
+          "type": "number",
+          "description": ""
+        },
+        "mild_threshold": {
+          "type": "number",
+          "description": ""
+        },
+        "sl_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "tp_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "risk_usdt": {
+          "type": "number",
+          "description": ""
+        },
+        "sl_price": {
+          "type": "number",
+          "description": ""
+        },
+        "fee_rate": {
+          "type": "number",
+          "description": ""
+        },
+        "funding_rate": {
+          "type": "number",
+          "description": ""
+        },
+        "holding_hours": {
+          "type": "number",
+          "description": ""
+        },
+        "holding_periods": {
+          "type": "integer",
+          "description": ""
+        },
+        "orders": {
+          "type": "string",
+          "description": ""
+        },
+        "slices": {
+          "type": "integer",
+          "description": ""
+        },
+        "delay": {
+          "type": "number",
+          "description": ""
+        },
+        "start_time": {
+          "type": "integer",
+          "description": ""
+        },
+        "end_time": {
+          "type": "integer",
+          "description": ""
+        },
+        "scale_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "reduce": {
+          "type": "boolean",
+          "description": ""
+        },
+        "scale": {
+          "type": "number",
+          "description": ""
+        },
+        "use_atr": {
+          "type": "boolean",
+          "description": ""
+        },
+        "offset_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "entry_price": {
+          "type": "number",
+          "description": ""
+        },
+        "exit_price": {
+          "type": "number",
+          "description": ""
+        },
+        "strategy": {
+          "type": "string",
+          "description": ""
+        },
+        "tags": {
+          "type": "string",
+          "description": ""
+        },
+        "trade_notes": {
+          "type": "string",
+          "description": ""
+        },
+        "trade_id": {
+          "type": "string",
+          "description": ""
+        },
+        "journal_status": {
+          "type": "string",
+          "description": ""
+        },
+        "journal_data": {
+          "type": "string",
+          "description": ""
+        },
+        "total_usdt": {
+          "type": "number",
+          "description": ""
+        },
+        "num_orders": {
+          "type": "integer",
+          "description": ""
+        },
+        "num_grids": {
+          "type": "integer",
+          "description": ""
+        },
+        "upper_price": {
+          "type": "number",
+          "description": ""
+        },
+        "lower_price": {
+          "type": "number",
+          "description": ""
+        },
+        "rr_ratio": {
+          "type": "number",
+          "description": ""
+        },
+        "atr_mult": {
+          "type": "number",
+          "description": ""
+        },
+        "duration_minutes": {
+          "type": "integer",
+          "description": ""
+        },
+        "num_slices": {
+          "type": "integer",
+          "description": ""
+        },
+        "min_rate": {
+          "type": "number",
+          "description": ""
+        },
+        "top_n": {
+          "type": "integer",
+          "description": ""
+        },
+        "price_range_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "coin": {
+          "type": "string",
+          "description": ""
+        },
+        "amount": {
+          "type": "string",
+          "description": ""
+        },
+        "from_account": {
+          "type": "string",
+          "description": ""
+        },
+        "to_account": {
+          "type": "string",
+          "description": ""
+        },
+        "risk_id": {
+          "type": "integer",
+          "description": ""
+        },
+        "currency": {
+          "type": "string",
+          "description": ""
+        },
+        "trigger_price": {
+          "type": "number",
+          "description": ""
+        },
+        "trigger_by": {
+          "type": "string",
+          "enum": [
+            "LastPrice",
+            "IndexPrice",
+            "MarkPrice"
+          ],
+          "description": ""
+        },
+        "depth": {
+          "type": "integer",
+          "description": ""
+        },
+        "period": {
+          "type": "integer",
+          "description": ""
+        },
+        "num_bins": {
+          "type": "integer",
+          "description": ""
+        },
+        "num_levels": {
+          "type": "integer",
+          "description": ""
+        },
+        "num_entries": {
+          "type": "integer",
+          "description": ""
+        },
+        "num_exits": {
+          "type": "integer",
+          "description": ""
+        },
+        "spacing_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "tp_spacing_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "hedge_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "dip_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": ""
+        },
+        "risk_fraction": {
+          "type": "number",
+          "description": ""
+        },
+        "consecutive_wins": {
+          "type": "integer",
+          "description": ""
+        },
+        "consecutive_losses": {
+          "type": "integer",
+          "description": ""
+        },
+        "daily_return_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "days": {
+          "type": "integer",
+          "description": ""
+        },
+        "win_rate_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "trades_per_day": {
+          "type": "integer",
+          "description": ""
+        },
+        "starting_capital": {
+          "type": "number",
+          "description": ""
+        },
+        "maint_margin_rate": {
+          "type": "number",
+          "description": ""
+        },
+        "account_balance": {
+          "type": "number",
+          "description": ""
+        },
+        "margin": {
+          "type": "string",
+          "description": ""
+        },
+        "auto_add_margin": {
+          "type": "boolean",
+          "description": ""
+        },
+        "tp_sl_mode": {
+          "type": "string",
+          "enum": [
+            "Full",
+            "Partial"
+          ],
+          "description": ""
+        },
+        "collateral_switch": {
+          "type": "boolean",
+          "description": ""
+        },
+        "brick_size": {
+          "type": "number",
+          "description": ""
+        },
+        "percent": {
+          "type": "number",
+          "description": ""
+        },
+        "dca_steps": {
+          "type": "integer",
+          "description": ""
+        },
+        "dca_range_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "total_qty": {
+          "type": "number",
+          "description": ""
+        }
+      },
+      "required": [
+        "action",
+        "symbol",
+        "side",
+        "qty",
+        "price",
+        "order_type",
+        "category",
+        "order_id",
+        "stop_loss",
+        "take_profit",
+        "trailing_stop",
+        "reduce_only",
+        "time_in_force",
+        "position_idx",
+        "client_oid",
+        "leverage",
+        "buy_leverage",
+        "sell_leverage",
+        "account_type",
+        "limit",
+        "interval",
+        "interval_time",
+        "strong_threshold",
+        "mild_threshold",
+        "sl_pct",
+        "tp_pct",
+        "risk_usdt",
+        "sl_price",
+        "fee_rate",
+        "funding_rate",
+        "holding_hours",
+        "holding_periods",
+        "orders",
+        "slices",
+        "delay",
+        "start_time",
+        "end_time",
+        "scale_pct",
+        "reduce",
+        "scale",
+        "use_atr",
+        "offset_pct",
+        "entry_price",
+        "exit_price",
+        "strategy",
+        "tags",
+        "trade_notes",
+        "trade_id",
+        "journal_status",
+        "journal_data",
+        "total_usdt",
+        "num_orders",
+        "num_grids",
+        "upper_price",
+        "lower_price",
+        "rr_ratio",
+        "atr_mult",
+        "duration_minutes",
+        "num_slices",
+        "min_rate",
+        "top_n",
+        "price_range_pct",
+        "coin",
+        "amount",
+        "from_account",
+        "to_account",
+        "risk_id",
+        "currency",
+        "trigger_price",
+        "trigger_by",
+        "depth",
+        "period",
+        "num_bins",
+        "num_levels",
+        "num_entries",
+        "num_exits",
+        "spacing_pct",
+        "tp_spacing_pct",
+        "hedge_pct",
+        "dip_pct",
+        "symbols",
+        "risk_fraction",
+        "consecutive_wins",
+        "consecutive_losses",
+        "daily_return_pct",
+        "days",
+        "win_rate_pct",
+        "trades_per_day",
+        "starting_capital",
+        "maint_margin_rate",
+        "account_balance",
+        "margin",
+        "auto_add_margin",
+        "tp_sl_mode",
+        "collateral_switch",
+        "brick_size",
+        "percent",
+        "dca_steps",
+        "dca_range_pct",
+        "total_qty"
       ]
     }
   },
@@ -2852,17 +3606,47 @@
   },
   {
     "name": "bybit_micro_scalper",
-    "description": "Compatibility shim for the argc runner – simply forwards to main().",
+    "description": "Programmatic and LLM-tool entrypoint for Bybit Micro-Scalper.",
     "parameters": {
       "type": "object",
       "properties": {
-        "args": {
+        "symbol": {
           "type": "string",
+          "description": ""
+        },
+        "risk_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "leverage": {
+          "type": "integer",
+          "description": ""
+        },
+        "tp_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "sl_pct": {
+          "type": "number",
+          "description": ""
+        },
+        "post_only": {
+          "type": "boolean",
+          "description": ""
+        },
+        "execute": {
+          "type": "boolean",
           "description": ""
         }
       },
       "required": [
-        "args"
+        "symbol",
+        "risk_pct",
+        "leverage",
+        "tp_pct",
+        "sl_pct",
+        "post_only",
+        "execute"
       ]
     }
   },
@@ -2881,12 +3665,16 @@
           "description": "Required side: Buy or Sell."
         },
         "qty": {
-          "type": "integer",
-          "description": "Required quantity (base asset)."
+          "type": "string",
+          "description": "Quantity in base asset (0 = auto-size from balance)."
         },
         "target": {
           "type": "string",
           "description": "Optional target profit in USDT (default 5.0)."
+        },
+        "target_profit": {
+          "type": "integer",
+          "description": "Alias for --target (net profit in USDT)."
         },
         "leverage": {
           "type": "string",
@@ -2912,6 +3700,10 @@
           "type": "string",
           "description": "Risk/reward ratio (default 2.0)."
         },
+        "max_risk": {
+          "type": "string",
+          "description": "Optional max risk in USDT (overrides risk_reward)."
+        },
         "kelly_win": {
           "type": "string",
           "description": "Estimated win rate for Kelly (default 0.55)."
@@ -2924,9 +3716,13 @@
           "type": "string",
           "description": "Account balance for sizing (default 0.0)."
         },
+        "balance": {
+          "type": "string",
+          "description": "Alias for --account_balance."
+        },
         "risk_percent": {
           "type": "string",
-          "description": "Risk percent per trade (default 0.0)."
+          "description": "Risk percent per trade (0 = use Kelly)."
         },
         "bids_json": {
           "type": "string",
@@ -2952,6 +3748,14 @@
           "type": "boolean",
           "description": "Use limit order for entry price."
         },
+        "post_only": {
+          "type": "boolean",
+          "description": "Use passive PostOnly maker entry (zero slippage)."
+        },
+        "include_funding": {
+          "type": "boolean",
+          "description": "Include 8h funding rate in entry fee cost."
+        },
         "no_color": {
           "type": "boolean",
           "description": "Disable ANSI color output."
@@ -2963,8 +3767,7 @@
       },
       "required": [
         "symbol",
-        "side",
-        "qty"
+        "side"
       ]
     }
   },
@@ -4162,6 +4965,13 @@
             "get_coin_greeks",
             "internal_transfer",
             "get_coin_balance",
+            "query_account_coins_balance",
+            "get_small_balance_list",
+            "get_dust_quote",
+            "execute_dust_convert",
+            "get_dust_history",
+            "sweep_dust",
+            "get_withdrawable_amount",
             "get_ticker",
             "get_24hr_ticker",
             "get_orderbook",
@@ -8507,59 +9317,57 @@
   },
   {
     "name": "skill_manager",
-    "description": "Create, load, list, update, delete, validate, search, or import agent skills (Agent Skills / SKILL.md format).",
+    "description": "Create, load, list, update, delete, validate, search, or import agent skills.\nSkills follow the Agent Skills format: a SKILL.md markdown file with YAML\nfrontmatter (name, description, category) and a body with the sections\nOverview, When to use, Core concepts, Practical workflow, Common pitfalls.",
     "parameters": {
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "description": "Action to perform: create, load, list, update, delete, validate, search, import",
-          "enum": [
-            "create",
-            "load",
-            "list",
-            "update",
-            "delete",
-            "validate",
-            "search",
-            "import"
-          ]
+          "description": ""
         },
         "name": {
           "type": "string",
-          "description": "Skill name, lowercase-hyphens preferred (e.g. 'marketplace-appraiser'). Required for load/update/delete; for create, required unless content carries frontmatter with a name; for import, overrides the frontmatter name."
+          "description": ""
         },
         "description": {
           "type": "string",
-          "description": "Frontmatter description with explicit trigger phrases (what the skill does and when to use it); used on create/update."
+          "description": ""
         },
         "category": {
           "type": "string",
-          "description": "Frontmatter category (e.g. 'money', 'navigation', 'productivity'); used on create/update."
+          "description": ""
         },
         "content": {
           "type": "string",
-          "description": "Markdown for create/update — either the body only, or a full SKILL.md including frontmatter (fields are merged, never double-wrapped)."
+          "description": ""
         },
         "file": {
           "type": "string",
-          "description": "Path to a SKILL.md or body markdown file — alternative to content for create/update; the source file for import; the file to check for validate."
+          "description": ""
         },
         "query": {
           "type": "string",
-          "description": "Keyword or phrase for action 'search' (matched against name, description, category, and body)."
+          "description": ""
         },
         "skills_dir": {
           "type": "string",
-          "description": "Directory where skills live (default '~/skills'). Each skill is skills_dir/<name>/SKILL.md; flat <name>.md files are also supported."
+          "description": ""
         },
         "force": {
           "type": "boolean",
-          "description": "Overwrite an existing skill on create/import; on delete, remove a skill directory that contains extra files."
+          "description": ""
         }
       },
       "required": [
-        "action"
+        "action",
+        "name",
+        "description",
+        "category",
+        "content",
+        "file",
+        "query",
+        "skills_dir",
+        "force"
       ]
     }
   },
@@ -8973,6 +9781,174 @@
       },
       "required": [
         "input"
+      ]
+    }
+  },
+  {
+    "name": "video_tool",
+    "description": "Master AI tool for native FFmpeg thumbnail extraction, montage grid building, scene detection, stream extraction, and subtitle-backed timestamp querying without OpenCV/PySceneDetect dependencies.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target video file path or URL (required)"
+        },
+        "query": {
+          "type": "string",
+          "description": "Query text matched against embedded/sidecar subtitles"
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "Directory where thumbnails and keyframes are written (default: thumbnails)"
+        },
+        "interval": {
+          "type": "number",
+          "description": "Seconds between each captured frame for thumbnail generation (default: 10.0)"
+        },
+        "width": {
+          "type": "integer",
+          "description": "Thumbnail width in pixels; height scales automatically (default: 320)"
+        },
+        "format": {
+          "type": "string",
+          "description": "Output image format: png, jpg, webp (default: png)"
+        },
+        "start": {
+          "type": "string",
+          "description": "Start time as HH:MM:SS, seconds, or NN% (default: 00:00:00)"
+        },
+        "end": {
+          "type": "string",
+          "description": "End time as HH:MM:SS, seconds, or NN% (default: 00:00:00)"
+        },
+        "max_frames": {
+          "type": "integer",
+          "description": "Maximum number of extracted thumbnail frames (default: 15)"
+        },
+        "timestamps": {
+          "type": "string",
+          "description": "Comma-separated timestamps (HH:MM:SS, seconds, or NN%) to capture"
+        },
+        "percentages": {
+          "type": "string",
+          "description": "Comma-separated percentages (0-100) of video duration to capture"
+        },
+        "montage": {
+          "type": "string",
+          "description": "Generate image grid montage, e.g. 2x3 or 3x3"
+        },
+        "montage_bg": {
+          "type": "string",
+          "description": "Montage background/padding color (default: white)"
+        },
+        "tile_spacing": {
+          "type": "integer",
+          "description": "Pixel padding between montage tiles (default: 2)"
+        },
+        "quality": {
+          "type": "integer",
+          "description": "JPEG/WebP quality (1-100), mapped to PNG compression for png (default: 80)"
+        },
+        "font": {
+          "type": "string",
+          "description": "TTF font file used for the timestamp overlay"
+        },
+        "font_size": {
+          "type": "integer",
+          "description": "Timestamp overlay font size (default: 14)"
+        },
+        "font_color": {
+          "type": "string",
+          "description": "Timestamp overlay font color (default: white)"
+        },
+        "box_color": {
+          "type": "string",
+          "description": "Timestamp overlay box color (default: black)"
+        },
+        "box_opacity": {
+          "type": "number",
+          "description": "Timestamp overlay box opacity 0.0-1.0 (default: 0.5)"
+        },
+        "position": {
+          "type": "string",
+          "description": "Overlay position: tl, tr, bl, br, center (default: bl)"
+        },
+        "scene_threshold": {
+          "type": "number",
+          "description": "Scene-change sensitivity 0.0-1.0 for --scenes (default: 0.4)"
+        },
+        "jobs": {
+          "type": "integer",
+          "description": "Parallel ffmpeg extraction workers (default: 4)"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Per-subprocess timeout in seconds (default: 180)"
+        },
+        "manifest": {
+          "type": "string",
+          "description": "Write a JSON manifest of all captures to this path"
+        },
+        "scenes": {
+          "type": "boolean",
+          "description": "Pick capture points from detected scene changes"
+        },
+        "query_capture": {
+          "type": "boolean",
+          "description": "Capture frames at subtitle cues matching --query"
+        },
+        "keyframes": {
+          "type": "boolean",
+          "description": "Snap capture points to the nearest real keyframe (I-frame)"
+        },
+        "force_keyframes": {
+          "type": "boolean",
+          "description": "Frame-accurate seeking (slower, decodes up to each timestamp)"
+        },
+        "add_timestamps": {
+          "type": "boolean",
+          "description": "Draw the capture time overlay on each generated thumbnail"
+        },
+        "strip_metadata": {
+          "type": "boolean",
+          "description": "Strip EXIF metadata from output thumbnails"
+        },
+        "only_montage": {
+          "type": "boolean",
+          "description": "Clean up intermediate frames and keep only the montage grid"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Resolve and plan capture points without writing images"
+        },
+        "progress": {
+          "type": "boolean",
+          "description": "Show extraction progress on stderr"
+        },
+        "use_cache": {
+          "type": "boolean",
+          "description": "Enable result caching for expensive video processing operations"
+        },
+        "clear_cache": {
+          "type": "boolean",
+          "description": "Clear tool cache directory and exit"
+        },
+        "schema": {
+          "type": "boolean",
+          "description": "Print JSON Tool Schema for LLM registration and exit"
+        },
+        "no_color": {
+          "type": "boolean",
+          "description": "Disable ANSI color output"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable detailed debug log output"
+        }
+      },
+      "required": [
+        "target"
       ]
     }
   }

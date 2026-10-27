@@ -38,3 +38,6 @@ aicha5/bridge/node_modules/.cache/
 *.env
 !*.env.example
 !env.example
+
+# Runtime cache (tool response caches) — ignore new artifacts
+/cache/
