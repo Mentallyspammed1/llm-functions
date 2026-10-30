@@ -1,9 +1,9 @@
-# mts.py — MCP Tool Server v4.1.0
+# mts.py — MCP Tool Server v4.2.0
 
 A single-file MCP tool server with a standard-library core (PyYAML and psutil are optional) that
-speaks both **JSON-RPC 2.0 (MCP `2024-11-05`)** and a **plain REST** dialect over HTTP. v4.1.0
-extends the v4.0 hardening and search capabilities with bounded inputs, outputs, caches, archive
-parsing, and subprocess capture; the registry remains at **93 tools**.
+speaks both **JSON-RPC 2.0 (MCP `2024-11-05`)** and a **plain REST** dialect over HTTP. v4.2.0 is
+a correctness-and-capability pass over **every registered tool** (see §0); the registry grows to
+**95 tools** with `regex_replace` and `git_show`.
 
 ```bash
 python3 mts.py                      # start the server
@@ -12,7 +12,41 @@ python3 mts.py --list-tools         # dump the registry
 python3 mts.py --self-test          # internal diagnostics, exit 0/1
 python3 mts.py --call web_search '{"query":"rust async runtime","max_results":5}'
 python3 -m unittest tests.test_mts -v  # 86 offline tests (no external network required)
+python3 -m unittest discover -s tests -p "test_mts*.py" -v  # 127 tests incl. the v4.2 upgrade suite
 ```
+
+---
+
+## 0. What v4.2 fixed and added (tool-by-tool audit)
+
+| Area | Problem in v4.1 | v4.2 behaviour |
+|------|-----------------|----------------|
+| `csv_to_json` | Delimiter auto-detection never ran: the default `delimiter=","` is truthy, so `csv.Sniffer()` was always skipped. Semicolon/tab exports silently became a single column. A UTF-8 BOM ended up inside the first column name. | Detects `,` `;` tab `|` when the default comma cannot split the header (or with `delimiter="auto"`), honours explicitly requested separators, strips BOMs, pads ragged rows into `_extra`, and reports `delimiter_autodetected`, `had_bom` and `duplicate_columns`. |
+| `text_stats` | Flesch score divided a syllable count taken from the first 20,000 words by the *total* word count — a 120k-word text scored 174.6 (impossible). Non-ASCII words were counted as zero. | Readability uses one consistent sample (reported via `readability_sampled_words` / `readability_estimated`), adds `flesch_kincaid_grade` and `reading_level`, and counts Unicode words (`naïve`, `日本語`, `don't`). |
+| `url_encode_decode` | `component` only affected encoding; decoding always used `unquote_plus`, turning `+` into a space inside full URLs. | `component=false` decodes with `unquote`, preserving literal `+`. |
+| `jwt_decode` | An out-of-range `exp`/`iat`/`nbf` (e.g. `1e30`) raised inside `fromtimestamp` and failed the whole decode. | Claims are range-checked and reported in `warnings`; adds `algorithm`, `claims`, `not_yet_valid`, `issued_in_future` and an `alg: none` warning. |
+| `base64_encode_decode` | Line-wrapped (PEM/JSON) input was rejected as invalid. | CR/LF are stripped (interior spaces still rejected) and `line_breaks_stripped` is reported. |
+| `hash_text` | SHAKE digests were always 32 bytes with no way to choose the length; SHAKE + HMAC failed obscurely. | Adds `length` (16–512 bytes) and an explicit error for HMAC with XOF algorithms. |
+| `uuid_generate` | v5 was hardcoded to the DNS namespace. | Adds `namespace` (`dns`/`url`/`oid`/`x500`/literal UUID) with the resolved namespace echoed. |
+| `random_string` | No way to avoid `0/O/1/l/I`; the `password` preset could return all-lowercase tokens. | Adds `exclude_ambiguous`, and short `password`/`alphanumeric` tokens always contain every character class at distinct positions. |
+| `current_datetime` | Only fixed UTC offsets were supported. | Adds `timezone` (IANA via `zoneinfo`), plus `utc_offset`, `dst`, `iso_week`, `day_of_year` and `quarter`. |
+| `timestamp_convert` | Milliseconds were guessed from a single magnitude threshold. | Adds `unit` (`auto`/`s`/`ms`/`us`/`ns`), wider auto-detection, `rfc2822`/`rfc3339`/`date`/`time` outputs, `age_human`, `is_future` and a clear error for out-of-range values. |
+| `text_diff_compare` | No way to ignore whitespace or case. | Adds `ignore_whitespace` / `ignore_case`; `identical` now reflects the computed diff. |
+| `append_to_file` | Appending to a file without a trailing newline produced `abcdef`. | Inserts a separator newline (disable with `ensure_newline=false`) and reports `added_separator_newline`. |
+| `edit_file_replace` | Only byte-exact matching; indentation drift from a model produced "not found". | Falls back to whitespace-insensitive line matching when the target is unique, re-indents the replacement to the matched block, and reports `match_mode`. |
+| `list_directory` | `sort_by=name` did not sort at all (filesystem order); unknown values were ignored silently. | Always sorted, validates `sort_by` (name/name_desc/size/modified/type/extension), and reports `sort_by` + `total_size_bytes`. |
+| `write_file` / `file_checksum` / `disk_usage` / `file_stat` | No created/overwritten signal, no digest verification, partial totals were unlabelled, `created` silently meant `st_ctime`. | `write_file` reports `created`/`previous_bytes`; `file_checksum` accepts `expected` → `matches`; `disk_usage` reports `total_size_complete` + excluded directories; `file_stat` documents ctime and exposes `birth_time` where available. |
+| `http_request` | No default `User-Agent`/`Accept` (many sites 403), redirects were always followed, no timing. | Sends default headers (overridable), adds `allow_redirects`, `redirected` and `elapsed_ms`. |
+| `fetch_json_api` / `web_download_file` | Timeouts were not configurable. | Add `timeout_seconds`; downloads also report `elapsed_ms` and `throughput_kbps`. |
+| `check_url_status` / `port_check` | Latency used wall-clock `time.time()`, so clock jumps skewed results. | Timing is monotonic. |
+| `process_list` | Sorted only the first N processes it happened to iterate over — the heaviest processes could be missing entirely. | Collects (bounded), then sorts by memory/CPU before truncating; the `ps` fallback parses and sorts the same way. |
+| `parse_robots_txt` | Accepted `url=` but never evaluated it against the rules. | Reports `allowed`, `matched_rule` and `checked_path` using RFC 9309 longest-match/Allow-wins semantics (`*` and `$` supported). |
+| `search_files` | Only basenames matched, so `pkg/*.py` returned nothing. | Matches basenames *and* paths relative to the search root. |
+| `memory_store` / `memory_search` | No distinction between create and overwrite; no tag filter while searching. | Reports `created`/`overwritten`/`previous_bytes`; search adds `tag`, `matched_in` and is ordered by recency. |
+| `wikipedia_lookup` / `arxiv_search` / `stackexchange_search` | Invalid language codes, sort keys and site slugs only failed after a network round-trip with a confusing transport error. | All three validate input first and return actionable errors with supported values. |
+| `list_tools` / `tool_help` | Generated JSON Schema had no parameter descriptions and stringified example values. | Every property now carries a description; examples are correctly typed; `requires_dangerous_mode` is exposed. |
+| **New** `regex_replace` | Only search existed; transforming text required code execution. | Bounded, out-of-process substitution with backreferences, flags, `max_replacements`, ReDoS guard and a 5 s limit. |
+| **New** `git_show` | `git_log`/`git_diff` could not show a specific commit. | Commit metadata, changed-file stat and a bounded patch for any validated revision. |
 
 ---
 
@@ -98,7 +132,7 @@ python3 -m unittest tests.test_mts -v  # 86 offline tests (no external network r
 
 ---
 
-## 3. Tool registry (93 tools)
+## 3. Tool registry (95 tools)
 
 | Category | Tools |
 |----------|-------|
@@ -106,8 +140,8 @@ python3 -m unittest tests.test_mts -v  # 86 offline tests (no external network r
 | **web** (22) | `fetch_many_urls`, `url_to_markdown`, `fetch_webpage_text`, `http_request`, `fetch_json_api`, `web_download_file`, `web_scrape_links`, `extract_metadata`, `dns_lookup`, `check_url_status`, `parse_url_headers`, `read_url_hardened`, `sitemap_parse`, `rss_feed_parse`, `whois_lookup`, `port_check`, `parse_html_document`, `extract_structured_data`, `parse_html_tables`, `extract_media_links`, `parse_robots_txt`, `discover_feed_links` |
 | **files** (18) | `read_file`, `write_file`, `edit_file_replace`, `append_to_file`, `list_directory`, `file_stat`, `delete_file`, `make_directory`, `copy_file`, `move_file`, `file_checksum`, `search_files`, `search_file_content`, `file_tree`, `disk_usage`, `compress_decompress_archive`, `archive_list`, `apply_patch` |
 | **execution** (6) | `lint_code`, `execute_python_code`, `execute_javascript_code`, `execute_bash_command`, `safe_execute_python`, `process_list` |
-| **data** (18) | `json_parse_validate`, `json_query`, `regex_search`, `base64_encode_decode`, `url_encode_decode`, `hash_text`, `uuid_generate`, `random_string`, `current_datetime`, `timestamp_convert`, `jwt_decode`, `csv_to_json`, `json_to_csv`, `yaml_json_convert`, `text_diff_compare`, `text_stats`, `text_summarize`, `parse_url` |
-| **git** (3) | `git_status`, `git_diff`, `git_log` |
+| **data** (19) | `json_parse_validate`, `json_query`, `regex_search`, `regex_replace`, `base64_encode_decode`, `url_encode_decode`, `hash_text`, `uuid_generate`, `random_string`, `current_datetime`, `timestamp_convert`, `jwt_decode`, `csv_to_json`, `json_to_csv`, `yaml_json_convert`, `text_diff_compare`, `text_stats`, `text_summarize`, `parse_url` |
+| **git** (4) | `git_status`, `git_diff`, `git_log`, `git_show` |
 | **memory** (5) | `memory_store`, `memory_recall`, `memory_list`, `memory_delete`, `memory_search` |
 | **system** (11) | `ping`, `health_check`, `system_info`, `server_stats`, `self_diagnostics`, `cache_stats`, `cache_clear`, `list_tools`, `tool_help`, `get_environment_variable`, `set_environment_variable` |
 
@@ -211,6 +245,12 @@ See `mts_config.example.json`.
 * the real `Handler` over a loopback socket: auth, JSON-RPC `initialize`/`tools/list`/`tools/call`,
   REST path calls, 404/413 handling.
 
-`tests/test_mts_tool_coverage.py` additionally invokes all **93 registered tools** against
+`tests/test_mts_tool_coverage.py` additionally invokes all **95 registered tools** against
 in-memory or local fixtures (including search, DNS, WHOIS, and file tools) with no external
 services or credentials.
+
+`tests/test_mts_upgrades.py` adds **39 regression tests** that pin every v4.2 behaviour: CSV
+delimiter/BOM handling, readability maths, decode semantics, JWT edge cases, generator
+guarantees, timezone/epoch handling, append/edit/directory/checksum/disk behaviour, top-N
+process ordering, robots.txt evaluation, `regex_replace`, `git_show` (against a throwaway repo),
+`http_request` headers/redirect control (against a loopback fixture) and schema descriptions.
