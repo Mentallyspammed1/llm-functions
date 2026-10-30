@@ -16,12 +16,19 @@
 # @option --country <COUNTRY>            Country code filter (e.g., us, uk, jp)
 # @option --safe-search <LEVEL>          Safe search level: safe, moderate, strict (default: moderate)
 # @option --max-downloads <NUM>          Maximum concurrent download threads (default: 3)
-# @option --rate-limit <NUM>             Max requests per second (0 = unlimited, default: 0)
+# @option --rate-limit <NUM>             Max requests per second (0 = unlimited, default: 1)
+# @option --retry-delay <NUM>            Base delay between retries in seconds (default: 5)
+# @option --download-timeout <NUM>       Per-download timeout in seconds (default: 30)
+# @option --user-agent <UA>              Custom User-Agent header string
+# @option --include-domains <DOMAINS>    Comma-separated domains to include (filter)
+# @option --exclude-domains <DOMAINS>    Comma-separated domains to exclude (filter)
+# @option --cache-dir <PATH>             Custom cache directory (default: ~/.cache/brave_search)
 # @flag   --download                     Download HTML of each search result
 # @flag   --include-raw                  Include raw search HTML/JSON payload
 # @flag   --force-html                   Force HTML scraping even if API key available
 # @flag   --no-color                     Disable ANSI color output
 # @flag   --verbose                      Enable detailed debug logging
+# @flag   --schema                       Print JSON Tool Schema for LLM registration and exit
 #
 # @env BRAVE_API_KEY                     Official Brave Search API subscription token
 # @env LLM_OUTPUT=/dev/stdout            Output path for LLM integration
@@ -279,13 +286,33 @@ class BraveSearchEngine:
         self,
         timeout: int = 15,
         verbose: bool = False,
-        rate_limit: float = 0.0,
+        rate_limit: float = 1.0,
         force_html: bool = False,
+        download_timeout: int = 30,
+        user_agent: Optional[str] = None,
+        include_domains: Optional[str] = None,
+        exclude_domains: Optional[str] = None,
+        cache_dir: Optional[str] = None,
+        retry_delay: float = 5.0,
     ):
         self.timeout = timeout
+        self.download_timeout = download_timeout
         self.verbose = verbose
         self.rate_limit = rate_limit
         self.force_html = force_html
+        self.retry_delay = retry_delay
+        self.user_agent = user_agent or random.choice(USER_AGENTS)
+        self.include_domains = (
+            set(d.strip().lower() for d in include_domains.split(",") if d.strip())
+            if include_domains
+            else None
+        )
+        self.exclude_domains = (
+            set(d.strip().lower() for d in exclude_domains.split(",") if d.strip())
+            if exclude_domains
+            else None
+        )
+        self.cache_dir = Path(cache_dir) if cache_dir else CACHE_DIR
         self._last_request_time = 0.0
 
         # Check for API key
@@ -296,7 +323,7 @@ class BraveSearchEngine:
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "User-Agent": random.choice(USER_AGENTS),
+                "User-Agent": self.user_agent,
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.9",
                 "Sec-Fetch-Dest": "document",
@@ -325,6 +352,24 @@ class BraveSearchEngine:
         if self.verbose:
             logging.debug(message)
             _cprint(f"{DIM}// [DEBUG] {message}{RESET}")
+
+    def _domain_allowed(self, url: str) -> bool:
+        """Check if a URL passes include/exclude domain filters."""
+        if not url:
+            return False
+        try:
+            netloc = urllib.parse.urlparse(url).netloc.lower()
+        except Exception:
+            return False
+        if not netloc:
+            return False
+        # Strip www. prefix for matching
+        domain = netloc[4:] if netloc.startswith("www.") else netloc
+        if self.exclude_domains and any(d in domain for d in self.exclude_domains):
+            return False
+        if self.include_domains and not any(d in domain for d in self.include_domains):
+            return False
+        return True
 
     def _rate_limit_wait(self) -> None:
         """Enforce rate limiting between requests."""
@@ -394,7 +439,9 @@ class BraveSearchEngine:
                     retry_after = int(resp.headers.get("Retry-After", "60"))
                     self._log(f"Rate limited (429). Retry-After: {retry_after}s")
                     if attempt < 3:
-                        time.sleep(min(retry_after, 30))
+                        sleep_for = min(max(retry_after, self.retry_delay), 30)
+                        self._log(f"Retrying in {sleep_for}s...")
+                        time.sleep(sleep_for)
                         continue
                     raise RuntimeError(
                         f"Rate limited after retries. Retry-After: {retry_after}s"
@@ -409,7 +456,9 @@ class BraveSearchEngine:
                 last_err = exc
                 self._log(f"API attempt {attempt} failed: {exc}")
                 if attempt < 3:
-                    time.sleep(1.0 * attempt)
+                    sleep_for = self.retry_delay * attempt
+                    self._log(f"Retrying in {sleep_for}s...")
+                    time.sleep(sleep_for)
 
         raise RuntimeError(f"API request failed after retries: {last_err}")
 
@@ -448,7 +497,9 @@ class BraveSearchEngine:
                     retry_after = int(resp.headers.get("Retry-After", "60"))
                     self._log(f"Rate limited (429). Retry-After: {retry_after}s")
                     if attempt < max_retries:
-                        time.sleep(min(retry_after, 30))
+                        sleep_for = min(max(retry_after, self.retry_delay), 30)
+                        self._log(f"Retrying in {sleep_for}s...")
+                        time.sleep(sleep_for)
                         continue
                     raise RuntimeError(
                         f"Rate limited after retries. Retry-After: {retry_after}s"
@@ -464,9 +515,9 @@ class BraveSearchEngine:
                 last_err = exc
                 self._log(f"HTML attempt {attempt} failed: {exc}")
                 if attempt < max_retries:
-                    backoff = 2**attempt
-                    self._log(f"Retrying in {backoff}s...")
-                    time.sleep(backoff)
+                    sleep_for = self.retry_delay * attempt
+                    self._log(f"Retrying in {sleep_for}s...")
+                    time.sleep(sleep_for)
 
         raise RuntimeError(
             f"HTML request failed after {max_retries} retries: {last_err}"
@@ -498,6 +549,9 @@ class BraveSearchEngine:
 
                 url = item.get("url", "")
                 if not url or url in seen_urls:
+                    continue
+
+                if not self._domain_allowed(url):
                     continue
 
                 parsed = urllib.parse.urlparse(url)
@@ -631,6 +685,9 @@ class BraveSearchEngine:
             if not valid_url:
                 continue
 
+            if not self._domain_allowed(valid_url):
+                continue
+
             seen_urls.add(valid_url)
             title = title_tag.get_text(strip=True) or "Untitled Result"
 
@@ -671,6 +728,8 @@ class BraveSearchEngine:
             title = a_tag.get_text(strip=True)
 
             if valid_url and len(title) > 5:
+                if not self._domain_allowed(valid_url):
+                    continue
                 seen_urls.add(valid_url)
                 results.append(
                     {
@@ -688,7 +747,7 @@ class BraveSearchEngine:
     def download_page(self, url: str, position: int, title: str) -> Dict[str, Any]:
         """Download individual search result page and output clean preview metadata."""
         try:
-            resp = self.session.get(url, timeout=(5.0, float(self.timeout)))
+            resp = self.session.get(url, timeout=(5.0, float(self.download_timeout)))
             resp.raise_for_status()
 
             if not resp.encoding or resp.encoding.lower() == "iso-8859-1":
@@ -765,8 +824,14 @@ def execute_tool(
     download: bool = False,
     include_raw: bool = False,
     max_downloads: int = 3,
-    rate_limit: float = 0.0,
+    rate_limit: float = 1.0,
     force_html: bool = False,
+    download_timeout: int = 30,
+    user_agent: Optional[str] = None,
+    include_domains: Optional[str] = None,
+    exclude_domains: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+    retry_delay: float = 5.0,
     no_color: bool = False,
     verbose: bool = False,
 ) -> dict[str, Any]:
@@ -781,8 +846,11 @@ def execute_tool(
     timeout_val = max(1, timeout)
     max_dl_val = max(1, min(max_downloads, 10))
     rate_limit_val = max(0.0, rate_limit)
+    dl_timeout_val = max(1, download_timeout)
+    retry_delay_val = max(1.0, retry_delay)
 
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_dir_path = Path(cache_dir) if cache_dir else CACHE_DIR
+    cache_dir_path.mkdir(parents=True, exist_ok=True)
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     shutdown = GracefulShutdown()
@@ -791,6 +859,12 @@ def execute_tool(
         verbose=verbose,
         rate_limit=rate_limit_val,
         force_html=force_html,
+        download_timeout=dl_timeout_val,
+        user_agent=user_agent,
+        include_domains=include_domains,
+        exclude_domains=exclude_domains,
+        cache_dir=str(cache_dir_path),
+        retry_delay=retry_delay_val,
     )
 
     mode = "api" if engine.use_api else "html"
@@ -963,12 +1037,56 @@ def run(
     download: bool = False,
     include_raw: bool = False,
     max_downloads: int = 3,
-    rate_limit: float = 0.0,
+    rate_limit: float = 1.0,
     force_html: bool = False,
+    download_timeout: int = 30,
+    user_agent: Optional[str] = None,
+    include_domains: Optional[str] = None,
+    exclude_domains: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+    retry_delay: float = 5.0,
     no_color: bool = False,
     verbose: bool = False,
+    schema: bool = False,
 ) -> None:
     """Entry point for AIChat function call framework."""
+    if schema:
+        import json as _json
+
+        schema_dict = {
+            "name": "brave_search",
+            "description": f"Brave Search Engine v{__version__} — Web search via official API with HTML fallback, concurrent downloads, and domain filtering.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query term (required)"},
+                    "count": {"type": "integer", "description": "Number of search results (default: 10, max: 50)"},
+                    "offset": {"type": "integer", "description": "Pagination offset (default: 0)"},
+                    "timeout": {"type": "integer", "description": "Request timeout in seconds (default: 15)"},
+                    "language": {"type": "string", "description": "Language code filter (e.g. en, es, zh-CN)"},
+                    "country": {"type": "string", "description": "Country code filter (e.g. us, uk, jp)"},
+                    "safe_search": {"type": "string", "enum": ["safe", "moderate", "strict"], "description": "Safe search level (default: moderate)"},
+                    "download": {"type": "boolean", "description": "Download HTML of each search result"},
+                    "include_raw": {"type": "boolean", "description": "Include raw search HTML/JSON payload"},
+                    "max_downloads": {"type": "integer", "description": "Maximum concurrent download threads (default: 3)"},
+                    "rate_limit": {"type": "number", "description": "Max requests per second (0 = unlimited)"},
+                    "retry_delay": {"type": "number", "description": "Base delay between retries in seconds (default: 5)"},
+                    "force_html": {"type": "boolean", "description": "Force HTML scraping even if API key available"},
+                    "download_timeout": {"type": "integer", "description": "Per-download timeout in seconds (default: 30)"},
+                    "user_agent": {"type": "string", "description": "Custom User-Agent header string"},
+                    "include_domains": {"type": "string", "description": "Comma-separated domains to include (filter)"},
+                    "exclude_domains": {"type": "string", "description": "Comma-separated domains to exclude (filter)"},
+                    "cache_dir": {"type": "string", "description": "Custom cache directory path"},
+                    "no_color": {"type": "boolean", "description": "Disable ANSI color output"},
+                    "verbose": {"type": "boolean", "description": "Enable detailed debug logging"},
+                },
+                "required": ["query"],
+            },
+        }
+        sys.stdout.write(_json.dumps(schema_dict, indent=2) + "\n")
+        sys.stdout.flush()
+        return
+
     result = execute_tool(
         query=query,
         count=count,
@@ -982,6 +1100,12 @@ def run(
         max_downloads=max_downloads,
         rate_limit=rate_limit,
         force_html=force_html,
+        download_timeout=download_timeout,
+        user_agent=user_agent,
+        include_domains=include_domains,
+        exclude_domains=exclude_domains,
+        cache_dir=cache_dir,
+        retry_delay=retry_delay,
         no_color=no_color,
         verbose=verbose,
     )
@@ -1074,10 +1198,46 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rate-limit",
         type=float,
-        default=0.0,
+        default=1.0,
         dest="rate_limit",
         metavar="NUM",
-        help="Max requests per second (0 = unlimited, default: 0)",
+        help="Max requests per second (0 = unlimited, default: 1)",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=5.0,
+        dest="retry_delay",
+        metavar="NUM",
+        help="Base delay between retries in seconds (default: 5)",
+    )
+    parser.add_argument(
+        "--download-timeout",
+        type=int,
+        default=30,
+        dest="download_timeout",
+        metavar="NUM",
+        help="Per-download timeout in seconds (default: 30)",
+    )
+    parser.add_argument(
+        "--user-agent",
+        metavar="UA",
+        help="Custom User-Agent header string",
+    )
+    parser.add_argument(
+        "--include-domains",
+        metavar="DOMAINS",
+        help="Comma-separated domains to include (filter)",
+    )
+    parser.add_argument(
+        "--exclude-domains",
+        metavar="DOMAINS",
+        help="Comma-separated domains to exclude (filter)",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        metavar="PATH",
+        help="Custom cache directory path",
     )
     parser.add_argument(
         "--force-html",
@@ -1085,6 +1245,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=False,
         dest="force_html",
         help="Force HTML scraping even if API key is available",
+    )
+    parser.add_argument(
+        "--schema",
+        action="store_true",
+        default=False,
+        help="Print JSON Tool Schema for LLM registration and exit",
     )
     parser.add_argument(
         "--no-color",
@@ -1105,6 +1271,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 if __name__ == "__main__":
     args = _build_parser().parse_args()
+    if args.schema:
+        run(
+            query=args.query,
+            schema=True,
+            no_color=args.no_color,
+            verbose=args.verbose,
+        )
+        sys.exit(EXIT_SUCCESS)
     res = execute_tool(
         query=args.query,
         count=args.count,
@@ -1118,6 +1292,12 @@ if __name__ == "__main__":
         max_downloads=args.max_downloads,
         rate_limit=args.rate_limit,
         force_html=args.force_html,
+        download_timeout=args.download_timeout,
+        user_agent=args.user_agent,
+        include_domains=args.include_domains,
+        exclude_domains=args.exclude_domains,
+        cache_dir=args.cache_dir,
+        retry_delay=args.retry_delay,
         no_color=args.no_color,
         verbose=args.verbose,
     )

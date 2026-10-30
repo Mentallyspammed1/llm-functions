@@ -958,6 +958,8 @@ class EditOptions:
         "global_replace": True,
         "decode_escapes": False,
         "dotall": False,
+        "whole_word": False,
+        "count_only": False,
         "preserve_newlines": True,
         "backup": False,
         "dry_run": False,
@@ -1429,8 +1431,10 @@ def op_write(options: EditOptions) -> dict[str, Any]:
 
     try:
         original_bytes = path.stat().st_size if path.exists() else 0
+        backup_path = None
         if options.backup and path.exists():
-            _editor._make_backup(path, options.max_backups)
+            bp = _editor._make_backup(path, options.max_backups)
+            backup_path = str(bp) if bp else None
         _editor._atomic_write_bytes(path, payload)
         new_bytes = path.stat().st_size
         return {
@@ -1442,6 +1446,7 @@ def op_write(options: EditOptions) -> dict[str, Any]:
             "new_bytes": new_bytes,
             "encoding": enc_used,
             "encoding_fallback": fell_back,
+            "backup_path": backup_path,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -1458,6 +1463,8 @@ def op_append(
     max_size: int = DEFAULT_MAX_WRITE,
     decode_escapes: bool = False,
     preserve_newlines: bool = True,
+    backup: bool = False,
+    max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
     if content is None:
         return {"success": False, "error": "content parameter is required", "exit_code": EXIT_INVALID_INPUT}
@@ -1479,6 +1486,11 @@ def op_append(
         if len(payload) > max_size:
             return {"success": False, "error": "Combined content exceeds max size", "exit_code": EXIT_INVALID_INPUT}
 
+        backup_path = None
+        if backup:
+            bp = _editor._make_backup(path, max_backups)
+            backup_path = str(bp) if bp else None
+
         _editor._atomic_write_bytes(path, payload)
         new_size = path.stat().st_size
         return {
@@ -1488,6 +1500,7 @@ def op_append(
             "new_bytes": new_size,
             "bytes_delta": new_size - fsize,
             "encoding": enc_final,
+            "backup_path": backup_path,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -1502,6 +1515,8 @@ def op_prepend(
     max_size: int = DEFAULT_MAX_WRITE,
     decode_escapes: bool = False,
     preserve_newlines: bool = True,
+    backup: bool = False,
+    max_backups: int = MAX_BACKUPS,
 ) -> dict[str, Any]:
     if content is None:
         return {"success": False, "error": "content parameter is required", "exit_code": EXIT_INVALID_INPUT}
@@ -1523,6 +1538,11 @@ def op_prepend(
         if len(payload) > max_size:
             return {"success": False, "error": "Combined content exceeds max size", "exit_code": EXIT_INVALID_INPUT}
 
+        backup_path = None
+        if backup:
+            bp = _editor._make_backup(path, max_backups)
+            backup_path = str(bp) if bp else None
+
         _editor._atomic_write_bytes(path, payload)
         new_size = path.stat().st_size
         return {
@@ -1532,6 +1552,7 @@ def op_prepend(
             "new_bytes": new_size,
             "bytes_delta": new_size - fsize,
             "encoding": enc_final,
+            "backup_path": backup_path,
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -1565,14 +1586,42 @@ def op_replace(options: EditOptions) -> dict[str, Any]:
     search_norm = _normalize_newlines(search_text)
     repl_norm = _normalize_newlines(replacement)
 
+    # Whole-word handling: wrap search in word boundaries
+    use_regex = options.regex
+    if options.whole_word and not use_regex:
+        search_norm = r"\b" + re.escape(search_norm) + r"\b"
+        use_regex = True
+    elif options.whole_word and use_regex:
+        search_norm = r"\b(?:" + search_norm + r")\b"
+
     limit = _normalize_max_replacements(options.max_replacements)
     if not options.global_replace and limit is None:
         limit = 1
 
+    # Count-only mode: just count matches, do not modify
+    if options.count_only:
+        try:
+            count = _count_matches(
+                content, search_norm,
+                regex=use_regex,
+                ignore_case=not options.case_sensitive,
+                dotall=options.dotall,
+            )
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "exit_code": EXIT_INVALID_INPUT}
+        return {
+            "success": True,
+            "path": str(path),
+            "matches": count,
+            "count": count,
+            "changed": False,
+            "message": f"{count} match(es) found",
+        }
+
     try:
         new_content, count = _replace_in_content(
             content, search_norm, repl_norm,
-            regex=options.regex,
+            regex=use_regex,
             ignore_case=not options.case_sensitive,
             dotall=options.dotall,
             max_replacements=limit,
@@ -1596,15 +1645,17 @@ def op_replace(options: EditOptions) -> dict[str, Any]:
     payload, enc_final, _ = _encode_text(write_text, enc_used, bom_present=bom)
     _editor._atomic_write_bytes(path, payload)
 
-    return {
+    result: dict[str, Any] = {
         "success": True,
         "path": str(path),
         "replacements": count,
         "changed": True,
         "backup_path": backup_path,
-        "diff": diff_text,
         "size": path.stat().st_size,
     }
+    if options.return_diff:
+        result["diff"] = diff_text
+    return result
 
 
 # ---------- LINE OPERATIONS ----------
@@ -1688,6 +1739,7 @@ def op_replace_lines(
     max_backups: int = MAX_BACKUPS,
     dry_run: bool = False,
     decode_escapes: bool = False,
+    backup: bool = False,
 ) -> dict[str, Any]:
     if start_line < 1 or end_line < start_line:
         return {"success": False, "error": "Invalid start_line/end_line range", "exit_code": EXIT_INVALID_INPUT}
@@ -1709,10 +1761,14 @@ def op_replace_lines(
     if dry_run:
         return {"success": True, "path": str(path), "mode": "dry-run", "diff": diff_text}
 
+    backup_path = None
+    if backup:
+        bp = _editor._make_backup(path, max_backups)
+        backup_path = str(bp) if bp else None
+
     try:
-        backup = _editor._make_backup(path, max_backups)
         _editor._atomic_write(path, new_content, res.get("encoding_used", DEFAULT_ENCODING))
-        return {"success": True, "path": str(path), "lines_replaced": e_idx - s_idx, "diff": diff_text, "backup_path": str(backup) if backup else None}
+        return {"success": True, "path": str(path), "lines_replaced": e_idx - s_idx, "diff": diff_text, "backup_path": backup_path}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -2606,15 +2662,15 @@ def _run(options: EditOptions) -> dict[str, Any]:
         "view": lambda: op_read(fpath, options.max_size, options.encoding, options.show_lines, options.start_line, options.end_line),
         "read_lines": lambda: op_read_lines(fpath, options.line_number or options.start_line or 1, options.end_line or sys.maxsize, options.encoding),
         "write": lambda: op_write(options),
-        "append": lambda: op_append(fpath, options.content or "", options.encoding, options.add_newline, options.max_write_size, options.decode_escapes, options.preserve_newlines),
-        "prepend": lambda: op_prepend(fpath, options.content or "", options.encoding, options.add_newline, options.max_write_size, options.decode_escapes, options.preserve_newlines),
+        "append": lambda: op_append(fpath, options.content or "", options.encoding, options.add_newline, options.max_write_size, options.decode_escapes, options.preserve_newlines, options.backup, options.max_backups),
+        "prepend": lambda: op_prepend(fpath, options.content or "", options.encoding, options.add_newline, options.max_write_size, options.decode_escapes, options.preserve_newlines, options.backup, options.max_backups),
         "replace": lambda: op_replace(options),
         "count": lambda: op_file_search(fpath, options.search_text or "", use_regex=options.regex, case_sensitive=options.case_sensitive, encoding=options.encoding),
         "insert_line": lambda: op_insert_line(fpath, options.line_number or 1, options.content or "", options.encoding, options.max_backups, options.decode_escapes),
         "insert": lambda: op_insert_line(fpath, options.line_number or 1, options.content or "", options.encoding, options.max_backups, options.decode_escapes),
         "delete_line": lambda: op_delete_line(fpath, options.line_number or 1, options.encoding, options.max_backups),
         "delete": lambda: op_delete_line(fpath, options.line_number, options.encoding, options.max_backups) if options.line_number else op_delete(fpath, options.recursive),
-        "replace_lines": lambda: op_replace_lines(fpath, options.start_line or 1, options.end_line or 1, options.content or "", options.encoding, options.max_backups, options.dry_run, options.decode_escapes),
+        "replace_lines": lambda: op_replace_lines(fpath, options.start_line or 1, options.end_line or 1, options.content or "", options.encoding, options.max_backups, options.dry_run, options.decode_escapes, options.backup),
         "search": lambda: op_file_search(fpath, options.search_text or "", options.regex, options.case_sensitive, options.line_context or options.context_lines, options.encoding, options.max_matches),
         "file_search": lambda: op_file_search(fpath, options.search_text or "", options.regex, options.case_sensitive, options.line_context or options.context_lines, options.encoding, options.max_matches),
         "copy": lambda: op_copy(fpath, options.target_path or "", options.preserve_metadata, options.recursive),
@@ -2679,7 +2735,10 @@ def generate_tool_schema() -> dict[str, Any]:
                 "regex": {"type": "boolean", "description": "Enable regex pattern matching"},
                 "ignore_case": {"type": "boolean", "description": "Case-insensitive search"},
                 "decode_escapes": {"type": "boolean", "description": "Decode escape sequences in text strings"},
-                "backup": {"type": "boolean", "description": "Create timestamped backup before modifying file"},
+                "whole_word": {"type": "boolean", "description": "Match whole words only"},
+                "count_only": {"type": "boolean", "description": "Count matches without modifying file"},
+                "return_diff": {"type": "boolean", "description": "Include unified diff in result"},
+                "backup": {"type": "boolean", "description": "Create timestamped backup before modifying file (write/append/prepend/replace_lines)"},
                 "dry_run": {"type": "boolean", "description": "Simulate mutation without modifying disk"},
                 "recursive": {"type": "boolean", "description": "Process directories recursively"},
                 "preserve_newlines": {"type": "boolean", "description": "Preserve original newline style"},
@@ -2871,7 +2930,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ignore-case", "--case-insensitive", action="store_true", dest="ignore_case")
     parser.add_argument("--no-global", action="store_false", dest="global_replace", default=True)
     parser.add_argument("--decode-escapes", action="store_true")
+    parser.add_argument("--whole-word", action="store_true", dest="whole_word", help="Match whole words only")
+    parser.add_argument("--count-only", action="store_true", dest="count_only", help="Count matches without modifying")
     parser.add_argument("--dotall", action="store_true")
+    parser.add_argument("--return-diff", action="store_true", dest="return_diff", help="Include mutation diff in result")
     parser.add_argument("--preserve-newlines", dest="preserve_newlines", action="store_true", default=True)
     parser.add_argument("--no-preserve-newlines", dest="preserve_newlines", action="store_false")
     parser.add_argument("--backup", action="store_true", default=False)
@@ -2963,6 +3025,9 @@ def main() -> int:
         ignore_case=args.ignore_case,
         global_replace=args.global_replace,
         decode_escapes=args.decode_escapes,
+        whole_word=args.whole_word,
+        count_only=args.count_only,
+        return_diff=args.return_diff,
         dotall=args.dotall,
         preserve_newlines=args.preserve_newlines,
         backup=args.backup,
