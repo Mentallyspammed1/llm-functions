@@ -20,6 +20,10 @@ v4.2 highlights (audit of every registered tool)
   Exchange sites), and robots.txt parsing can evaluate a URL against the rules.
 * MCP clients get parameter descriptions in every generated input schema.
 
+Filesystem updates: read explicit numbered line ranges, replace or delete those
+ranges with optional content checks, previews and backups, and preserve existing
+line endings and ordinary file permissions during edits.
+
 Backwards compatible: existing tool names and parameters retain their defaults.
 """
 
@@ -69,7 +73,7 @@ import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from contextlib import contextmanager
 from html.parser import HTMLParser
@@ -555,22 +559,47 @@ def _ensure_parent(path: str) -> None:
         os.makedirs(parent, exist_ok=True)
 
 
-def _atomic_write(path: str, data: str, encoding: str = "utf-8") -> int:
-    """Write via a temp file + os.replace so readers never see a half-written file."""
+def _atomic_write(path: str, data: str, encoding: str = "utf-8",
+                  overwrite: bool = True, preserve_mode: bool = False) -> int:
+    """Write atomically, optionally retaining a regular file's ordinary permissions.
+
+    The no-overwrite case uses a same-directory hard link for an atomic create;
+    checking existence before os.replace alone would leave a race. Internal files
+    keep the private mkstemp mode unless preservation is explicitly requested.
+    """
     _ensure_parent(path)
     directory = os.path.dirname(path) or "."
+    existing_mode = None
+    if preserve_mode:
+        try:
+            current = os.stat(path)
+            if stat.S_ISREG(current.st_mode):
+                # Do not carry setuid/setgid/sticky bits onto newly written contents.
+                existing_mode = stat.S_IMODE(current.st_mode) & 0o777
+        except FileNotFoundError:
+            pass
     fd, tmp = tempfile.mkstemp(prefix=".mts-", dir=directory)
     try:
-        with os.fdopen(fd, "w", encoding=encoding) as handle:
+        with os.fdopen(fd, "w", encoding=encoding, newline="") as handle:
             handle.write(data)
             handle.flush()
+            if existing_mode is not None:
+                if hasattr(os, "fchmod"):
+                    os.fchmod(handle.fileno(), existing_mode)
+                else:  # pragma: no cover - platform dependent
+                    os.chmod(tmp, existing_mode)
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
+        if overwrite:
+            os.replace(tmp, path)
+        else:
+            os.link(tmp, path)  # fails rather than replacing a concurrent creator
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
-    return len(data.encode(encoding, "replace"))
+    return len(data.encode(encoding))
 
 
 # ---------------------------------------------------------------------------
@@ -2859,208 +2888,511 @@ def _looks_binary(path: str) -> bool:
         return True
 
 
-def read_file(filepath: str, start_line: int = 1, line_count: int = 500) -> str:
-    """Read a bounded text range from inside the sandbox."""
+_FILE_NEWLINE_RE = re.compile(r"\r\n|\r|\n")
+_MAX_READ_LINES = 20_000
+_MAX_EDIT_OUTPUT_BYTES = MAX_FILE_SCAN_BYTES * 2
+
+
+def _line_number(value: Any, name: str) -> int:
+    """Validate a 1-based line number instead of silently clamping it."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a positive integer")
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, str) and re.fullmatch(r"[0-9]+", value.strip()):
+        number = int(value.strip())
+    else:
+        raise ValueError(f"{name} must be a positive integer")
+    if number < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return number
+
+
+def _line_range(start_line: Any, end_line: Any) -> Tuple[int, int]:
+    start = _line_number(start_line, "start_line")
+    end = _line_number(end_line, "end_line")
+    if end < start:
+        raise ValueError("end_line must be greater than or equal to start_line")
+    return start, end
+
+
+def _iter_text_lines(text: str):
+    """Yield offsets and lines, splitting only on CRLF, LF or CR (like read_file)."""
+    start = 0
+    for match in _FILE_NEWLINE_RE.finditer(text):
+        yield start, match.end(), text[start:match.end()]
+        start = match.end()
+    if start < len(text):
+        yield start, len(text), text[start:]
+
+
+def _line_ending(text: str) -> str:
+    if text.endswith("\r\n"):
+        return "\r\n"
+    if text.endswith("\n"):
+        return "\n"
+    if text.endswith("\r"):
+        return "\r"
+    return ""
+
+
+def _last_newline_style(text: str) -> str:
+    index = max(text.rfind("\r"), text.rfind("\n"))
+    if index < 0:
+        return ""
+    if text[index] == "\n" and index and text[index - 1] == "\r":
+        return "\r\n"
+    return text[index]
+
+
+def _prepare_line_replacement(replacement: str, matched: str, prefix: str = "") -> str:
+    """Use the matched lines' newline style and preserve their trailing boundary."""
+    if not replacement:
+        return ""
+    ending = _line_ending(matched)
+    style = ending or _last_newline_style(matched) or _line_ending(prefix) or "\n"
+    replacement = _FILE_NEWLINE_RE.sub(lambda _match: style, replacement)
+    if ending and not _line_ending(replacement):
+        replacement += ending
+    return replacement
+
+
+def _preserve_file_bom(original: str, begin: int, finish: int, replacement: str) -> str:
+    """Keep an existing UTF-8 BOM on a non-empty result without duplicating it."""
+    if (begin == 0 and original.startswith("\ufeff") and (replacement or finish < len(original))
+            and not replacement.startswith("\ufeff")):
+        return "\ufeff" + replacement
+    return replacement
+
+
+def _read_file_range(filepath: str, start_line: int, line_count: int,
+                     preserve_line_endings: bool) -> Dict[str, Any]:
+    path = _safe_path(filepath)
+    if os.path.isdir(path):
+        raise ValueError(f"'{filepath}' is a directory; use list_directory")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"File '{filepath}' not found")
+    if not os.path.isfile(path):
+        raise ValueError(f"'{filepath}' is not a regular file")
+    file_size = os.path.getsize(path)
+    total_lines: Optional[int] = None
+    # Keep physical endings while scanning so CRLF files count toward the byte
+    # limit correctly; normalize only the returned content when requested.
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as stream:
+        if file_size <= MAX_FILE_SCAN_BYTES:
+            total_lines = sum(1 for _ in stream)
+            stream.seek(0)
+
+        skipped = 0
+        scanned_bytes = 0
+        read_size = MAX_TEXT_CHARS + 1
+        while skipped < start_line - 1:
+            chunk = stream.readline(read_size)
+            if not chunk:
+                break
+            while True:
+                scanned_bytes += len(chunk.encode("utf-8"))
+                if scanned_bytes > MAX_FILE_SCAN_BYTES:
+                    raise ValueError("Requested line range requires scanning more than 32 MiB")
+                if chunk.endswith("\n"):
+                    break
+                if chunk.endswith("\r"):
+                    # A size-limited read can split a CRLF between its two bytes.
+                    if len(chunk) == read_size:
+                        position = stream.tell()
+                        following = stream.read(1)
+                        if following == "\n":
+                            scanned_bytes += 1
+                            if scanned_bytes > MAX_FILE_SCAN_BYTES:
+                                raise ValueError("Requested line range requires scanning more than 32 MiB")
+                        else:
+                            stream.seek(position)
+                    break
+                chunk = stream.readline(read_size)
+                if not chunk:
+                    break
+            skipped += 1
+
+        sliced_lines: List[str] = []
+        content_chars = 0
+        content_truncated = False
+        partial_line = False
+        has_more = False
+        while len(sliced_lines) < line_count:
+            remaining = MAX_TEXT_CHARS - content_chars
+            if remaining == 0:
+                has_more = bool(stream.read(1))
+                content_truncated = has_more
+                break
+            # A normalized CRLF consumes one extra physical character. Reading
+            # one additional character keeps the output limit based on the
+            # normalized content without splitting a complete CRLF.
+            chunk = stream.readline(remaining + (1 if preserve_line_endings else 2))
+            if not chunk:
+                break
+            if not preserve_line_endings:
+                chunk = chunk.replace("\r\n", "\n").replace("\r", "\n")
+            if len(chunk) > remaining:
+                chunk = chunk[:remaining]
+                content_truncated = partial_line = has_more = True
+            sliced_lines.append(chunk)
+            content_chars += len(chunk)
+            if partial_line:
+                break
+        else:
+            # The requested line count was fulfilled; one character determines EOF
+            # even for large files whose total line count was not calculated.
+            has_more = bool(stream.read(1))
+
+    returned = len(sliced_lines)
+    return {
+        "filepath": filepath,
+        "resolved_path": path,
+        "size_bytes": file_size,
+        "total_lines": total_lines,
+        "total_lines_known": total_lines is not None,
+        "start_line": start_line,
+        "returned_lines": returned,
+        "returned_end_line": start_line + returned - 1 if returned else None,
+        "has_more": has_more,
+        "next_start_line": start_line + returned if has_more and not partial_line else None,
+        "content_truncated": content_truncated,
+        "partial_line": partial_line,
+        "preserve_line_endings": preserve_line_endings,
+        "content": "".join(sliced_lines),
+    }
+
+
+def read_file(filepath: str, start_line: int = 1, line_count: int = 500,
+              preserve_line_endings: bool = False) -> str:
+    """Read up to line_count lines, starting at a 1-based line, within the sandbox.
+
+    Output is capped by MAX_TEXT_CHARS. has_more and next_start_line describe
+    pagination; a partial_line cannot be resumed by line number. Set
+    preserve_line_endings to return CRLF/CR exactly as stored.
+    """
     try:
-        path = _safe_path(filepath)
-        if os.path.isdir(path):
-            return _error(f"'{filepath}' is a directory; use list_directory")
-        if not os.path.exists(path):
-            return _error(f"File '{filepath}' not found")
-        start_line = _bounded_int(start_line, 1, 1, 10_000_000)
-        line_count = _bounded_int(line_count, 500, 1, 20_000)
-        file_size = os.path.getsize(path)
-        total_lines: Optional[int] = None
-        with open(path, "r", encoding="utf-8", errors="replace") as stream:
-            if file_size <= MAX_FILE_SCAN_BYTES:
-                total_lines = sum(1 for _ in stream)
-                stream.seek(0)
-
-            skipped = 0
-            scanned_chars = 0
-            while skipped < start_line - 1:
-                chunk = stream.readline(MAX_TEXT_CHARS + 1)
-                if not chunk:
-                    break
-                scanned_chars += len(chunk)
-                while not chunk.endswith("\n"):
-                    chunk = stream.readline(MAX_TEXT_CHARS + 1)
-                    if not chunk:
-                        break
-                    scanned_chars += len(chunk)
-                    if scanned_chars > MAX_FILE_SCAN_BYTES:
-                        return _error("Requested line range requires scanning more than 32 MiB")
-                if scanned_chars > MAX_FILE_SCAN_BYTES:
-                    return _error("Requested line range requires scanning more than 32 MiB")
-                skipped += 1
-
-            sliced_lines: List[str] = []
-            content_chars = 0
-            content_truncated = False
-            while len(sliced_lines) < line_count and content_chars < MAX_TEXT_CHARS:
-                remaining = MAX_TEXT_CHARS - content_chars
-                chunk = stream.readline(remaining + 1)
-                if not chunk:
-                    break
-                if len(chunk) > remaining:
-                    chunk = chunk[:remaining]
-                    content_truncated = True
-                sliced_lines.append(chunk)
-                content_chars += len(chunk)
-                if content_truncated or not chunk.endswith("\n"):
-                    break
-
-        content = "".join(sliced_lines)
-        has_more = (start_line - 1 + len(sliced_lines) < total_lines
-                    if total_lines is not None else None)
-        if total_lines is None and (content_truncated or len(sliced_lines) >= line_count):
-            has_more = True
-        return _ok({
-            "filepath": filepath,
-            "resolved_path": path,
-            "total_lines": total_lines,
-            "total_lines_known": total_lines is not None,
-            "start_line": start_line,
-            "returned_lines": len(sliced_lines),
-            "has_more": has_more,
-            "content_truncated": content_truncated,
-            "content": content,
-        })
+        start = _bounded_int(start_line, 1, 1, 10_000_000)
+        count = _bounded_int(line_count, 500, 1, _MAX_READ_LINES)
+        return _ok(_read_file_range(filepath, start, count,
+                                    _to_bool(preserve_line_endings, False)))
     except Exception as exc:
         return _error(f"Error reading file: {exc}")
 
 
-def write_file(filepath: str, content: str, create_backup: bool = False) -> str:
-    """Write (overwrite) a UTF-8 text file atomically inside the sandbox."""
+def read_lines(filepath: str, start_line: int, end_line: int) -> str:
+    """Read a 1-based, inclusive line range, preserving its original line endings.
+
+    The content can be passed as expected_content to replace_lines. Individual
+    numbered lines are also returned. At most 20,000 lines and MAX_TEXT_CHARS
+    characters are returned per call; inspect the pagination/truncation fields.
+    """
+    try:
+        start, end = _line_range(start_line, end_line)
+        if end - start + 1 > _MAX_READ_LINES:
+            raise ValueError(f"A read range may contain at most {_MAX_READ_LINES} lines")
+        result = _read_file_range(filepath, start, end - start + 1, True)
+        result["requested_end_line"] = end
+        result["lines"] = [
+            {"line_number": start + index, "content": line}
+            for index, (_, _, line) in enumerate(_iter_text_lines(result["content"]))
+        ]
+        return _ok(result)
+    except Exception as exc:
+        return _error(f"Error reading lines: {exc}")
+
+
+def _create_file_backup(path: str) -> str:
+    """Atomically copy an existing regular file to its sandboxed .bak path."""
+    if not os.path.isfile(path):
+        raise ValueError("Backups are supported only for regular files")
+    backup = f"{path}.bak"
+    _safe_path(backup)
+    backup_fd, backup_tmp = tempfile.mkstemp(prefix=".mts-backup-",
+                                             dir=os.path.dirname(path) or SANDBOX_ROOT)
+    os.close(backup_fd)
+    try:
+        shutil.copyfile(path, backup_tmp)
+        shutil.copystat(path, backup_tmp)
+        os.replace(backup_tmp, backup)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(backup_tmp)
+        raise
+    return backup
+
+
+def _read_editable_text(path: str) -> str:
+    """Read bounded text, rejecting NUL bytes and invalid UTF-8 before editing."""
+    if not os.path.exists(path):
+        raise FileNotFoundError("Target file does not exist")
+    if not os.path.isfile(path):
+        raise ValueError("Target must be a regular file")
+    if os.path.getsize(path) > MAX_FILE_SCAN_BYTES:
+        raise ValueError("Target file exceeds the 32 MiB edit limit")
+    with open(path, "rb") as stream:
+        data = stream.read(MAX_FILE_SCAN_BYTES + 1)
+    if len(data) > MAX_FILE_SCAN_BYTES:
+        raise ValueError("Target file exceeds the 32 MiB edit limit")
+    if b"\x00" in data:
+        raise ValueError("Cannot edit a binary file containing NUL bytes")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Cannot edit a file that is not valid UTF-8") from exc
+
+
+def write_file(filepath: str, content: str, create_backup: bool = False,
+               overwrite: bool = True) -> str:
+    """Atomically write UTF-8 text; optionally back up or refuse existing files."""
     try:
         path = _safe_path(filepath)
         content = "" if content is None else str(content)
         encoded_size = len(content.encode("utf-8"))
         if encoded_size > MCP_MAX_REQUEST_BYTES:
             raise ValueError("Content exceeds configured file write limit")
+        overwrite = _to_bool(overwrite, True)
         existed = os.path.exists(path)
         previous_bytes = 0
         if existed:
-            if os.path.isdir(path):
-                raise ValueError("Destination is a directory")
-            with contextlib.suppress(OSError):
-                previous_bytes = os.path.getsize(path)
+            if not os.path.isfile(path):
+                raise ValueError("Destination is not a regular file")
+            if not overwrite:
+                raise FileExistsError("Destination already exists; set overwrite=true to replace it")
+            previous_bytes = os.path.getsize(path)
         backup = ""
         if _to_bool(create_backup, False) and existed:
-            if not os.path.isfile(path):
-                raise ValueError("Backups are supported only for regular files")
-            backup = f"{path}.bak"
-            _safe_path(backup)
-            backup_fd, backup_tmp = tempfile.mkstemp(prefix=".mts-backup-",
-                                                     dir=os.path.dirname(path) or SANDBOX_ROOT)
-            os.close(backup_fd)
-            try:
-                shutil.copyfile(path, backup_tmp)
-                shutil.copystat(path, backup_tmp)
-                os.replace(backup_tmp, backup)
-            except Exception:
-                with contextlib.suppress(OSError):
-                    os.unlink(backup_tmp)
-                raise
-        written = _atomic_write(path, content)
+            backup = _create_file_backup(path)
+        written = _atomic_write(path, content, overwrite=overwrite, preserve_mode=True)
         return _ok({"status": "success", "filepath": filepath, "resolved_path": path,
                     "bytes_written": written, "created": not existed,
                     "previous_bytes": previous_bytes, "backup": backup})
     except Exception as exc:
         return _error(f"Error writing file: {exc}")
 
+
+def _locate_line_range(text: str, start_line: int, end_line: int) -> Tuple[int, int]:
+    """Find a line span without materializing a list for every line in the file."""
+    begin: Optional[int] = None
+    total = 0
+    for total, (start, end, _line) in enumerate(_iter_text_lines(text), 1):
+        if total == start_line:
+            begin = start
+        if total == end_line and begin is not None:
+            return begin, end
+    raise ValueError(f"Line range {start_line}-{end_line} is outside the file (total lines: {total})")
+
+
+def replace_lines(filepath: str, start_line: int, end_line: int, content: str,
+                  create_backup: bool = False, expected_content: str = "",
+                  dry_run: bool = False) -> str:
+    """Replace/delete a 1-based inclusive line range in a UTF-8 file atomically.
+
+    Empty content deletes the range. Replacement newlines follow the matched file
+    style, and its terminal newline is retained when present. expected_content
+    optionally checks the exact original lines (as returned by read_lines)
+    before writing; this is not an atomic compare-and-swap or a lock. dry_run
+    previews the edit without writing or backing up.
+    """
+    try:
+        start, end = _line_range(start_line, end_line)
+        path = _safe_path(filepath)
+        replacement = "" if content is None else str(content)
+        expected = "" if expected_content is None else str(expected_content)
+        if len(replacement.encode("utf-8")) + len(expected.encode("utf-8")) > MCP_MAX_REQUEST_BYTES:
+            raise ValueError("Replacement and expected content exceed the request size limit")
+        original = _read_editable_text(path)
+        begin, finish = _locate_line_range(original, start, end)
+        matched = original[begin:finish]
+        if expected and expected != matched:
+            return _error("The selected lines no longer match expected_content; read them again",
+                          filepath=filepath, conflict=True)
+        prepared = _prepare_line_replacement(replacement, matched, original[max(0, begin - 2):begin])
+        inserted_lines = sum(1 for _ in _iter_text_lines(prepared))
+        prepared = _preserve_file_bom(original, begin, finish, prepared)
+        result_bytes = (len(original.encode("utf-8")) - len(matched.encode("utf-8"))
+                        + len(prepared.encode("utf-8")))
+        if result_bytes > _MAX_EDIT_OUTPUT_BYTES:
+            raise ValueError("Edited file would exceed the 64 MiB write limit")
+        updated = original[:begin] + prepared + original[finish:]
+        dry_run = _to_bool(dry_run, False)
+        backup = ""
+        if not dry_run:
+            if _to_bool(create_backup, False):
+                backup = _create_file_backup(path)
+            _atomic_write(path, updated, preserve_mode=True)
+        payload = {
+            "status": "preview" if dry_run else "success", "filepath": filepath,
+            "resolved_path": path, "start_line": start, "end_line": end,
+            "lines_replaced": end - start + 1,
+            "lines_inserted": inserted_lines,
+            "changed": updated != original, "dry_run": dry_run,
+            "bytes_written": 0 if dry_run else result_bytes,
+            "would_write_bytes": result_bytes, "backup": backup,
+        }
+        if dry_run:
+            payload["original_content"] = matched[:MAX_TEXT_CHARS]
+            payload["replacement_content"] = prepared[:MAX_TEXT_CHARS]
+            payload["preview_truncated"] = (len(matched) > MAX_TEXT_CHARS
+                                             or len(prepared) > MAX_TEXT_CHARS)
+        return _ok(payload)
+    except Exception as exc:
+        return _error(f"Error replacing lines: {exc}")
+
+
+def _normalize_match_line(line: str, first: bool) -> str:
+    if first and line.startswith("\ufeff"):
+        line = line[1:]
+    return re.sub(r"\s+", " ", line).strip()
+
+
 def _normalized_snippet_lines(text: str) -> List[str]:
     """Per-line, whitespace-collapsed form used for tolerant snippet matching."""
-    return [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    return [_normalize_match_line(line, begin == 0) for begin, _, line in _iter_text_lines(text)]
+
+
+def _flexible_snippet_matches(content: str, target: List[str]):
+    """Yield matching character spans in linear time without storing all file lines."""
+    prefix = [0] * len(target)
+    matched = 0
+    for index in range(1, len(target)):
+        while matched and target[index] != target[matched]:
+            matched = prefix[matched - 1]
+        if target[index] == target[matched]:
+            matched += 1
+        prefix[index] = matched
+
+    offsets = deque(maxlen=len(target))
+    matched = 0
+    for begin, finish, line in _iter_text_lines(content):
+        offsets.append(begin)
+        normalized = _normalize_match_line(line, begin == 0)
+        while matched and normalized != target[matched]:
+            matched = prefix[matched - 1]
+        if normalized == target[matched]:
+            matched += 1
+        if matched == len(target):
+            yield offsets[0], finish
+            matched = prefix[matched - 1]
 
 
 def edit_file_replace(filepath: str, target_snippet: str, replacement_snippet: str,
-                      replace_all: bool = False, whitespace_flexible: bool = True) -> str:
-    """Replace a snippet in a file; falls back to whitespace-tolerant matching when unique."""
+                      replace_all: bool = False, whitespace_flexible: bool = True,
+                      create_backup: bool = False, dry_run: bool = False) -> str:
+    """Replace a snippet, optionally previewing/backing up the change.
+
+    Exact matches are preferred. Otherwise whitespace-tolerant line matching is
+    used when enabled; ambiguous matches require replace_all=true. Untouched
+    line endings and permissions are retained, and invalid UTF-8 is rejected.
+    """
     try:
         path = _safe_path(filepath)
-        if not os.path.exists(path):
-            return _error(f"File '{filepath}' does not exist.")
-        if os.path.getsize(path) > MAX_FILE_SCAN_BYTES:
-            return _error("Target file exceeds the 32 MiB edit limit")
-        snippet_bytes = (len(str(target_snippet or "").encode("utf-8"))
-                         + len(str(replacement_snippet or "").encode("utf-8")))
-        if snippet_bytes > MCP_MAX_REQUEST_BYTES:
+        target = "" if target_snippet is None else str(target_snippet)
+        replacement = "" if replacement_snippet is None else str(replacement_snippet)
+        target_bytes = len(target.encode("utf-8"))
+        replacement_bytes = len(replacement.encode("utf-8"))
+        if target_bytes + replacement_bytes > MCP_MAX_REQUEST_BYTES:
             return _error("Edit snippets exceed configured request size limit")
+        if not target:
+            return _error("target_snippet must be a non-empty string")
         replace_all = _to_bool(replace_all, False)
         whitespace_flexible = _to_bool(whitespace_flexible, True)
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read(MAX_FILE_SCAN_BYTES + 1)
-        if len(content.encode("utf-8")) > MAX_FILE_SCAN_BYTES:
-            return _error("Target file exceeds the 32 MiB edit limit")
-        if not target_snippet:
-            return _error("target_snippet must be a non-empty string")
-        replacement = "" if replacement_snippet is None else str(replacement_snippet)
-        count = content.count(target_snippet)
+        original = _read_editable_text(path)
+        original_bytes = len(original.encode("utf-8"))
+        count = original.count(target)
         match_mode = "exact"
-        updated = ""
+        preview_old, preview_new = target, replacement
         if count:
             if not replace_all and count > 1:
                 return _error(f"Target snippet appears {count} times. Set replace_all=true.",
                               occurrences=count)
-            updated = (content.replace(target_snippet, replacement) if replace_all
-                       else content.replace(target_snippet, replacement, 1))
+            replacements = count if replace_all else 1
+            result_bytes = original_bytes + replacements * (replacement_bytes - target_bytes)
+            if result_bytes > _MAX_EDIT_OUTPUT_BYTES:
+                return _error("Edited file would exceed the 64 MiB write limit")
+            updated = original.replace(target, replacement, replacements)
+            count = replacements
         elif whitespace_flexible:
-            # Models routinely emit the right lines with different indentation or
-            # trailing whitespace. Match line-wise on collapsed whitespace, but only
-            # apply the edit when the target is unambiguous.
-            target_lines = _normalized_snippet_lines(target_snippet)
+            target_lines = _normalized_snippet_lines(target)
             if not target_lines or not any(target_lines):
                 return _error(f"Target snippet not found in {filepath}.")
-            lines = content.splitlines(keepends=True)
-            normalized = [re.sub(r"\s+", " ", line).strip() for line in lines]
-            span = len(target_lines)
-            spans = [(index, index + span) for index in range(len(normalized) - span + 1)
-                     if normalized[index:index + span] == target_lines]
-            if not spans:
+            matches = _flexible_snippet_matches(original, target_lines)
+            first = next(matches, None)
+            if first is None:
                 return _error(f"Target snippet not found in {filepath}.",
                               hint="Matching is whitespace-tolerant but not fuzzy.")
-            if len(spans) > 1 and not replace_all:
-                return _error(f"Target snippet matches {len(spans)} locations. Set replace_all=true.",
-                              occurrences=len(spans))
-            selected = spans if replace_all else spans[:1]
-            # The matched block keeps its original indentation: if the caller's
-            # replacement starts at column 0 but the source does not, the source
-            # indent is applied to every replacement line that is not already
-            # indented at least as far. Already-indented lines stay untouched.
-            first_line = lines[selected[0][0]]
-            original_indent = first_line[:len(first_line) - len(first_line.lstrip())]
-            adjusted = replacement
-            if original_indent and adjusted and not adjusted[0].isspace():
-                adjusted = original_indent + adjusted
-                rebuilt = [line if (not line.strip() or line.startswith(original_indent))
-                           else original_indent + line
-                           for line in adjusted.splitlines(keepends=True)]
-                adjusted = "".join(rebuilt)
-            last_text = lines[selected[-1][1] - 1] if selected[-1][1] <= len(lines) else ""
-            if last_text.endswith("\n") and not adjusted.endswith("\n"):
-                adjusted += "\n"
-            pieces: List[str] = []
+            if not replace_all:
+                occurrences = 1 + sum(1 for _ in matches)
+                if occurrences > 1:
+                    return _error(f"Target snippet matches {occurrences} locations. Set replace_all=true.",
+                                  occurrences=occurrences)
+                spans = iter((first,))
+            else:
+                spans = itertools.chain((first,), matches)
+            # Preserve indentation and line endings independently at each match.
+            # Overlapping matches are skipped, as with str.replace.
+            output = io.StringIO(newline="")
             cursor = 0
-            for begin, finish in selected:
-                pieces.append("".join(lines[cursor:begin]))
-                pieces.append(adjusted)
+            result_bytes = 0
+            count = 0
+            for begin, finish in spans:
+                if begin < cursor:
+                    continue
+                matched_text = original[begin:finish]
+                first_line = next(_iter_text_lines(matched_text))[2]
+                first_ending = _line_ending(first_line)
+                first_body = first_line[:-len(first_ending)] if first_ending else first_line
+                if begin == 0 and first_body.startswith("\ufeff"):
+                    first_body = first_body[1:]
+                indent = first_body[:len(first_body) - len(first_body.lstrip())]
+                adjusted = replacement
+                if indent and adjusted and not adjusted[0].isspace():
+                    adjusted = indent + adjusted
+                    adjusted = "".join(
+                        line if not line.strip() or line.startswith(indent) else indent + line
+                        for _, _, line in _iter_text_lines(adjusted)
+                    )
+                adjusted = _prepare_line_replacement(adjusted, matched_text, original[max(0, begin - 2):begin])
+                adjusted = _preserve_file_bom(original, begin, finish, adjusted)
+                if count == 0:
+                    preview_old, preview_new = matched_text, adjusted
+                before = original[cursor:begin]
+                result_bytes += len(before.encode("utf-8")) + len(adjusted.encode("utf-8"))
+                if result_bytes > _MAX_EDIT_OUTPUT_BYTES:
+                    return _error("Edited file would exceed the 64 MiB write limit")
+                output.write(before)
+                output.write(adjusted)
                 cursor = finish
-            pieces.append("".join(lines[cursor:]))
-            updated = "".join(pieces)
-            count = len(selected)
+                count += 1
+            suffix = original[cursor:]
+            result_bytes += len(suffix.encode("utf-8"))
+            if result_bytes > _MAX_EDIT_OUTPUT_BYTES:
+                return _error("Edited file would exceed the 64 MiB write limit")
+            output.write(suffix)
+            updated = output.getvalue()
             match_mode = "whitespace-normalized"
         else:
             return _error(f"Target snippet not found in {filepath}.")
-        if len(updated.encode("utf-8")) > MAX_FILE_SCAN_BYTES * 2:
-            return _error("Edited file would exceed the 64 MiB write limit")
-        _atomic_write(path, updated)
-        return _ok({"status": "success", "filepath": filepath,
-                    "replacements_made": count if replace_all else 1,
-                    "match_mode": match_mode,
-                    "bytes_written": len(updated.encode("utf-8"))})
+        dry_run = _to_bool(dry_run, False)
+        backup = ""
+        if not dry_run:
+            if _to_bool(create_backup, False):
+                backup = _create_file_backup(path)
+            _atomic_write(path, updated, preserve_mode=True)
+        payload = {"status": "preview" if dry_run else "success", "filepath": filepath,
+                   "replacements_made": count, "match_mode": match_mode,
+                   "changed": updated != original, "dry_run": dry_run,
+                   "bytes_written": 0 if dry_run else result_bytes,
+                   "would_write_bytes": result_bytes, "backup": backup}
+        if dry_run:
+            payload["original_snippet"] = preview_old[:MAX_TEXT_CHARS]
+            payload["replacement_snippet"] = preview_new[:MAX_TEXT_CHARS]
+            payload["preview_truncated"] = (len(preview_old) > MAX_TEXT_CHARS
+                                            or len(preview_new) > MAX_TEXT_CHARS)
+        return _ok(payload)
     except Exception as exc:
         return _error(f"Error editing file: {exc}")
+
 
 def append_to_file(filepath: str, content: str, ensure_newline: bool = True) -> str:
     """Append text to a file (creating parents); inserts a separator newline when needed."""
@@ -3068,15 +3400,29 @@ def append_to_file(filepath: str, content: str, ensure_newline: bool = True) -> 
         path = _safe_path(filepath)
         content = "" if content is None else str(content)
         ensure_newline = _to_bool(ensure_newline, True)
+        if os.path.exists(path) and not os.path.isfile(path):
+            raise ValueError("Destination is not a regular file")
         current_size = os.path.getsize(path) if os.path.exists(path) else 0
         prefix = ""
         if ensure_newline and content and current_size:
-            # Never glue a new record onto the previous last line.
+            # Never glue a new record onto the previous last line. Prefer the
+            # most recent newline style when it appears in the file's tail.
             with open(path, "rb") as probe:
-                probe.seek(-1, os.SEEK_END)
-                last_byte = probe.read(1)
-            if last_byte not in (b"\n", b"\r") and not content.startswith(("\n", "\r")):
-                prefix = "\n"
+                tail_start = max(0, current_size - 65536)
+                probe.seek(tail_start)
+                tail = probe.read(65536)
+                if tail[-1:] not in (b"\n", b"\r") and not content.startswith(("\n", "\r")):
+                    index = max(tail.rfind(b"\n"), tail.rfind(b"\r"))
+                    if index >= 0 and tail[index:index + 1] == b"\n":
+                        previous = tail[index - 1:index] if index else b""
+                        if index == 0 and tail_start:
+                            probe.seek(tail_start - 1)
+                            previous = probe.read(1)
+                        prefix = "\r\n" if previous == b"\r" else "\n"
+                    elif index >= 0:
+                        prefix = "\r"
+                    else:
+                        prefix = "\n"
         payload_text = prefix + content
         content_bytes = len(payload_text.encode("utf-8"))
         if content_bytes > MCP_MAX_REQUEST_BYTES:
@@ -3084,7 +3430,7 @@ def append_to_file(filepath: str, content: str, ensure_newline: bool = True) -> 
         if current_size + content_bytes > 64 * 1024 * 1024:
             raise ValueError("Appended file would exceed the 64 MiB file write limit")
         _ensure_parent(path)
-        with open(path, "a", encoding="utf-8") as f:
+        with open(path, "a", encoding="utf-8", newline="") as f:
             f.write(payload_text)
         return _ok({"status": "success", "filepath": filepath,
                     "bytes_appended": content_bytes,
@@ -3984,7 +4330,7 @@ def apply_patch(filepath: str, patch: str, mode: str = "auto") -> str:
         stripped = patch_text.strip()
         looks_like_diff = stripped.startswith(("---", "diff ", "Index:", "@@"))
         if mode == "replace" or (mode == "auto" and not looks_like_diff and not os.path.exists(path)):
-            _atomic_write(path, patch_text)
+            _atomic_write(path, patch_text, preserve_mode=True)
             return _ok({"status": "success", "mode": "full_replace", "filepath": filepath,
                         "bytes_written": len(patch_text.encode("utf-8"))})
         if not looks_like_diff:
@@ -7530,7 +7876,10 @@ def _example_args(schema: Dict[str, str]) -> Dict[str, Any]:
             if parsed is not None:
                 args[key] = parsed
                 continue
-        args[key] = {"int": 0, "number": 0, "bool": False}.get(param_type, "<string>")
+        if param_type == "int" and key in ("start_line", "end_line"):
+            args[key] = 1
+        else:
+            args[key] = {"int": 0, "number": 0, "bool": False}.get(param_type, "<string>")
     return args
 
 
@@ -7661,8 +8010,10 @@ TOOL_MAP: Dict[str, Callable] = {
     "discover_feed_links": discover_feed_links,
     # --- filesystem ---
     "read_file": read_file,
+    "read_lines": read_lines,
     "write_file": write_file,
     "edit_file_replace": edit_file_replace,
+    "replace_lines": replace_lines,
     "append_to_file": append_to_file,
     "list_directory": list_directory,
     "file_stat": file_stat,
@@ -7778,10 +8129,16 @@ TOOL_SCHEMAS: Dict[str, Dict[str, str]] = {
     "parse_robots_txt": {"text": "str=", "user_agent": "str=*", "url": "str="},
     "discover_feed_links": {"html": "str=", "base_url": "str=", "url": "str="},
     # --- filesystem ---
-    "read_file": {"filepath": "str", "start_line": "int=1", "line_count": "int=500"},
-    "write_file": {"filepath": "str", "content": "str", "create_backup": "bool=false"},
+    "read_file": {"filepath": "str", "start_line": "int=1", "line_count": "int=500",
+                  "preserve_line_endings": "bool=false"},
+    "read_lines": {"filepath": "str", "start_line": "int", "end_line": "int"},
+    "write_file": {"filepath": "str", "content": "str", "create_backup": "bool=false",
+                   "overwrite": "bool=true"},
     "edit_file_replace": {"filepath": "str", "target_snippet": "str", "replacement_snippet": "str",
-                          "replace_all": "bool=false", "whitespace_flexible": "bool=true"},
+                          "replace_all": "bool=false", "whitespace_flexible": "bool=true",
+                          "create_backup": "bool=false", "dry_run": "bool=false"},
+    "replace_lines": {"filepath": "str", "start_line": "int", "end_line": "int", "content": "str",
+                      "create_backup": "bool=false", "expected_content": "str=", "dry_run": "bool=false"},
     "append_to_file": {"filepath": "str", "content": "str", "ensure_newline": "bool=true"},
     "list_directory": {"path": "str=.", "show_hidden": "bool=true", "sort_by": "str=name"},
     "file_stat": {"filepath": "str"},
@@ -7877,7 +8234,8 @@ for _group, _names in {
             "sitemap_parse", "rss_feed_parse", "whois_lookup", "port_check",
             "parse_html_document", "extract_structured_data", "parse_html_tables",
             "extract_media_links", "parse_robots_txt", "discover_feed_links"],
-    "files": ["read_file", "write_file", "edit_file_replace", "append_to_file", "list_directory",
+    "files": ["read_file", "read_lines", "write_file", "edit_file_replace", "replace_lines",
+              "append_to_file", "list_directory",
               "file_stat", "delete_file", "make_directory", "copy_file", "move_file",
               "file_checksum", "search_files", "search_file_content", "file_tree", "disk_usage",
               "compress_decompress_archive", "archive_list", "apply_patch"],
@@ -7954,13 +8312,26 @@ PARAMETER_HINTS: Dict[str, str] = {
     "pretty": "Indent the JSON output",
 }
 _TOOL_PARAMETER_HINTS: Dict[str, Dict[str, str]] = {
-    "read_file": {"filepath": "File to read", "line_count": "Maximum lines to return"},
+    "read_file": {"filepath": "File to read", "start_line": "First line to read (1-based)",
+                  "line_count": "Maximum lines to return (1-20,000)",
+                  "preserve_line_endings": "Return CRLF/CR line endings exactly as stored"},
+    "read_lines": {"start_line": "First line to read (1-based, inclusive)",
+                   "end_line": "Last line to read (inclusive; at most 20,000 lines per call)"},
     "write_file": {"filepath": "Destination file (created if missing)",
-                   "content": "Full file contents", "create_backup": "Copy the old file to <path>.bak"},
+                   "content": "Full file contents", "create_backup": "Copy the old file to <path>.bak",
+                   "overwrite": "Allow replacing an existing file (false creates only if absent)"},
     "append_to_file": {"ensure_newline": "Insert a newline if the file does not end with one"},
     "edit_file_replace": {"target_snippet": "Exact text to find",
                           "replacement_snippet": "Replacement text",
-                          "whitespace_flexible": "Fall back to whitespace-insensitive matching when unique"},
+                          "whitespace_flexible": "Fall back to whitespace-insensitive matching when unique",
+                          "create_backup": "Copy the old file to <path>.bak before writing",
+                          "dry_run": "Preview without writing or creating a backup"},
+    "replace_lines": {"start_line": "First line to replace (1-based, inclusive)",
+                      "end_line": "Last line to replace (inclusive)",
+                      "content": "Replacement lines; empty text deletes the selected lines",
+                      "expected_content": "Optional pre-write content check from read_lines (not a lock)",
+                      "create_backup": "Copy the old file to <path>.bak before writing",
+                      "dry_run": "Preview without writing or creating a backup"},
     "regex_search": {"flags": "Flags: i, m, s, x, a, u", "text": "Text to search"},
     "regex_replace": {"flags": "Flags: i, m, s, x, a, u", "text": "Text to transform",
                       "max_replacements": "Maximum substitutions (0 = all)"},
@@ -8002,6 +8373,8 @@ def _build_mcp_input_schema(tschema: dict, tool_name: str = "") -> dict:
         param_type = (spec_str.split("=", 1)[0] if has_default else spec_str).strip() or "str"
         json_type = {"int": "integer", "number": "number", "bool": "boolean"}.get(param_type, "string")
         prop: Dict[str, Any] = {"type": json_type}
+        if tool_name in {"read_lines", "replace_lines"} and key in {"start_line", "end_line"}:
+            prop["minimum"] = 1
         hint = _parameter_hint(tool_name, key)
         if hint:
             prop["description"] = hint
@@ -8038,6 +8411,8 @@ def _coerce_args(tool_name: str, args: Dict[str, Any]) -> Tuple[Dict[str, Any], 
         try:
             if param_type == "int":
                 if isinstance(value, bool):
+                    if tool_name in {"read_lines", "replace_lines"} and key in {"start_line", "end_line"}:
+                        raise ValueError
                     cleaned[key] = int(value)
                 else:
                     number = float(value)

@@ -2,8 +2,8 @@
 
 A single-file MCP tool server with a standard-library core (PyYAML and psutil are optional) that
 speaks both **JSON-RPC 2.0 (MCP `2024-11-05`)** and a **plain REST** dialect over HTTP. v4.2.0 is
-a correctness-and-capability pass over **every registered tool** (see §0); the registry grows to
-**95 tools** with `regex_replace` and `git_show`.
+a correctness-and-capability pass over **every registered tool** (see §0). Subsequent filesystem
+updates add `read_lines` and `replace_lines`, bringing the registry to **97 tools**.
 
 ```bash
 python3 mts.py                      # start the server
@@ -12,8 +12,51 @@ python3 mts.py --list-tools         # dump the registry
 python3 mts.py --self-test          # internal diagnostics, exit 0/1
 python3 mts.py --call web_search '{"query":"rust async runtime","max_results":5}'
 python3 -m unittest tests.test_mts -v  # 86 offline tests (no external network required)
-python3 -m unittest discover -s tests -p "test_mts*.py" -v  # 127 tests incl. the v4.2 upgrade suite
+python3 -m unittest discover -s tests -p "test_mts*.py" -v  # all offline MCP tests
 ```
+
+### File reading, writing and editing
+
+All file paths are resolved inside `MCP_SANDBOX_ROOT`. For example:
+
+```bash
+export MCP_SANDBOX_ROOT="$HOME/mcp-workspace"
+python3 mts.py --call write_file '{"filepath":"notes.txt","content":"first\nsecond\nthird\n","overwrite":false}'
+python3 mts.py --call read_lines '{"filepath":"notes.txt","start_line":2,"end_line":3}'
+python3 mts.py --call replace_lines '{"filepath":"notes.txt","start_line":2,"end_line":3,"content":"updated\nreplacement","expected_content":"second\nthird\n","create_backup":true}'
+python3 mts.py --call replace_lines '{"filepath":"notes.txt","start_line":2,"end_line":2,"content":"","dry_run":true}'
+```
+
+* `read_lines` takes **1-based, inclusive** bounds and returns both numbered `lines` and the
+  `content` of UTF-8 text, including original CRLF, LF or CR endings. It returns the available
+  lines when the end is past EOF; a start past EOF returns an empty result. A request may cover
+  at most 20,000 lines and returns at most `MAX_TEXT_CHARS` characters. `has_more` refers to the
+  rest of the file. Use `next_start_line` to page when available. `content_truncated` indicates
+  the character limit cut the requested range short; `partial_line=true` means a single line was
+  cut and cannot be resumed by line number. `read_file` retains its existing `start_line`/
+  `line_count` interface and normalized-newline default; set `preserve_line_endings=true` for
+  exact line endings. Skipping to a later start is limited to scanning 32 MiB, and `total_lines`
+  can be unknown for larger files. These readers replace invalid UTF-8 bytes with the replacement
+  character.
+* `replace_lines` requires an existing range and replaces the **entire** selected lines. Empty
+  `content` deletes them. Replacement line endings are normalized to the selected range's style;
+  when the old range ended with a newline, a non-empty replacement gets the same terminating
+  newline if it did not supply one. Untouched portions retain their original bytes, and a UTF-8
+  BOM is retained on non-empty files. Pass the exact `content` from `read_lines` as
+  `expected_content` to reject a changed range. This is a check before writing, **not** a lock or
+  atomic compare-and-swap; concurrent writers can still race.
+  `dry_run=true` reports a bounded preview without changing files or making backups.
+* `edit_file_replace` remains available for exact or whitespace-tolerant snippet replacement;
+  it now also accepts `dry_run` and `create_backup`. Both edit tools reject files containing NUL
+  bytes or invalid UTF-8 instead of silently corrupting them. They limit the original to 32 MiB and the
+  resulting file to 64 MiB; request-size limits also apply to replacement text.
+* `write_file` still overwrites by default. Use `overwrite=false` for an atomic create-only write;
+  it fails safely on filesystems that do not support hard links. `create_backup=true` copies an
+  existing file to `<path>.bak` (replacing any previous backup).
+  The edit tools support the same backup option. Atomic overwrites preserve ordinary permission
+  bits, including executability; special setuid/setgid/sticky bits are not carried forward.
+  `append_to_file` selects the recent newline style for a needed separator when available in the
+  file's tail. These operations retain the sandbox path checks and existing request-size limits.
 
 ---
 
@@ -132,13 +175,13 @@ python3 -m unittest discover -s tests -p "test_mts*.py" -v  # 127 tests incl. th
 
 ---
 
-## 3. Tool registry (95 tools)
+## 3. Tool registry (97 tools)
 
 | Category | Tools |
 |----------|-------|
 | **search** (10) | `web_search`, `web_search_news`, `web_search_images`, `web_search_answer`, `web_search_suggestions`, `wikipedia_lookup`, `arxiv_search`, `github_search`, `stackexchange_search`, `research_topic` |
 | **web** (22) | `fetch_many_urls`, `url_to_markdown`, `fetch_webpage_text`, `http_request`, `fetch_json_api`, `web_download_file`, `web_scrape_links`, `extract_metadata`, `dns_lookup`, `check_url_status`, `parse_url_headers`, `read_url_hardened`, `sitemap_parse`, `rss_feed_parse`, `whois_lookup`, `port_check`, `parse_html_document`, `extract_structured_data`, `parse_html_tables`, `extract_media_links`, `parse_robots_txt`, `discover_feed_links` |
-| **files** (18) | `read_file`, `write_file`, `edit_file_replace`, `append_to_file`, `list_directory`, `file_stat`, `delete_file`, `make_directory`, `copy_file`, `move_file`, `file_checksum`, `search_files`, `search_file_content`, `file_tree`, `disk_usage`, `compress_decompress_archive`, `archive_list`, `apply_patch` |
+| **files** (20) | `read_file`, `read_lines`, `write_file`, `edit_file_replace`, `replace_lines`, `append_to_file`, `list_directory`, `file_stat`, `delete_file`, `make_directory`, `copy_file`, `move_file`, `file_checksum`, `search_files`, `search_file_content`, `file_tree`, `disk_usage`, `compress_decompress_archive`, `archive_list`, `apply_patch` |
 | **execution** (6) | `lint_code`, `execute_python_code`, `execute_javascript_code`, `execute_bash_command`, `safe_execute_python`, `process_list` |
 | **data** (19) | `json_parse_validate`, `json_query`, `regex_search`, `regex_replace`, `base64_encode_decode`, `url_encode_decode`, `hash_text`, `uuid_generate`, `random_string`, `current_datetime`, `timestamp_convert`, `jwt_decode`, `csv_to_json`, `json_to_csv`, `yaml_json_convert`, `text_diff_compare`, `text_stats`, `text_summarize`, `parse_url` |
 | **git** (4) | `git_status`, `git_diff`, `git_log`, `git_show` |
@@ -245,9 +288,13 @@ See `mts_config.example.json`.
 * the real `Handler` over a loopback socket: auth, JSON-RPC `initialize`/`tools/list`/`tools/call`,
   REST path calls, 404/413 handling.
 
-`tests/test_mts_tool_coverage.py` additionally invokes all **95 registered tools** against
+`tests/test_mts_tool_coverage.py` additionally invokes all **97 registered tools** against
 in-memory or local fixtures (including search, DNS, WHOIS, and file tools) with no external
 services or credentials.
+
+`tests/test_mts_file_tools.py` covers numbered reads, line-range replacements and deletions,
+newlines, permissions, backups, stale-content checks, dry runs, limits, sandbox safety, and
+CLI/JSON-RPC discovery and invocation.
 
 `tests/test_mts_upgrades.py` adds **39 regression tests** that pin every v4.2 behaviour: CSV
 delimiter/BOM handling, readability maths, decode semantics, JWT edge cases, generator
