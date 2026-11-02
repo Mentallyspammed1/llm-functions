@@ -2637,3 +2637,6 @@ RuntimeError: [c48fc831] Request failed after retries: HTTP 403 from https://api
 2026-05-23 15:34:02 | WARNING  | BybitRealm | [686e6d9a] HTTP 403 from https://api.bytick.com. Block: True
 2026-05-23 15:34:02 | WARNING  | BybitRealm | [686e6d9a] HTTP 403 from https://api.bybit.nl. Block: True
 2026-05-23 15:34:02 | WARNING  | BybitRealm | [686e6d9a] HTTP 403 from https://api.bybit.tr. Block: True
+2026-10-31 20:12:56 | INFO     | BybitRealm | Validating configuration. API Key present: Yes
+2026-10-31 20:12:56 | INFO     | BybitRealm | SOCKS5 session initialized on port 9050 (PySocks available: True)
+2026-10-31 20:13:01 | WARNING  | BybitRealm | Clock drift detected: 2445ms offset from server

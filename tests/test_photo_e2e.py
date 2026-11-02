@@ -146,4 +146,4 @@ with tempfile.TemporaryDirectory() as td:
 total = len(results)
 passed = sum(1 for r in results if r["ok"])
 print(f"\n{passed}/{total} tests passed")
-sys.exit(0 if passed == total else 1)
+assert passed == total, f"{passed}/{total} tests passed"
