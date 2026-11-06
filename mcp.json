@@ -1,23 +1,153 @@
 {
   "mcpServers": {
-    "web-search": {
-      "command": "node",
-      "args": ["/data/data/com.termux/files/home/web-search/build/index.js"]
-    },
-    "github": {
-      "command": "node",
-      "args": ["/data/data/com.termux/files/home/.config/aichat/llm-functions/node_modules/@modelcontextprotocol/server-github/dist/index.js"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "dummy_token"
-      }
-    },
-    "bybit": {
-      "command": "node",
-      "args": ["/data/data/com.termux/files/home/.config/aichat/llm-functions/bybit-mcp/build/index.js"]
-    },
     "filesystem": {
-      "command": "node",
-      "args": ["/data/data/com.termux/files/home/.config/aichat/llm-functions/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "/data/data/com.termux/files/home"]
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/data/data/com.termux/files/home",
+        "/data/data/com.termux/files/home/code",
+        "/tmp",
+        "/data/data/com.termux/files/home/Documents"
+      ]
+    },
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "/data/data/com.termux/files/home"
+      ],
+      "prefix": false
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time"
+      ]
+    },
+    "sqlite": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite",
+        "--db-path",
+        "/data/data/com.termux/files/home/.aichat-mcp.db"
+      ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ]
+    },
+    "everything": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ]
+    },
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://localhost/postgres"
+      ]
+    },
+    "redis": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-redis",
+        "redis://localhost:6379"
+      ]
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ]
+    },
+    "docker": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-docker"
+      ]
+    },
+    "kubernetes": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-kubernetes"
+      ]
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ]
+    },
+    "mongodb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-server-mongodb",
+        "mongodb://localhost:27017"
+      ]
+    },
+    "qdrant": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-server-qdrant",
+        "http://localhost:6333"
+      ]
+    },
+    "duckduckgo-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-server-duckduckgo"
+      ]
+    },
+    "youtube-transcript": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "youtube-transcript-mcp"
+      ]
+    },
+    "blender": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "blender-mcp"
+      ]
     }
   }
 }

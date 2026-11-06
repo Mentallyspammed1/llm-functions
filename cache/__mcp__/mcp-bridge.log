@@ -1,10 +1,78 @@
 Install node dependencies...
-Starting web-search server...
-Starting github server...
-Starting bybit server...
 Starting filesystem server...
-Web Search MCP server running on stdio
-GitHub MCP Server running on stdio
-Secure MCP Filesystem Server running on stdio
-Client does not support MCP Roots, using allowed directories set from server args: [ '/data/data/com.termux/files/home' ]
-Server is running on port 8808
+Starting git server...
+Starting fetch server...
+Starting memory server...
+Starting sequential-thinking server...
+Starting time server...
+Starting sqlite server...
+Starting playwright server...
+Starting everything server...
+Starting postgres server...
+Starting redis server...
+Starting puppeteer server...
+Starting docker server...
+Starting kubernetes server...
+Starting context7 server...
+Starting mongodb server...
+Starting qdrant server...
+Starting duckduckgo-search server...
+Starting youtube-transcript server...
+Starting blender server...
+   Building cryptography==50.0.2
+   Building pydantic-core==2.50.2
+   Building rpds-py==2026.9.1
+warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+   Building regex==2026.9.29
+   Building lxml==6.1.3
+warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+npm error code E404
+npm error 404 Not Found - GET https://registry.npmjs.org/@modelcontextprotocol%2fserver-docker - Not found
+npm error 404
+npm error 404  The requested resource '@modelcontextprotocol/server-docker@*' could not be found or you do not have permission to access it.
+npm error 404
+npm error 404 Note that you can also install from a
+npm error 404 tarball, folder, http url, or git url.
+npm error A complete log of this run can be found in: /data/data/com.termux/files/home/.npm/_logs/2026-11-04T23_59_48_077Z-debug-0.log
+Failed to start docker server; MCP error -32000: Connection closed
+npm error code E404
+npm error 404 Not Found - GET https://registry.npmjs.org/mcp-server-duckduckgo - Not found
+npm error 404
+npm error 404  The requested resource 'mcp-server-duckduckgo@*' could not be found or you do not have permission to access it.
+npm error 404
+npm error 404 Note that you can also install from a
+npm error 404 tarball, folder, http url, or git url.
+npm error A complete log of this run can be found in: /data/data/com.termux/files/home/.npm/_logs/2026-11-04T23_59_47_615Z-debug-0.log
+npm error could not determine executable to run
+npm error A complete log of this run can be found in: /data/data/com.termux/files/home/.npm/_logs/2026-11-04T23_59_46_764Z-debug-0.log
+Failed to start duckduckgo-search server; MCP error -32000: Connection closed
+npm error code E404
+npm error 404 Not Found - GET https://registry.npmjs.org/@modelcontextprotocol%2fserver-kubernetes - Not found
+npm error 404
+npm error 404  The requested resource '@modelcontextprotocol/server-kubernetes@*' could not be found or you do not have permission to access it.
+npm error 404
+Failed to start qdrant server; MCP error -32000: Connection closed
+npm error 404 Note that you can also install from a
+npm error 404 tarball, folder, http url, or git url.
+npm error A complete log of this run can be found in: /data/data/com.termux/files/home/.npm/_logs/2026-11-04T23_59_49_790Z-debug-0.log
+Failed to start kubernetes server; MCP error -32000: Connection closed
+Failed to start filesystem server; MCP error -32001: Request timed out
+Failed to start git server; MCP error -32001: Request timed out
+Failed to start fetch server; MCP error -32001: Request timed out
+Failed to start memory server; MCP error -32001: Request timed out
+Failed to start sequential-thinking server; MCP error -32001: Request timed out
+Failed to start time server; MCP error -32001: Request timed out
+Failed to start sqlite server; MCP error -32001: Request timed out
+Failed to start playwright server; MCP error -32001: Request timed out
+Failed to start everything server; MCP error -32001: Request timed out
+Failed to start postgres server; MCP error -32001: Request timed out
+Failed to start redis server; MCP error -32001: Request timed out
+Failed to start puppeteer server; MCP error -32001: Request timed out
+Failed to start context7 server; MCP error -32001: Request timed out
+Failed to start mongodb server; MCP error -32001: Request timed out
+Failed to start youtube-transcript server; MCP error -32001: Request timed out
+Failed to start blender server; MCP error -32001: Request timed out
