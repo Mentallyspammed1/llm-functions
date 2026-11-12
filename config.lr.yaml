@@ -1,0 +1,23 @@
+# Pyrmethus / aichat llm-functions config
+# Configured for NVIDIA Nemotron Super NIM API
+
+nim:
+  api_base: https://integrate.api.nvidia.com/v1
+  api_key: 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
+  model: nvidia/nemotron-3.5-super-vl-120b-a12b
+  fallback_models:
+    - nvidia/nemotron-3.5-lightning-30b-a3b
+  timeout: 30
+  max_tokens: 150
+  temperature: 0.82
+  disable_thinking: true
+
+port: 5001
+debug: false
+self_loop_guard: true
+auth: open
+database: /data/data/com.termux/files/home/pyrmethus_conversations.db
+webhook_endpoint: http://127.0.0.1:5001/pyrmethus_autoreply_webhook
+dashboard_url: http://127.0.0.1:5001/
+health_url: http://127.0.0.1:5001/health
+metrics_url: http://127.0.0.1:5001/metrics

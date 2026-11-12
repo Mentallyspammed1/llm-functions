@@ -181,9 +181,24 @@ DEFAULT_CONFIG = {
         'auto_reply_window_seconds': 120.0,
         'same_message_repeat_limit': 2,
     },
+    'nim': {
+        'api_base': os.environ.get('NIM_BASE_URL', 'https://integrate.api.nvidia.com/v1'),
+        'api_key': os.environ.get('NVIDIA_API_KEY', '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'),
+        'model': os.environ.get('NEMOTRON_MODEL', 'nvidia/nemotron-3.5-super-vl-120b-a12b'),
+        'fallback_models': ['nvidia/nemotron-3.5-lightning-30b-a3b'],
+        'timeout': 30,
+        'max_retries': 2,
+        'retry_backoff': 1.5,
+        'retry_jitter': 0.4,
+        'temperature': 0.82,
+        'top_p': 0.95,
+        'max_tokens': 150,
+        'disable_thinking': True,
+        'warmup_on_start': True,
+    },
     'ollama': {
         'host': 'http://localhost:11434',
-        'model': 'nemotron-3-nano:30b-cloud',
+        'model': 'gemma3:1b',
         'fallback_models': [],               # tried in order if the primary model fails
         'timeout': 25,
         'max_retries': 2,
@@ -198,7 +213,7 @@ DEFAULT_CONFIG = {
         'seed': 0,                           # 0 = non-deterministic
         'keep_alive': '10m',
         'disable_thinking': True,
-        'warmup_on_start': True,
+        'warmup_on_start': False,
     },
     'persona': {
         'name': 'Jeremiah',
@@ -276,6 +291,7 @@ DEFAULT_CONFIG = {
         'digest_hour': 9,                    # local hour for the daily digest
     },
     'health': {
+        'nim_timeout': 10,
         'ollama_timeout': 5,
         'dashboard_cache_seconds': 20,
     },
@@ -391,6 +407,23 @@ def load_config() -> dict:
         sec['quiet_hours'] = deep_merge({}, DEFAULT_CONFIG['security']['quiet_hours'])
     if str(quiet.get('action', 'drop')).lower() not in ('drop', 'fallback'):
         quiet['action'] = 'drop'
+
+    nim = config.setdefault('nim', {})
+    _coerce(nim, 'timeout', int, 30, minimum=1)
+    _coerce(nim, 'max_retries', int, 2, minimum=0, maximum=10)
+    _coerce(nim, 'max_tokens', int, 260, minimum=16)
+    _coerce(nim, 'temperature', float, 0.82, minimum=0.0, maximum=2.0)
+    _coerce(nim, 'top_p', float, 0.95, minimum=0.0, maximum=1.0)
+    _coerce(nim, 'retry_backoff', float, 1.5, minimum=1.0)
+    _coerce(nim, 'retry_jitter', float, 0.4, minimum=0.0)
+    if not isinstance(nim.get('fallback_models'), list):
+        nim['fallback_models'] = []
+    if not nim.get('api_key'):
+        nim['api_key'] = os.environ.get('NVIDIA_API_KEY', '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')
+    if not nim.get('api_base'):
+        nim['api_base'] = os.environ.get('NIM_BASE_URL', 'https://integrate.api.nvidia.com/v1')
+    if not nim.get('model'):
+        nim['model'] = os.environ.get('NEMOTRON_MODEL', 'nvidia/nemotron-3.5-super-vl-120b-a12b')
 
     ollama = config['ollama']
     _coerce(ollama, 'timeout', int, 25, minimum=1)
@@ -1861,7 +1894,11 @@ def clean_llm_response(text: str, max_chars: Optional[int] = None) -> str:
     return _clamp_reply(text, max_chars)
 
 
-class OllamaError(RuntimeError):
+class LLMError(RuntimeError):
+    """Base error for LLM transport / protocol failures."""
+
+
+class OllamaError(LLMError):
     """Base error for Ollama transport / protocol failures."""
 
 
@@ -1873,14 +1910,61 @@ class _FatalOllamaError(OllamaError):
     """Permanent failure (bad model, 4xx, malformed request) — try next model."""
 
 
+class NIMError(LLMError):
+    """Base error for NVIDIA NIM transport / protocol failures."""
+
+
+class _RetryableNIMError(NIMError):
+    """Transient failure (timeout, 5xx, 429, empty body) — worth retrying."""
+
+
+class _FatalNIMError(NIMError):
+    """Permanent failure (bad model, 401, 403, 404, bad body) — try next model."""
+
+
 def _model_candidates(primary: Optional[str] = None) -> List[str]:
     """Primary model followed by any configured fallbacks (deduplicated)."""
     out: List[str] = []
-    for candidate in [primary or CONFIG['ollama']['model']] + list(CONFIG['ollama'].get('fallback_models') or []):
+    nim_cfg = CONFIG.get('nim', {})
+    for candidate in [primary or nim_cfg.get('model')] + list(nim_cfg.get('fallback_models') or []):
         candidate = str(candidate or '').strip()
         if candidate and candidate not in out:
             out.append(candidate)
     return out
+
+
+def _nim_request_headers() -> Dict[str, str]:
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': f'{APP_TITLE}/{VERSION}',
+    }
+    api_key = CONFIG.get('nim', {}).get('api_key') or os.environ.get('NVIDIA_API_KEY', '')
+    if api_key:
+        headers['Authorization'] = f"Bearer {api_key.strip()}"
+    return headers
+
+
+def verify_nim_model() -> bool:
+    """Check connectivity to NVIDIA NIM API and model endpoint."""
+    nim_cfg = CONFIG.get('nim', {})
+    api_base = str(nim_cfg.get('api_base') or 'https://integrate.api.nvidia.com/v1').rstrip('/')
+    url = f"{api_base}/models"
+    timeout = CONFIG.get('health', {}).get('nim_timeout', 10)
+    try:
+        r = requests.get(url, headers=_nim_request_headers(), timeout=timeout)
+        if r.status_code == 200:
+            logger.info("NVIDIA NIM API connectivity verified (/v1/models OK)")
+            return True
+        elif r.status_code in (401, 403):
+            logger.warning(f"NVIDIA NIM auth error: HTTP {r.status_code}. Check your NVIDIA_API_KEY.")
+            return False
+        else:
+            logger.warning(f"NVIDIA NIM /models returned HTTP {r.status_code}: {r.text[:200]}")
+            return False
+    except Exception as e:
+        logger.warning(f"Could not connect to NVIDIA NIM on startup: {e}")
+        return False
 
 
 def verify_ollama_model() -> bool:
@@ -1892,7 +1976,7 @@ def verify_ollama_model() -> bool:
             return False
         models = [m.get('name', '') for m in r.json().get('models', [])]
         ok = True
-        for target in _model_candidates():
+        for target in [CONFIG['ollama']['model']] + list(CONFIG['ollama'].get('fallback_models') or []):
             if any(target in m for m in models):
                 logger.info(f"Ollama model '{target}' verified and ready")
             else:
@@ -1905,22 +1989,151 @@ def verify_ollama_model() -> bool:
 
 
 def warmup_model() -> None:
-    """Load the model into memory in the background so the first text is fast."""
+    """Perform a lightweight warmup chat request against NVIDIA NIM in the background."""
     def _run():
+        nim_cfg = CONFIG.get('nim', {})
+        api_base = str(nim_cfg.get('api_base') or 'https://integrate.api.nvidia.com/v1').rstrip('/')
+        url = f"{api_base}/chat/completions"
+        model = nim_cfg.get('model', 'nvidia/nemotron-3-nano-30b-a3b')
+        started = time.monotonic()
         try:
-            model = CONFIG['ollama']['model']
-            started = time.monotonic()
-            requests.post(f"{CONFIG['ollama']['host']}/api/chat", json={
+            payload = {
                 'model': model,
                 'messages': [{'role': 'user', 'content': 'hi'}],
-                'stream': False,
-                'options': {'num_predict': 1, 'temperature': 0.0},
-                'keep_alive': CONFIG['ollama'].get('keep_alive', '10m'),
-            }, timeout=max(30, int(CONFIG['ollama']['timeout'])))
-            logger.info(f"Model warmup finished in {time.monotonic() - started:.1f}s")
+                'max_tokens': 4,
+                'temperature': 0.1,
+            }
+            resp = requests.post(url, json=payload, headers=_nim_request_headers(),
+                                 timeout=max(20, int(nim_cfg.get('timeout', 30))))
+            if resp.status_code == 200:
+                logger.info(f"NVIDIA NIM warmup finished in {time.monotonic() - started:.1f}s ({model})")
+            else:
+                logger.debug(f"NVIDIA NIM warmup returned HTTP {resp.status_code}: {resp.text[:150]}")
         except Exception as e:
-            logger.debug(f"Model warmup skipped: {e}")
-    threading.Thread(target=_run, daemon=True, name='ollama-warmup').start()
+            logger.debug(f"NVIDIA NIM warmup skipped: {e}")
+    threading.Thread(target=_run, daemon=True, name='nim-warmup').start()
+
+
+def _nim_payload(messages: List[Dict[str, str]], model: str) -> Dict[str, Any]:
+    """Build an OpenAI-compatible /chat/completions request body for NVIDIA NIM."""
+    cfg = CONFIG.get('nim', {})
+    persona_name = str(CONFIG.get('persona', {}).get('name', '')).strip()
+
+    candidate_stops = ['\nUser:', '\nAssistant:', f"\n{persona_name}:", '\nSender:', '\nHuman:']
+    stops: List[str] = []
+    for s in candidate_stops:
+        if s and s not in stops and len(stops) < 4:
+            stops.append(s)
+
+    payload: Dict[str, Any] = {
+        'model': model,
+        'messages': messages,
+        'temperature': float(cfg.get('temperature', 0.82)),
+        'top_p': float(cfg.get('top_p', 0.95)),
+        'max_tokens': int(cfg.get('max_tokens', 150)),
+        'stream': False,
+    }
+    if cfg.get('disable_thinking', True):
+        payload['chat_template_kwargs'] = {'thinking': False}
+    if stops:
+        payload['stop'] = stops
+    return payload
+
+
+def _nim_chat_once(messages: List[Dict[str, str]], model: str,
+                   timeout: float) -> Tuple[str, Dict[str, Any]]:
+    """One /chat/completions round-trip to NVIDIA NIM API."""
+    cfg = CONFIG.get('nim', {})
+    api_base = str(cfg.get('api_base') or 'https://integrate.api.nvidia.com/v1').rstrip('/')
+    url = f"{api_base}/chat/completions"
+
+    try:
+        resp = requests.post(url, json=_nim_payload(messages, model),
+                             headers=_nim_request_headers(), timeout=timeout)
+    except requests.exceptions.Timeout as e:
+        raise _RetryableNIMError(f"NIM timed out after {timeout:.1f}s") from e
+    except requests.exceptions.RequestException as e:
+        raise _RetryableNIMError(f"NIM connection error: {e}") from e
+
+    if resp.status_code == 429 or resp.status_code >= 500:
+        raise _RetryableNIMError(f"NIM HTTP {resp.status_code}: {resp.text[:200]}")
+    if resp.status_code >= 400:
+        raise _FatalNIMError(f"NIM HTTP {resp.status_code}: {resp.text[:200]}")
+
+    try:
+        data = resp.json()
+    except ValueError as e:
+        raise _RetryableNIMError("NIM returned non-JSON body") from e
+
+    if isinstance(data.get('error'), dict) and data['error'].get('message'):
+        raise _FatalNIMError(f"NIM error: {data['error']['message'][:200]}")
+
+    choices = data.get('choices') or []
+    if not choices:
+        raise _RetryableNIMError("NIM returned no choices in response")
+
+    first_choice = choices[0] or {}
+    msg_obj = first_choice.get('message') or {}
+    raw_reply = msg_obj.get('content', '') or msg_obj.get('reasoning_content', '') or ''
+    cleaned = clean_llm_response(raw_reply)
+    if not cleaned:
+        raise _RetryableNIMError("NIM returned empty reply")
+    return cleaned, data
+
+
+def query_nim(messages: List[Dict[str, str]], timeout: Optional[float] = None,
+              model: Optional[str] = None, deadline: Optional[float] = None) -> str:
+    """Ask NVIDIA NIM for one reply, retrying transient failures within a deadline."""
+    cfg = CONFIG.get('nim', {})
+    if deadline is None:
+        deadline = time.monotonic() + float(CONFIG['runtime'].get('request_timeout_seconds', 45))
+    attempts = max(1, int(cfg.get('max_retries', 2)) + 1)
+    per_attempt = float(timeout if timeout is not None else cfg.get('timeout', 30))
+    backoff = float(cfg.get('retry_backoff', 1.5))
+    jitter_max = float(cfg.get('retry_jitter', 0.4))
+    last_err: Optional[Exception] = None
+
+    for model_name in _model_candidates(model):
+        delay = 1.0
+        for attempt in range(attempts):
+            remaining = deadline - time.monotonic()
+            if remaining <= 1.5:
+                raise NIMError(f"Request deadline reached before NIM could reply ({last_err or 'no time left'})")
+            try:
+                text, meta = _nim_chat_once(messages, model_name, min(per_attempt, remaining))
+                metrics.inc('llm_calls')
+                metrics.inc('llm_attempts')
+                metrics.record_model(model_name)
+                usage = meta.get('usage') or {}
+                metrics.add_tokens(usage.get('prompt_tokens', 0), usage.get('completion_tokens', 0))
+                if model_name != cfg.get('model'):
+                    metrics.inc('llm_fallback_used')
+                    logger.warning(f"Primary model unavailable — served by fallback '{model_name}'")
+                return text
+            except _FatalNIMError as e:
+                last_err = e
+                logger.error(f"NIM fatal error on '{model_name}': {e}")
+                break  # move straight to next model
+            except _RetryableNIMError as e:
+                last_err = e
+                if attempt == attempts - 1:
+                    break
+                sleep_for = min(delay + random.uniform(0.0, jitter_max),
+                                max(0.0, deadline - time.monotonic() - 1.0))
+                if sleep_for <= 0:
+                    break
+                logger.warning(f"NIM call failed on '{model_name}' (attempt {attempt + 1}/{attempts}): {e}. "
+                               f"Retrying in {sleep_for:.1f}s...")
+                time.sleep(sleep_for)
+                delay *= backoff
+
+    raise NIMError(str(last_err) if last_err else "NIM call failed")
+
+
+def query_llm(messages: List[Dict[str, str]], timeout: Optional[float] = None,
+              model: Optional[str] = None, deadline: Optional[float] = None) -> str:
+    """Main LLM dispatch: invokes NVIDIA NIM with fallback to Ollama if configured."""
+    return query_nim(messages, timeout=timeout, model=model, deadline=deadline)
 
 
 def ollama_retry(max_attempts: int = 3, backoff: float = 1.5):
@@ -2532,45 +2745,39 @@ def collect_health(deep: bool = False, force: bool = False) -> Dict[str, Any]:
         checks['database'] = f'error: {e}'
         status = 'unhealthy'
 
+    nim_cfg = CONFIG.get('nim', {})
+    api_base = str(nim_cfg.get('api_base') or 'https://integrate.api.nvidia.com/v1').rstrip('/')
+    nim_timeout = float(CONFIG.get('health', {}).get('nim_timeout', 10))
+
     try:
-        resp = requests.get(f"{CONFIG['ollama']['host']}/api/tags",
-                            timeout=CONFIG['health']['ollama_timeout'])
-        checks['ollama'] = 'ok' if resp.status_code == 200 else f'error: HTTP {resp.status_code}'
+        resp = requests.get(f"{api_base}/models", headers=_nim_request_headers(),
+                            timeout=nim_timeout)
+        checks['nim'] = 'ok' if resp.status_code == 200 else f'error: HTTP {resp.status_code}'
         if resp.status_code == 200:
-            try:
-                names = [m.get('name', '') for m in resp.json().get('models', [])]
-                if names and not any(CONFIG['ollama']['model'] in n for n in names):
-                    checks['model'] = f"missing: {CONFIG['ollama']['model']}"
-                    checks['ollama'] = 'degraded: model not pulled'
-                    if status == 'healthy':
-                        status = 'degraded'
-                else:
-                    checks['model'] = 'ok'
-            except ValueError:
-                checks['model'] = 'unknown'
+            checks['model'] = 'ok'
         elif status == 'healthy':
             status = 'degraded'
     except Exception as e:
-        checks['ollama'] = f'error: {e}'
+        checks['nim'] = f'error: {e}'
         if status == 'healthy':
             status = 'degraded'
 
-    if deep and checks.get('ollama') == 'ok':
+    if deep and checks.get('nim') == 'ok':
         try:
-            smoke = requests.post(f"{CONFIG['ollama']['host']}/api/chat", json={
-                'model': CONFIG['ollama']['model'],
+            smoke = requests.post(f"{api_base}/chat/completions", json={
+                'model': nim_cfg.get('model', 'nvidia/nemotron-3-nano-30b-a3b'),
                 'messages': [{'role': 'user', 'content': 'ping'}],
-                'stream': False,
-                'options': {'num_predict': 8, 'temperature': 0.0},
-            }, timeout=CONFIG['health']['ollama_timeout'])
-            checks['ollama_chat'] = 'ok' if smoke.status_code == 200 else f'error: HTTP {smoke.status_code}'
+                'max_tokens': 4,
+                'temperature': 0.0,
+            }, headers=_nim_request_headers(), timeout=nim_timeout)
+            checks['nim_chat'] = 'ok' if smoke.status_code == 200 else f'error: HTTP {smoke.status_code}'
             if smoke.status_code != 200:
-                checks['ollama'] = 'degraded: chat smoke test failed'
+                checks['nim'] = 'degraded: chat smoke test failed'
                 if status == 'healthy':
                     status = 'degraded'
         except Exception as e:
-            checks['ollama_chat'] = f'error: {e}'
-            checks['ollama'] = 'degraded: chat smoke test failed'
+            checks['nim_chat'] = f'error: {e}'
+            checks['nim'] = 'degraded: chat smoke test failed'
             if status == 'healthy':
                 status = 'degraded'
 
@@ -2581,7 +2788,7 @@ def collect_health(deep: bool = False, force: bool = False) -> Dict[str, Any]:
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'uptime_seconds': round(time.monotonic() - metrics.started_at, 1),
         'pid': os.getpid(),
-        'model': CONFIG['ollama']['model'],
+        'model': CONFIG.get('nim', {}).get('model', 'nvidia/nemotron-3-nano-30b-a3b'),
     }
     with _health_lock:
         _health_cache[key] = (now, payload)
@@ -2608,7 +2815,7 @@ def _generate_reply(fields: Dict[str, Any], deadline: float) -> str:
     )
     metrics.inc('prompt_chars', sum(len(m['content']) for m in messages))
     try:
-        return query_ollama(messages, deadline=deadline)
+        return query_nim(messages, deadline=deadline)
     except Exception as e:
         metrics.inc('llm_errors')
         logger.error(f"Failed to process message with LLM: {e}")
@@ -2748,7 +2955,7 @@ def _webhook_core():
                     app_id=fields['app_id'], is_group=fields['is_group'],
                     group_name=fields['group_name'],
                     elapsed_ms=(time.monotonic() - started) * 1000.0,
-                    model_name=CONFIG['ollama']['model'], cached=True,
+                    model_name=CONFIG.get('nim', {}).get('model', 'nemotron'), cached=True,
                 )
             return jsonify(cached_payload or {"data": []}), 200
 
@@ -2768,13 +2975,14 @@ def _webhook_core():
             reply_text = get_fallback_response()
 
         elapsed_ms = (time.monotonic() - started) * 1000.0
+        current_model = CONFIG.get('nim', {}).get('model', 'nemotron')
 
         if reply_text:
             metrics.inc('replies_sent')
             metrics.observe_latency(elapsed_ms)
             log_conversation(sender, message, reply_text, fields['app_id'], fields['is_group'],
                              fields['group_name'], get_request_id(), elapsed_ms,
-                             CONFIG['ollama']['model'])
+                             current_model)
             self_message_guard.remember_outgoing(sender, reply_text)
             _mark_replied(sender)
 
@@ -2790,7 +2998,7 @@ def _webhook_core():
 
             render_message_card(
                 sender, message, reply_text, fields['app_id'], fields['is_group'],
-                fields['group_name'], elapsed_ms, CONFIG['ollama']['model'], False,
+                fields['group_name'], elapsed_ms, current_model, False,
             )
         else:
             metrics.inc('empty_replies')
@@ -3481,7 +3689,7 @@ def build_dashboard_payload(limit: Optional[int] = None) -> Dict[str, Any]:
     return {
         'version': VERSION,
         'title': CONFIG['dashboard'].get('title', APP_TITLE),
-        'model': CONFIG['ollama']['model'],
+        'model': CONFIG.get('nim', {}).get('model', 'nvidia/nemotron-3-nano-30b-a3b'),
         'host': CONFIG['server']['host'],
         'port': ACTIVE_PORT or CONFIG['server']['port'],
         'pid': os.getpid(),
@@ -3636,6 +3844,10 @@ def api_config():
         'ollama': {'host': CONFIG['ollama']['host'], 'model': CONFIG['ollama']['model'],
                    'fallback_models': CONFIG['ollama'].get('fallback_models', []),
                    'timeout': CONFIG['ollama']['timeout']},
+        'nim': {'api_base': CONFIG.get('nim', {}).get('api_base'),
+                'model': CONFIG.get('nim', {}).get('model'),
+                'fallback_models': CONFIG.get('nim', {}).get('fallback_models', []),
+                'timeout': CONFIG.get('nim', {}).get('timeout')},
         'persona': {'name': CONFIG['persona']['name'], 'max_reply_chars': CONFIG['persona']['max_reply_chars']},
         'context': CONFIG['context'],
         'security': {
@@ -3724,7 +3936,7 @@ def print_banner(port: int, host: Optional[str] = None) -> None:
         ("Webhook endpoint", f"{base}/pyrmethus_autoreply_webhook"),
         ("Dashboard", f"{base}/"),
         ("Health / metrics", f"{base}/health  ·  {base}/metrics"),
-        ("Ollama model", f"{CONFIG['ollama']['model']} @ {CONFIG['ollama']['host']}"),
+        ("NIM model", f"{CONFIG.get('nim', {}).get('model')} @ {CONFIG.get('nim', {}).get('api_base')}"),
         ("Database", CONFIG['database']['path']),
         ("Config", config_path() if os.path.exists(config_path()) else f"{config_path()} (defaults)"),
         ("Self-loop guard", 'ON' if self_message_guard.enabled else 'OFF'),
@@ -3821,8 +4033,8 @@ def run_service(port_override: Optional[int] = None, auto_kill: bool = True,
     init_db()
     prune_old_conversations()
     start_maintenance_threads()
-    verify_ollama_model()
-    if CONFIG['ollama'].get('warmup_on_start', True):
+    verify_nim_model()
+    if CONFIG.get('nim', {}).get('warmup_on_start', True):
         warmup_model()
     setup_signal_handlers()
     atexit.register(_cleanup_runtime_files)
@@ -3882,8 +4094,10 @@ def _security_warnings() -> List[str]:
         warnings.append(f"security.require_signature is ON but secret_file ({sec.get('secret_file')}) is missing.")
     if sec.get('self_loop_protection') is False:
         warnings.append("security.self_loop_protection is OFF — the bot may reply to itself.")
-    if CONFIG['ollama'].get('temperature', 0) > 1.4:
-        warnings.append("ollama.temperature is very high; replies may be incoherent.")
+    if CONFIG.get('nim', {}).get('temperature', 0) > 1.4:
+        warnings.append("nim.temperature is very high; replies may be incoherent.")
+    if not (CONFIG.get('nim', {}).get('api_key') or os.environ.get('NVIDIA_API_KEY')):
+        warnings.append("NVIDIA_API_KEY is not set; requests to integrate.api.nvidia.com will fail.")
     return warnings
 
 
@@ -3891,7 +4105,7 @@ def _print_config_summary() -> None:
     print(f"{APP_TITLE} v{VERSION}")
     print(f"  config     : {config_path()}{'' if os.path.exists(config_path()) else '  (built-in defaults)'}")
     print(f"  server     : {CONFIG['server']['host']}:{CONFIG['server']['port']}")
-    print(f"  ollama     : {CONFIG['ollama']['model']} @ {CONFIG['ollama']['host']}")
+    print(f"  nim        : {CONFIG.get('nim', {}).get('model')} @ {CONFIG.get('nim', {}).get('api_base')}")
     print(f"  database   : {CONFIG['database']['path']}")
     print(f"  logging    : {CONFIG['logging']['path']} ({CONFIG['logging']['level']})")
     print(f"  persona    : {CONFIG['persona']['name']} · max {CONFIG['persona']['max_reply_chars'] or '∞'} chars")
@@ -3926,7 +4140,7 @@ def _print_stats_table() -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description=f"{APP_TITLE} v{VERSION} — AutoReply webhook service for Ollama")
+        description=f"{APP_TITLE} v{VERSION} — AutoReply webhook service for Nemotron NIM")
     parser.add_argument("-p", "--port", type=int, default=None, help="Port to listen on (default: config/5001)")
     parser.add_argument("--host", default=None, help="Bind address (default: config/127.0.0.1)")
     parser.add_argument("--config", default=None,
@@ -3993,8 +4207,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception as e:
             print(f"  {'database':<12}: FAIL — {e}")
             failures += 1
-        ollama_ok = verify_ollama_model()
-        print(f"  {'ollama':<12}: {'OK' if ollama_ok else 'unavailable (service can still start)'}")
+        nim_ok = verify_nim_model()
+        print(f"  {'nim':<12}: {'OK' if nim_ok else 'unavailable (check API key / network)'}")
         print(f"  {'self ids':<12}: {', '.join(sorted(self_message_guard.self_names))}")
         for warning in _security_warnings():
             print(f"  {'WARNING':<12}: {warning}")
